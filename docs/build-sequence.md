@@ -49,10 +49,10 @@ JOB (shipped)
 | 2 | Parts | 1-2 | ✅ Complete | — | Phase 0 Module: Parts |
 | 3 | Operations | 1-2 | ✅ Complete | — | Phase 0 Module: Operations |
 | 4 | Quotes | 2-3 | ✅ Complete | — | Phase 0 Module: Quotes |
-| 5 | Jobs | 2-3 | ⬜ Not Started | 2026-01-08 | Phase 0 Module: Jobs |
-| 6 | Dashboard | 1-2 | ⬜ Not Started | 2026-01-10 | Phase 0 Module: Dashboard |
-| 7 | Operator View | 2-3 | ⬜ Not Started | — | Phase 0 Module: Operator View |
-| 8 | Inventory | 2-3 | ⬜ Not Started | — | [Phase 0 Module: Inventory](modules/inventory.md) |
+| 5 | Jobs | 2-3 | ✅ Complete | — | Phase 0 Module: Jobs |
+| 6 | Dashboard | 1-2 | ✅ Complete | — | Phase 0 Module: Dashboard |
+| 7 | Operator View | 2-3 | ✅ Complete | — | Phase 0 Module: Operator View |
+| 8 | Inventory | 2-3 | ✅ Complete | — | [Phase 0 Module: Inventory](modules/inventory.md) |
 | 9 | Invitation & Demo content | 1-2 | ⬜ Not Started | - |  |
 
 ---
@@ -78,6 +78,18 @@ JOB (shipped)
 - [x] **Parts module** (CRUD + AI-powered CSV/Excel import + flexible pricing tiers)
 
 - [x] **Operations module** (Resource groups + operation types with labor rates + AI import)
+
+- [x] **Quotes module** (Quote lifecycle, convert to job, file attachments)
+
+- [x] **Jobs module** (Job workflow, operations tracking, status transitions)
+
+- [x] **Routings module** (Visual workflow builder, DAG-based operation sequences)
+
+- [x] **Dashboard module** (Summary cards, recent activity, quick actions)
+
+- [x] **Operator View module** (Mobile-first job tracking, time tracking, session management)
+
+- [x] **Inventory module** (Flexible units, transaction history, stock tracking)
 
 ---
 
@@ -122,23 +134,23 @@ Phase 0 is complete when Shane can:
 
 - [x] Bulk import operation types from legacy system
 
-- [ ] Create a quote for the customer/part
+- [x] Create a quote for the customer/part
 
-- [ ] Send the quote (change status)
+- [x] Send the quote (change status)
 
-- [ ] Mark quote as accepted
+- [x] Mark quote as accepted
 
-- [ ] Convert accepted quote to job
+- [x] Convert accepted quote to job
 
-- [ ] Start the job
+- [x] Start the job
 
-- [ ] Update job progress
+- [x] Update job progress
 
-- [ ] Mark job as complete
+- [x] Mark job as complete
 
-- [ ] Mark job as shipped
+- [x] Mark job as shipped
 
-- [ ] See summary on dashboard
+- [x] See summary on dashboard
 
 ---
 

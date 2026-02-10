@@ -167,7 +167,7 @@ export default function EditOperatorPage() {
         sx={{
           p: 4,
           maxWidth: 500,
-          bgcolor: 'rgba(17, 20, 57, 0.6)',
+          bgcolor: 'rgba(26, 31, 74, 0.55)',
           backdropFilter: 'blur(8px)',
         }}
       >

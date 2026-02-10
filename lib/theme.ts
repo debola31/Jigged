@@ -2,6 +2,38 @@
 
 import { createTheme } from '@mui/material/styles';
 
+/**
+ * =============================================================================
+ * JIGGED DESIGN SYSTEM - SOURCE OF TRUTH
+ * =============================================================================
+ *
+ * This file is the SINGLE SOURCE OF TRUTH for all design values.
+ * For design principles and rationale, see: docs/design-system.md
+ *
+ * DESIGN PRINCIPLES:
+ * 1. "Professional, not trendy" - Appeal to 50-60 year old shop owners
+ * 2. "Substantial, not playful" - Industrial aesthetic, feels solid
+ * 3. "Readable in bright environments" - Shop floor under fluorescent lights
+ *
+ * KEY DESIGN DECISIONS:
+ *
+ * Card Opacity (0.55):
+ *   - Provides substantial feel while allowing subtle background gradient visibility
+ *   - Higher than 0.35 (too airy) but lower than 0.6+ (too opaque)
+ *   - Optimized for shop floor readability
+ *
+ * Touch Targets (48px min):
+ *   - All interactive elements meet mobile accessibility standards
+ *   - Critical for tablet use on shop floor with gloves/dirty hands
+ *
+ * Glassmorphism:
+ *   - backdrop-filter: blur(15px) creates frosted glass effect
+ *   - Combined with MUI elevation for shadows
+ *   - Subtle border (rgba white 0.15) defines card edges
+ *
+ * =============================================================================
+ */
+
 const jiggedTheme = createTheme({
   palette: {
     mode: 'dark',
@@ -18,7 +50,7 @@ const jiggedTheme = createTheme({
     },
     background: {
       default: '#111439',   // Deep Indigo (per design system spec)
-      paper: 'rgba(26, 31, 74, 0.35)',  // Transparent for glassmorphism cards
+      paper: 'rgba(26, 31, 74, 0.55)',  // Semi-transparent for substantial cards
     },
     text: {
       primary: '#ffffff',
@@ -101,7 +133,7 @@ const jiggedTheme = createTheme({
       },
       styleOverrides: {
         root: {
-          backgroundColor: 'rgba(26, 31, 74, 0.35)',  // Semi-transparent for glassmorphism
+          backgroundColor: 'rgba(26, 31, 74, 0.55)',  // Semi-transparent for substantial cards
           backdropFilter: 'blur(15px)',               // Frosted glass effect
           WebkitBackdropFilter: 'blur(15px)',         // Safari support
           border: '1px solid rgba(255, 255, 255, 0.15)',

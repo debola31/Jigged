@@ -6,7 +6,7 @@ Jigged uses Material-UI (MUI) v5+ as the component library, following Material D
 
 **Theme Philosophy:** Static, professional dark gradient theme optimized for manufacturing environments. No light/dark mode toggle - one polished theme that works everywhere.
 
-**Last Updated:** 2026-01-03  - Corrected to vibrant gradient values
+> **SOURCE OF TRUTH:** All design values are defined in `lib/theme.ts`. This document describes principles and rationale. For exact values, always refer to the theme file.
 
 ---
 
@@ -77,44 +77,31 @@ background-attachment: fixed;
 
 ### Glass Morphism Cards (Critical Styling)
 
-**Cards must be VERY transparent with strong blur for frosted glass effect.**
+**Principle:** Cards should feel substantial and grounded while retaining subtle depth.
 
-```typescript
-// Card styling - CRITICAL specifications
-backgroundColor: 'rgba(26, 31, 74, 0.35)',  // 35% opacity - very transparent
-backdropFilter: 'blur(15px)',               // Strong blur for premium glass
-WebkitBackdropFilter: 'blur(15px)',         // Safari support
-border: '1px solid rgba(255, 255, 255, 0.15)',
-boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-```
+See `lib/theme.ts` for exact values. The key design decisions:
 
-**Why these specific values:**
-
-- **35% opacity:** Very transparent - gradient CLEARLY visible through cards
-
-- **15px blur:** Strong frosted glass effect - premium feel
-
-- **Visible border:** Defines card edges against gradient
+- **Opacity:** Substantial feel for industrial aesthetic with subtle gradient visibility
+- **Blur:** Strong frosted glass effect for premium feel
+- **Border:** Subtle white border defines card edges against gradient
 
 **Visual Effect:**
 
-Cards should look like frosted glass panels floating above the gradient background. You should CLEARLY see the Steel Blue gradient colors through the card, heavily blurred for a sophisticated glass effect. Cards use MUI elevation for shadows combined with glassmorphism (backdrop blur + transparency).
+Cards should feel solid and professional. This achieves "substantial, not playful" per the design principles while maintaining visual polish. Cards use MUI elevation for shadows combined with glassmorphism (backdrop blur + transparency).
 
 **Test:**
 
-If you CAN'T clearly see the gradient through your cards, the opacity is too high or backdrop-filter is too weak.
+Cards should feel substantial and professional. The gradient should be subtly visible, not prominently showing through.
 
-**Common Mistakes:**
+**Usage:**
 
 ```typescript
-/* ❌ WRONG - Too opaque, gradient not visible */
-backgroundColor: 'rgba(26, 31, 74, 0.6)'   // 60% opacity
-backdropFilter: 'blur(10px)'               // Blur too weak
-
-/* ✅ CORRECT - Very transparent, strong glass effect */
-backgroundColor: 'rgba(26, 31, 74, 0.35)'  // 35% opacity
-backdropFilter: 'blur(15px)'               // Strong blur
-WebkitBackdropFilter: 'blur(15px)'         // Safari support
+// Just use MUI Card - theme handles styling automatically
+<Card elevation={2}>
+  <CardContent>
+    {/* Your content */}
+  </CardContent>
+</Card>
 ```
 
 ---
@@ -123,59 +110,24 @@ WebkitBackdropFilter: 'blur(15px)'         // Safari support
 
 ### Single Dark Theme
 
+The complete theme configuration is in `lib/theme.ts`. Key aspects:
+
+- **Palette:** Dark mode with Steel Blue primary, Neutral Gray secondary
+- **Typography:** System font stack, no uppercase transforms
+- **Components:** Card glassmorphism, 48px touch targets, custom button variants
+
+**Usage:**
+
 ```typescript
-import { createTheme } from '@mui/material/styles';
+import jiggedTheme from '@/lib/theme';
+import { ThemeProvider } from '@mui/material/styles';
 
-const jiggedTheme = createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: '#4682B4',      // Steel Blue (design system spec)
-      light: '#6FA3D8',     // Hover state
-      dark: '#3A6B94',      // Pressed state
-      contrastText: '#fff',
-    },
-    secondary: {
-      main: '#B0B3B8',      // Neutral Gray
-      light: '#c5c7cc',
-      dark: '#9a9da1',
-    },
-    background: {
-      default: '#111439',   // Deep Indigo
-      paper: 'rgba(26, 31, 74, 0.35)',  // Transparent for glassmorphism
-    },
-    text: {
-      primary: '#ffffff',
-      secondary: '#B0B3B8',
-    },
-    success: { main: '#10b981' },
-    warning: { main: '#f59e0b' },
-    error: { main: '#ef4444' },
-    info: { main: '#3b82f6' },
-  },
-  shape: {
-    borderRadius: 8,
-  },
-  components: {
-    MuiCard: {
-      defaultProps: {
-        elevation: 2,  // MUI shadow system
-      },
-      styleOverrides: {
-        root: {
-          backgroundColor: 'rgba(26, 31, 74, 0.35)',  // Semi-transparent
-          backdropFilter: 'blur(15px)',               // Frosted glass
-          WebkitBackdropFilter: 'blur(15px)',         // Safari
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          // boxShadow from elevation prop
-        },
-      },
-    },
-  },
-});
-
-export default jiggedTheme;
+<ThemeProvider theme={jiggedTheme}>
+  {/* Your app */}
+</ThemeProvider>
 ```
+
+See `lib/theme.ts` for the complete configuration with inline documentation.
 
 ---
 
@@ -556,13 +508,15 @@ function WorkOrderCard({ workOrder }) {
 
 - Use theme spacing: `sx={{ p: 3 }}` not `sx={{ padding: '24px' }}`
 
-- Use theme colors: `color="primary"` not `sx={{ color: '#5a96c9' }}`
+- Use theme colors: `color="primary"` not hardcoded hex values
 
-- Apply the linear 3-stop gradient background (Deep Indigo → Steel Blue → Deep Indigo) to all pages
+- Apply the linear 3-stop gradient background to all pages
 
-- Use very transparent cards (35% opacity) with strong blur (15px)
+- Let cards use theme defaults - don't override card backgrounds
 
 - Test readability in bright lighting conditions
+
+- Reference `lib/theme.ts` for exact design values
 
 ### ❌ Don't:
 
@@ -578,15 +532,13 @@ function WorkOrderCard({ workOrder }) {
 
 - Use flat backgrounds - gradient is brand identity
 
-- Use radial gradients - use linear 3-stop gradient with Steel Blue (#4682B4) at center
-
-- Make cards too opaque (60%) - use 35% opacity
-
-- Use weak blur (10px) - use 15px
+- Override card backgrounds unless functionally necessary (modals, etc.)
 
 - Use `textTransform: 'uppercase'` on buttons (already set to 'none')
 
 - Use overly playful or trendy styling
+
+- Duplicate design values in documentation - reference theme.ts instead
 
 ---
 

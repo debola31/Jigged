@@ -128,7 +128,7 @@ export default function Header() {
         px: 3,
         py: 1,
         borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        bgcolor: 'rgba(17, 20, 57, 0.4)',
+        bgcolor: 'rgba(26, 31, 74, 0.55)',
         backdropFilter: 'blur(8px)',
         minHeight: 48,
         position: 'sticky',

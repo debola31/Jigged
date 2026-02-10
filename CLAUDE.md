@@ -16,52 +16,26 @@ Jigged is a web-based ERP system designed for small-scale precision manufacturin
 
 ## Design System: Jigged Manufacturing ERP (Material-UI)
 
+> **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.
+> **Detailed Reference:** `docs/design-system.md` explains principles and rationale.
+
 **Framework:** Material-UI (MUI) v7+ with Material Design 3 principles
-
-### Brand Colors (User-Tested)
-
-| Color | Hex | Usage |
-|-------|-----|-------|
-| Steel Blue | `#4682B4` | Primary actions, links, CTAs |
-| Deep Indigo | `#111439` | Dark mode base |
-| Neutral Gray | `#B0B3B8` | Secondary text, supporting elements |
-
-### Status Colors
-
-| Status | Hex | Usage |
-|--------|-----|-------|
-| Success | `#10b981` | Completed work orders, positive feedback |
-| Warning | `#f59e0b` | Approaching deadlines, caution states |
-| Error | `#ef4444` | Late jobs, critical issues, overdue |
-| Info | `#3b82f6` | Active work, informational notices |
-
-### Background Gradient
-
-```css
-/* Dark theme - Industrial machine shop aesthetic with Steel Blue accent */
-linear-gradient(135deg, #111439 0%, #4682B4 50%, #111439 100%)
-```
-
-### MUI Theme Configuration
-
-The design system uses MUI's `createTheme()` with custom palette and component overrides. The application uses a single dark theme optimized for shop floor environments.
-
-**Key Theme Settings:**
-- Primary: Steel Blue (`#4682B4`) with light/dark variants for hover/pressed states
-- Border Radius: 8px globally via `theme.shape.borderRadius`
-- Buttons: `textTransform: 'none'` (no ALL CAPS), subtle hover lift effect
-- TextFields: `variant: 'outlined'` default
-- Typography: System font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`)
-- Cards: Glassmorphism style with backdrop blur, transparency, and hover lift animation
-- Header/Sidebar: Semi-transparent with backdrop blur for depth
 
 ### Design Principles
 
 1. **Professional, Not Trendy** - Must appeal to 50-60 year old shop owners. Focus on clarity and function.
-2. **Industrial Aesthetic** - Evoke machined metal and precision. Colors should feel substantial, not playful.
+2. **Substantial, Not Playful** - Industrial aesthetic. Cards should feel solid and grounded.
 3. **Readable in Bright Environments** - Ensure sufficient contrast for use under bright fluorescent lighting on tablets.
 4. **Single Dark Theme** - Optimized for shop floor environments with consistent dark UI.
-5. **Material Design Compliance** - Follow MD3 guidelines for consistency and accessibility.
+
+### Quick Reference
+
+| Element | Approach |
+|---------|----------|
+| Colors | Use theme palette (`color="primary"`) - never hardcode |
+| Spacing | Use `theme.spacing(n)` - never hardcode pixels |
+| Cards | Use default `<Card elevation={2}>` - theme handles glassmorphism |
+| Touch targets | Minimum 48px (theme enforces this) |
 
 ### Component Guidelines
 
@@ -73,31 +47,14 @@ The design system uses MUI's `createTheme()` with custom palette and component o
 
 **Styling approach:**
 - Use MUI's `sx` prop for component-level styles
-- Use `theme.spacing(n)` where n * 8px for consistent spacing
-- Cards combine MUI elevation (for shadows) with glassmorphism (backdrop blur + transparency)
+- Let cards use theme defaults - don't override backgrounds unless necessary
 - Never use external CSS files for MUI components
 - Never use plain HTML elements when MUI equivalents exist
 
-**Elevation + Glassmorphism:**
-Cards use both MUI elevation and glassmorphism together:
-- `elevation={2}` provides consistent MUI shadows via `theme.shadows[2]`
-- Semi-transparent `backgroundColor: rgba(...)` allows background to show through
-- `backdropFilter: blur()` creates the frosted glass effect
-
-Standard elevation values:
+**Standard elevation values:**
 - `2`: Standard cards (default)
 - `3`: Auth cards, modals
 - `4`: App bar, floating elements
-
-**Typography Scale:**
-- `h1`: 2.5rem (40px) - Page titles
-- `h2`: 2rem (32px) - Section headers
-- `h3`: 1.75rem (28px) - Subsection headers
-- `h4`: 1.5rem (24px) - Card titles
-- `h5`: 1.25rem (20px) - Small headers
-- `h6`: 1rem (16px) - Labels
-- `body1`: 1rem (16px) - Primary body text
-- `body2`: 0.875rem (14px) - Secondary body text
 
 ### Page Layout Patterns
 

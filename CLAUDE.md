@@ -234,11 +234,48 @@ pnpm build
 
 ---
 
-## Notion Integration
+## Documentation
 
-Product documentation is hosted in Notion. Use the Notion CLI for all Notion interactions.
+Product documentation is version-controlled in the `/docs` folder.
 
-### Notion CLI
+### Key Documents
+
+| Document | Path |
+|----------|------|
+| Product Requirements | [docs/prd.md](docs/prd.md) |
+| System Architecture | [docs/architecture.md](docs/architecture.md) |
+| Design System | [docs/design-system.md](docs/design-system.md) |
+| Build Sequence | [docs/build-sequence.md](docs/build-sequence.md) |
+
+### Module Specifications
+
+See [docs/modules/](docs/modules/) for detailed module specs:
+- [Customers](docs/modules/customers.md)
+- [Parts](docs/modules/parts.md)
+- [Quotes](docs/modules/quotes.md)
+- [Jobs](docs/modules/jobs.md)
+- [Operations](docs/modules/operations.md)
+- [Dashboard](docs/modules/dashboard.md)
+- [Routings](docs/modules/routings.md)
+- [Inventory](docs/modules/inventory.md)
+- [Operator View](docs/modules/operator-view.md)
+- [Invitation System](docs/modules/invitation-system.md)
+
+### Testing Documentation
+
+See [docs/testing/](docs/testing/) for testing strategy and guides.
+
+### Guidelines
+
+- **Consult PRD** before implementing new features
+- **Check module specs** for detailed requirements
+- **Keep docs in sync** - update docs if implementation diverges
+
+---
+
+## Notion Integration (Legacy)
+
+The Notion CLI is still available for accessing any remaining Notion content.
 
 ```bash
 # CLI is available in conda environment
@@ -250,22 +287,3 @@ notion search "keyword"
 # Get page content
 notion blocks children <page_id> --recursive
 ```
-
-### Key Documents
-
-| Document | ID |
-|----------|-----|
-| PRD | `2dc5314e-8475-8144-bb28-ea4f0f89ec8c` |
-| Build Sequence | `2dc5314e-8475-8144-8aa1-f6a66ba97780` |
-| Customers | `2dc5314e-8475-813f-8b4c-d8966b8d6a33` |
-| Parts | `2dc5314e-8475-8133-957d-fdb3a940d3be` |
-| Quotes | `2dc5314e-8475-812a-967b-c15335f63274` |
-| Jobs | `2dc5314e-8475-8176-a163-c8b17702327d` |
-| Operations | `2dc5314e-8475-81d3-8ed0-d6f3bc09e96e` |
-| Dashboard | `2dc5314e-8475-81d5-9b82-f3f1c53e95ab` |
-
-### Guidelines
-
-- **Consult PRD** before implementing new features
-- **Check module specs** for detailed requirements
-- **Keep docs in sync** - update Notion if implementation diverges

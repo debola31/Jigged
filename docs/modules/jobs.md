@@ -26,10 +26,10 @@ The Jobs module tracks production work through the shop. Jobs represent actual w
   PENDING
      │
      ▼
-IN_PROGRESS
+IN_PROGRESS ◄──► ON_HOLD
      │
      ▼
-  COMPLETE
+ COMPLETED
      │
      ▼
   SHIPPED
@@ -41,7 +41,9 @@ IN_PROGRESS
 
 - **In Progress** - Work has begun on the shop floor
 
-- **Complete** - All work finished, ready to ship
+- **On Hold** - Job paused (can resume back to In Progress)
+
+- **Completed** - All work finished, ready to ship
 
 - **Shipped** - Job shipped to customer
 
@@ -74,7 +76,7 @@ IN_PROGRESS
 | part_id | UUID (FK) | No | Link to part (optional) |
 | routing_id | UUID (FK) | No | Link to routing (optional) |
 | description | Text | No | Job/part description |
-| status | Text | Yes | pending, in_progress, complete, shipped, cancelled |
+| status | Text | Yes | pending, in_progress, on_hold, completed, shipped, cancelled |
 | started_at | Timestamp | No | When job moved to in_progress |
 | completed_at | Timestamp | No | When job moved to complete |
 | shipped_at | Timestamp | No | When job moved to shipped |
@@ -94,7 +96,7 @@ IN_PROGRESS
 
 - Search box (searches job number, customer name, part number)
 
-- Filter dropdown: Status (All / Pending / In Progress / Complete / Shipped)
+- Filter dropdown: Status (All / Pending / In Progress / On Hold / Completed / Shipped)
 
 - "+ New Job" button
 
@@ -108,7 +110,9 @@ IN_PROGRESS
 
 - In Progress = Blue
 
-- Complete = Green
+- On Hold = Yellow/Warning
+
+- Completed = Green
 
 - Shipped = Purple
 
@@ -191,8 +195,9 @@ IN_PROGRESS
 | Current Status | Available Actions |
 |---|---|
 | Pending | Start Job, Edit, Cancel Job |
-| In Progress | Update Progress, Mark Complete, Cancel Job |
-| Complete | Mark Shipped, Reopen (back to In Progress) |
+| In Progress | Put On Hold, Update Progress, Mark Complete, Cancel Job |
+| On Hold | Resume Job (back to In Progress), Cancel Job |
+| Completed | Mark Shipped, Reopen (back to In Progress) |
 | Shipped | (read only) |
 | Cancelled | (read only) |
 

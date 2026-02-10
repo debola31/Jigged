@@ -230,17 +230,6 @@ See [docs/testing/](docs/testing/) for testing strategy and guides.
 
 ---
 
-## Notion Integration (Legacy)
+## Notion Integration (Deprecated)
 
-The Notion CLI is still available for accessing any remaining Notion content.
-
-```bash
-# CLI is available in conda environment
-notion --help
-
-# Search for documents
-notion search "keyword"
-
-# Get page content
-notion blocks children <page_id> --recursive
-```
+> **Note:** All product documentation has been migrated to the `/docs` folder. The Notion CLI is no longer needed for standard development workflows. Notion page IDs are retained for historical reference only.

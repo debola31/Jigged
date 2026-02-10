@@ -14,7 +14,7 @@ The Operator View module provides a mobile-first interface for shop floor operat
 
 - Operations module (for operation types)
 
-**Database Tables:** `operators`, `operator_sessions`
+**Database Tables:** `user_company_access` (with role='operator'), `operator_sessions`
 
 **Route:** `/operator/{companyId}` (dedicated mobile-first interface)
 
@@ -37,18 +37,20 @@ The Operator View module provides a mobile-first interface for shop floor operat
 
 ## Data Model
 
-### Operators Table
+### Team Members (Operators)
+
+Operators are managed through the unified `user_company_access` table with `role='operator'`. This approach provides consistent team member management across all roles.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
-| company_id | uuid | Yes | FK to companies |
-| name | text | Yes | Operator display name |
 | user_id | uuid | Yes | FK to auth.users (Supabase user) |
-| is_active | boolean | Yes | Whether operator can log in (default true) |
-| last_login_at | timestamptz | No | Updated on each successful login |
+| company_id | uuid | Yes | FK to companies |
+| role | text | Yes | Role type - 'operator' for shop floor users |
+| name | text | No | Display name (from user profile or auth metadata) |
 | created_at | timestamptz | Yes | Record creation timestamp |
-| updated_at | timestamptz | Yes | Last update timestamp |
+
+> **Note:** The legacy `operators` table is deprecated. New implementations should use `user_company_access` with `role='operator'`. See `types/operator.ts` for the `TeamMember` interface.
 
 ### Operator Sessions Table
 
@@ -56,7 +58,7 @@ The Operator View module provides a mobile-first interface for shop floor operat
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
 | company_id | uuid | Yes | FK to companies |
-| operator_id | uuid | Yes | FK to operators |
+| operator_id | uuid | Yes | FK to user_company_access (the operator's team member record) |
 | job_id | uuid | Yes | FK to jobs (current job being worked) |
 | operation_type_id | uuid | Yes | FK to operation_types (from station QR code) |
 | job_operation_id | uuid | No | FK to job_operations (the specific operation step being worked) |
@@ -189,7 +191,7 @@ List of available jobs the operator can work on:
 
 - Refresh button for latest job data
 
-- Bottom navigation bar with Jobs, Active, Profile tabs
+> **Note:** Bottom navigation with Jobs, Active, Profile tabs is planned but not yet implemented. Current implementation uses header navigation.
 
 ### 3. Active Job View
 
@@ -223,29 +225,29 @@ Modal/screen shown after marking a job complete:
 
 ---
 
-## API Endpoints
+## API Architecture
+
+### Backend Endpoint (Operator Creation Only)
 
 | Method | Endpoint | Description | Auth |
 |---|---|---|---|
-| POST | /api/operators | Create operator (admin only - requires service role key) | Admin JWT |
-| GET | /api/operators?company_id={id} | List all operators with emails for a company | Service Role |
-| GET | /api/operators/{operator_id} | Get single operator with email | Service Role |
+| POST | /api/operators | Create operator with Supabase Auth user | Admin JWT |
 
-Authentication Note: Operators authenticate using Supabase Auth (same as admin users) but access a dedicated operator interface. The system verifies the user has an active operator record for the company.
+> **Note:** Operator creation requires the backend API to use the Supabase service role key for creating auth.users entries. All other operations use direct Supabase client calls.
 
-Direct Supabase Operations (no backend API needed):
+### Direct Supabase Operations
 
-- Sign in: supabase.auth.signInWithPassword()
+All standard operations use the Supabase client with RLS policies (no backend API needed):
 
-- Sign out: supabase.auth.signOut()
+- **Sign in:** `supabase.auth.signInWithPassword()`
+- **Sign out:** `supabase.auth.signOut()`
+- **Validate operator:** Query `user_company_access` where `role='operator'`
+- **List operators:** Query `user_company_access` with RLS
+- **List jobs:** Query `jobs` table with RLS
+- **Start/stop/complete session:** CRUD `operator_sessions` with RLS
+- **Update password:** `supabase.auth.updateUser()`
 
-- Validate operator: Query operators table with RLS
-
-- List jobs: Query jobs table with RLS
-
-- Start/stop/complete session: CRUD operator_sessions with RLS
-
-- Update password: supabase.auth.updateUser()
+See `utils/operatorAccess.ts` for implementation details.
 
 ---
 

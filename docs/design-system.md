@@ -26,25 +26,25 @@ background-attachment: fixed;
 
 **Gradient Specifications:**
 
-- **Type:** RADIAL (creates circular/spotlight effect) - NOT linear
+- **Type:** LINEAR 3-stop gradient (135 degree angle)
 
-- **Position:** Circle centered at top left (`circle at top left`)
+- **Color 1:** Deep Indigo `#111439` at 0% - starts at top-left
 
-- **Start Color:** Darker Deep Indigo (#0a0d28) at 0% - positioned at top-left corner
+- **Color 2:** Steel Blue `#4682B4` at 50% - accent in center
 
-- **End Color:** Brighter Steel Blue (#5a96c9) at 100% - radiates toward bottom-right
+- **Color 3:** Deep Indigo `#111439` at 100% - ends at bottom-right
 
 - **Attachment:** Fixed - gradient stays in place when scrolling
 
 **Why these EXACT colors:**
 
-- `#0a0d28` - Darker, richer indigo creates stronger contrast
+- `#111439` - Deep indigo provides rich, dark foundation
 
-- `#5a96c9` - Brighter, more vibrant steel blue makes gradient POP
+- `#4682B4` - Steel Blue accent creates industrial, professional feel
 
-- These values match the prototype that users loved
+- 3-stop creates centered spotlight effect with symmetrical fade
 
-- Creates VIBRANT gradient (not muted)
+- Matches implementation in `lib/theme.ts`
 
 **Visual Effect:**
 
@@ -63,15 +63,15 @@ background-attachment: fixed;
 
 ### Supporting Brand Colors
 
-- **Vibrant Steel Blue:** `#5a96c9` - Primary brand color for CTAs, links, accents
+See `lib/theme.ts` for exact values. Primary colors:
 
-- **Light Blue Accent:** `#6fa3d8` - Hover states, highlights
+- **Steel Blue (Primary):** `#4682B4` - Primary brand color for CTAs, links, accents
 
-- **Original Steel Blue:** `#4682B4` - Pressed states, dark accents
+- **Light Blue Accent:** `#6FA3D8` - Hover states, highlights (primary.light)
 
-- **Dark Blue Accent:** `#2e5a8a` - Deep accents
+- **Dark Blue Accent:** `#3A6B94` - Pressed states (primary.dark)
 
-- **Deep Indigo:** `#0a0d28` - Foundation color, gradient start
+- **Deep Indigo:** `#111439` - Foundation color, background base
 
 - **Neutral Gray:** `#B0B3B8` - Secondary text, disabled states
 
@@ -313,15 +313,15 @@ MUI uses an 8px base spacing unit accessed via `theme.spacing(n)`:
 
 ### Core Brand Colors
 
-- **Vibrant Steel Blue:** `#5a96c9` - Primary brand color, CTAs, links
+See `lib/theme.ts` for exact values:
 
-- **Light Blue:** `#6fa3d8` - Hover states
+- **Steel Blue (Primary):** `#4682B4` - Primary brand color, CTAs, links
 
-- **Original Steel Blue:** `#4682B4` - Pressed states
+- **Light Blue:** `#6FA3D8` - Hover states (primary.light)
 
-- **Dark Blue:** `#2e5a8a` - Deep accents
+- **Dark Blue:** `#3A6B94` - Pressed states (primary.dark)
 
-- **Deep Indigo:** `#0a0d28` - Gradient start, foundation
+- **Deep Indigo:** `#111439` - Background base, gradient foundation
 
 - **Neutral Gray:** `#B0B3B8` - Secondary text
 

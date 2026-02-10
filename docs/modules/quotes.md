@@ -68,8 +68,10 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | Field | Type | Required | Description |
 |---|---|---|---|
 | quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, etc. |
+| legacy_quote_number | Text | No | Original quote number from legacy system (for migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | part_id | UUID (FK) | No | Link to existing part (optional) |
+| routing_id | UUID (FK) | No | Link to routing (for routing-based quotes) |
 | part_number_text | Text | No | Ad-hoc part number (when part_id is null) |
 | description | Text | No | Part/job description |
 | quantity | Integer | Yes | Number of units quoted |

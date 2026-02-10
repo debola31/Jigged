@@ -179,18 +179,23 @@ Modal dialog for inventory adjustments.
 
 ---
 
-## API Endpoints
+## API Architecture
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | /api/inventory | List inventory items |
-| POST | /api/inventory | Create inventory item |
-| GET | /api/inventory/{id} | Get item details |
-| PUT | /api/inventory/{id} | Update item |
-| DELETE | /api/inventory/{id} | Delete item |
-| POST | /api/inventory/{id}/transaction | Create transaction (add/remove/adjust) |
-| GET | /api/inventory/{id}/transactions | Get transaction history |
-| GET | /api/inventory/export | Export inventory to CSV |
+### Direct Supabase Operations
+
+All inventory operations use the Supabase client with RLS policies (no backend API needed):
+
+- **List items:** Query `inventory_items` table with RLS
+- **Create item:** Insert into `inventory_items` with RLS
+- **Update item:** Update `inventory_items` with RLS
+- **Delete item:** Delete from `inventory_items` with RLS
+- **Create transaction:** Insert into `inventory_transactions` with RLS
+- **Get transactions:** Query `inventory_transactions` with RLS
+- **Export:** Client-side CSV generation from fetched data
+
+See `utils/inventoryAccess.ts` for implementation details.
+
+> **Note:** No FastAPI backend endpoints are needed for inventory CRUD operations. The Supabase client handles all data access with row-level security policies ensuring proper multi-tenant isolation.
 
 ---
 

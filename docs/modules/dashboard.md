@@ -19,8 +19,6 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 | Owner | See a summary of open quotes | I know how much potential work is in the pipeline |
 | Owner | See a count of active jobs | I know how busy the shop is |
 | Owner | See revenue for this week | I know how the business is performing |
-| Owner | Quickly create a new quote | I can respond to customer inquiries fast |
-| Owner | Quickly create a new job | I can get rush orders into production |
 | Owner | See recent activity | I know what's been happening |
 
 ---

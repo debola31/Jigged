@@ -65,6 +65,7 @@ export async function getActiveJobsCount(companyId: string): Promise<number> {
 
 /**
  * Get revenue from shipped jobs this week
+ * Revenue is calculated from the linked quote's total_price
  */
 export async function getWeeklyRevenue(companyId: string): Promise<number> {
   const supabase = getSupabase();
@@ -78,7 +79,10 @@ export async function getWeeklyRevenue(companyId: string): Promise<number> {
 
   const { data, error } = await supabase
     .from('jobs')
-    .select('price')
+    .select(`
+      id,
+      quotes!jobs_quote_id_fkey(total_price)
+    `)
     .eq('company_id', companyId)
     .eq('status', 'shipped')
     .gte('shipped_at', startOfWeek.toISOString());
@@ -88,9 +92,12 @@ export async function getWeeklyRevenue(companyId: string): Promise<number> {
     throw error;
   }
 
-  // Sum up the prices
+  // Sum up the prices from linked quotes
   const total = (data || []).reduce(
-    (sum: number, job: { price: number | null }) => sum + (job.price || 0),
+    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
+      const price = job.quotes?.total_price || 0;
+      return sum + price;
+    },
     0
   );
   return total;

@@ -57,7 +57,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 ### Card 3: Revenue (This Week)
 
-**Query:** Sum of `price` from jobs where `status = 'shipped'` AND `shipped_at` >= start of current week
+**Query:** Sum of `quotes.total_price` from jobs where `status = 'shipped'` AND `shipped_at` >= start of current week (via quote relation)
 
 **Display:**
 

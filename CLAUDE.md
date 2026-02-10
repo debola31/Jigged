@@ -81,7 +81,7 @@ The design system uses MUI's `createTheme()` with custom palette and component o
 **Elevation + Glassmorphism:**
 Cards use both MUI elevation and glassmorphism together:
 - `elevation={2}` provides consistent MUI shadows via `theme.shadows[2]`
-- Semi-transparent `backgroundColor: rgba(...)` allows background to show through
+- Semi-transparent `backgroundColor: rgba(26, 31, 74, 0.50)` - substantial but allows subtle background visibility
 - `backdropFilter: blur()` creates the frosted glass effect
 
 Standard elevation values:

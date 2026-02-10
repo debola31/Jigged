@@ -215,7 +215,7 @@ export default function OperatorJobDetailPage() {
         elevation={2}
         sx={{
           mb: 3,
-          bgcolor: 'rgba(17, 20, 57, 0.6)',
+          bgcolor: 'rgba(26, 31, 74, 0.50)',
           backdropFilter: 'blur(8px)',
         }}
       >
@@ -253,7 +253,7 @@ export default function OperatorJobDetailPage() {
           elevation={2}
           sx={{
             mb: 3,
-            bgcolor: 'rgba(17, 20, 57, 0.6)',
+            bgcolor: 'rgba(26, 31, 74, 0.50)',
             backdropFilter: 'blur(8px)',
           }}
         >
@@ -285,7 +285,7 @@ export default function OperatorJobDetailPage() {
           elevation={2}
           sx={{
             mb: 3,
-            bgcolor: 'rgba(17, 20, 57, 0.6)',
+            bgcolor: 'rgba(26, 31, 74, 0.50)',
             backdropFilter: 'blur(8px)',
             py: 3,
           }}

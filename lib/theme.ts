@@ -18,7 +18,7 @@ const jiggedTheme = createTheme({
     },
     background: {
       default: '#111439',   // Deep Indigo (per design system spec)
-      paper: 'rgba(26, 31, 74, 0.35)',  // Transparent for glassmorphism cards
+      paper: 'rgba(26, 31, 74, 0.50)',  // Semi-transparent for substantial cards
     },
     text: {
       primary: '#ffffff',
@@ -101,7 +101,7 @@ const jiggedTheme = createTheme({
       },
       styleOverrides: {
         root: {
-          backgroundColor: 'rgba(26, 31, 74, 0.35)',  // Semi-transparent for glassmorphism
+          backgroundColor: 'rgba(26, 31, 74, 0.50)',  // Semi-transparent for substantial cards
           backdropFilter: 'blur(15px)',               // Frosted glass effect
           WebkitBackdropFilter: 'blur(15px)',         // Safari support
           border: '1px solid rgba(255, 255, 255, 0.15)',

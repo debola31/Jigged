@@ -77,11 +77,11 @@ background-attachment: fixed;
 
 ### Glass Morphism Cards (Critical Styling)
 
-**Cards must be VERY transparent with strong blur for frosted glass effect.**
+**Cards should be substantial with subtle transparency for depth.**
 
 ```typescript
 // Card styling - CRITICAL specifications
-backgroundColor: 'rgba(26, 31, 74, 0.35)',  // 35% opacity - very transparent
+backgroundColor: 'rgba(26, 31, 74, 0.50)',  // 50% opacity - substantial but allows depth
 backdropFilter: 'blur(15px)',               // Strong blur for premium glass
 WebkitBackdropFilter: 'blur(15px)',         // Safari support
 border: '1px solid rgba(255, 255, 255, 0.15)',
@@ -90,7 +90,7 @@ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
 
 **Why these specific values:**
 
-- **35% opacity:** Very transparent - gradient CLEARLY visible through cards
+- **50% opacity:** Substantial feel for industrial aesthetic, subtle gradient visibility
 
 - **15px blur:** Strong frosted glass effect - premium feel
 
@@ -98,21 +98,20 @@ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
 
 **Visual Effect:**
 
-Cards should look like frosted glass panels floating above the gradient background. You should CLEARLY see the Steel Blue gradient colors through the card, heavily blurred for a sophisticated glass effect. Cards use MUI elevation for shadows combined with glassmorphism (backdrop blur + transparency).
+Cards should feel solid and grounded while retaining subtle depth from the background gradient. This achieves "substantial, not playful" per the design principles while maintaining visual polish. Cards use MUI elevation for shadows combined with glassmorphism (backdrop blur + transparency).
 
 **Test:**
 
-If you CAN'T clearly see the gradient through your cards, the opacity is too high or backdrop-filter is too weak.
+Cards should feel substantial and professional. The gradient should be subtly visible, not prominently showing through.
 
 **Common Mistakes:**
 
 ```typescript
-/* ❌ WRONG - Too opaque, gradient not visible */
-backgroundColor: 'rgba(26, 31, 74, 0.6)'   // 60% opacity
-backdropFilter: 'blur(10px)'               // Blur too weak
+/* ❌ WRONG - Too transparent, feels airy/playful */
+backgroundColor: 'rgba(26, 31, 74, 0.35)'  // 35% opacity - too light for industrial feel
 
-/* ✅ CORRECT - Very transparent, strong glass effect */
-backgroundColor: 'rgba(26, 31, 74, 0.35)'  // 35% opacity
+/* ✅ CORRECT - Substantial with subtle depth */
+backgroundColor: 'rgba(26, 31, 74, 0.50)'  // 50% opacity
 backdropFilter: 'blur(15px)'               // Strong blur
 WebkitBackdropFilter: 'blur(15px)'         // Safari support
 ```
@@ -142,7 +141,7 @@ const jiggedTheme = createTheme({
     },
     background: {
       default: '#111439',   // Deep Indigo
-      paper: 'rgba(26, 31, 74, 0.35)',  // Transparent for glassmorphism
+      paper: 'rgba(26, 31, 74, 0.50)',  // Semi-transparent for substantial cards
     },
     text: {
       primary: '#ffffff',
@@ -163,7 +162,7 @@ const jiggedTheme = createTheme({
       },
       styleOverrides: {
         root: {
-          backgroundColor: 'rgba(26, 31, 74, 0.35)',  // Semi-transparent
+          backgroundColor: 'rgba(26, 31, 74, 0.50)',  // Semi-transparent substantial
           backdropFilter: 'blur(15px)',               // Frosted glass
           WebkitBackdropFilter: 'blur(15px)',         // Safari
           border: '1px solid rgba(255, 255, 255, 0.15)',

@@ -18,6 +18,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 |---|---|---|
 | Owner | See a summary of open quotes | I know how much potential work is in the pipeline |
 | Owner | See a count of active jobs | I know how busy the shop is |
+| Owner | See revenue for this week | I know how the business is performing |
 | Owner | Quickly create a new quote | I can respond to customer inquiries fast |
 | Owner | Quickly create a new job | I can get rush orders into production |
 | Owner | See recent activity | I know what's been happening |
@@ -28,7 +29,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 ### Card 1: Open Quotes
 
-**Query:** Count quotes where status IN ('draft', 'sent')
+**Query:** Count quotes where status IN ('draft', 'pending_approval')
 
 **Display:**
 
@@ -54,35 +55,41 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 **Color:** Default/neutral
 
+### Card 3: Revenue (This Week)
+
+**Query:** Sum of `price` from jobs where `status = 'shipped'` AND `shipped_at` >= start of current week
+
+**Display:**
+
+- Currency formatted value (e.g., "$12,450")
+
+- Label: "Revenue This Week"
+
+- Click → Navigate to shipped jobs list (optional)
+
+**Color:** Success/green
+
+**Future Enhancement:** Allow user to toggle time period (Week/Month/All Time)
+
 ---
 
 ## Recent Activity Section
 
-**Query:** Most recent status changes from quotes and jobs
+**Query:** Most recent activity inferred from timestamps
 
-- UNION of quote status changes and job status changes
-
+- Combine quotes and jobs by their timestamp fields
 - ORDER BY timestamp DESC
-
 - LIMIT 10
 
-**Activity Types:**
+**Activity Types (inferrable from timestamps):**
 
-- Quote created
+- Quote created (`quotes.created_at`)
+- Job created (`jobs.created_at`)
+- Job started (`jobs.started_at`)
+- Job completed (`jobs.completed_at`)
+- Job shipped (`jobs.shipped_at`)
 
-- Quote sent
-
-- Quote accepted
-
-- Quote declined
-
-- Job created
-
-- Job started
-
-- Job completed
-
-- Job shipped
+**Note:** Quote status changes (approved, rejected) cannot be inferred from timestamps alone. These will be added when an activity log table is implemented in a future phase.
 
 **Display per row:**
 
@@ -90,7 +97,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 - Entity number (Q-0089 or J-0042)
 
-- Action text ("sent to XYZ Corp", "marked complete")
+- Action text ("created", "started", "completed", "shipped")
 
 - Relative timestamp ("2h ago", "yesterday")
 
@@ -100,7 +107,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 **Implementation Note for Phase 0:**
 
-For simplicity, this can be derived from `created_at`, `status_changed_at`, `started_at`, `completed_at`, `shipped_at` timestamps rather than a separate activity log table. A proper activity/audit log can be added in a later phase.
+Activity is derived from `created_at`, `started_at`, `completed_at`, `shipped_at` timestamps rather than a separate activity log table. A proper activity/audit log table will be added in a later phase to capture all status changes including quote approvals/rejections and job operation changes.
 
 ---
 
@@ -124,19 +131,19 @@ For simplicity, this can be derived from `created_at`, `status_changed_at`, `sta
 
 **Desktop (> 1024px):**
 
-- 4 summary cards in a row
+- 3 summary cards in a row
 
 - Two-column layout for sections below
 
 **Tablet (768px - 1024px):**
 
-- 2 summary cards per row (2x2 grid)
+- 3 summary cards in a row (smaller)
 
 - Single column for sections
 
 **Mobile (< 768px):**
 
-- 2 summary cards per row (2x2 grid, smaller)
+- 1 summary card per row (stacked)
 
 - Single column, stacked sections
 
@@ -158,11 +165,11 @@ For simplicity, this can be derived from `created_at`, `status_changed_at`, `sta
 
 - [ ] Dashboard loads as home page after login
 
-- [ ] Shows count of open quotes (draft + sent)
+- [ ] Shows count of open quotes (draft + pending_approval)
 
 - [ ] Shows count of active jobs (pending + in_progress)
 
-- [ ] Shows count of overdue jobs with warning indicator
+- [ ] Shows revenue for the current week (shipped jobs)
 
 - [ ] Clicking summary cards navigates to filtered list
 
@@ -175,3 +182,12 @@ For simplicity, this can be derived from `created_at`, `status_changed_at`, `sta
 - [ ] Dashboard is responsive on mobile
 
 - [ ] Empty states display when no data
+
+---
+
+## Future Enhancements
+
+- [ ] Activity log table for complete audit trail
+- [ ] Time period selector for Revenue card (Week/Month/Year/All Time)
+- [ ] Auto-refresh every 60 seconds
+- [ ] Pull-to-refresh on mobile

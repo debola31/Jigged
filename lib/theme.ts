@@ -2,6 +2,38 @@
 
 import { createTheme } from '@mui/material/styles';
 
+/**
+ * =============================================================================
+ * JIGGED DESIGN SYSTEM - SOURCE OF TRUTH
+ * =============================================================================
+ *
+ * This file is the SINGLE SOURCE OF TRUTH for all design values.
+ * For design principles and rationale, see: docs/design-system.md
+ *
+ * DESIGN PRINCIPLES:
+ * 1. "Professional, not trendy" - Appeal to 50-60 year old shop owners
+ * 2. "Substantial, not playful" - Industrial aesthetic, feels solid
+ * 3. "Readable in bright environments" - Shop floor under fluorescent lights
+ *
+ * KEY DESIGN DECISIONS:
+ *
+ * Card Opacity (0.50):
+ *   - Provides substantial feel while allowing subtle background gradient visibility
+ *   - Higher than 0.35 (too airy) but lower than 0.6+ (too opaque)
+ *   - Optimized for shop floor readability
+ *
+ * Touch Targets (48px min):
+ *   - All interactive elements meet mobile accessibility standards
+ *   - Critical for tablet use on shop floor with gloves/dirty hands
+ *
+ * Glassmorphism:
+ *   - backdrop-filter: blur(15px) creates frosted glass effect
+ *   - Combined with MUI elevation for shadows
+ *   - Subtle border (rgba white 0.15) defines card edges
+ *
+ * =============================================================================
+ */
+
 const jiggedTheme = createTheme({
   palette: {
     mode: 'dark',

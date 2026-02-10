@@ -105,10 +105,6 @@ export default function SummaryCard({
     <Card
       elevation={2}
       sx={{
-        bgcolor: 'rgba(17, 20, 57, 0.6)',
-        backdropFilter: 'blur(10px)',
-        border: `1px solid ${colors.border}`,
-        transition: 'transform 0.2s, box-shadow 0.2s',
         '&:hover': onClick
           ? {
               transform: 'translateY(-2px)',

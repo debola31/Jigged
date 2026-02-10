@@ -17,13 +17,7 @@ interface QuickActionsProps {
  */
 export default function QuickActions({ companyId }: QuickActionsProps) {
   return (
-    <Card
-      elevation={2}
-      sx={{
-        bgcolor: 'rgba(17, 20, 57, 0.6)',
-        backdropFilter: 'blur(10px)',
-      }}
-    >
+    <Card elevation={2}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Quick Actions

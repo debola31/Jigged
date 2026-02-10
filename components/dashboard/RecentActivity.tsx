@@ -109,13 +109,7 @@ export default function RecentActivity({
 }: RecentActivityProps) {
   if (loading) {
     return (
-      <Card
-        elevation={2}
-        sx={{
-          bgcolor: 'rgba(17, 20, 57, 0.6)',
-          backdropFilter: 'blur(10px)',
-        }}
-      >
+      <Card elevation={2}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             Recent Activity
@@ -139,13 +133,7 @@ export default function RecentActivity({
   }
 
   return (
-    <Card
-      elevation={2}
-      sx={{
-        bgcolor: 'rgba(17, 20, 57, 0.6)',
-        backdropFilter: 'blur(10px)',
-      }}
-    >
+    <Card elevation={2}>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Recent Activity

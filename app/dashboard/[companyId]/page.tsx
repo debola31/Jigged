@@ -9,7 +9,7 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
-import { SummaryCard, RecentActivity, QuickActions } from '@/components/dashboard';
+import { SummaryCard, RecentActivity } from '@/components/dashboard';
 import {
   getDashboardMetrics,
   getRecentActivity,
@@ -108,21 +108,14 @@ export default function DashboardPage() {
             title="Revenue This Week"
             value={formatCurrency(metrics?.weeklyRevenue ?? 0)}
             icon={AttachMoneyIcon}
-            color="success"
+            color="default"
             loading={loading}
           />
         </Grid>
       </Grid>
 
-      {/* Activity and Quick Actions */}
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 8 }}>
-          <RecentActivity activities={activities} loading={loading} />
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <QuickActions companyId={companyId} />
-        </Grid>
-      </Grid>
+      {/* Recent Activity */}
+      <RecentActivity activities={activities} loading={loading} />
     </Box>
   );
 }

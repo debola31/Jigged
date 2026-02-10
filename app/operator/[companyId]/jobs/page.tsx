@@ -180,7 +180,7 @@ export default function OperatorJobsPage() {
             key={job.id}
             elevation={2}
             sx={{
-              bgcolor: 'rgba(26, 31, 74, 0.50)',
+              bgcolor: 'rgba(26, 31, 74, 0.55)',
               backdropFilter: 'blur(8px)',
             }}
           >

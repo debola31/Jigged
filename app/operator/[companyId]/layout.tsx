@@ -11,21 +11,26 @@ import BottomNavigation from '@mui/material/BottomNavigation';
 import BottomNavigationAction from '@mui/material/BottomNavigationAction';
 import Paper from '@mui/material/Paper';
 import CircularProgress from '@mui/material/CircularProgress';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import ListItemText from '@mui/material/ListItemText';
 import LogoutIcon from '@mui/icons-material/Logout';
 import WorkIcon from '@mui/icons-material/Work';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PersonIcon from '@mui/icons-material/Person';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import { getSupabase } from '@/lib/supabase';
+import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 /**
  * Operator View layout.
  *
  * Mobile-first layout with:
- * - Minimal top header with operator name and logout
- * - Bottom navigation bar (Jobs, Active, Profile)
+ * - Top header with operator name, station display, and logout
+ * - Bottom navigation bar (Jobs, Profile)
  * - No sidebar (unlike admin dashboard)
  * - Uses Supabase Auth for session management
+ * - OperatorStationProvider for shared station state
  */
 export default function OperatorLayout({
   children,
@@ -66,7 +71,7 @@ export default function OperatorLayout({
         return;
       }
 
-      // 3. Validate operator exists for this company (now uses user_company_access)
+      // 3. Validate operator exists for this company (uses user_company_access)
       const { data: operatorAccess } = await supabase
         .from('user_company_access')
         .select('id, name')
@@ -101,16 +106,17 @@ export default function OperatorLayout({
 
   // Update nav value based on current path
   useEffect(() => {
-    if (pathname?.includes('/jobs') && !pathname?.includes('/active')) {
-      setNavValue(0);
-    } else if (pathname?.includes('/active')) {
+    if (pathname?.includes('/profile')) {
       setNavValue(1);
-    } else if (pathname?.includes('/profile')) {
-      setNavValue(2);
+    } else {
+      setNavValue(0);
     }
   }, [pathname]);
 
   const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jigged_operator_station');
+    }
     await supabase.auth.signOut();
     router.push(`/operator/${companyId}/login`);
   };
@@ -122,12 +128,7 @@ export default function OperatorLayout({
         router.push(`/operator/${companyId}/jobs`);
         break;
       case 1:
-        // Active - shows current working job or jobs list
-        router.push(`/operator/${companyId}/jobs`);
-        break;
-      case 2:
-        // Profile - for now, just show jobs
-        router.push(`/operator/${companyId}/jobs`);
+        router.push(`/operator/${companyId}/profile`);
         break;
     }
   };
@@ -168,6 +169,57 @@ export default function OperatorLayout({
   }
 
   return (
+    <OperatorStationProvider>
+      <OperatorShell
+        operatorName={operatorName}
+        companyId={companyId}
+        navValue={navValue}
+        onNavChange={handleNavChange}
+        onLogout={handleLogout}
+      >
+        {children}
+      </OperatorShell>
+    </OperatorStationProvider>
+  );
+}
+
+/**
+ * Inner shell component that can access station context.
+ */
+function OperatorShell({
+  operatorName,
+  companyId,
+  navValue,
+  onNavChange,
+  onLogout,
+  children,
+}: {
+  operatorName: string;
+  companyId: string;
+  navValue: number;
+  onNavChange: (event: React.SyntheticEvent, newValue: number) => void;
+  onLogout: () => void;
+  children: React.ReactNode;
+}) {
+  const { stationName, stations, setStation } = useStationContext();
+  const router = useRouter();
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  const handleStationMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleStationMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleStationSelect = (stationId: string) => {
+    setStation(stationId);
+    setAnchorEl(null);
+    router.push(`/operator/${companyId}/jobs`);
+  };
+
+  return (
     <Box
       sx={{
         minHeight: '100vh',
@@ -186,16 +238,107 @@ export default function OperatorLayout({
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
-          <Typography
-            variant="h6"
-            component="div"
-            sx={{ flexGrow: 1, fontWeight: 500 }}
+          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+            <Typography
+              variant="h6"
+              component="div"
+              sx={{ fontWeight: 500, flexShrink: 0 }}
+            >
+              {operatorName || 'Operator'}
+            </Typography>
+            {stationName && (
+              <>
+                <Typography
+                  variant="h6"
+                  component="span"
+                  sx={{ mx: 1, color: 'rgba(255, 255, 255, 0.3)', fontWeight: 300 }}
+                >
+                  |
+                </Typography>
+                <Box
+                  onClick={handleStationMenuOpen}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    minHeight: 48,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <Typography
+                    variant="body1"
+                    sx={{
+                      color: 'primary.main',
+                      fontWeight: 500,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {stationName}
+                  </Typography>
+                  <ArrowDropDownIcon sx={{ color: 'primary.main', ml: 0.5 }} />
+                </Box>
+              </>
+            )}
+            {!stationName && stations.length > 0 && (
+              <>
+                <Typography
+                  variant="h6"
+                  component="span"
+                  sx={{ mx: 1, color: 'rgba(255, 255, 255, 0.3)', fontWeight: 300 }}
+                >
+                  |
+                </Typography>
+                <Box
+                  onClick={handleStationMenuOpen}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    minHeight: 48,
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    sx={{ color: 'rgba(255, 255, 255, 0.5)' }}
+                  >
+                    Select Station
+                  </Typography>
+                  <ArrowDropDownIcon sx={{ color: 'rgba(255, 255, 255, 0.5)', ml: 0.5 }} />
+                </Box>
+              </>
+            )}
+          </Box>
+
+          {/* Station Selector Menu */}
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleStationMenuClose}
+            slotProps={{
+              paper: {
+                sx: {
+                  maxHeight: 300,
+                  minWidth: 200,
+                },
+              },
+            }}
           >
-            {operatorName || 'Operator'}
-          </Typography>
+            {stations.map((station) => (
+              <MenuItem
+                key={station.id}
+                onClick={() => handleStationSelect(station.id)}
+                sx={{ minHeight: 48 }}
+              >
+                <ListItemText primary={station.name} />
+              </MenuItem>
+            ))}
+          </Menu>
+
           <IconButton
             color="inherit"
-            onClick={handleLogout}
+            onClick={onLogout}
             aria-label="logout"
             sx={{ minWidth: 48, minHeight: 48 }}
           >
@@ -231,7 +374,7 @@ export default function OperatorLayout({
       >
         <BottomNavigation
           value={navValue}
-          onChange={handleNavChange}
+          onChange={onNavChange}
           showLabels
           sx={{
             bgcolor: 'rgba(17, 20, 57, 0.98)',
@@ -247,11 +390,6 @@ export default function OperatorLayout({
           <BottomNavigationAction
             label="Jobs"
             icon={<WorkIcon />}
-            sx={{ minHeight: 56 }}
-          />
-          <BottomNavigationAction
-            label="Active"
-            icon={<PlayArrowIcon />}
             sx={{ minHeight: 56 }}
           />
           <BottomNavigationAction

@@ -19,6 +19,7 @@ import type {
   OperatorJobDetail,
   OperatorSession,
   ActiveSession,
+  Station,
   JobStartRequest,
   JobStopRequest,
   JobCompleteRequest,
@@ -558,7 +559,7 @@ export async function getActiveSession(
 }
 
 /**
- * Get work session history for an operator (admin).
+ * Get work session history for an operator.
  */
 export async function getOperatorSessions(
   operatorId: string,
@@ -568,7 +569,12 @@ export async function getOperatorSessions(
 
   const { data, error } = await supabase
     .from('operator_sessions')
-    .select('id, operator_id, job_id, job_operation_id, operation_type_id, started_at, ended_at, notes')
+    .select(`
+      id, operator_id, job_id, job_operation_id, operation_type_id,
+      started_at, ended_at, notes,
+      jobs(job_number),
+      job_operations(operation_name)
+    `)
     .eq('operator_id', operatorId)
     .order('started_at', { ascending: false })
     .limit(limit);
@@ -584,6 +590,8 @@ export async function getOperatorSessions(
     started_at: string;
     ended_at: string | null;
     notes: string | null;
+    jobs: { job_number: string } | null;
+    job_operations: { operation_name: string } | null;
   }
 
   return (data || []).map((s: SessionRow) => {
@@ -604,6 +612,52 @@ export async function getOperatorSessions(
       ended_at: s.ended_at,
       notes: s.notes,
       duration_seconds: durationSeconds,
+      job_number: s.jobs?.job_number || null,
+      operation_name: s.job_operations?.operation_name || null,
     };
   });
+}
+
+// ============================================================================
+// STATION UTILITIES
+// ============================================================================
+
+/**
+ * Get all operation types (stations) for a company.
+ * Used by the station dropdown selector in the operator view.
+ */
+export async function getStationOperationTypes(
+  companyId: string
+): Promise<Station[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('operation_types')
+    .select('id, name')
+    .eq('company_id', companyId)
+    .order('name');
+
+  if (error) throw new Error(error.message);
+
+  return (data || []).map((ot: { id: string; name: string }) => ({
+    id: ot.id,
+    name: ot.name,
+  }));
+}
+
+/**
+ * Get the display name for a station (operation type) by its ID.
+ */
+export async function getStationName(
+  stationId: string
+): Promise<string | null> {
+  const supabase = getSupabase();
+
+  const { data } = await supabase
+    .from('operation_types')
+    .select('name')
+    .eq('id', stationId)
+    .single();
+
+  return data?.name || null;
 }

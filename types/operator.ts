@@ -68,6 +68,9 @@ export interface OperatorSession {
   ended_at: string | null;
   notes: string | null;
   duration_seconds?: number;
+  // Enriched fields (joined from related tables)
+  job_number?: string | null;
+  operation_name?: string | null;
 }
 
 /**
@@ -165,6 +168,18 @@ export interface JobCompleteResponse {
   session_id: string;
   duration_seconds: number;
   job_completed: boolean;
+}
+
+// ============================================================================
+// STATION TYPES
+// ============================================================================
+
+/**
+ * Station (operation type) for the station selector.
+ */
+export interface Station {
+  id: string;
+  name: string;
 }
 
 // ============================================================================

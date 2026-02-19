@@ -28,6 +28,7 @@ export interface JobOperation {
   sequence: number;
   operation_name: string;
   operation_type_id: string | null;
+  routing_node_id: string | null;
   estimated_setup_hours: number;
   estimated_run_hours_per_unit: number;
   actual_setup_hours: number | null;
@@ -75,6 +76,14 @@ export interface Job {
 }
 
 /**
+ * Current operation info for the jobs list "Current Op" column
+ */
+export interface CurrentOperationInfo {
+  operationName: string;
+  readyCount: number;
+}
+
+/**
  * Job with joined relation data
  */
 export interface JobWithRelations extends Job {
@@ -105,6 +114,8 @@ export interface JobWithRelations extends Job {
   job_operations?: JobOperation[];
   // Joined attachments
   job_attachments?: JobAttachment[];
+  // Current operation info (populated by batch query on list page)
+  currentOperation?: CurrentOperationInfo | null;
 }
 
 /**

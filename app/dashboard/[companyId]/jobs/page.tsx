@@ -40,9 +40,10 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllJobs, bulkDeleteJobs, getCustomersForSelect } from '@/utils/jobsAccess';
+import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { JobStatusChip } from '@/components/jobs';
+import Chip from '@mui/material/Chip';
 import type { JobWithRelations, JobFilters } from '@/types/job';
 
 export default function JobsPage() {
@@ -110,7 +111,25 @@ export default function JobsPage() {
         search: searchDebounced,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
-      setJobs(data);
+
+      // Fetch current operations for active jobs
+      const activeStatuses = new Set(['pending', 'in_progress', 'on_hold']);
+      const activeJobIds = data
+        .filter(j => activeStatuses.has(j.status))
+        .map(j => j.id);
+
+      let currentOpsMap = new Map<string, { operationName: string; readyCount: number }>();
+      if (activeJobIds.length > 0) {
+        currentOpsMap = await getReadyOperationsForJobs(activeJobIds);
+      }
+
+      // Merge current operation info into jobs
+      const jobsWithCurrentOp = data.map(job => ({
+        ...job,
+        currentOperation: currentOpsMap.get(job.id) || null,
+      }));
+
+      setJobs(jobsWithCurrentOp);
     } catch (error) {
       console.error('Error fetching jobs:', error);
     } finally {
@@ -237,6 +256,58 @@ export default function JobsPage() {
         if (!params.data) return '';
         if (!params.data.parts) return '—';
         return params.data.parts.part_number;
+      },
+    },
+    {
+      colId: 'currentOp',
+      headerName: 'Current Op',
+      width: 160,
+      sortable: false,
+      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
+        if (!params.data) return null;
+
+        const { status, currentOperation } = params.data;
+
+        // Completed or shipped jobs show "Done"
+        if (status === 'completed' || status === 'shipped') {
+          return (
+            <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', lineHeight: '52px' }}>
+              Done
+            </Typography>
+          );
+        }
+
+        // Cancelled or no routing → "--"
+        if (status === 'cancelled' || !currentOperation) {
+          return (
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: '52px' }}>
+              --
+            </Typography>
+          );
+        }
+
+        // Single ready op
+        if (currentOperation.readyCount <= 1) {
+          return (
+            <Typography variant="body2" sx={{ lineHeight: '52px' }}>
+              {currentOperation.operationName}
+            </Typography>
+          );
+        }
+
+        // Parallel ready ops: show name + "+N" chip
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+            <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentOperation.operationName}
+            </Typography>
+            <Chip
+              label={`+${currentOperation.readyCount - 1}`}
+              size="small"
+              sx={{ height: 20, fontSize: '0.7rem' }}
+            />
+          </Box>
+        );
       },
     },
     {

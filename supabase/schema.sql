@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "completed_by" uuid,
     "instructions" text,
     "notes" text,
+    "routing_node_id" uuid,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
@@ -999,6 +1000,9 @@ ALTER TABLE "public"."job_operations"
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_operation_type_id_fkey" FOREIGN KEY (operation_type_id) REFERENCES operation_types(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."job_operations"
+    ADD CONSTRAINT "job_operations_routing_node_id_fkey" FOREIGN KEY (routing_node_id) REFERENCES routing_nodes(id) ON DELETE SET NULL;
+
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1126,6 +1130,7 @@ CREATE INDEX IF NOT EXISTS idx_job_attachments_source ON public.job_attachments 
 CREATE INDEX IF NOT EXISTS idx_job_ops_assigned ON public.job_operations USING btree (assigned_to) WHERE (assigned_to IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_job ON public.job_operations USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_operation_type ON public.job_operations USING btree (operation_type_id);
+CREATE INDEX IF NOT EXISTS idx_job_ops_routing_node ON public.job_operations USING btree (routing_node_id) WHERE (routing_node_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_status ON public.job_operations USING btree (status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
@@ -1338,10 +1343,12 @@ AS $function$
       LOOP
           INSERT INTO job_operations (
               job_id, sequence, operation_name, operation_type_id,
-              instructions, estimated_setup_hours, estimated_run_hours_per_unit, status
+              instructions, estimated_setup_hours, estimated_run_hours_per_unit, status,
+              routing_node_id
           ) VALUES (
               p_job_id, v_sequence, v_node.operation_name, v_node.operation_type_id,
-              v_node.instructions, v_node.setup_time, v_node.run_time_per_unit, 'pending'
+              v_node.instructions, v_node.setup_time, v_node.run_time_per_unit, 'pending',
+              v_node.id
           );
           v_sequence := v_sequence + 10;
           v_count := v_count + 1;
@@ -1352,6 +1359,68 @@ AS $function$
       RETURN v_count;
   END;
   $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.get_ready_operations_batch(p_job_ids uuid[])
+ RETURNS TABLE(job_id uuid, operation_name text, ready_count integer)
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+BEGIN
+  RETURN QUERY
+  WITH
+  in_progress_ops AS (
+    SELECT
+      jo.job_id,
+      jo.operation_name,
+      COUNT(*)::integer AS cnt
+    FROM job_operations jo
+    WHERE jo.job_id = ANY(p_job_ids)
+      AND jo.status = 'in_progress'
+    GROUP BY jo.job_id, jo.operation_name
+  ),
+  jobs_with_in_progress AS (
+    SELECT DISTINCT ip.job_id FROM in_progress_ops ip
+  ),
+  ready_ops AS (
+    SELECT
+      jo.job_id,
+      jo.operation_name,
+      jo.routing_node_id
+    FROM job_operations jo
+    WHERE jo.job_id = ANY(p_job_ids)
+      AND jo.job_id NOT IN (SELECT jwi.job_id FROM jobs_with_in_progress jwi)
+      AND jo.status = 'pending'
+      AND jo.routing_node_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM routing_edges re
+        WHERE re.target_node_id = jo.routing_node_id
+          AND EXISTS (
+            SELECT 1
+            FROM job_operations pred_jo
+            WHERE pred_jo.job_id = jo.job_id
+              AND pred_jo.routing_node_id = re.source_node_id
+              AND pred_jo.status NOT IN ('completed', 'skipped')
+          )
+      )
+  ),
+  ready_agg AS (
+    SELECT
+      ro.job_id,
+      MIN(ro.operation_name) AS operation_name,
+      COUNT(*)::integer AS ready_count
+    FROM ready_ops ro
+    GROUP BY ro.job_id
+  )
+  SELECT ip.job_id, ip.operation_name, ip.cnt AS ready_count
+  FROM in_progress_ops ip
+  UNION ALL
+  SELECT ra.job_id, ra.operation_name, ra.ready_count
+  FROM ready_agg ra;
+END;
+$function$
 
 ;
 
@@ -1664,7 +1733,7 @@ COMMENT ON TABLE "public"."job_attachments"
     IS 'PDF attachments for jobs. Created either by copying from quote on conversion, or uploaded directly to job. Phase 0 limits to one attachment per job (enforced in UI).';
 
 COMMENT ON TABLE "public"."job_operations"
-    IS 'Actual operation steps for a specific job. Tracks real-time progress: status, actual hours, quantities completed/scrapped, assigned operator. Shop floor operators interact primarily with this table.';
+    IS 'Actual operation steps for a specific job. Tracks real-time progress: status, actual hours, quantities completed/scrapped, assigned operator. Shop floor operators interact primarily with this table. routing_node_id links back to the DAG for dependency tracking.';
 
 COMMENT ON TABLE "public"."jobs"
     IS 'Active manufacturing work orders. Created from quotes or directly. Tracks quantities ordered/completed/scrapped, due dates, priority, and current status. Contains job_operations as child records for step-by-step tracking.';

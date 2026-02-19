@@ -9,6 +9,7 @@ import type {
   JobAttachment,
   CompleteOperationData,
   OperationUpdateResult,
+  CurrentOperationInfo,
 } from '@/types/job';
 import {
   deleteFileFromStorage,
@@ -148,6 +149,14 @@ export async function createJob(
 
   if (!formData.customer_id) {
     throw new Error('Customer is required');
+  }
+
+  if (!formData.part_id) {
+    throw new Error('Part is required');
+  }
+
+  if (!formData.routing_id) {
+    throw new Error('Routing is required');
   }
 
   // Get current user
@@ -950,4 +959,38 @@ export async function getRoutingsForPart(
   }
 
   return data || [];
+}
+
+// ============== Current Operation Batch Query ==============
+
+/**
+ * Get ready/current operations for a batch of jobs.
+ * Calls the get_ready_operations_batch DB function which returns
+ * in-progress or DAG-aware ready operations per job.
+ */
+export async function getReadyOperationsForJobs(
+  jobIds: string[]
+): Promise<Map<string, CurrentOperationInfo>> {
+  if (jobIds.length === 0) return new Map();
+
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('get_ready_operations_batch', {
+    p_job_ids: jobIds,
+  });
+
+  if (error) {
+    console.error('Error fetching ready operations batch:', error);
+    return new Map();
+  }
+
+  const result = new Map<string, CurrentOperationInfo>();
+  for (const row of data || []) {
+    result.set(row.job_id, {
+      operationName: row.operation_name,
+      readyCount: row.ready_count,
+    });
+  }
+
+  return result;
 }

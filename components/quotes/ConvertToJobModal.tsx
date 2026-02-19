@@ -85,12 +85,17 @@ export default function ConvertToJobModal({
   }, [open, quote.part_id, quote.company_id, refreshKey]);
 
   const handleConvert = async () => {
+    if (!routingId) {
+      setError('A routing is required to create a job.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       const jobData: ConvertToJobData = {
-        routing_id: routingId || undefined,
+        routing_id: routingId,
       };
 
       const result = await convertQuoteToJob(quote.id, jobData);
@@ -156,13 +161,13 @@ export default function ConvertToJobModal({
           </Box>
 
           {/* Routing Selector - only show if quote has a part */}
-          {quote.part_id && (
+          {quote.part_id ? (
             <>
               <Divider sx={{ my: 2 }} />
 
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                 <Typography variant="subtitle2">
-                  Routing
+                  Routing *
                 </Typography>
                 <Tooltip title="Refresh routings">
                   <span>
@@ -187,9 +192,6 @@ export default function ConvertToJobModal({
                       label="Select Routing"
                       onChange={(e) => setRoutingId(e.target.value)}
                     >
-                      <MenuItem value="">
-                        <em>No routing</em>
-                      </MenuItem>
                       {routings.map((r) => (
                         <MenuItem key={r.id} value={r.id}>
                           {r.name}
@@ -236,11 +238,15 @@ export default function ConvertToJobModal({
                       </Typography>
                     </>
                   )}
-                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
-                    You can also convert without a routing and add operations later
-                  </Typography>
                 </Box>
               )}
+            </>
+          ) : (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Alert severity="warning">
+                This quote has no part assigned. A part and routing are required to create a job.
+              </Alert>
             </>
           )}
         </Box>
@@ -252,7 +258,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading}
+          disabled={loading || !routingId || !quote.part_id}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating...' : 'Create Job'}

@@ -73,8 +73,8 @@ IN_PROGRESS ◄──► ON_HOLD
 | job_number | Text | Auto | Auto-generated: J-0001, J-0002, etc. |
 | quote_id | UUID (FK) | No | Link to source quote (if created from quote) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| part_id | UUID (FK) | No | Link to part (optional) |
-| routing_id | UUID (FK) | No | Link to routing (optional) |
+| part_id | UUID (FK) | Yes | Link to part |
+| routing_id | UUID (FK) | Yes | Link to routing |
 | description | Text | No | Job/part description |
 | status | Text | Yes | pending, in_progress, on_hold, completed, shipped, cancelled |
 | started_at | Timestamp | No | When job moved to in_progress |
@@ -92,7 +92,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 **Features:**
 
-- Table showing: Job #, Customer, Part, Qty (completed/ordered), Due Date, Priority, Status
+- Table showing: Job #, Customer, Part, Current Op, Description, Status, Created
 
 - Search box (searches job number, customer name, part number)
 
@@ -134,9 +134,13 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - Customer dropdown with search with quick create part UX option similar to quotes
 
-▸ **Part**
+▸ **Part** (required)
 
-- Part dropdown with search with quick create part UX option similar to quotes
+- Part dropdown (filtered by selected customer). A part must be selected to proceed.
+
+▸ **Routing** (required)
+
+- Routing dropdown (filtered by selected part). Auto-selects the default routing if one exists. If no routings exist for the part, a link to create one is shown.
 
 ▸ **Notes**
 
@@ -270,6 +274,20 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - [ ] Jobs created from quotes show attachments added to quote
 
+- [ ] Part is required when creating a job (no ad-hoc jobs without a part)
+
+- [ ] Routing is required when creating a job (operations must be defined)
+
+- [ ] Quote-to-job conversion requires a routing; quotes without a part cannot be converted
+
+- [ ] Jobs list shows "Current Op" column with DAG-aware next operation
+
+- [ ] Current Op column shows in-progress operation name when one is active
+
+- [ ] Current Op column shows parallel ready ops with "+N" notation
+
+- [ ] Current Op column shows "Done" for completed/shipped jobs and "--" for cancelled jobs
+
 ---
 
 ## Job Operations Tracking
@@ -300,6 +318,8 @@ Jobs with routings automatically have operations copied from the routing. These 
 
 - `operation_name` - Name from operation type
 
+- `routing_node_id` - FK to routing_nodes, links back to the DAG node this operation was created from
+
 - `status` - pending | in_progress | completed | skipped
 
 - `estimated_setup_hours` / `estimated_run_hours_per_unit` - Copied from routing
@@ -307,6 +327,30 @@ Jobs with routings automatically have operations copied from the routing. These 
 - `actual_setup_hours` / `actual_run_hours` - Recorded when completing
 
 - `started_at` / `completed_at` - Timestamps for tracking
+
+---
+
+## Current Operation Column
+
+The jobs list includes a "Current Op" column that shows the next ready operation for each job. This is DAG-aware, meaning it respects the routing's dependency graph to determine which operations are ready.
+
+**Display Logic:**
+
+- **In-progress operation exists:** Shows that operation's name (takes priority over pending/ready ops)
+
+- **Single ready operation:** Shows the operation name
+
+- **Multiple parallel ready operations:** Shows the first operation name alphabetically, plus a "+N" chip indicating additional parallel operations (e.g., "CNC Mill +2")
+
+- **Completed/Shipped job:** Shows "Done" in italic secondary text
+
+- **Cancelled job or no routing data:** Shows "--"
+
+**DAG Readiness Logic:**
+
+A pending operation is considered "ready" when all of its predecessor nodes in the routing graph have corresponding job_operations in `completed` or `skipped` status. Start nodes (no incoming edges) are ready immediately if they are `pending`.
+
+**Implementation:** Uses the `get_ready_operations_batch()` database function for efficient batch querying across all visible jobs.
 
 ---
 

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-01-16T14:52:52Z
+-- Generated: 2026-02-19T21:44:34Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -622,17 +622,32 @@ DROP POLICY IF EXISTS "Admins can delete company sessions" ON "public"."operator
 CREATE POLICY "Admins can delete company sessions"
     ON "public"."operator_sessions"
     FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text]))))));
+    USING (is_company_admin(company_id));
 
 DROP POLICY IF EXISTS "Admins can read company sessions" ON "public"."operator_sessions";
 CREATE POLICY "Admins can read company sessions"
     ON "public"."operator_sessions"
     FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text]))))));
+    USING (is_company_admin(company_id));
+
+DROP POLICY IF EXISTS "Operators can insert own sessions" ON "public"."operator_sessions";
+CREATE POLICY "Operators can insert own sessions"
+    ON "public"."operator_sessions"
+    FOR INSERT
+    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
+
+DROP POLICY IF EXISTS "Operators can read own sessions" ON "public"."operator_sessions";
+CREATE POLICY "Operators can read own sessions"
+    ON "public"."operator_sessions"
+    FOR SELECT
+    USING ((operator_id = get_operator_access_id(company_id)));
+
+DROP POLICY IF EXISTS "Operators can update own sessions" ON "public"."operator_sessions";
+CREATE POLICY "Operators can update own sessions"
+    ON "public"."operator_sessions"
+    FOR UPDATE
+    USING ((operator_id = get_operator_access_id(company_id)))
+    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
 
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
@@ -1378,6 +1393,20 @@ BEGIN
   
   RETURN 'Q-' || LPAD(next_num::TEXT, 4, '0');
 END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.get_operator_access_id(check_company_id uuid)
+ RETURNS uuid
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+AS $function$
+  SELECT id FROM user_company_access
+  WHERE user_id = auth.uid()
+    AND company_id = check_company_id
+    AND role = 'operator'
+  LIMIT 1;
 $function$
 
 ;

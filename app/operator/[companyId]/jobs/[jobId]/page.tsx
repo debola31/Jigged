@@ -160,7 +160,10 @@ export default function OperatorJobDetailPage() {
 
   const handleCompleteConfirm = async () => {
     setShowCompleteModal(false);
-    await loadJob(); // Refresh job data
+    // Redirect to the jobs list — this operation is done, so staying on
+    // this page would show a stale "START WORK" button for a station
+    // that no longer has a pending operation on this job.
+    router.push(`/operator/${companyId}/jobs`);
   };
 
   // Determine if current operator is working on this job

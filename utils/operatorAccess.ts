@@ -183,10 +183,13 @@ export async function getOperatorJobs(
     // Skip jobs with no matching operations if filtering by operation type
     if (operationTypeId && (!ops || ops.length === 0)) continue;
 
-    // Find current operation for this station
+    // Find current operation for this station (pending or in_progress)
     const currentOp = ops?.find((op: { id: string; operation_name: string; status: string; operation_type_id: string }) =>
       op.status === 'pending' || op.status === 'in_progress'
     );
+
+    // Skip jobs where all operations for this station are already completed/skipped
+    if (operationTypeId && !currentOp) continue;
 
     // Check if someone is working on this operation
     let currentOperatorName: string | null = null;

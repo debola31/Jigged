@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -21,6 +21,7 @@ import {
   startJob,
   stopJob,
 } from '@/utils/operatorAccess';
+import { useStationContext } from '@/components/operator/OperatorStationContext';
 import type { OperatorJobDetail } from '@/types/operator';
 import { formatDuration } from '@/types/operator';
 import JobCompleteModal from '@/components/operator/JobCompleteModal';
@@ -65,16 +66,14 @@ function SessionTimer({ startedAt }: { startedAt: string }) {
  * Active Job View Page.
  *
  * Shows job details with START/STOP/COMPLETE buttons.
+ * Uses station context for operation_type_id.
  */
 export default function OperatorJobDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
-
-  // Get operation_type_id from URL query param (set from station QR scan)
-  const operationTypeId = searchParams.get('station') || undefined;
+  const { stationId } = useStationContext();
 
   const [job, setJob] = useState<OperatorJobDetail | null>(null);
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
@@ -99,22 +98,22 @@ export default function OperatorJobDetailPage() {
     setError(null);
 
     try {
-      const data = await getOperatorJobDetail(jobId, companyId, operationTypeId);
+      const data = await getOperatorJobDetail(jobId, companyId, stationId || undefined);
       setJob(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load job');
     } finally {
       setLoading(false);
     }
-  }, [jobId, companyId, operationTypeId]);
+  }, [jobId, companyId, stationId]);
 
   useEffect(() => {
     loadJob();
   }, [loadJob]);
 
   const handleStart = async () => {
-    if (!operationTypeId) {
-      setError('No station selected. Please scan a station QR code.');
+    if (!stationId) {
+      setError('No station selected. Please scan a station QR code or select a station.');
       return;
     }
 
@@ -127,7 +126,7 @@ export default function OperatorJobDetailPage() {
     setError(null);
 
     try {
-      await startJob(jobId, currentOperatorId, companyId, { operation_type_id: operationTypeId });
+      await startJob(jobId, currentOperatorId, companyId, { operation_type_id: stationId });
       await loadJob(); // Refresh job data
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start job');
@@ -161,7 +160,10 @@ export default function OperatorJobDetailPage() {
 
   const handleCompleteConfirm = async () => {
     setShowCompleteModal(false);
-    await loadJob(); // Refresh job data
+    // Redirect to the jobs list — this operation is done, so staying on
+    // this page would show a stale "START WORK" button for a station
+    // that no longer has a pending operation on this job.
+    router.push(`/operator/${companyId}/jobs`);
   };
 
   // Determine if current operator is working on this job

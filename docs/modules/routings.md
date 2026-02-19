@@ -48,6 +48,8 @@ The routing editor provides a drag-and-drop canvas for building manufacturing wo
 
 - **Validation** - System ensures valid workflow (no cycles, all nodes connected)
 
+- **Minimum Operations** - At least one operation is required to save a routing
+
 ---
 
 ## Workflow Examples
@@ -119,6 +121,16 @@ Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when
 | Owner/Admin | Clone an existing routing | I can quickly create similar workflows |
 | Owner/Admin | Set a default routing for a part | Jobs are auto-populated with correct operations |
 | Owner/Admin | Validate my workflow has no cycles | I avoid invalid routing configurations |
+
+---
+
+## Validation Rules
+
+- Routing name is required and must be unique within the company
+
+- At least one operation (node) is required to save a routing. An error is shown on Step 2 if no operations have been added.
+
+- Workflow must have no cycles (DAG only)
 
 ---
 

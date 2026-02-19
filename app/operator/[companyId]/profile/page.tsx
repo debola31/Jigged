@@ -1,0 +1,255 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
+import Divider from '@mui/material/Divider';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
+import Chip from '@mui/material/Chip';
+import LockIcon from '@mui/icons-material/Lock';
+import LogoutIcon from '@mui/icons-material/Logout';
+import {
+  getCurrentOperator,
+  getOperatorSessions,
+} from '@/utils/operatorAccess';
+import { useStationContext } from '@/components/operator/OperatorStationContext';
+import { formatDuration } from '@/types/operator';
+import type { OperatorSession } from '@/types/operator';
+import { getSupabase } from '@/lib/supabase';
+
+/**
+ * Operator Profile Page.
+ *
+ * Shows operator info, current station, work session history,
+ * change password link, and logout button.
+ */
+export default function OperatorProfilePage() {
+  const params = useParams();
+  const router = useRouter();
+  const companyId = params.companyId as string;
+  const { stationName } = useStationContext();
+
+  const [operatorName, setOperatorName] = useState<string>('');
+  const [operatorEmail, setOperatorEmail] = useState<string>('');
+  const [sessions, setSessions] = useState<OperatorSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadProfile() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const supabase = getSupabase();
+
+        // Get auth session for email
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          setOperatorEmail(session.user.email);
+        }
+
+        // Get operator info
+        const operator = await getCurrentOperator(companyId);
+        if (!operator) {
+          setError('Operator not found');
+          setLoading(false);
+          return;
+        }
+
+        setOperatorName(operator.name || 'Operator');
+
+        // Load session history
+        const sessionData = await getOperatorSessions(operator.id, 50);
+        setSessions(sessionData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProfile();
+  }, [companyId]);
+
+  const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jigged_operator_station');
+    }
+    const supabase = getSupabase();
+    await supabase.auth.signOut();
+    router.push(`/operator/${companyId}/login`);
+  };
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const formatTime = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '50vh',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      <Typography variant="h5" component="h1" fontWeight={600} sx={{ mb: 3 }}>
+        Profile
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Operator Info Card */}
+      <Card
+        elevation={2}
+        sx={{
+          mb: 3,
+          bgcolor: 'rgba(26, 31, 74, 0.55)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
+        <CardContent>
+          <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
+            {operatorName}
+          </Typography>
+          {operatorEmail && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {operatorEmail}
+            </Typography>
+          )}
+          {stationName && (
+            <Typography variant="body2" color="primary.main">
+              Station: {stationName}
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Actions */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<LockIcon />}
+          onClick={() => router.push(`/operator/${companyId}/change-password`)}
+          sx={{ flex: 1, minHeight: 48 }}
+        >
+          Change Password
+        </Button>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<LogoutIcon />}
+          onClick={handleLogout}
+          sx={{ flex: 1, minHeight: 48 }}
+        >
+          Logout
+        </Button>
+      </Box>
+
+      {/* Work History */}
+      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
+        Work History
+      </Typography>
+
+      {sessions.length === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <Typography variant="body2" color="text.secondary">
+            No work sessions yet.
+          </Typography>
+        </Box>
+      ) : (
+        <Card
+          elevation={2}
+          sx={{
+            bgcolor: 'rgba(26, 31, 74, 0.55)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <List disablePadding>
+            {sessions.map((session, index) => (
+              <Box key={session.id}>
+                {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />}
+                <ListItem
+                  sx={{ py: 2 }}
+                  secondaryAction={
+                    <Chip
+                      label={session.ended_at ? 'Done' : 'Active'}
+                      size="small"
+                      color={session.ended_at ? 'default' : 'primary'}
+                    />
+                  }
+                >
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                        <Typography variant="body1" fontWeight={600}>
+                          {session.job_number || 'Job'}
+                        </Typography>
+                        {session.operation_name && (
+                          <Typography variant="body2" color="text.secondary">
+                            - {session.operation_name}
+                          </Typography>
+                        )}
+                      </Box>
+                    }
+                    secondary={
+                      <Box sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary" component="span">
+                          {formatDate(session.started_at)} at {formatTime(session.started_at)}
+                        </Typography>
+                        {session.duration_seconds != null && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            component="span"
+                            sx={{ ml: 2, fontFamily: 'monospace' }}
+                          >
+                            {formatDuration(session.duration_seconds)}
+                          </Typography>
+                        )}
+                      </Box>
+                    }
+                  />
+                </ListItem>
+              </Box>
+            ))}
+          </List>
+        </Card>
+      )}
+    </Box>
+  );
+}

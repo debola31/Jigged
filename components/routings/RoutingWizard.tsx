@@ -176,6 +176,15 @@ export default function RoutingWizard({ companyId, routingId, initialPartId }: R
     return Object.keys(errors).length === 0;
   };
 
+  // Validate Step 2 - must have at least one operation
+  const validateStep2 = (): boolean => {
+    if (pendingNodes.length === 0) {
+      setError('At least one operation is required. Add an operation to the workflow before saving.');
+      return false;
+    }
+    return true;
+  };
+
   // Handle step navigation
   const handleStepClick = (step: number) => {
     setCurrentStep(step);
@@ -202,6 +211,12 @@ export default function RoutingWizard({ companyId, routingId, initialPartId }: R
     const isValid = await validateStep1();
     if (!isValid) {
       setCurrentStep(0); // Go back to Step 1 to show errors
+      return;
+    }
+
+    // Validate Step 2 - must have at least one operation
+    if (!validateStep2()) {
+      setCurrentStep(1); // Go to Step 2 to show error
       return;
     }
 

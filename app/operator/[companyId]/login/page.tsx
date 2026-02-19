@@ -55,11 +55,16 @@ export default function OperatorLoginPage() {
           .single();
 
         if (operatorAccess) {
+          // Persist station from QR code to sessionStorage for the context to pick up
+          if (stationId && typeof window !== 'undefined') {
+            sessionStorage.setItem('jigged_operator_station', stationId);
+          }
+
           // Check if password change required
           if (session.user.user_metadata?.needs_password_change) {
             router.push(`/operator/${companyId}/change-password`);
           } else {
-            router.push(`/operator/${companyId}/jobs${stationId ? `?station=${stationId}` : ''}`);
+            router.push(`/operator/${companyId}/jobs`);
           }
           return;
         }
@@ -127,8 +132,13 @@ export default function OperatorLoginPage() {
         return;
       }
 
-      // 5. Redirect to jobs
-      router.push(`/operator/${companyId}/jobs${stationId ? `?station=${stationId}` : ''}`);
+      // 5. Persist station to sessionStorage for station context
+      if (stationId && typeof window !== 'undefined') {
+        sessionStorage.setItem('jigged_operator_station', stationId);
+      }
+
+      // 6. Redirect to jobs
+      router.push(`/operator/${companyId}/jobs`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {

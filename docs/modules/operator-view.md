@@ -26,10 +26,14 @@ The Operator View module provides a mobile-first interface for shop floor operat
 |---|---|---|
 | Operator | Scan a station QR code to identify my workstation | The system knows which station I am working at |
 | Operator | Log in with my email and password | I can access my work using credentials I already have |
-| Operator | View a list of pending jobs | I know what work is available |
+| Operator | See my current station displayed in the header | I always know which station I am working at |
+| Operator | Switch to a different station via dropdown or QR scan | I can move between workstations without logging out |
+| Operator | View a list of pending jobs filtered to my station | I know what work is available at my current station |
 | Operator | Start work on a job | Time tracking begins and others see Im working on it |
 | Operator | Stop work on a job | I can take a break or switch to another job |
 | Operator | Mark a job operation as complete | The job moves to the next operation or completion |
+| Operator | View my work session history | I can review past jobs, durations, and dates |
+| Operator | Change my password from my profile | I can update my credentials without admin help |
 | Owner | See which operators are currently active | I have real-time visibility into shop floor activity |
 | Owner | Create and manage operator accounts | I control who can access the operator view |
 
@@ -159,6 +163,8 @@ Mobile-first login screen with email/password authentication. Station is pre-sel
 
 - Clear error messaging for invalid credentials
 
+- If operator is already authenticated and scans a new station QR code, the station updates automatically and the operator is redirected to the jobs list without needing to log in again
+
 ### Password Change (First Login)
 
 Route: /operator/{companyId}/change-password
@@ -181,7 +187,7 @@ Implementation: Use supabase.auth.updateUser() with password and data fields.
 
 **Route:** `/operator/{companyId}/jobs`
 
-List of available jobs the operator can work on:
+List of available jobs the operator can work on, filtered to the current station:
 
 - Large, tappable job cards with job number, customer, and part info
 
@@ -191,7 +197,7 @@ List of available jobs the operator can work on:
 
 - Refresh button for latest job data
 
-> **Note:** Bottom navigation with Jobs, Active, Profile tabs is planned but not yet implemented. Current implementation uses header navigation.
+- Jobs filtered by current station's operation_type_id
 
 ### 3. Active Job View
 
@@ -222,6 +228,25 @@ Modal/screen shown after marking a job complete:
 - Confirm button to finalize
 
 - Returns to job list after confirmation
+
+### 5. Profile
+
+**Route:** `/operator/{companyId}/profile`
+
+Operator profile and work history screen:
+
+- Operator info card showing name, email, and current station
+
+- Work session history list showing:
+  - Job number
+  - Operation name
+  - Date (formatted)
+  - Duration (HH:MM:SS)
+  - Status indicator (completed vs stopped/paused)
+
+- Change password link (navigates to `/operator/{companyId}/change-password`)
+
+- Logout button
 
 ---
 
@@ -277,9 +302,19 @@ The operator view is designed mobile-first for use on smartphones in shop floor 
 
 - Bottom navigation bar (thumb-friendly)
 
-- Simple 3-tab structure: Jobs, Active, Profile
+- Simple 2-tab structure: Jobs, Profile
 
 - No complex nested navigation
+
+### Station Display & Switching
+
+- Current station name displayed in the top AppBar alongside operator name (e.g., "John Smith | CNC Turning")
+
+- Station can be switched two ways:
+  1. **QR Code Scan:** Operator scans a new station QR code. If already authenticated, the station updates and the jobs list re-filters automatically without re-login.
+  2. **Dropdown Selector:** A dropdown in the AppBar lists all available operation types for the company. Operator selects a different station, and the jobs list re-filters.
+
+- Station selection persists via sessionStorage until changed or session ends
 
 ### Performance
 
@@ -302,6 +337,18 @@ The operator view is designed mobile-first for use on smartphones in shop floor 
 - [ ] Invalid credentials show clear error message
 
 - [ ] Session persists until explicit logout or timeout
+
+- [ ] Scanning a new station QR while already authenticated updates station without re-login
+
+### Station Management
+
+- [ ] Current station name displayed in AppBar next to operator name
+
+- [ ] Operator can switch stations via dropdown selector in AppBar
+
+- [ ] Operator can switch stations by scanning a new station QR code
+
+- [ ] Switching stations re-filters the jobs list automatically
 
 ### Job Management
 
@@ -326,6 +373,14 @@ The operator view is designed mobile-first for use on smartphones in shop floor 
 - [ ] Multiple sessions per job are tracked separately
 
 - [ ] Total time per job is calculated from all sessions
+
+### Profile
+
+- [ ] Operator can view their work session history
+
+- [ ] Session history shows job number, operation name, duration, and date
+
+- [ ] Operator can change their password from the profile page
 
 ### Admin Features
 
@@ -413,7 +468,7 @@ Owners manage operator accounts from the admin dashboard.
 
 - Generated from the Operations module (each operation_type has a QR code)
 
-### 
+- If operator is already authenticated, scanning updates the station and redirects to the jobs list
 
 ---
 

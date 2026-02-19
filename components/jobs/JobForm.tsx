@@ -160,6 +160,14 @@ export default function JobForm({
       errors.customer_id = 'Customer is required';
     }
 
+    if (!formData.part_id) {
+      errors.part_id = 'Part is required';
+    }
+
+    if (!formData.routing_id) {
+      errors.routing_id = 'Routing is required';
+    }
+
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -265,16 +273,13 @@ export default function JobForm({
             </FormControl>
 
             {/* Part Selection */}
-            <FormControl fullWidth disabled={!formData.customer_id || loadingParts}>
-              <InputLabel>Part</InputLabel>
+            <FormControl fullWidth disabled={!formData.customer_id || loadingParts} error={!!fieldErrors.part_id}>
+              <InputLabel>Part *</InputLabel>
               <Select
                 value={formData.part_id}
-                label="Part"
+                label="Part *"
                 onChange={(e) => handleChange('part_id', e.target.value)}
               >
-                <MenuItem value="">
-                  <em>None (ad-hoc job)</em>
-                </MenuItem>
                 {parts.map((p) => (
                   <MenuItem key={p.id} value={p.id}>
                     {p.part_number}
@@ -282,6 +287,11 @@ export default function JobForm({
                   </MenuItem>
                 ))}
               </Select>
+              {fieldErrors.part_id && (
+                <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>
+                  {fieldErrors.part_id}
+                </Typography>
+              )}
               {!formData.customer_id && (
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
                   Select a customer first to see their parts
@@ -291,16 +301,13 @@ export default function JobForm({
 
             {/* Routing Selection */}
             {formData.part_id && (
-              <FormControl fullWidth disabled={loadingRoutings}>
-                <InputLabel>Routing</InputLabel>
+              <FormControl fullWidth disabled={loadingRoutings} error={!!fieldErrors.routing_id}>
+                <InputLabel>Routing *</InputLabel>
                 <Select
                   value={formData.routing_id}
-                  label="Routing"
+                  label="Routing *"
                   onChange={(e) => handleChange('routing_id', e.target.value)}
                 >
-                  <MenuItem value="">
-                    <em>No routing</em>
-                  </MenuItem>
                   {routings.map((r) => (
                     <MenuItem key={r.id} value={r.id}>
                       {r.name}
@@ -308,9 +315,25 @@ export default function JobForm({
                     </MenuItem>
                   ))}
                 </Select>
+                {fieldErrors.routing_id && (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>
+                    {fieldErrors.routing_id}
+                  </Typography>
+                )}
                 {routings.length === 0 && !loadingRoutings && (
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                    No routings defined for this part
+                    No routings defined for this part.{' '}
+                    <Typography
+                      component="a"
+                      variant="caption"
+                      color="primary"
+                      href={`/dashboard/${companyId}/routings/new?partId=${formData.part_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      sx={{ cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Create a routing
+                    </Typography>
                   </Typography>
                 )}
               </FormControl>

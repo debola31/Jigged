@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
@@ -17,22 +17,20 @@ import {
   getCurrentOperator,
   getActiveSession,
 } from '@/utils/operatorAccess';
+import { useStationContext } from '@/components/operator/OperatorStationContext';
 import type { OperatorJob, ActiveSession } from '@/types/operator';
 
 /**
  * Operator Jobs List Page.
  *
  * Shows jobs available for the operator to work on.
- * Filtered by station operation_type_id from URL query param.
+ * Filtered by station operation_type_id from station context.
  */
 export default function OperatorJobsPage() {
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
-
-  // Get operation_type_id from URL query param (set from station QR scan)
-  const operationTypeId = searchParams.get('station') || undefined;
+  const { stationId } = useStationContext();
 
   const [jobs, setJobs] = useState<OperatorJob[]>([]);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
@@ -56,7 +54,7 @@ export default function OperatorJobsPage() {
     setError(null);
 
     try {
-      const jobsData = await getOperatorJobs(companyId, operationTypeId);
+      const jobsData = await getOperatorJobs(companyId, stationId || undefined);
       setJobs(jobsData);
 
       // Get active session if we have operator ID
@@ -69,17 +67,14 @@ export default function OperatorJobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, operationTypeId, operatorId]);
+  }, [companyId, stationId, operatorId]);
 
   useEffect(() => {
     loadJobs();
   }, [loadJobs]);
 
   const handleJobClick = (jobId: string) => {
-    const queryParams = operationTypeId
-      ? `?station=${operationTypeId}`
-      : '';
-    router.push(`/operator/${companyId}/jobs/${jobId}${queryParams}`);
+    router.push(`/operator/${companyId}/jobs/${jobId}`);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'success' | 'warning' | 'error' => {

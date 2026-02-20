@@ -68,16 +68,6 @@ PARTS_CONFIG = ImportModuleConfig(
                 r"^(part|item|product)$",
             ],
         ),
-        "customer_code": FieldDefinition(
-            name="customer_code",
-            type="string",
-            required=False,
-            description="Customer code to associate this part with (used when customer_match_mode is BY_COLUMN)",
-            mapping_patterns=[
-                r"^(customer[_\s-]?(code|id|number|#)?|cust[_\s-]?(code|id))$",
-                r"^(client[_\s-]?(code|id)|account[_\s-]?(code|id))$",
-            ],
-        ),
         "description": FieldDefinition(
             name="description",
             type="string",
@@ -87,17 +77,6 @@ PARTS_CONFIG = ImportModuleConfig(
                 r"^(description|desc|part[_\s-]?desc(ription)?)$",
                 r"^(name|title|label|part[_\s-]?name)$",
                 r"^(product|item|part)[_\s-]?(name|description)$",
-            ],
-        ),
-        "material_cost": FieldDefinition(
-            name="material_cost",
-            type="number",
-            required=False,
-            description="Material cost per unit (numeric, max 2 decimal places)",
-            mapping_patterns=[
-                r"^(material[_\s-]?cost|mat[_\s-]?cost|raw[_\s-]?cost)$",
-                r"^(unit[_\s-]?cost|base[_\s-]?cost|cost[_\s-]?per[_\s-]?unit)$",
-                r"^(cost|material|raw[_\s-]?material[_\s-]?cost)$",
             ],
         ),
         "notes": FieldDefinition(

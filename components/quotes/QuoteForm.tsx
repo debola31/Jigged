@@ -40,7 +40,6 @@ interface QuoteFormProps {
 interface CustomerOption {
   id: string;
   name: string;
-  customer_code: string;
   isCreateNew?: boolean;
 }
 
@@ -56,7 +55,6 @@ interface PartOption {
 const CREATE_NEW_CUSTOMER: CustomerOption = {
   id: '__create_new__',
   name: 'Create New Customer',
-  customer_code: '',
   isCreateNew: true,
 };
 
@@ -106,7 +104,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         const customerOptions = data.map((c) => ({
           id: c.id,
           name: c.name,
-          customer_code: c.customer_code,
         }));
         setCustomers(customerOptions);
 
@@ -249,7 +246,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     const newOption: CustomerOption = {
       id: customer.id,
       name: customer.name,
-      customer_code: customer.customer_code,
     };
     setCustomers((prev) => [...prev, newOption]);
     setSelectedCustomer(newOption);
@@ -371,13 +367,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Autocomplete
             options={[CREATE_NEW_CUSTOMER, ...customers]}
-            getOptionLabel={(option) =>
-              option.isCreateNew
-                ? option.name
-                : option.customer_code
-                  ? `${option.name} (${option.customer_code})`
-                  : option.name
-            }
+            getOptionLabel={(option) => option.name}
             value={selectedCustomer}
             onChange={handleCustomerChange}
             loading={loadingCustomers}
@@ -388,9 +378,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               const filtered = options
                 .filter((o) => !o.isCreateNew)
                 .filter((o) => {
-                  const label = o.customer_code
-                    ? `${o.name} (${o.customer_code})`
-                    : o.name;
+                  const label = o.name;
                   return label.toLowerCase().includes(state.inputValue.toLowerCase());
                 });
               return createNew ? [createNew, ...filtered] : filtered;
@@ -415,9 +403,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               }
               return (
                 <li key={key} {...otherProps}>
-                  {option.customer_code
-                    ? `${option.name} (${option.customer_code})`
-                    : option.name}
+                  {option.name}
                 </li>
               );
             }}

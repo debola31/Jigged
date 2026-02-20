@@ -86,14 +86,12 @@ describe('partsAccess utilities', () => {
       { qty: 1, price: 10.0 },
       { qty: 10, price: 8.5 },
     ],
-    material_cost: 5.0,
     notes: 'Test notes',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     customer: {
       id: 'customer-1',
       name: 'Test Customer',
-      customer_code: 'CUST001',
     },
   };
 
@@ -303,7 +301,6 @@ describe('partsAccess utilities', () => {
         { qty: 1, price: 15.0 },
         { qty: 50, price: 12.0 },
       ],
-      material_cost: '7.50',
       notes: 'New part notes',
     };
 
@@ -318,7 +315,6 @@ describe('partsAccess utilities', () => {
           { qty: 1, price: 15.0 },
           { qty: 50, price: 12.0 },
         ],
-        material_cost: 7.5,
         notes: 'New part notes',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
@@ -369,7 +365,6 @@ describe('partsAccess utilities', () => {
       customer_id: 'customer-1',
       description: 'Updated Part',
       pricing: [{ qty: 1, price: 20.0 }],
-      material_cost: '10.00',
       notes: 'Updated notes',
     };
 
@@ -378,7 +373,6 @@ describe('partsAccess utilities', () => {
         ...mockPart,
         description: 'Updated Part',
         pricing: [{ qty: 1, price: 20.0 }],
-        material_cost: 10.0,
         notes: 'Updated notes',
       };
 

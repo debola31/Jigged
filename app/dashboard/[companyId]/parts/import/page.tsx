@@ -212,10 +212,10 @@ export default function ImportPartsPage() {
       // Calculate unmapped optional fields
       const mappedFields = new Set(data.mappings.filter((m) => m.db_field).map((m) => m.db_field));
       const optionalFields = PART_FIELDS.filter((f) => !f.required).map((f) => f.key);
-      // Don't count customer_code as unmapped if we're not using BY_COLUMN mode
+      // Don't count customer_name as unmapped if we're not using BY_COLUMN mode
       let filteredOptional = optionalFields.filter((f) => !mappedFields.has(f));
       if (customerMatchMode !== 'by_column') {
-        filteredOptional = filteredOptional.filter((f) => f !== 'customer_code');
+        filteredOptional = filteredOptional.filter((f) => f !== 'customer_name');
       }
       setUnmappedOptional(filteredOptional);
 
@@ -258,7 +258,7 @@ export default function ImportPartsPage() {
     // Update unmapped optional
     let optionalFields = PART_FIELDS.filter((f) => !f.required).map((f) => f.key);
     if (customerMatchMode !== 'by_column') {
-      optionalFields = optionalFields.filter((f) => f !== 'customer_code');
+      optionalFields = optionalFields.filter((f) => f !== 'customer_name');
     }
     setUnmappedOptional(optionalFields.filter((f) => !mappedFields.has(f)));
   };
@@ -302,9 +302,9 @@ export default function ImportPartsPage() {
       return;
     }
 
-    // Check customer_code mapping for BY_COLUMN mode
-    if (customerMatchMode === 'by_column' && !mappedFields.has('customer_code')) {
-      setError('Customer Code must be mapped when using "Match by column" mode');
+    // Check customer_name mapping for BY_COLUMN mode
+    if (customerMatchMode === 'by_column' && !mappedFields.has('customer_name')) {
+      setError('Customer Name must be mapped when using "Match by column" mode');
       return;
     }
 
@@ -571,7 +571,7 @@ export default function ImportPartsPage() {
                       control={<Radio />}
                       label={
                         <Box>
-                          <Typography variant="body1">Match by Customer Code Column</Typography>
+                          <Typography variant="body1">Match by Customer Name Column</Typography>
                           <Typography variant="body2" color="text.secondary">
                             Use a CSV column to match parts to existing customers
                           </Typography>
@@ -610,7 +610,7 @@ export default function ImportPartsPage() {
                       sx={{ mt: 2 }}
                       disabled={customersLoading}
                       options={customers}
-                      getOptionLabel={(option) => `${option.customer_code} - ${option.name}`}
+                      getOptionLabel={(option) => option.name}
                       value={customers.find(c => c.id === selectedCustomerId) || null}
                       onChange={(_, newValue) => setSelectedCustomerId(newValue?.id || '')}
                       renderInput={(params) => (
@@ -647,9 +647,9 @@ export default function ImportPartsPage() {
       {/* Step: Review Mappings */}
       {currentStep === 'review' && (
         <>
-          {customerMatchMode === 'by_column' && !mappings.some((m) => m.db_field === 'customer_code') && (
+          {customerMatchMode === 'by_column' && !mappings.some((m) => m.db_field === 'customer_name') && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              Customer Code column not mapped. Required for &quot;Match by column&quot; mode.
+              Customer Name column not mapped. Required for &quot;Match by column&quot; mode.
             </Alert>
           )}
 
@@ -657,7 +657,7 @@ export default function ImportPartsPage() {
             mappings={mappings}
             fields={PART_FIELDS.map((f) => ({
               ...f,
-              disabled: f.key === 'customer_code' && customerMatchMode !== 'by_column',
+              disabled: f.key === 'customer_name' && customerMatchMode !== 'by_column',
             })) as FieldDefinition[]}
             unmappedRequired={unmappedRequired}
             unmappedOptional={unmappedOptional}
@@ -823,7 +823,7 @@ export default function ImportPartsPage() {
         entityName="Parts"
         conflictColumns={[
           { key: 'csv_part_number', label: 'Part Number' },
-          { key: 'csv_customer_code', label: 'Customer Code' },
+          { key: 'csv_customer_name', label: 'Customer Name' },
         ]}
         getConflictLabel={(conflict) => {
           switch (conflict.conflict_type) {

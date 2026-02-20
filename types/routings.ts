@@ -12,6 +12,15 @@ import type { Node, Edge } from '@xyflow/react';
 // ============================================
 
 /**
+ * Material reference for a routing node.
+ */
+export interface RoutingNodeMaterial {
+  inventory_item_id: string;
+  quantity: number;
+  unit: string;
+}
+
+/**
  * A routing is a workflow diagram that defines how a part is manufactured.
  * It consists of nodes (operations) connected by edges (dependencies).
  */
@@ -35,10 +44,10 @@ export interface RoutingNode {
   id: string;
   routing_id: string;
   operation_type_id: string;
-  setup_time: number | null;
   run_time_per_unit: number | null;
   instructions: string | null;
   metadata: Record<string, unknown>;
+  materials: RoutingNodeMaterial[];
   created_at: string;
   updated_at: string;
 }
@@ -75,7 +84,6 @@ export interface RoutingWithPart extends Routing {
  */
 export interface RoutingWithStats extends RoutingWithPart {
   nodes_count: number;
-  total_setup_time: number | null;
   total_run_time_per_unit: number | null;
 }
 
@@ -121,10 +129,10 @@ export interface OperationNodeData {
   operationTypeId: string;
   operationName: string;
   resourceGroupName: string | null;
-  setupTime: number | null;
   runTimePerUnit: number | null;
   instructions: string | null;
   laborRate: number | null;
+  materials: RoutingNodeMaterial[];
 }
 
 /**
@@ -166,9 +174,9 @@ export const EMPTY_ROUTING_FORM: RoutingFormData = {
  */
 export interface RoutingNodeFormData {
   operation_type_id: string;
-  setup_time: string;
   run_time_per_unit: string;
   instructions: string;
+  materials: RoutingNodeMaterial[];
 }
 
 /**
@@ -176,9 +184,9 @@ export interface RoutingNodeFormData {
  */
 export const EMPTY_NODE_FORM: RoutingNodeFormData = {
   operation_type_id: '',
-  setup_time: '',
   run_time_per_unit: '',
   instructions: '',
+  materials: [],
 };
 
 // ============================================
@@ -203,9 +211,9 @@ export function routingToFormData(routing: Routing): RoutingFormData {
 export function nodeToFormData(node: RoutingNode): RoutingNodeFormData {
   return {
     operation_type_id: node.operation_type_id,
-    setup_time: node.setup_time !== null ? String(node.setup_time) : '',
     run_time_per_unit: node.run_time_per_unit !== null ? String(node.run_time_per_unit) : '',
     instructions: node.instructions || '',
+    materials: node.materials || [],
   };
 }
 
@@ -226,10 +234,10 @@ export function toFlowElements(
       operationTypeId: node.operation_type_id,
       operationName: node.operation_type?.name || 'Unknown Operation',
       resourceGroupName: node.operation_type?.resource_group?.name || null,
-      setupTime: node.setup_time,
       runTimePerUnit: node.run_time_per_unit,
       instructions: node.instructions,
       laborRate: node.operation_type?.labor_rate || null,
+      materials: node.materials || [],
     },
   }));
 
@@ -250,19 +258,16 @@ export function toFlowElements(
 export function calculateRoutingTime(
   nodes: RoutingNodeWithOperation[],
   quantity: number = 1
-): { setupTime: number; runTime: number; totalTime: number } {
-  let setupTime = 0;
+): { runTime: number; totalTime: number } {
   let runTime = 0;
 
   for (const node of nodes) {
-    setupTime += node.setup_time || 0;
     runTime += (node.run_time_per_unit || 0) * quantity;
   }
 
   return {
-    setupTime,
     runTime,
-    totalTime: setupTime + runTime,
+    totalTime: runTime,
   };
 }
 

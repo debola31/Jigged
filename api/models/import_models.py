@@ -35,9 +35,8 @@ class ConflictInfo(BaseModel):
     """Information about a conflicting row."""
 
     row_number: int
-    csv_customer_code: Optional[str]
     csv_name: Optional[str]
-    conflict_type: str  # "duplicate_code" | "duplicate_name" | "csv_duplicate_code" | "csv_duplicate_name"
+    conflict_type: str  # "duplicate_name" | "csv_duplicate_name"
     existing_customer_id: str  # Empty string for CSV internal duplicates
     existing_value: str  # For CSV duplicates, this is "Row N" where N is the first occurrence
 
@@ -54,7 +53,7 @@ class ValidationError(BaseModel):
     """A validation error discovered during validation phase."""
 
     row_number: int
-    error_type: str  # "missing_customer_code" | "missing_name"
+    error_type: str  # "missing_name"
     field: str
 
 
@@ -98,11 +97,6 @@ class ExecuteResponse(BaseModel):
 
 # Target schema for customers table
 CUSTOMER_SCHEMA = {
-    "customer_code": {
-        "type": "string",
-        "required": True,
-        "description": "Unique customer identifier code",
-    },
     "name": {
         "type": "string",
         "required": True,

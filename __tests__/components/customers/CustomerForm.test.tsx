@@ -10,13 +10,13 @@ import type { CustomerFormData, Customer } from '@/types/customer';
 const mockCreateCustomer = vi.fn();
 const mockUpdateCustomer = vi.fn();
 const mockSoftDeleteCustomer = vi.fn();
-const mockCheckCustomerCodeExists = vi.fn();
+const mockCheckCustomerNameExists = vi.fn();
 
 vi.mock('@/utils/customerAccess', () => ({
   createCustomer: (...args: unknown[]) => mockCreateCustomer(...args),
   updateCustomer: (...args: unknown[]) => mockUpdateCustomer(...args),
   softDeleteCustomer: (...args: unknown[]) => mockSoftDeleteCustomer(...args),
-  checkCustomerCodeExists: (...args: unknown[]) => mockCheckCustomerCodeExists(...args),
+  checkCustomerNameExists: (...args: unknown[]) => mockCheckCustomerNameExists(...args),
 }));
 
 describe('CustomerForm', () => {
@@ -25,40 +25,16 @@ describe('CustomerForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetRouterMocks();
-    // Default: customer code doesn't exist (validation passes)
-    mockCheckCustomerCodeExists.mockResolvedValue(false);
+    // Default: customer name doesn't exist (validation passes)
+    mockCheckCustomerNameExists.mockResolvedValue(false);
   });
 
   describe('Validation', () => {
-    it('shows error when customer_code is empty on submit', async () => {
-      render(
-        <CustomerForm
-          mode="create"
-          initialData={{ ...EMPTY_CUSTOMER_FORM, name: 'Test Company' }}
-        />
-      );
-
-      // Verify the Customer Code field exists and is empty
-      const customerCodeInput = screen.getByLabelText(/customer code/i);
-      expect(customerCodeInput).toHaveValue('');
-
-      // Submit the form directly using fireEvent to bypass HTML5 validation
-      // (HTML5 required attribute blocks button click in jsdom when fields are empty)
-      const form = document.querySelector('form');
-      fireEvent.submit(form!);
-
-      // Should show validation error in the helper text
-      expect(await screen.findByText(/customer code is required/i)).toBeInTheDocument();
-
-      // Should not have called createCustomer
-      expect(mockCreateCustomer).not.toHaveBeenCalled();
-    });
-
     it('shows error when name is empty on submit', async () => {
       render(
         <CustomerForm
           mode="create"
-          initialData={{ ...EMPTY_CUSTOMER_FORM, customer_code: 'TEST001' }}
+          initialData={EMPTY_CUSTOMER_FORM}
         />
       );
 
@@ -81,7 +57,6 @@ describe('CustomerForm', () => {
   describe('Create mode', () => {
     const validFormData: CustomerFormData = {
       ...EMPTY_CUSTOMER_FORM,
-      customer_code: 'NEW001',
       name: 'New Test Company',
     };
 
@@ -89,7 +64,6 @@ describe('CustomerForm', () => {
       const mockCustomer: Customer = {
         id: 'new-customer-uuid',
         company_id: 'test-company-id',
-        customer_code: 'NEW001',
         name: 'New Test Company',
         phone: null,
         email: null,
@@ -118,9 +92,9 @@ describe('CustomerForm', () => {
 
       // Wait for form submission
       await waitFor(() => {
-        expect(mockCheckCustomerCodeExists).toHaveBeenCalledWith(
+        expect(mockCheckCustomerNameExists).toHaveBeenCalledWith(
           'test-company-id',
-          'NEW001',
+          'New Test Company',
           undefined
         );
       });
@@ -140,9 +114,9 @@ describe('CustomerForm', () => {
       });
     });
 
-    it('shows error for duplicate customer_code', async () => {
-      // Customer code already exists
-      mockCheckCustomerCodeExists.mockResolvedValue(true);
+    it('shows error for duplicate customer name', async () => {
+      // Customer name already exists
+      mockCheckCustomerNameExists.mockResolvedValue(true);
 
       render(<CustomerForm mode="create" initialData={validFormData} />);
 
@@ -152,7 +126,7 @@ describe('CustomerForm', () => {
 
       // Should show duplicate error
       await waitFor(() => {
-        expect(screen.getByText(/customer code already exists/i)).toBeInTheDocument();
+        expect(screen.getByText(/a customer with this name already exists/i)).toBeInTheDocument();
       });
 
       // Should not have called createCustomer
@@ -162,7 +136,6 @@ describe('CustomerForm', () => {
 
   describe('Edit mode', () => {
     const existingCustomerData: CustomerFormData = {
-      customer_code: 'EXIST001',
       name: 'Existing Company',
       phone: '555-1234',
       email: 'contact@existing.com',
@@ -189,7 +162,6 @@ describe('CustomerForm', () => {
       );
 
       // Check that form fields are pre-filled
-      expect(screen.getByLabelText(/customer code/i)).toHaveValue('EXIST001');
       expect(screen.getByLabelText(/company name/i)).toHaveValue('Existing Company');
       expect(screen.getByLabelText(/contact name/i)).toHaveValue('John Doe');
       expect(screen.getByLabelText(/city/i)).toHaveValue('Springfield');

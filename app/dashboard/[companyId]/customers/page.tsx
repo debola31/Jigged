@@ -211,11 +211,6 @@ export default function CustomersPage() {
 
   const columnDefs: ColDef<Customer>[] = [
     {
-      field: 'customer_code',
-      headerName: 'Code',
-      width: 120,
-    },
-    {
       field: 'name',
       headerName: 'Name',
       flex: 2,

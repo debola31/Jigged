@@ -16,14 +16,12 @@ export interface Part {
   part_number: string;
   description: string | null;
   pricing: PricingTier[];
-  material_cost: number | null;
   created_at: string;
   updated_at: string;
   // Optional joined fields (populated by queries that join customers table)
   customer?: {
     id: string;
     name: string;
-    customer_code: string;
   } | null;
   // Optional relation counts (populated by getPartWithRelations)
   quotes_count?: number;
@@ -38,7 +36,6 @@ export interface PartFormData {
   customer_id: string; // Empty string for generic parts
   description: string;
   pricing: PricingTier[];
-  material_cost: string; // String for form input, convert to number on save
 }
 
 /**
@@ -49,7 +46,6 @@ export const EMPTY_PART_FORM: PartFormData = {
   customer_id: '',
   description: '',
   pricing: [{ qty: 1, price: 0 }],
-  material_cost: '',
 };
 
 /**
@@ -69,7 +65,6 @@ export function partToFormData(part: Part): PartFormData {
     customer_id: part.customer_id || '',
     description: part.description || '',
     pricing: part.pricing.length > 0 ? sortPricingTiers(part.pricing) : [{ qty: 1, price: 0 }],
-    material_cost: part.material_cost?.toFixed(2) || '',
   };
 }
 

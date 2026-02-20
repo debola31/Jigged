@@ -56,9 +56,9 @@ export interface PendingNode {
   operationName: string;
   resourceGroupName: string | null;
   laborRate: number | null;
-  setupTime: number | null;
   runTimePerUnit: number | null;
   instructions: string | null;
+  materials: unknown[];
 }
 
 /**
@@ -84,10 +84,10 @@ function pendingNodesToFlowNodes(pendingNodes: PendingNode[]): Node[] {
       operationTypeId: pn.operationTypeId,
       operationName: pn.operationName,
       resourceGroupName: pn.resourceGroupName,
-      setupTime: pn.setupTime,
       runTimePerUnit: pn.runTimePerUnit,
       instructions: pn.instructions,
       laborRate: pn.laborRate,
+      materials: pn.materials || [],
     } as OperationNodeData,
   }));
 }
@@ -278,19 +278,13 @@ export default function RoutingWorkflowBuilder({
   // Calculate time totals
   const timeTotals = useMemo(() => {
     if (isMemoryMode) {
-      // Memory mode: calculate from pending nodes
       if (!externalPendingNodes?.length) return null;
-      const setupTime = externalPendingNodes.reduce(
-        (sum, n) => sum + (n.setupTime || 0),
-        0
-      );
       const runTime = externalPendingNodes.reduce(
         (sum, n) => sum + (n.runTimePerUnit || 0),
         0
       );
-      return { setupTime, runTime };
+      return { runTime };
     }
-    // Persisted mode: calculate from routing data
     if (!routing) return null;
     return calcTime(routing.nodes);
   }, [isMemoryMode, externalPendingNodes, routing]);
@@ -385,7 +379,6 @@ export default function RoutingWorkflowBuilder({
       });
 
       if (isMemoryMode) {
-        // Memory mode: add to pending nodes via callback
         const newNodeId = generateTempId('node');
         const newPendingNode: PendingNode = {
           tempId: newNodeId,
@@ -393,12 +386,11 @@ export default function RoutingWorkflowBuilder({
           operationName,
           resourceGroupName,
           laborRate,
-          setupTime: null,
           runTimePerUnit: null,
           instructions: null,
+          materials: [],
         };
 
-        // Add to React Flow
         const flowNode: Node = {
           id: newNodeId,
           type: 'operation',
@@ -408,17 +400,22 @@ export default function RoutingWorkflowBuilder({
             operationTypeId,
             operationName,
             resourceGroupName,
-            setupTime: null,
             runTimePerUnit: null,
             instructions: null,
             laborRate,
+            materials: [],
           } as OperationNodeData,
         };
 
         setNodes((nds) => [...nds, flowNode]);
-
-        // Notify parent of change
         onPendingNodesChange?.([...(externalPendingNodes || []), newPendingNode]);
+
+        // Auto-open edit modal for the new node
+        setTimeout(() => {
+          setEditingNode(flowNode.data as OperationNodeData);
+          setEditingNodeId(newNodeId);
+          setEditModalOpen(true);
+        }, 50);
         return;
       }
 
@@ -426,9 +423,9 @@ export default function RoutingWorkflowBuilder({
       try {
         const newNode = await createRoutingNode(routingId, {
           operation_type_id: operationTypeId,
-          setup_time: '',
           run_time_per_unit: '',
           instructions: '',
+          materials: [],
         });
 
         // Add to React Flow
@@ -441,10 +438,10 @@ export default function RoutingWorkflowBuilder({
             operationTypeId,
             operationName,
             resourceGroupName,
-            setupTime: null,
             runTimePerUnit: null,
             instructions: null,
             laborRate,
+            materials: [],
           } as OperationNodeData,
         };
 
@@ -468,6 +465,13 @@ export default function RoutingWorkflowBuilder({
             ],
           });
         }
+
+        // Auto-open edit modal for the new node
+        setTimeout(() => {
+          setEditingNode(flowNode.data as OperationNodeData);
+          setEditingNodeId(newNode.id);
+          setEditModalOpen(true);
+        }, 50);
       } catch (err) {
         console.error('Failed to create node:', err);
         setError('Failed to add operation');
@@ -573,13 +577,12 @@ export default function RoutingWorkflowBuilder({
     async (formData: RoutingNodeFormData) => {
       if (!editingNodeId) return;
 
-      const setupTime = formData.setup_time ? parseFloat(formData.setup_time) : null;
       const runTimePerUnit = formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null;
       const instructions = formData.instructions || null;
+      const materials = formData.materials || [];
 
-      // Update React Flow node (common for both modes)
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === editingNodeId) {
@@ -588,9 +591,9 @@ export default function RoutingWorkflowBuilder({
               ...n,
               data: {
                 ...data,
-                setupTime,
                 runTimePerUnit,
                 instructions,
+                materials,
               } as OperationNodeData,
             };
           }
@@ -599,15 +602,14 @@ export default function RoutingWorkflowBuilder({
       );
 
       if (isMemoryMode) {
-        // Memory mode: update pending nodes via callback
         onPendingNodesChange?.(
           (externalPendingNodes || []).map((n) => {
             if (n.tempId === editingNodeId) {
               return {
                 ...n,
-                setupTime,
                 runTimePerUnit,
                 instructions,
+                materials,
               };
             }
             return n;
@@ -616,11 +618,9 @@ export default function RoutingWorkflowBuilder({
         return;
       }
 
-      // Persisted mode: save to database
       try {
         await updateRoutingNode(editingNodeId, formData);
 
-        // Update routing data for time calculations
         if (routing) {
           setRouting({
             ...routing,
@@ -628,9 +628,9 @@ export default function RoutingWorkflowBuilder({
               if (n.id === editingNodeId) {
                 return {
                   ...n,
-                  setup_time: setupTime,
                   run_time_per_unit: runTimePerUnit,
                   instructions,
+                  materials,
                 };
               }
               return n;
@@ -714,11 +714,6 @@ export default function RoutingWorkflowBuilder({
           {/* Time Summary */}
           {timeTotals && (
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Chip
-                label={`Setup: ${fmtTime(timeTotals.setupTime)}`}
-                size="small"
-                variant="outlined"
-              />
               <Chip
                 label={`Run: ${fmtTime(timeTotals.runTime)}/unit`}
                 size="small"
@@ -858,6 +853,7 @@ export default function RoutingWorkflowBuilder({
         }}
         onSave={handleNodeSave}
         nodeData={editingNode}
+        companyId={companyId}
       />
     </Box>
   );

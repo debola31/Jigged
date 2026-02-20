@@ -46,7 +46,7 @@ AS $function$
               routing_node_id
           ) VALUES (
               p_job_id, v_sequence, v_node.operation_name, v_node.operation_type_id,
-              v_node.instructions, v_node.setup_time, v_node.run_time_per_unit, 'pending',
+              v_node.instructions, 0, v_node.run_time_per_unit, 'pending',
               v_node.id
           );
           v_sequence := v_sequence + 10;

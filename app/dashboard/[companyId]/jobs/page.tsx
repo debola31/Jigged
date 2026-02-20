@@ -57,7 +57,7 @@ export default function JobsPage() {
   const [searchDebounced, setSearchDebounced] = useState('');
   const [statusFilter, setStatusFilter] = useState<JobFilters['status']>('active');
   const [customerFilter, setCustomerFilter] = useState<string>('');
-  const [customers, setCustomers] = useState<Array<{ id: string; name: string; customer_code: string | null }>>([]);
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',
     sort: 'desc',
@@ -399,7 +399,7 @@ export default function JobsPage() {
             <MenuItem value="">All Customers</MenuItem>
             {customers.map((c) => (
               <MenuItem key={c.id} value={c.id}>
-                {c.customer_code ? `${c.customer_code} - ${c.name}` : c.name}
+                {c.name}
               </MenuItem>
             ))}
           </Select>

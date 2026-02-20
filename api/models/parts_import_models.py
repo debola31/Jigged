@@ -127,20 +127,15 @@ PART_SCHEMA = {
         "required": True,
         "description": "Unique part identifier (unique per customer or globally for generic parts)",
     },
-    "customer_code": {
+    "customer_name": {
         "type": "string",
         "required": False,
-        "description": "Customer code to associate this part with (used when customer_match_mode is BY_COLUMN)",
+        "description": "Customer name to associate this part with (used when customer_match_mode is BY_COLUMN)",
     },
     "description": {
         "type": "string",
         "required": False,
         "description": "Part description or name",
-    },
-    "material_cost": {
-        "type": "number",
-        "required": False,
-        "description": "Material cost per unit (numeric, max 2 decimal places)",
     },
     "notes": {
         "type": "string",

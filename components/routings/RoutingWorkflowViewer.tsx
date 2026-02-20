@@ -139,7 +139,7 @@ export default function RoutingWorkflowViewer({
 
   // Calculate time totals
   const timeTotals = useMemo(() => {
-    if (!routing?.nodes) return { setupTime: 0, runTime: 0, totalTime: 0 };
+    if (!routing?.nodes) return { runTime: 0, totalTime: 0 };
     return calcTime(routing.nodes);
   }, [routing]);
 
@@ -195,12 +195,6 @@ export default function RoutingWorkflowViewer({
           bgcolor: 'rgba(0, 0, 0, 0.2)',
         }}
       >
-        <Chip
-          icon={<AccessTimeIcon />}
-          label={`Setup: ${fmtTime(timeTotals.setupTime)}`}
-          size="small"
-          variant="outlined"
-        />
         <Chip
           icon={<AccessTimeIcon />}
           label={`Run: ${fmtTime(timeTotals.runTime)}/unit`}

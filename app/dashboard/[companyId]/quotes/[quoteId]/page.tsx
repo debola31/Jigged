@@ -328,11 +328,6 @@ export default function QuoteDetailPage() {
                   >
                     {quote.customers.name}
                   </MuiLink>
-                  {quote.customers.customer_code && (
-                    <Typography variant="body2" color="text.secondary">
-                      Code: {quote.customers.customer_code}
-                    </Typography>
-                  )}
                 </>
               ) : (
                 <Typography color="text.secondary">Customer not found</Typography>

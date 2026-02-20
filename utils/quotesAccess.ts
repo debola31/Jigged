@@ -61,7 +61,7 @@ export async function getQuotes(
     .select(
       `
       *,
-      customers!left(id, name, customer_code),
+      customers!left(id, name),
       parts!left(id, part_number, description, pricing),
       jobs:converted_to_job_id!left(id, job_number, status)
     `,
@@ -120,7 +120,7 @@ export async function getAllQuotes(
       .select(
         `
         *,
-        customers!left(id, name, customer_code),
+        customers!left(id, name),
         parts!left(id, part_number, description, pricing),
         jobs:converted_to_job_id!left(id, job_number, status)
       `
@@ -236,7 +236,7 @@ export async function getQuoteWithRelations(quoteId: string, companyId: string):
     .select(
       `
       *,
-      customers!left(id, name, customer_code),
+      customers!left(id, name),
       parts!left(id, part_number, description, pricing),
       jobs:converted_to_job_id!left(id, job_number, status),
       quote_attachments(*)

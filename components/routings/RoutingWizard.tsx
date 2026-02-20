@@ -111,9 +111,9 @@ export default function RoutingWizard({ companyId, routingId, initialPartId }: R
             operationName: n.operation_type?.name || 'Unknown',
             resourceGroupName: n.operation_type?.resource_group?.name || null,
             laborRate: n.operation_type?.labor_rate || null,
-            setupTime: n.setup_time,
             runTimePerUnit: n.run_time_per_unit,
             instructions: n.instructions,
+            materials: n.materials || [],
           }));
           setPendingNodes(nodes);
 

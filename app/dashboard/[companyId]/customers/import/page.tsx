@@ -194,7 +194,7 @@ export default function ImportCustomersPage() {
     );
 
     // Update unmapped required
-    setUnmappedRequired(['customer_code', 'name'].filter((f) => !mappedFields.has(f)));
+    setUnmappedRequired(['name'].filter((f) => !mappedFields.has(f)));
 
     // Update unmapped optional
     const optionalFields = CUSTOMER_FIELDS.filter((f) => !f.required).map((f) => f.key);
@@ -223,8 +223,8 @@ export default function ImportCustomersPage() {
 
     // Check required fields
     const mappedFields = new Set(mappings.filter((m) => m.db_field).map((m) => m.db_field));
-    if (!mappedFields.has('customer_code') || !mappedFields.has('name')) {
-      setError('Customer Code and Company Name must be mapped');
+    if (!mappedFields.has('name')) {
+      setError('Company Name must be mapped');
       return;
     }
 
@@ -607,17 +607,12 @@ export default function ImportCustomersPage() {
         onConfirm={() => executeImport(true)}
         entityName="Customers"
         conflictColumns={[
-          { key: 'csv_customer_code', label: 'Customer Code' },
           { key: 'csv_name', label: 'Company Name' },
         ]}
         getConflictLabel={(conflict) => {
           switch (conflict.conflict_type) {
-            case 'csv_duplicate_code':
-              return 'Duplicate Code in CSV';
             case 'csv_duplicate_name':
               return 'Duplicate Name in CSV';
-            case 'duplicate_code':
-              return 'Code Exists in Database';
             case 'duplicate_name':
               return 'Name Exists in Database';
             default:
@@ -625,7 +620,7 @@ export default function ImportCustomersPage() {
           }
         }}
         getErrorMessage={(error) => {
-          return `Missing: ${error.field === 'customer_code' ? 'Customer Code' : 'Company Name'}`;
+          return `Missing: Company Name`;
         }}
       />
     </Box>

@@ -38,9 +38,8 @@ export interface AnalyzeResponse {
  */
 export interface ConflictInfo {
   row_number: number;
-  csv_customer_code: string | null;
   csv_name: string | null;
-  conflict_type: 'duplicate_code' | 'duplicate_name' | 'csv_duplicate_code' | 'csv_duplicate_name';
+  conflict_type: 'duplicate_name' | 'csv_duplicate_name';
   existing_customer_id: string; // Empty string for CSV internal duplicates
   existing_value: string; // For CSV duplicates, this is "Row N" where N is the first occurrence
 }
@@ -50,7 +49,7 @@ export interface ConflictInfo {
  */
 export interface ValidationError {
   row_number: number;
-  error_type: 'missing_customer_code' | 'missing_name';
+  error_type: 'missing_name';
   field: string;
 }
 
@@ -122,7 +121,6 @@ export type ImportState =
  * Customer database fields and their metadata.
  */
 export const CUSTOMER_FIELDS: { key: string; label: string; required: boolean }[] = [
-  { key: 'customer_code', label: 'Customer Code', required: true },
   { key: 'name', label: 'Company Name', required: true },
   { key: 'website', label: 'Website', required: false },
   { key: 'contact_name', label: 'Contact Name', required: false },

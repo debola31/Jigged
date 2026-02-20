@@ -344,16 +344,16 @@ async def validate_import(
             key = (part["part_number"].lower(), part["customer_id"])
             existing_parts_lookup[key] = part
 
-        # Get customers for this company (for customer_code lookup)
+        # Get customers for this company (for name lookup)
         customers_response = (
             supabase.table("customers")
-            .select("id, customer_code")
+            .select("id, name")
             .eq("company_id", request.company_id)
             .execute()
         )
         existing_customers = customers_response.data or []
-        customer_code_to_id = {
-            c["customer_code"].lower(): c["id"] for c in existing_customers
+        customer_name_to_id = {
+            c["name"].lower(): c["id"] for c in existing_customers
         }
 
         # Validate selected customer exists (for ALL_TO_ONE mode)
@@ -382,7 +382,7 @@ async def validate_import(
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         part_number_column = reverse_mappings.get("part_number")
-        customer_code_column = reverse_mappings.get("customer_code")
+        customer_name_column = reverse_mappings.get("customer_name")
 
         # First pass: track part_number occurrences for CSV duplicate detection
         part_occurrences: dict[tuple[str, Optional[str]], list[int]] = {}
@@ -398,13 +398,13 @@ async def validate_import(
             if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
                 customer_id = selected_customer_id
             elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_code = (
-                    row.get(customer_code_column, "").strip()
-                    if customer_code_column
+                customer_name = (
+                    row.get(customer_name_column, "").strip()
+                    if customer_name_column
                     else ""
                 )
-                if customer_code:
-                    customer_id = customer_code_to_id.get(customer_code.lower())
+                if customer_name:
+                    customer_id = customer_name_to_id.get(customer_name.lower())
                     # Note: customer_id will be None if customer not found (handled in validation)
             # ALL_GENERIC: customer_id stays None
 
@@ -444,28 +444,28 @@ async def validate_import(
 
             # Determine customer for this row
             customer_id: Optional[str] = None
-            customer_code = ""
+            customer_name = ""
 
             if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
                 customer_id = selected_customer_id
             elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_code = (
-                    row.get(customer_code_column, "").strip()
-                    if customer_code_column
+                customer_name = (
+                    row.get(customer_name_column, "").strip()
+                    if customer_name_column
                     else ""
                 )
-                if customer_code:
-                    customer_id = customer_code_to_id.get(customer_code.lower())
-                    # If customer_code provided but not found, that's a conflict
+                if customer_name:
+                    customer_id = customer_name_to_id.get(customer_name.lower())
+                    # If customer_name provided but not found, that's a conflict
                     if not customer_id:
                         conflicts.append(
                             PartConflictInfo(
                                 row_number=row_number,
                                 csv_part_number=part_number,
-                                csv_customer_code=customer_code,
+                                csv_customer_code=customer_name,
                                 conflict_type="customer_not_found",
                                 existing_part_id="",
-                                existing_value=f"Customer code '{customer_code}' not found",
+                                existing_value=f"Customer name '{customer_name}' not found",
                             )
                         )
                         conflict_rows.add(row_number)
@@ -481,7 +481,7 @@ async def validate_import(
                         PartConflictInfo(
                             row_number=row_number,
                             csv_part_number=part_number,
-                            csv_customer_code=customer_code,
+                            csv_customer_code=customer_name,
                             conflict_type="csv_duplicate",
                             existing_part_id="",
                             existing_value=f"Duplicate in CSV at rows {', '.join(map(str, other_rows))}",
@@ -497,7 +497,7 @@ async def validate_import(
                     PartConflictInfo(
                         row_number=row_number,
                         csv_part_number=part_number,
-                        csv_customer_code=customer_code,
+                        csv_customer_code=customer_name,
                         conflict_type="duplicate_part_number",
                         existing_part_id=existing["id"],
                         existing_value=f"Part '{part_number}' already exists for this customer",
@@ -509,36 +509,6 @@ async def validate_import(
             # Validate pricing data
             pricing = _transform_pricing_to_jsonb(row, request.pricing_columns)
             # Pricing can be empty - that's valid (cost-plus pricing)
-
-            # Validate material_cost if provided
-            material_cost_column = reverse_mappings.get("material_cost")
-            if material_cost_column:
-                material_cost_str = row.get(material_cost_column, "").strip()
-                if material_cost_str:
-                    try:
-                        material_cost = float(material_cost_str)
-                        if material_cost < 0:
-                            validation_errors.append(
-                                PartValidationError(
-                                    row_number=row_number,
-                                    error_type="invalid_material_cost",
-                                    field="material_cost",
-                                    message="Material cost cannot be negative",
-                                )
-                            )
-                            validation_error_rows.add(row_number)
-                            continue
-                    except ValueError:
-                        validation_errors.append(
-                            PartValidationError(
-                                row_number=row_number,
-                                error_type="invalid_material_cost",
-                                field="material_cost",
-                                message=f"Invalid material cost: '{material_cost_str}'",
-                            )
-                        )
-                        validation_error_rows.add(row_number)
-                        continue
 
         # Calculate counts
         total_skipped = conflict_rows | validation_error_rows
@@ -605,16 +575,16 @@ async def execute_import(
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
         # Get customer lookup for BY_COLUMN mode
-        customer_code_to_id: dict[str, str] = {}
+        customer_name_to_id: dict[str, str] = {}
         if request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
             customers_response = (
                 supabase.table("customers")
-                .select("id, customer_code")
+                .select("id, name")
                 .eq("company_id", request.company_id)
                 .execute()
             )
-            customer_code_to_id = {
-                c["customer_code"].lower(): c["id"]
+            customer_name_to_id = {
+                c["name"].lower(): c["id"]
                 for c in (customers_response.data or [])
             }
 
@@ -639,14 +609,14 @@ async def execute_import(
             if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
                 customer_id = request.selected_customer_id
             elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_code_column = reverse_mappings.get("customer_code")
-                customer_code = (
-                    row.get(customer_code_column, "").strip()
-                    if customer_code_column
+                customer_name_column = reverse_mappings.get("customer_name")
+                customer_name = (
+                    row.get(customer_name_column, "").strip()
+                    if customer_name_column
                     else ""
                 )
-                if customer_code:
-                    customer_id = customer_code_to_id.get(customer_code.lower())
+                if customer_name:
+                    customer_id = customer_name_to_id.get(customer_name.lower())
             # ALL_GENERIC: customer_id stays None
 
             # Build part record
@@ -663,16 +633,6 @@ async def execute_import(
                     # Filter out empty values and literal "undefined" string from frontend
                     if value and value.lower() != "undefined":
                         part_data[db_field] = value
-
-            # Handle material_cost (numeric)
-            material_cost_column = reverse_mappings.get("material_cost")
-            if material_cost_column and material_cost_column in row:
-                value = row[material_cost_column].strip()
-                if value:
-                    try:
-                        part_data["material_cost"] = round(float(value), 2)
-                    except ValueError:
-                        pass  # Skip invalid values (should be caught in validation)
 
             # Transform pricing columns to JSONB
             pricing = _transform_pricing_to_jsonb(row, request.pricing_columns)

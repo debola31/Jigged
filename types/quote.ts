@@ -37,7 +37,6 @@ export interface QuoteWithRelations extends Quote {
   customers?: {
     id: string;
     name: string;
-    customer_code: string | null;
   } | null;
   // Joined part data
   parts?: {

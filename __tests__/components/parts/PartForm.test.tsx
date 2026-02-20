@@ -31,7 +31,6 @@ const mockCustomers: Customer[] = [
   {
     id: 'customer-1',
     company_id: 'test-company-id',
-    customer_code: 'CUST001',
     name: 'Test Customer 1',
     phone: null,
     email: null,
@@ -52,7 +51,6 @@ const mockCustomers: Customer[] = [
   {
     id: 'customer-2',
     company_id: 'test-company-id',
-    customer_code: 'CUST002',
     name: 'Test Customer 2',
     phone: null,
     email: null,
@@ -236,7 +234,6 @@ describe('PartForm', () => {
         part_number: 'NEW-PART-001',
         description: 'Test Part Description',
         pricing: [{ qty: 1, price: 0 }],
-        material_cost: null,
         notes: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -328,7 +325,6 @@ describe('PartForm', () => {
         { qty: 1, price: 10.0 },
         { qty: 50, price: 8.0 },
       ],
-      material_cost: '5.00',
     };
 
     const existingPart: Part = {
@@ -341,7 +337,6 @@ describe('PartForm', () => {
         { qty: 1, price: 10.0 },
         { qty: 50, price: 8.0 },
       ],
-      material_cost: 5.0,
       notes: 'Important part',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',

@@ -21,7 +21,7 @@ import {
   createCustomer,
   updateCustomer,
   softDeleteCustomer,
-  checkCustomerCodeExists,
+  checkCustomerNameExists,
 } from '@/utils/customerAccess';
 
 interface CustomerFormProps {
@@ -68,9 +68,6 @@ export default function CustomerForm({
     const errors: Record<string, string> = {};
 
     // Required fields
-    if (!formData.customer_code.trim()) {
-      errors.customer_code = 'Customer code is required';
-    }
     if (!formData.name.trim()) {
       errors.name = 'Company name is required';
     }
@@ -80,19 +77,19 @@ export default function CustomerForm({
       errors.contact_email = 'Invalid email format';
     }
 
-    // Check uniqueness of customer code
-    if (formData.customer_code.trim() && !errors.customer_code) {
+    // Check uniqueness of name
+    if (formData.name.trim() && !errors.name) {
       try {
-        const exists = await checkCustomerCodeExists(
+        const exists = await checkCustomerNameExists(
           companyId,
-          formData.customer_code,
+          formData.name,
           mode === 'edit' ? customerId : undefined
         );
         if (exists) {
-          errors.customer_code = 'Customer code already exists';
+          errors.name = 'A customer with this name already exists';
         }
       } catch {
-        setError('Error validating customer code');
+        setError('Error validating customer name');
         return false;
       }
     }
@@ -176,23 +173,11 @@ export default function CustomerForm({
               <TextField
                 fullWidth
                 required
-                label="Customer Code"
-                value={formData.customer_code}
-                onChange={handleChange('customer_code')}
-                error={!!fieldErrors.customer_code}
-                helperText={fieldErrors.customer_code || 'Short unique identifier (e.g., ABC001)'}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                required
                 label="Company Name"
                 value={formData.name}
                 onChange={handleChange('name')}
                 error={!!fieldErrors.name}
-                helperText={fieldErrors.name}
+                helperText={fieldErrors.name || 'Unique customer name'}
                 disabled={loading}
               />
             </Grid>

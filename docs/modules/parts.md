@@ -38,7 +38,6 @@ The Parts module manages the catalog of products/parts that Contour manufactures
 | part_number | Text | Yes | Customer's part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
 | pricing | JSONB | No | Array of quantity-based price tiers (see below) |
-| material_cost | Decimal | No | Estimated material cost per unit |
 | is_active | Boolean | Yes | Active/inactive status (default: true) |
 | notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |

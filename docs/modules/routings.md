@@ -23,7 +23,7 @@ Users build routings by dragging operations onto a canvas and connecting them wi
 | Term | Description |
 |---|---|
 | **Routing** | A workflow diagram defining how a part is manufactured, consisting of nodes (operations) and edges (connections) |
-| **Workflow Node** | An operation represented as a card on the canvas, containing setup time, run time, and resource assignment |
+| **Workflow Node** | An operation represented as a card on the canvas, containing run time, materials, and resource assignment |
 | **Edge/Connection** | A link between nodes showing execution dependency - the source must complete before the target starts |
 | **Parallel Branch** | Multiple nodes that can execute simultaneously because they have no dependencies on each other |
 | **Series Path** | Nodes that execute sequentially, one after another, where each depends on the previous |
@@ -95,8 +95,8 @@ Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when
 | id | uuid | Yes | Primary key |
 | routing_id | uuid | Yes | FK to routings |
 | operation_type_id | uuid | Yes | FK to operation_types |
-| setup_time | float | No | Setup time in minutes |
 | cycle_time | float | No | Run time per unit in minutes |
+| materials | jsonb | No | Array of materials needed for this operation [{inventory_item_id, quantity, unit}] |
 | metadata | jsonb | No | Optional JSON (can store position hints for custom layouts) |
 
 ### Routing Edges Table (`routing_edges`)

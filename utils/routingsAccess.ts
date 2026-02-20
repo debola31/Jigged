@@ -42,7 +42,7 @@ export async function getRoutings(
     .select(`
       *,
       part:parts(id, part_number, description),
-      nodes:routing_nodes(id, setup_time, run_time_per_unit)
+      nodes:routing_nodes(id, run_time_per_unit)
     `)
     .eq('company_id', companyId);
 
@@ -75,15 +75,11 @@ export async function getRoutings(
     created_at: string;
     updated_at: string;
     part: { id: string; part_number: string; description: string | null } | null;
-    nodes?: Array<{ id: string; setup_time: number | null; run_time_per_unit: number | null }>;
+    nodes?: Array<{ id: string; run_time_per_unit: number | null }>;
   }
 
   return (data || []).map((routing: RoutingRow) => {
     const nodes = routing.nodes || [];
-    const totalSetup = nodes.reduce(
-      (sum: number, n) => sum + (n.setup_time || 0),
-      0
-    );
     const totalRun = nodes.reduce(
       (sum: number, n) => sum + (n.run_time_per_unit || 0),
       0
@@ -93,7 +89,6 @@ export async function getRoutings(
     return {
       ...rest,
       nodes_count: nodes.length,
-      total_setup_time: totalSetup || null,
       total_run_time_per_unit: totalRun || null,
     } as RoutingWithStats;
   });
@@ -326,10 +321,10 @@ export async function cloneRouting(
         .insert({
           routing_id: newRouting.id,
           operation_type_id: node.operation_type_id,
-          setup_time: node.setup_time,
           run_time_per_unit: node.run_time_per_unit,
           instructions: node.instructions,
           metadata: node.metadata,
+          materials: node.materials || [],
         })
         .select()
         .single();
@@ -375,12 +370,12 @@ export async function createRoutingNode(
     .insert({
       routing_id: routingId,
       operation_type_id: formData.operation_type_id,
-      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : null,
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
       instructions: formData.instructions.trim() || null,
       metadata: {},
+      materials: formData.materials || [],
     })
     .select()
     .single();
@@ -406,11 +401,11 @@ export async function updateRoutingNode(
     .from('routing_nodes')
     .update({
       operation_type_id: formData.operation_type_id,
-      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : null,
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
       instructions: formData.instructions.trim() || null,
+      materials: formData.materials || [],
       updated_at: new Date().toISOString(),
     })
     .eq('id', nodeId)
@@ -503,9 +498,9 @@ export async function saveRoutingGraph(
     id: string;
     isNew?: boolean;
     operationTypeId: string;
-    setupTime: number | null;
     runTimePerUnit: number | null;
     instructions: string | null;
+    materials: unknown[];
   }>,
   edges: Array<{
     id: string;
@@ -549,10 +544,10 @@ export async function saveRoutingGraph(
         .insert({
           routing_id: routingId,
           operation_type_id: node.operationTypeId,
-          setup_time: node.setupTime,
           run_time_per_unit: node.runTimePerUnit,
           instructions: node.instructions,
           metadata: {},
+          materials: node.materials || [],
         })
         .select()
         .single();
@@ -564,9 +559,9 @@ export async function saveRoutingGraph(
         .from('routing_nodes')
         .update({
           operation_type_id: node.operationTypeId,
-          setup_time: node.setupTime,
           run_time_per_unit: node.runTimePerUnit,
           instructions: node.instructions,
+          materials: node.materials || [],
           updated_at: new Date().toISOString(),
         })
         .eq('id', node.id);
@@ -682,9 +677,9 @@ interface PendingNode {
   operationName: string;
   resourceGroupName: string | null;
   laborRate: number | null;
-  setupTime: number | null;
   runTimePerUnit: number | null;
   instructions: string | null;
+  materials: unknown[];
 }
 
 /**
@@ -770,10 +765,10 @@ export async function saveRoutingWithGraph(
         .insert({
           routing_id: routing.id,
           operation_type_id: node.operationTypeId,
-          setup_time: node.setupTime,
           run_time_per_unit: node.runTimePerUnit,
           instructions: node.instructions,
           metadata: {},
+          materials: node.materials || [],
         })
         .select()
         .single();
@@ -786,9 +781,9 @@ export async function saveRoutingWithGraph(
         .from('routing_nodes')
         .update({
           operation_type_id: node.operationTypeId,
-          setup_time: node.setupTime,
           run_time_per_unit: node.runTimePerUnit,
           instructions: node.instructions,
+          materials: node.materials || [],
           updated_at: new Date().toISOString(),
         })
         .eq('id', node.tempId);

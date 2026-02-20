@@ -17,7 +17,7 @@ The Customers module manages the master list of companies that Contour does busi
 | As a... | I want to... | So that... |
 |---|---|---|
 | Owner/Admin | View a list of all customers | I can see who we do business with |
-| Owner/Admin | Search customers by name or code | I can quickly find a specific customer |
+| Owner/Admin | Search customers by name | I can quickly find a specific customer |
 | Owner/Admin | Filter customers by active/inactive status | I can focus on current customers |
 | Owner/Admin | Create a new customer with contact details | I can start doing business with them |
 | Owner/Admin | Edit customer information | I can keep records up to date |
@@ -30,7 +30,6 @@ The Customers module manages the master list of companies that Contour does busi
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| customer_code | Text | Yes | Short unique identifier (e.g., "ABC00", "CONTOUR") |
 | name | Text | Yes | Full company name |
 | phone | Text | No | Main phone number |
 | email | Text | No | Main email address |
@@ -57,9 +56,9 @@ The Customers module manages the master list of companies that Contour does busi
 
 **Features:**
 
-- Table showing: Customer Code, Name, Contact, Phone, City/State, Status
+- Table showing: Name, Contact, Phone, City/State, Status
 
-- Search box (searches name and code)
+- Search box (searches name)
 
 - Filter toggle: All / Active only / Inactive only
 
@@ -81,9 +80,7 @@ The Customers module manages the master list of companies that Contour does busi
 
 ▸ **Basic Information**
 
-- Customer Code (required, unique)
-
-- Company Name (required)
+- Company Name (required, unique per company)
 
 - Website
 
@@ -164,7 +161,7 @@ Replaces manual CSV column mapping with an AI-powered backend that analyzes CSV 
        ▼
 4. VALIDATE
    Call /validate endpoint
-   Show conflicts if any (duplicate customer_code or name)
+   Show conflicts if any (duplicate name)
        │
        ▼
 5. EXECUTE
@@ -174,9 +171,7 @@ Replaces manual CSV column mapping with an AI-powered backend that analyzes CSV 
 
 ### Conflict Detection
 
-- **Duplicate customer_code** → Conflict (code must be unique)
-
-- **Duplicate name** → Conflict (flag for review)
+- **Duplicate name** → Conflict (name must be unique per company)
 
 - User can choose to skip conflicts and import valid rows
 
@@ -223,7 +218,7 @@ Check for conflicts before import.
 {
   "has_conflicts": true,
   "conflicts": [
-    {"row_number": 3, "conflict_type": "duplicate_code", "csv_value": "ACM01"}
+    {"row_number": 3, "conflict_type": "duplicate_name", "csv_value": "ACM01"}
   ],
   "valid_rows_count": 47,
   "conflict_rows_count": 3
@@ -258,7 +253,7 @@ Perform the import.
 
 2. **Discarded Columns** - CSV columns that won't be imported
 
-3. **Missing Required** - Alert if customer_code or name unmapped
+3. **Missing Required** - Alert if name unmapped
 
 ### AI Provider Configuration
 
@@ -318,9 +313,7 @@ API keys remain in environment variables (secure). Default provider is Claude if
 
 ### Validation Rules
 
-- customer_code is required and must be unique
-
-- name is required
+- name is required and must be unique per company
 
 - Simple 1:1 column mapping only (no concatenation)
 
@@ -332,7 +325,7 @@ API keys remain in environment variables (secure). Default provider is Claude if
 
 - [ ] Can view paginated list of customers
 
-- [ ] Can search customers by name or code
+- [ ] Can search customers by name
 
 - [ ] Can filter by active/inactive status
 
@@ -342,7 +335,7 @@ API keys remain in environment variables (secure). Default provider is Claude if
 
 - [ ] Can toggle customer active/inactive
 
-- [ ] Customer code is unique within company
+- [ ] Customer name is unique within company
 
 - [ ] Form shows validation errors inline
 
@@ -357,8 +350,6 @@ API keys remain in environment variables (secure). Default provider is Claude if
 - [ ] Can manually override AI-suggested mappings
 
 - [ ] Shows unmapped required fields as alert
-
-- [ ] Detects duplicate customer_code conflicts
 
 - [ ] Detects duplicate name conflicts
 

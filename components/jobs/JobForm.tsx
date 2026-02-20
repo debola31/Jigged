@@ -60,7 +60,7 @@ export default function JobForm({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const [customers, setCustomers] = useState<Array<{ id: string; name: string; customer_code: string | null }>>([]);
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [parts, setParts] = useState<Array<{ id: string; part_number: string; description: string | null }>>([]);
   const [routings, setRoutings] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
@@ -261,7 +261,7 @@ export default function JobForm({
               >
                 {customers.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
-                    {c.customer_code ? `${c.customer_code} - ${c.name}` : c.name}
+                    {c.name}
                   </MenuItem>
                 ))}
               </Select>

@@ -11,28 +11,20 @@ interface ColumnMapping {
 
 interface ConflictInfo {
   row_number: number;
-  csv_customer_code: string | null;
   csv_name: string | null;
-  conflict_type: 'duplicate_code' | 'duplicate_name' | 'csv_duplicate_code' | 'csv_duplicate_name';
+  conflict_type: 'duplicate_name' | 'csv_duplicate_name';
   existing_customer_id: string;
   existing_value: string;
 }
 
 interface ValidationError {
   row_number: number;
-  error_type: 'missing_customer_code' | 'missing_name';
+  error_type: 'missing_name';
   field: string;
 }
 
 // Mock data
 const mockMappings: ColumnMapping[] = [
-  {
-    csv_column: 'Code',
-    db_field: 'customer_code',
-    confidence: 0.95,
-    reasoning: 'Header contains "Code" which matches customer_code field',
-    needs_review: false,
-  },
   {
     csv_column: 'Company Name',
     db_field: 'name',
@@ -94,8 +86,7 @@ export const handlers = [
     };
 
     // Check for specific test scenarios
-    const hasConflict = body.rows.some(row => row.customer_code === 'EXISTING001');
-    const hasMissingCode = body.rows.some(row => !row.customer_code);
+    const hasConflict = body.rows.some(row => row.name === 'Existing Company');
     const hasMissingName = body.rows.some(row => !row.name);
 
     const conflicts: ConflictInfo[] = [];
@@ -104,19 +95,10 @@ export const handlers = [
     if (hasConflict) {
       conflicts.push({
         row_number: 2,
-        csv_customer_code: 'EXISTING001',
         csv_name: 'Existing Company',
-        conflict_type: 'duplicate_code',
+        conflict_type: 'duplicate_name',
         existing_customer_id: 'existing-customer-uuid',
-        existing_value: 'EXISTING001',
-      });
-    }
-
-    if (hasMissingCode) {
-      validationErrors.push({
-        row_number: 3,
-        error_type: 'missing_customer_code',
-        field: 'customer_code',
+        existing_value: 'Existing Company',
       });
     }
 
@@ -151,7 +133,7 @@ export const handlers = [
     };
 
     // Simulate checking for conflicts
-    const hasConflicts = body.rows.some(row => row.customer_code === 'EXISTING001');
+    const hasConflicts = body.rows.some(row => row.name === 'Existing Company');
 
     if (hasConflicts && !body.skip_conflicts) {
       return HttpResponse.json(

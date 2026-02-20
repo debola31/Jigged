@@ -240,13 +240,6 @@ export default function RoutingsPage() {
       valueFormatter: (params) => (params.value !== null ? `${params.value}` : '0'),
     },
     {
-      colId: 'setup_time',
-      headerName: 'Setup Time',
-      width: 130,
-      valueGetter: (params) => params.data?.total_setup_time,
-      valueFormatter: (params) => formatTime(params.value),
-    },
-    {
       colId: 'run_time',
       headerName: 'Run/Unit',
       width: 130,

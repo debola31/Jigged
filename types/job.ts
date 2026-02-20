@@ -91,7 +91,6 @@ export interface JobWithRelations extends Job {
   customers?: {
     id: string;
     name: string;
-    customer_code: string | null;
   } | null;
   // Joined part data
   parts?: {

@@ -1,7 +1,6 @@
 export interface Customer {
   id: string;
   company_id: string;
-  customer_code: string;
   name: string;
   website: string | null;
   contact_name: string | null;
@@ -18,7 +17,6 @@ export interface Customer {
 }
 
 export interface CustomerFormData {
-  customer_code: string;
   name: string;
   website: string;
   contact_name: string;
@@ -40,7 +38,6 @@ export interface CustomerWithRelations extends Customer {
 }
 
 export interface CustomerImportRow {
-  customer_code: string;
   name: string;
   [key: string]: string;
 }
@@ -52,7 +49,6 @@ export interface ImportResult {
 }
 
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
-  customer_code: '',
   name: '',
   website: '',
   contact_name: '',
@@ -68,7 +64,6 @@ export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
 
 export function customerToFormData(customer: Customer): CustomerFormData {
   return {
-    customer_code: customer.customer_code,
     name: customer.name,
     website: customer.website || '',
     contact_name: customer.contact_name || '',

@@ -88,7 +88,7 @@ function OperationNodeComponent({ id, data, selected }: OperationNodeProps) {
           {data.operationName}
         </Typography>
 
-        {/* Time Estimates */}
+        {/* Time Estimate */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
           <AccessTimeIcon
             sx={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.5)' }}
@@ -97,12 +97,25 @@ function OperationNodeComponent({ id, data, selected }: OperationNodeProps) {
             variant="caption"
             sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
           >
-            {data.setupTime ? `${data.setupTime}m setup` : ''}
-            {data.setupTime && data.runTimePerUnit ? ' + ' : ''}
-            {data.runTimePerUnit ? `${data.runTimePerUnit}m/unit` : ''}
-            {!data.setupTime && !data.runTimePerUnit && 'No time set'}
+            {data.runTimePerUnit ? `${data.runTimePerUnit}m/unit` : 'No time set'}
           </Typography>
         </Box>
+
+        {/* Materials count */}
+        {data.materials && data.materials.length > 0 && (
+          <Chip
+            label={`${data.materials.length} material${data.materials.length !== 1 ? 's' : ''}`}
+            size="small"
+            sx={{
+              height: 20,
+              fontSize: '0.7rem',
+              backgroundColor: 'rgba(70, 130, 180, 0.2)',
+              color: '#4682B4',
+              border: '1px solid rgba(70, 130, 180, 0.3)',
+              mb: 0.5,
+            }}
+          />
+        )}
 
         {/* Labor Rate */}
         {data.laborRate && (

@@ -168,14 +168,6 @@ export default function CustomerDetailPage() {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
-                    Customer Code
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {customer.customer_code}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
                     Company Name
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>

@@ -53,7 +53,6 @@ export interface PartAnalyzeResponse {
 export interface PartConflictInfo {
   row_number: number;
   csv_part_number: string | null;
-  csv_customer_code: string | null;
   conflict_type: 'duplicate_part_number' | 'customer_not_found' | 'csv_duplicate';
   existing_part_id: string; // Empty string for non-DB conflicts
   existing_value: string;
@@ -131,8 +130,6 @@ export interface PartExecuteResponse {
  */
 export const PART_FIELDS: { key: string; label: string; required: boolean }[] = [
   { key: 'part_number', label: 'Part Number', required: true },
-  { key: 'customer_code', label: 'Customer Code', required: false },
   { key: 'description', label: 'Description', required: false },
-  { key: 'material_cost', label: 'Material Cost', required: false },
   { key: 'notes', label: 'Notes', required: false },
 ];

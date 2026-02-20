@@ -13,10 +13,9 @@ interface PartWithCustomerJoin {
   part_number: string;
   description: string | null;
   pricing: PricingTier[];
-  material_cost: number | null;
   created_at: string;
   updated_at: string;
-  customers: { id: string; name: string; customer_code: string } | null;
+  customers: { id: string; name: string } | null;
 }
 
 /**
@@ -46,8 +45,7 @@ export async function getAllParts(
         *,
         customers!left (
           id,
-          name,
-          customer_code
+          name
         )
       `
       )
@@ -111,8 +109,7 @@ export async function getPartsPaginated(
       *,
       customers!left (
         id,
-        name,
-        customer_code
+        name
       )
     `
     )
@@ -183,8 +180,7 @@ export async function getPart(partId: string): Promise<Part | null> {
       *,
       customers!left (
         id,
-        name,
-        customer_code
+        name
       )
     `
     )
@@ -219,8 +215,7 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
       *,
       customers!left (
         id,
-        name,
-        customer_code
+        name
       )
     `
     )
@@ -326,9 +321,6 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
       pricing: sortedPricing,
-      material_cost: formData.material_cost
-        ? parseFloat(parseFloat(formData.material_cost).toFixed(2))
-        : null,
     })
     .select()
     .single();
@@ -360,9 +352,6 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
       pricing: sortedPricing,
-      material_cost: formData.material_cost
-        ? parseFloat(parseFloat(formData.material_cost).toFixed(2))
-        : null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', partId)

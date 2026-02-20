@@ -230,7 +230,7 @@ export default function PartsPage() {
         if (!params.data.customer_id) return '—';
         // Customer was deleted (SET NULL fired but we still have stale reference)
         if (!params.data.customer) return 'Unknown (deleted)';
-        return `${params.data.customer.customer_code} - ${params.data.customer.name}`;
+        return params.data.customer.name;
       },
     },
     {
@@ -265,12 +265,6 @@ export default function PartsPage() {
           </Box>
         );
       },
-    },
-    {
-      field: 'material_cost',
-      headerName: 'Material Cost',
-      width: 150,
-      valueFormatter: (params) => (params.value != null ? `$${params.value.toFixed(2)}` : '—'),
     },
   ];
 

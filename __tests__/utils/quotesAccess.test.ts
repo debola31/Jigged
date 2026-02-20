@@ -141,7 +141,7 @@ describe('quotesAccess utilities', () => {
       const mockQuotesWithRelations = [
         {
           ...mockQuote,
-          customers: { id: 'customer-1', name: 'Test Customer', customer_code: 'CUST001' },
+          customers: { id: 'customer-1', name: 'Test Customer' },
           parts: { id: 'part-1', part_number: 'PART001', description: 'Test Part', pricing: [] },
           jobs: null,
         },
@@ -285,7 +285,7 @@ describe('quotesAccess utilities', () => {
     it('returns quote with customer, part, and attachments', async () => {
       const quoteWithRelations = {
         ...mockQuote,
-        customers: { id: 'customer-1', name: 'Test Customer', customer_code: 'CUST001' },
+        customers: { id: 'customer-1', name: 'Test Customer' },
         parts: { id: 'part-1', part_number: 'PART001', description: 'Test Part', pricing: [] },
         jobs: null,
         quote_attachments: [],

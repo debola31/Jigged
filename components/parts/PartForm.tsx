@@ -165,16 +165,6 @@ export default function PartForm({
     }
     setPricingWarnings(warnings);
 
-    // Validate material cost precision (max 2 decimal places)
-    if (formData.material_cost) {
-      const materialCostValue = parseFloat(formData.material_cost);
-      if (isNaN(materialCostValue) || materialCostValue < 0) {
-        errors.material_cost = 'Material cost must be a positive number';
-      } else if (formData.material_cost.includes('.') && formData.material_cost.split('.')[1]?.length > 2) {
-        errors.material_cost = 'Material cost cannot have more than 2 decimal places';
-      }
-    }
-
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -278,7 +268,6 @@ export default function PartForm({
                 options={customers.map((c): SelectOption => ({
                   id: c.id,
                   label: c.name,
-                  secondaryLabel: c.customer_code,
                 }))}
                 value={formData.customer_id}
                 onChange={handleCustomerChange}
@@ -382,30 +371,6 @@ export default function PartForm({
               {`No pricing tiers defined. Click "Add Tier" to add one.`}
             </Typography>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Cost Information */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Cost Information
-          </Typography>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                label="Material Cost ($)"
-                type="number"
-                value={formData.material_cost}
-                onChange={handleChange('material_cost')}
-                error={!!fieldErrors.material_cost}
-                helperText={fieldErrors.material_cost || 'Estimated raw material cost per unit'}
-                disabled={loading}
-                inputProps={{ min: 0, step: 0.01 }}
-              />
-            </Grid>
-          </Grid>
         </CardContent>
       </Card>
 

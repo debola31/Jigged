@@ -49,7 +49,7 @@ vi.mock('@/lib/supabase', () => ({
 import {
   getAllCustomers,
   getCustomer,
-  checkCustomerCodeExists,
+  checkCustomerNameExists,
   createCustomer,
   updateCustomer,
   softDeleteCustomer,
@@ -77,7 +77,6 @@ describe('customerAccess utilities', () => {
       {
         id: 'customer-1',
         company_id: 'company-1',
-        customer_code: 'CUST001',
         name: 'Customer One',
         phone: '555-1111',
         email: 'one@test.com',
@@ -98,7 +97,6 @@ describe('customerAccess utilities', () => {
       {
         id: 'customer-2',
         company_id: 'company-1',
-        customer_code: 'CUST002',
         name: 'Customer Two',
         phone: '555-2222',
         email: 'two@test.com',
@@ -134,10 +132,10 @@ describe('customerAccess utilities', () => {
       mockQueryBuilder.data = [mockCustomers[0]];
       mockQueryBuilder.error = null;
 
-      const result = await getAllCustomers('company-1', 'all', 'CUST001');
+      const result = await getAllCustomers('company-1', 'all', 'Customer One');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'name.ilike.%CUST001%,customer_code.ilike.%CUST001%'
+        'name.ilike.%Customer One%'
       );
       expect(result).toHaveLength(1);
     });
@@ -157,7 +155,6 @@ describe('customerAccess utilities', () => {
     const mockCustomer: Customer = {
       id: 'customer-1',
       company_id: 'company-1',
-      customer_code: 'CUST001',
       name: 'Customer One',
       phone: '555-1111',
       email: 'one@test.com',
@@ -189,22 +186,22 @@ describe('customerAccess utilities', () => {
     });
   });
 
-  describe('checkCustomerCodeExists', () => {
-    it('returns true when code exists', async () => {
+  describe('checkCustomerNameExists', () => {
+    it('returns true when name exists', async () => {
       mockQueryBuilder.data = [{ id: 'existing-customer' }];
       mockQueryBuilder.error = null;
 
-      const result = await checkCustomerCodeExists('company-1', 'EXISTING');
+      const result = await checkCustomerNameExists('company-1', 'EXISTING');
 
-      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('customer_code', 'EXISTING');
+      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('name', 'EXISTING');
       expect(result).toBe(true);
     });
 
-    it('returns false when code does not exist', async () => {
+    it('returns false when name does not exist', async () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      const result = await checkCustomerCodeExists('company-1', 'NONEXISTENT');
+      const result = await checkCustomerNameExists('company-1', 'NONEXISTENT');
 
       expect(result).toBe(false);
     });
@@ -213,7 +210,7 @@ describe('customerAccess utilities', () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      await checkCustomerCodeExists('company-1', 'CODE', 'exclude-this-id');
+      await checkCustomerNameExists('company-1', 'NAME', 'exclude-this-id');
 
       expect(mockQueryBuilder.neq).toHaveBeenCalledWith('id', 'exclude-this-id');
     });
@@ -221,7 +218,6 @@ describe('customerAccess utilities', () => {
 
   describe('createCustomer', () => {
     const mockFormData: CustomerFormData = {
-      customer_code: 'NEW001',
       name: 'New Customer',
       phone: '555-1234',
       email: 'new@test.com',
@@ -284,7 +280,6 @@ describe('customerAccess utilities', () => {
 
   describe('updateCustomer', () => {
     const mockFormData: CustomerFormData = {
-      customer_code: 'CUST001',
       name: 'Updated Customer',
       phone: '555-9999',
       email: 'updated@test.com',
@@ -305,7 +300,6 @@ describe('customerAccess utilities', () => {
       const mockUpdatedCustomer: Customer = {
         id: 'customer-1',
         company_id: 'company-1',
-        customer_code: 'CUST001',
         name: 'Updated Customer',
         phone: '555-9999',
         email: 'updated@test.com',

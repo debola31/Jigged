@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "customer_code" text NOT NULL,
     "name" text NOT NULL,
     "website" text,
     "contact_name" text,
@@ -55,7 +54,7 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "customers_company_code_unique" UNIQUE (company_id, customer_code)
+    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."inventory_items"
@@ -94,7 +93,6 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "part_number" text NOT NULL,
     "description" text,
     "pricing" jsonb DEFAULT '[]'::jsonb,
-    "material_cost" numeric(10,2),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
@@ -148,10 +146,10 @@ CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "routing_id" uuid NOT NULL,
     "operation_type_id" uuid NOT NULL,
-    "setup_time" numeric,
     "run_time_per_unit" numeric,
     "instructions" text,
     "metadata" jsonb DEFAULT '{}'::jsonb,
+    "materials" jsonb DEFAULT '[]'::jsonb,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "routing_nodes_pkey" PRIMARY KEY (id)
@@ -1113,7 +1111,6 @@ ALTER TABLE "public"."user_preferences"
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
-CREATE INDEX IF NOT EXISTS idx_customers_code ON public.customers USING btree (customer_code);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS inventory_items_company_id_idx ON public.inventory_items USING btree (company_id);
@@ -1347,7 +1344,7 @@ AS $function$
               routing_node_id
           ) VALUES (
               p_job_id, v_sequence, v_node.operation_name, v_node.operation_type_id,
-              v_node.instructions, v_node.setup_time, v_node.run_time_per_unit, 'pending',
+              v_node.instructions, 0, v_node.run_time_per_unit, 'pending',
               v_node.id
           );
           v_sequence := v_sequence + 10;
@@ -1825,9 +1822,6 @@ COMMENT ON COLUMN "public"."customers"."id"
 COMMENT ON COLUMN "public"."customers"."company_id"
     IS 'FK to companies. Cascades on delete. Isolates customers per tenant.';
 
-COMMENT ON COLUMN "public"."customers"."customer_code"
-    IS 'Unique short code within company. Used for quick lookup and legacy system compatibility. Example: "ACME", "FORD-001"';
-
 COMMENT ON COLUMN "public"."customers"."name"
     IS 'Full legal/display name of customer. Example: "Acme Manufacturing Corp"';
 
@@ -2080,9 +2074,6 @@ COMMENT ON COLUMN "public"."parts"."description"
 COMMENT ON COLUMN "public"."parts"."pricing"
     IS 'Volume-based pricing tiers as JSONB array. Format: [{"qty": 1, "price": 50.00}, {"qty": 10, "price": 45.00}]. Validated by CHECK constraint to ensure correct structure.';
 
-COMMENT ON COLUMN "public"."parts"."material_cost"
-    IS 'Estimated raw material cost per unit. Used for margin calculations.';
-
 COMMENT ON COLUMN "public"."parts"."created_at"
     IS 'Timestamp when part was created.';
 
@@ -2215,9 +2206,6 @@ COMMENT ON COLUMN "public"."routing_nodes"."routing_id"
 COMMENT ON COLUMN "public"."routing_nodes"."operation_type_id"
     IS 'Foreign key to the operation type (e.g., CNC Mill, Lathe, 
  Inspect)';
-
-COMMENT ON COLUMN "public"."routing_nodes"."setup_time"
-    IS 'Estimated setup time in minutes for this operation';
 
 COMMENT ON COLUMN "public"."routing_nodes"."run_time_per_unit"
     IS 'Estimated run time per unit in minutes for this operation';

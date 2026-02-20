@@ -11,17 +11,6 @@ CUSTOMERS_CONFIG = ImportModuleConfig(
     module_name="customers",
     table_name="customers",
     schema={
-        "customer_code": FieldDefinition(
-            name="customer_code",
-            type="string",
-            required=True,
-            description="Unique customer identifier code",
-            mapping_patterns=[
-                r"^(customer[_\s-]?(code|id|number|num|#)?|cust[_\s-]?(code|id))$",
-                r"^(client[_\s-]?(code|id)|account[_\s-]?(code|id|number|num))$",
-                r"^(vendor[_\s-]?(code|id)|company[_\s-]?(code|id))$",
-            ],
-        ),
         "name": FieldDefinition(
             name="name",
             type="string",
@@ -133,7 +122,7 @@ CUSTOMERS_CONFIG = ImportModuleConfig(
             ],
         ),
     },
-    unique_fields=["customer_code", "name"],
+    unique_fields=["name"],
     domain_hints=[
         "customer", "client", "vendor", "company", "business",
         "contact", "phone", "email", "address", "city", "state", "zip",

@@ -205,9 +205,6 @@ export default function PartDetailPage() {
                   >
                     {part.customer.name}
                   </MuiLink>
-                  <Typography variant="body2" color="text.secondary">
-                    Code: {part.customer.customer_code}
-                  </Typography>
                 </Box>
               ) : (
                 <Typography variant="body1" color="text.secondary">
@@ -259,18 +256,10 @@ export default function PartDetailPage() {
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Cost & Related
+                Related
               </Typography>
               <Divider sx={{ mb: 2 }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Material Cost
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatCurrency(part.material_cost)}
-                  </Typography>
-                </Box>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
                     Quotes

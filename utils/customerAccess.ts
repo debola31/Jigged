@@ -29,9 +29,9 @@ export async function getCustomers(
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
-  // Apply search (name or code)
+  // Apply search (name)
   if (search.trim()) {
-    query = query.or(`name.ilike.%${search}%,customer_code.ilike.%${search}%`);
+    query = query.or(`name.ilike.%${search}%`);
   }
 
   const { data, error, count } = await query;
@@ -71,9 +71,9 @@ export async function getAllCustomers(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    // Apply search (name or code)
+    // Apply search (name)
     if (search.trim()) {
-      query = query.or(`name.ilike.%${search}%,customer_code.ilike.%${search}%`);
+      query = query.or(`name.ilike.%${search}%`);
     }
 
     const { data, error } = await query;
@@ -165,11 +165,11 @@ export async function getCustomerWithRelations(
 }
 
 /**
- * Check if a customer code already exists for a company
+ * Check if a customer name already exists for a company
  */
-export async function checkCustomerCodeExists(
+export async function checkCustomerNameExists(
   companyId: string,
-  customerCode: string,
+  name: string,
   excludeId?: string
 ): Promise<boolean> {
   const supabase = getSupabase();
@@ -178,7 +178,7 @@ export async function checkCustomerCodeExists(
     .from('customers')
     .select('id')
     .eq('company_id', companyId)
-    .ilike('customer_code', customerCode);
+    .ilike('name', name);
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -187,7 +187,7 @@ export async function checkCustomerCodeExists(
   const { data, error } = await query;
 
   if (error) {
-    console.error('Error checking customer code:', error);
+    console.error('Error checking customer name:', error);
     throw error;
   }
 
@@ -207,7 +207,6 @@ export async function createCustomer(
     .from('customers')
     .insert({
       company_id: companyId,
-      customer_code: formData.customer_code.trim(),
       name: formData.name.trim(),
       website: formData.website.trim() || null,
       contact_name: formData.contact_name.trim() || null,
@@ -243,7 +242,6 @@ export async function updateCustomer(
   const { data, error } = await supabase
     .from('customers')
     .update({
-      customer_code: formData.customer_code.trim(),
       name: formData.name.trim(),
       website: formData.website.trim() || null,
       contact_name: formData.contact_name.trim() || null,
@@ -339,29 +337,22 @@ export async function bulkImportCustomers(
   const supabase = getSupabase();
   const results: ImportResult = { imported: 0, skipped: 0, errors: [] };
 
-  // Pre-fetch existing codes for efficiency
+  // Pre-fetch existing names for efficiency
   const { data: existing } = await supabase
     .from('customers')
-    .select('customer_code')
+    .select('name')
     .eq('company_id', companyId);
 
-  const existingCodes = new Set(
-    (existing || []).map((c: { customer_code: string }) => c.customer_code.toLowerCase())
+  const existingNames = new Set(
+    (existing || []).map((c: { name: string }) => c.name.toLowerCase())
   );
 
-  // Track codes added during this import to detect duplicates within the file
-  const importedCodes = new Set<string>();
+  // Track names added during this import to detect duplicates within the file
+  const importedNames = new Set<string>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowNum = i + 2; // +2 for 1-indexed and header row
-
-    // Validation: customer_code required
-    if (!row.customer_code?.trim()) {
-      results.errors.push({ row: rowNum, reason: 'Missing customer code' });
-      results.skipped++;
-      continue;
-    }
 
     // Validation: name required
     if (!row.name?.trim()) {
@@ -370,23 +361,23 @@ export async function bulkImportCustomers(
       continue;
     }
 
-    const codeKey = row.customer_code.trim().toLowerCase();
+    const nameKey = row.name.trim().toLowerCase();
 
-    // Check for existing code in database
-    if (existingCodes.has(codeKey)) {
+    // Check for existing name in database
+    if (existingNames.has(nameKey)) {
       results.errors.push({
         row: rowNum,
-        reason: `Customer code "${row.customer_code}" already exists`,
+        reason: `Customer name "${row.name}" already exists`,
       });
       results.skipped++;
       continue;
     }
 
     // Check for duplicate within the import file
-    if (importedCodes.has(codeKey)) {
+    if (importedNames.has(nameKey)) {
       results.errors.push({
         row: rowNum,
-        reason: `Duplicate customer code "${row.customer_code}" in file`,
+        reason: `Duplicate customer name "${row.name}" in file`,
       });
       results.skipped++;
       continue;
@@ -395,7 +386,6 @@ export async function bulkImportCustomers(
     // Insert
     const { error } = await supabase.from('customers').insert({
       company_id: companyId,
-      customer_code: row.customer_code.trim(),
       name: row.name.trim(),
       website: row.website?.trim() || null,
       contact_name: row.contact_name?.trim() || null,
@@ -414,8 +404,8 @@ export async function bulkImportCustomers(
       results.skipped++;
     } else {
       results.imported++;
-      importedCodes.add(codeKey);
-      existingCodes.add(codeKey);
+      importedNames.add(nameKey);
+      existingNames.add(nameKey);
     }
   }
 

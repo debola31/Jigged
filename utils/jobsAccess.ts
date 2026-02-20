@@ -51,7 +51,7 @@ export async function getAllJobs(
       .select(
         `
         *,
-        customers!left(id, name, customer_code),
+        customers!left(id, name),
         parts!left(id, part_number, description),
         quotes!jobs_quote_id_fkey(id, quote_number, total_price)
       `
@@ -110,7 +110,7 @@ export async function getJobWithRelations(
     .select(
       `
       *,
-      customers!left(id, name, customer_code),
+      customers!left(id, name),
       parts!left(id, part_number, description),
       quotes!jobs_quote_id_fkey(id, quote_number, total_price),
       routings!left(id, name),
@@ -895,12 +895,12 @@ export async function getJobAttachmentUrl(filePath: string): Promise<string> {
  */
 export async function getCustomersForSelect(
   companyId: string
-): Promise<Array<{ id: string; name: string; customer_code: string | null }>> {
+): Promise<Array<{ id: string; name: string }>> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('customers')
-    .select('id, name, customer_code')
+    .select('id, name')
     .eq('company_id', companyId)
     .order('name');
 

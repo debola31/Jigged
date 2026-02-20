@@ -358,7 +358,6 @@ export default function QuotesPage() {
             options={customers.map((c): SelectOption => ({
               id: c.id,
               label: c.name,
-              secondaryLabel: c.customer_code,
             }))}
             value={customerFilter}
             onChange={setCustomerFilter}

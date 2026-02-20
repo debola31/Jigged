@@ -29,9 +29,8 @@ class MockAIProvider:
         mapping_rules = {
             "part number": ("part_number", 0.95),
             "part_no": ("part_number", 0.90),
-            "customer code": ("customer_code", 0.95),
+            "customer name": ("customer_name", 0.95),
             "description": ("description", 0.90),
-            "material cost": ("material_cost", 0.90),
             "notes": ("notes", 0.85),
         }
 
@@ -350,20 +349,20 @@ class TestPartsValidateEndpoint:
 
     @pytest.mark.unit
     async def test_validate_customer_not_found_conflict(self, test_client):
-        """Detects customer_not_found conflict when customer_code doesn't exist."""
+        """Detects customer_not_found conflict when customer name doesn't exist."""
         existing_customers = [
-            {"id": "customer-1", "customer_code": "CUST001"},
+            {"id": "customer-1", "name": "Acme Corp"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Number": "part_number",
-                "Customer Code": "customer_code",
+                "Customer Name": "customer_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "PART001", "Customer Code": "NONEXISTENT"},
+                {"Part Number": "PART001", "Customer Name": "Nonexistent Co"},
             ],
             "customer_match_mode": "by_column",
         }
@@ -499,7 +498,7 @@ class TestPartsExecuteEndpoint:
     async def test_execute_assigns_customer_in_all_to_one_mode(self, test_client):
         """Assigns selected customer to all parts in all_to_one mode."""
         existing_customers = [
-            {"id": "customer-123", "customer_code": "CUST001"},
+            {"id": "customer-123", "name": "Acme Corp"},
         ]
 
         request_data = {

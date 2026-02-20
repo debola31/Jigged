@@ -27,8 +27,6 @@ class MockAIProvider:
 
         # Map common column names to DB fields
         mapping_rules = {
-            "customer code": ("customer_code", 0.95),
-            "code": ("customer_code", 0.85),
             "company name": ("name", 0.95),
             "name": ("name", 0.90),
             "city": ("city", 0.90),
@@ -144,10 +142,10 @@ class TestAnalyzeEndpoint:
         """Returns 200 with column mappings when AI provider succeeds."""
         request_data = {
             "company_id": "test-company-id",
-            "headers": ["Customer Code", "Company Name", "City", "Extra Column"],
+            "headers": ["Company Name", "City", "Extra Column"],
             "sample_rows": [
-                ["CUST001", "Acme Corp", "Springfield", "ignored"],
-                ["CUST002", "Widget Inc", "Chicago", "also ignored"],
+                ["Acme Corp", "Springfield", "ignored"],
+                ["Widget Inc", "Chicago", "also ignored"],
             ],
         }
 
@@ -173,7 +171,6 @@ class TestAnalyzeEndpoint:
 
         # Check that mappings were returned
         mappings = {m["csv_column"]: m["db_field"] for m in data["mappings"]}
-        assert mappings["Customer Code"] == "customer_code"
         assert mappings["Company Name"] == "name"
         assert mappings["City"] == "city"
         assert mappings["Extra Column"] is None  # Discarded
@@ -236,12 +233,11 @@ class TestValidateEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "NEW001", "Name": "New Company 1"},
-                {"Code": "NEW002", "Name": "New Company 2"},
+                {"Name": "New Company 1"},
+                {"Name": "New Company 2"},
             ],
         }
 
@@ -263,49 +259,16 @@ class TestValidateEndpoint:
         assert data["error_rows_count"] == 0
 
     @pytest.mark.unit
-    async def test_validate_detects_missing_customer_code(self, test_client):
-        """Detects missing customer_code validation error."""
-        request_data = {
-            "company_id": "test-company-id",
-            "mappings": {
-                "Code": "customer_code",
-                "Name": "name",
-            },
-            "rows": [
-                {"Code": "", "Name": "Company Without Code"},
-                {"Code": "VALID001", "Name": "Valid Company"},
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
-
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["error_rows_count"] == 1
-        assert len(data["validation_errors"]) == 1
-        assert data["validation_errors"][0]["error_type"] == "missing_customer_code"
-        assert data["validation_errors"][0]["row_number"] == 1
-
-    @pytest.mark.unit
     async def test_validate_detects_missing_name(self, test_client):
         """Detects missing name validation error."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "CODE001", "Name": ""},
-                {"Code": "CODE002", "Name": "Valid Company"},
+                {"Name": ""},
+                {"Name": "Valid Company"},
             ],
         }
 
@@ -325,51 +288,16 @@ class TestValidateEndpoint:
         assert data["validation_errors"][0]["error_type"] == "missing_name"
 
     @pytest.mark.unit
-    async def test_validate_detects_duplicate_code_in_csv(self, test_client):
-        """Detects duplicate customer_code within CSV file."""
-        request_data = {
-            "company_id": "test-company-id",
-            "mappings": {
-                "Code": "customer_code",
-                "Name": "name",
-            },
-            "rows": [
-                {"Code": "DUPE001", "Name": "First Company"},
-                {"Code": "DUPE001", "Name": "Second Company"},  # Duplicate code
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
-
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["has_conflicts"] is True
-        # Both rows should be flagged
-        csv_duplicate_conflicts = [
-            c for c in data["conflicts"] if c["conflict_type"] == "csv_duplicate_code"
-        ]
-        assert len(csv_duplicate_conflicts) == 2
-
-    @pytest.mark.unit
     async def test_validate_detects_duplicate_name_in_csv(self, test_client):
         """Detects duplicate name within CSV file."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "CODE001", "Name": "Same Company"},
-                {"Code": "CODE002", "Name": "Same Company"},  # Duplicate name
+                {"Name": "Same Company"},
+                {"Name": "Same Company"},  # Duplicate name
             ],
         }
 
@@ -392,57 +320,20 @@ class TestValidateEndpoint:
         assert len(csv_duplicate_conflicts) == 2
 
     @pytest.mark.unit
-    async def test_validate_detects_conflict_with_existing_db_code(self, test_client):
-        """Detects conflict with existing customer_code in database."""
-        existing_customers = [
-            {"id": "existing-1", "customer_code": "EXIST001", "name": "Existing Company"},
-        ]
-
-        request_data = {
-            "company_id": "test-company-id",
-            "mappings": {
-                "Code": "customer_code",
-                "Name": "name",
-            },
-            "rows": [
-                {"Code": "EXIST001", "Name": "New Company"},  # Conflicts with existing
-                {"Code": "NEW001", "Name": "Truly New Company"},
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override(existing_customers)
-
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["has_conflicts"] is True
-        db_conflicts = [c for c in data["conflicts"] if c["conflict_type"] == "duplicate_code"]
-        assert len(db_conflicts) == 1
-        assert db_conflicts[0]["existing_customer_id"] == "existing-1"
-
-    @pytest.mark.unit
     async def test_validate_detects_conflict_with_existing_db_name(self, test_client):
         """Detects conflict with existing name in database."""
         existing_customers = [
-            {"id": "existing-1", "customer_code": "EXIST001", "name": "Existing Company"},
+            {"id": "existing-1", "name": "Existing Company"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "NEW001", "Name": "Existing Company"},  # Name conflicts
-                {"Code": "NEW002", "Name": "Unique Company"},
+                {"Name": "Existing Company"},  # Name conflicts
+                {"Name": "Unique Company"},
             ],
         }
 
@@ -472,13 +363,12 @@ class TestExecuteEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
                 "City": "city",
             },
             "rows": [
-                {"Code": "NEW001", "Name": "New Company 1", "City": "Chicago"},
-                {"Code": "NEW002", "Name": "New Company 2", "City": "Detroit"},
+                {"Name": "New Company 1", "City": "Chicago"},
+                {"Name": "New Company 2", "City": "Detroit"},
             ],
             "skip_conflicts": False,
         }
@@ -503,17 +393,16 @@ class TestExecuteEndpoint:
     async def test_execute_returns_400_when_conflicts_exist(self, test_client):
         """Returns 400 when conflicts exist and skip_conflicts is False."""
         existing_customers = [
-            {"id": "existing-1", "customer_code": "EXIST001", "name": "Existing Company"},
+            {"id": "existing-1", "name": "Existing Company"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "EXIST001", "Name": "Conflict Company"},
+                {"Name": "Existing Company"},  # Name conflict
             ],
             "skip_conflicts": False,
         }
@@ -534,18 +423,17 @@ class TestExecuteEndpoint:
     async def test_execute_skips_conflicts_when_skip_conflicts_true(self, test_client):
         """Skips conflicting rows when skip_conflicts is True."""
         existing_customers = [
-            {"id": "existing-1", "customer_code": "EXIST001", "name": "Existing Company"},
+            {"id": "existing-1", "name": "Existing Company"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "EXIST001", "Name": "Conflict Company"},  # Will be skipped
-                {"Code": "NEW001", "Name": "New Company"},  # Will be imported
+                {"Name": "Existing Company"},  # Will be skipped (name conflict)
+                {"Name": "New Company"},  # Will be imported
             ],
             "skip_conflicts": True,
         }
@@ -570,23 +458,22 @@ class TestExecuteEndpoint:
     async def test_execute_returns_correct_counts(self, test_client):
         """Returns correct imported_count and skipped_count."""
         existing_customers = [
-            {"id": "existing-1", "customer_code": "EXIST001", "name": "Existing One"},
-            {"id": "existing-2", "customer_code": "EXIST002", "name": "Existing Two"},
+            {"id": "existing-1", "name": "Existing One"},
+            {"id": "existing-2", "name": "Existing Two"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Code": "customer_code",
                 "Name": "name",
             },
             "rows": [
-                {"Code": "EXIST001", "Name": "Conflict 1"},  # Skip - code conflict
-                {"Code": "NEW001", "Name": "Existing Two"},  # Skip - name conflict
-                {"Code": "", "Name": "Missing Code"},  # Skip - validation error
-                {"Code": "NEW002", "Name": "Valid Company 1"},  # Import
-                {"Code": "NEW003", "Name": "Valid Company 2"},  # Import
-                {"Code": "NEW004", "Name": "Valid Company 3"},  # Import
+                {"Name": "Existing One"},  # Skip - name conflict
+                {"Name": "Existing Two"},  # Skip - name conflict
+                {"Name": ""},  # Skip - validation error (missing name)
+                {"Name": "Valid Company 1"},  # Import
+                {"Name": "Valid Company 2"},  # Import
+                {"Name": "Valid Company 3"},  # Import
             ],
             "skip_conflicts": True,
         }

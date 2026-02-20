@@ -126,7 +126,7 @@ describe('CustomerForm', () => {
 
       // Should show duplicate error
       await waitFor(() => {
-        expect(screen.getByText(/customer name already exists/i)).toBeInTheDocument();
+        expect(screen.getByText(/a customer with this name already exists/i)).toBeInTheDocument();
       });
 
       // Should not have called createCustomer

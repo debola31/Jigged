@@ -116,8 +116,8 @@ export async function deleteOperator(operatorId: string): Promise<void> {
 // ============================================================================
 
 /**
- * Get the current operator from the authenticated Supabase session.
- * Returns null if not authenticated or not an operator.
+ * Get the current user's company access record for use in the operator view.
+ * Returns null if not authenticated or not a member of this company.
  */
 export async function getCurrentOperator(companyId: string): Promise<{
   id: string;
@@ -134,7 +134,6 @@ export async function getCurrentOperator(companyId: string): Promise<{
     .select('id, name, user_id')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
-    .eq('role', 'operator')
     .single();
 
   return operatorAccess;

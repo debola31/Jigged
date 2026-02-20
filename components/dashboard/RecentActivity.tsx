@@ -1,20 +1,26 @@
 'use client';
 
+import { useState } from 'react';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
 import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Skeleton from '@mui/material/Skeleton';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
 import type { ActivityItem } from '@/utils/dashboardAccess';
+
+const STORAGE_KEY = 'jigged-recent-activity-expanded';
 
 interface RecentActivityProps {
   activities: ActivityItem[];
@@ -101,19 +107,102 @@ function formatActionText(
 
 /**
  * Recent activity feed component.
- * Shows the most recent quotes and job activities.
+ * Uses an Accordion with a summary strip showing title, count, and a
+ * preview of the most recent activity when collapsed.
  */
 export default function RecentActivity({
   activities,
   loading = false,
 }: RecentActivityProps) {
-  if (loading) {
-    return (
-      <Card elevation={2}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Recent Activity
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem(STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleChange = (_event: React.SyntheticEvent, isExpanded: boolean) => {
+    setExpanded(isExpanded);
+    try {
+      localStorage.setItem(STORAGE_KEY, String(isExpanded));
+    } catch {
+      // Silently fail if localStorage is unavailable
+    }
+  };
+
+  const itemCount = loading ? 0 : activities.length;
+  const latestActivity = !loading && activities.length > 0 ? activities[0] : null;
+
+  return (
+    <Accordion
+      expanded={expanded}
+      onChange={handleChange}
+      elevation={2}
+      disableGutters
+      sx={{
+        bgcolor: 'rgba(26, 31, 74, 0.55)',
+        backdropFilter: 'blur(15px)',
+        WebkitBackdropFilter: 'blur(15px)',
+        border: '1px solid rgba(255, 255, 255, 0.15)',
+        borderRadius: '8px !important',
+        '&:before': { display: 'none' },
+        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+        '&:hover': {
+          transform: 'translateY(-2px)',
+        },
+      }}
+    >
+      <AccordionSummary
+        expandIcon={
+          loading ? (
+            <Skeleton variant="circular" width={24} height={24} />
+          ) : (
+            <ExpandMoreIcon sx={{ color: 'text.secondary' }} />
+          )
+        }
+        sx={{
+          minHeight: 64,
+          '& .MuiAccordionSummary-content': {
+            alignItems: 'center',
+            gap: 1.5,
+            overflow: 'hidden',
+          },
+        }}
+      >
+        <Typography variant="h6" sx={{ flexShrink: 0 }}>
+          Recent Activity
+        </Typography>
+        {!loading && (
+          <Chip
+            label={itemCount}
+            size="small"
+            variant="outlined"
+            color="primary"
+            sx={{ flexShrink: 0 }}
+          />
+        )}
+        {!expanded && latestActivity && (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            noWrap
+            sx={{ flex: 1, ml: 0.5 }}
+          >
+            {latestActivity.entityNumber} &mdash;{' '}
+            {formatActionText(
+              latestActivity.type,
+              latestActivity.action,
+              latestActivity.customerName
+            )}
+            , {formatRelativeTime(latestActivity.timestamp)}
           </Typography>
+        )}
+      </AccordionSummary>
+
+      <AccordionDetails sx={{ pt: 0, px: 2, pb: 2 }}>
+        {loading ? (
           <List disablePadding>
             {[1, 2, 3, 4, 5].map((i) => (
               <ListItem key={i} disableGutters sx={{ py: 1 }}>
@@ -127,25 +216,8 @@ export default function RecentActivity({
               </ListItem>
             ))}
           </List>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card elevation={2}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Recent Activity
-        </Typography>
-
-        {activities.length === 0 ? (
-          <Box
-            sx={{
-              py: 4,
-              textAlign: 'center',
-            }}
-          >
+        ) : activities.length === 0 ? (
+          <Box sx={{ py: 4, textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">
               No recent activity.
             </Typography>
@@ -211,7 +283,7 @@ export default function RecentActivity({
             })}
           </List>
         )}
-      </CardContent>
-    </Card>
+      </AccordionDetails>
+    </Accordion>
   );
 }

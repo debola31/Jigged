@@ -21,13 +21,13 @@ import CompanySwitcher from './CompanySwitcher';
 
 const menuItems = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
-  { name: 'Customers', path: '/customers', icon: PeopleIcon },
-  { name: 'Parts', path: '/parts', icon: CategoryIcon },
-  { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Operations', path: '/operations', icon: BuildIcon },
   { name: 'Routings', path: '/routings', icon: AccountTreeIcon },
+  { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
+  { name: 'Parts', path: '/parts', icon: CategoryIcon },
+  { name: 'Customers', path: '/customers', icon: PeopleIcon },
   { name: 'Team', path: '/team', icon: GroupIcon },
 ];
 

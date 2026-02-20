@@ -333,7 +333,7 @@ export default function PartForm({
                     <TextField
                       type="number"
                       size="small"
-                      value={tier.qty}
+                      value={tier.qty || ''}
                       onChange={(e) => handleTierChange(index, 'qty', e.target.value)}
                       disabled={loading}
                       inputProps={{ min: 1, step: 1 }}
@@ -344,7 +344,7 @@ export default function PartForm({
                     <TextField
                       type="number"
                       size="small"
-                      value={tier.price}
+                      value={tier.price || ''}
                       onChange={(e) => handleTierChange(index, 'price', e.target.value)}
                       disabled={loading}
                       inputProps={{ min: 0, step: 0.01 }}

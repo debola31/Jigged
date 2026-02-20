@@ -45,13 +45,12 @@ export default function OperatorLoginPage() {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session) {
-        // User is logged in, verify they're an operator for this company
+        // User is logged in, verify they have access to this company
         const { data: operatorAccess } = await supabase
           .from('user_company_access')
           .select('id')
           .eq('user_id', session.user.id)
           .eq('company_id', companyId)
-          .eq('role', 'operator')
           .single();
 
         if (operatorAccess) {
@@ -110,18 +109,17 @@ export default function OperatorLoginPage() {
         refresh_token: data.session.refresh_token,
       });
 
-      // 3. Validate user is an operator for this company
+      // 3. Validate user has access to this company
       const { data: operatorAccess, error: opError } = await supabase
         .from('user_company_access')
         .select('id, name')
         .eq('user_id', data.user.id)
         .eq('company_id', companyId)
-        .eq('role', 'operator')
         .single();
 
       if (opError || !operatorAccess) {
         await supabase.auth.signOut();
-        throw new Error('You are not registered as an operator for this company');
+        throw new Error('You do not have access to this company');
       }
 
       // Note: Supabase auth automatically tracks last_sign_in_at

@@ -1409,7 +1409,6 @@ AS $function$
   SELECT id FROM user_company_access
   WHERE user_id = auth.uid()
     AND company_id = check_company_id
-    AND role = 'operator'
   LIMIT 1;
 $function$
 

@@ -71,13 +71,12 @@ export default function OperatorLayout({
         return;
       }
 
-      // 3. Validate operator exists for this company (uses user_company_access)
+      // 3. Validate user has access to this company (uses user_company_access)
       const { data: operatorAccess } = await supabase
         .from('user_company_access')
         .select('id, name')
         .eq('user_id', session.user.id)
         .eq('company_id', companyId)
-        .eq('role', 'operator')
         .single();
 
       if (!operatorAccess) {

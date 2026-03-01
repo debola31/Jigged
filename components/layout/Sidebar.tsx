@@ -18,6 +18,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import GroupIcon from '@mui/icons-material/Group';
 import CompanySwitcher from './CompanySwitcher';
+import { JiggedIcon } from '@/components/branding';
 
 const menuItems = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
@@ -112,6 +113,11 @@ export default function Sidebar() {
             );
           })}
         </List>
+      </Box>
+
+      {/* Branding */}
+      <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', opacity: 0.5 }}>
+        <JiggedIcon size={20} />
       </Box>
     </Box>
   );

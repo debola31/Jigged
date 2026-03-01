@@ -17,6 +17,7 @@ import Skeleton from '@mui/material/Skeleton';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CheckIcon from '@mui/icons-material/Check';
 import { useCompanies } from '@/hooks/useCompanies';
+import { JiggedLogo } from '@/components/branding';
 
 function getInitials(name: string): string {
   return name
@@ -221,19 +222,8 @@ export default function CompanySwitcher() {
         <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)', mx: 2 }} />
 
         {/* Footer */}
-        <Box sx={{ p: 1.5 }}>
-          <Typography
-            variant="h6"
-            sx={{
-              px: 2,
-              py: 1,
-              fontWeight: 700,
-              color: 'primary.main',
-              letterSpacing: '-0.5px',
-            }}
-          >
-            Jigged
-          </Typography>
+        <Box sx={{ p: 1.5, display: 'flex', justifyContent: 'center' }}>
+          <JiggedLogo size="small" />
         </Box>
       </Drawer>
     </>

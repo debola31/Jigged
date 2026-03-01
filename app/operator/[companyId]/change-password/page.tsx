@@ -13,6 +13,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import { JiggedLogo } from '@/components/branding';
 import LockIcon from '@mui/icons-material/Lock';
 import { getSupabase } from '@/lib/supabase';
 
@@ -154,13 +155,9 @@ export default function ChangePasswordPage() {
         }}
       >
         {/* Logo / Title */}
-        <Typography
-          variant="h4"
-          component="h1"
-          sx={{ mb: 1, fontWeight: 700, color: 'primary.main' }}
-        >
-          Jigged
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
+          <JiggedLogo size="large" />
+        </Box>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
           Change Your Password
         </Typography>

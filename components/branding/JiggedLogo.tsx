@@ -9,35 +9,34 @@ type LogoSize = 'small' | 'medium' | 'large';
 interface JiggedLogoProps {
   size?: LogoSize;
   showWordmark?: boolean;
-  variant?: 'light' | 'dark';
+  variant?: 'dark' | 'light';
 }
 
 const sizeMap = {
-  small: { icon: 24, variant: 'subtitle1' as const, gap: 1 },
-  medium: { icon: 32, variant: 'h5' as const, gap: 1.5 },
-  large: { icon: 48, variant: 'h4' as const, gap: 2 },
+  small: { icon: 26, fontSize: '16px', gap: '10px' },
+  medium: { icon: 32, fontSize: '20px', gap: '12px' },
+  large: { icon: 48, fontSize: '30px', gap: '14px' },
 };
 
 export default function JiggedLogo({
   size = 'medium',
   showWordmark = true,
-  variant = 'light',
+  variant = 'dark',
 }: JiggedLogoProps) {
   const config = sizeMap[size];
-  const textColor = variant === 'light' ? 'primary.main' : '#111439';
-  const crosshairColor = variant === 'light' ? '#FFFFFF' : '#111439';
+  const textColor = variant === 'dark' ? '#FFFFFF' : '#1a2744';
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: config.gap }}>
-      <JiggedIcon size={config.icon} crosshairColor={crosshairColor} />
+      <JiggedIcon size={config.icon} variant={variant} />
       {showWordmark && (
         <Typography
-          variant={config.variant}
           component="span"
           sx={{
+            fontSize: config.fontSize,
             fontWeight: 700,
             color: textColor,
-            letterSpacing: '-0.5px',
+            letterSpacing: '-0.03em',
           }}
         >
           Jigged

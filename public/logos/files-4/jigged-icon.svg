@@ -1,4 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Jigged Icon — Constructed J
+       Container: #151520, Top: Warm Amber #D4872A, Stem: Steel Blue #4682B4, Hook: Teal #2BBCB3
+       Use everywhere: favicon, sidebar, login, app icon, social -->
+
   <rect width="64" height="64" rx="12" fill="#151520"/>
   <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A"/>
   <rect x="30" y="10" width="10" height="32" rx="0" fill="#4682B4"/>

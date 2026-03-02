@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 54" fill="none">
+  <!-- Jigged Icon Mark — Constructed J (No Background)
+       Standalone mark for flexible placement.
+       Place on any background. -->
+
+  <!-- Top crossbar (Warm Amber #D4872A) -->
+  <rect x="0" y="0" width="30" height="10" rx="2" fill="#D4872A"/>
+
+  <!-- Vertical stem (Steel Blue #4682B4) -->
+  <rect x="16" y="0" width="10" height="32" rx="0" fill="#4682B4"/>
+
+  <!-- Bottom hook (Teal #2BBCB3) -->
+  <path d="M26 32 L26 44 L12 44 Q0 44 0 32 L10 32 Q16 32 16 38 L16 44" fill="#2BBCB3"/>
+</svg>

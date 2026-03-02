@@ -4,54 +4,29 @@ import Box from '@mui/material/Box';
 
 interface JiggedIconProps {
   size?: number;
-  color?: string;
-  crosshairColor?: string;
+  variant?: 'dark' | 'light';
 }
 
 export default function JiggedIcon({
   size = 32,
-  color = '#4682B4',
-  crosshairColor = '#FFFFFF',
+  variant = 'dark',
 }: JiggedIconProps) {
+  const bgColor = variant === 'dark' ? '#151520' : '#F0EDE8';
+
   return (
     <Box
       component="svg"
-      viewBox="0 0 32 32"
+      viewBox="0 0 64 64"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
       aria-label="Jigged logo"
       sx={{ width: size, height: size, flexShrink: 0 }}
     >
-      {/* L-bracket body with chamfered inner corner */}
-      <path
-        d="M4 2 L14 2 L14 13 L18 17 L30 17 L30 30 L4 30 Z"
-        fill={color}
-      />
-      {/* Registration crosshair - vertical */}
-      <line
-        x1="24"
-        y1="3"
-        x2="24"
-        y2="12"
-        stroke={crosshairColor}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        opacity="0.7"
-      />
-      {/* Registration crosshair - horizontal */}
-      <line
-        x1="19"
-        y1="7.5"
-        x2="29"
-        y2="7.5"
-        stroke={crosshairColor}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        opacity="0.7"
-      />
-      {/* Datum point */}
-      <circle cx="24" cy="7.5" r="2" fill={crosshairColor} />
+      <rect width="64" height="64" rx="12" fill={bgColor} />
+      <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A" />
+      <rect x="30" y="10" width="10" height="32" rx="0" fill="#4682B4" />
+      <path d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54" fill="#2BBCB3" />
     </Box>
   );
 }

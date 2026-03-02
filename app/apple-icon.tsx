@@ -10,7 +10,7 @@ export default function Icon() {
         style={{
           width: 180,
           height: 180,
-          background: '#111439',
+          background: '#151520',
           borderRadius: 32,
           display: 'flex',
           alignItems: 'center',
@@ -18,41 +18,18 @@ export default function Icon() {
         }}
       >
         <svg
-          viewBox="0 0 32 32"
-          width="120"
-          height="120"
+          viewBox="0 0 64 64"
+          width="140"
+          height="140"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          {/* L-bracket body */}
+          <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A" />
+          <rect x="30" y="10" width="10" height="32" rx="0" fill="#4682B4" />
           <path
-            d="M5 4 L13 4 L13 12.5 L16.5 16 L27 16 L27 27 L5 27 Z"
-            fill="#4682B4"
+            d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54"
+            fill="#2BBCB3"
           />
-          {/* Registration crosshair - vertical */}
-          <line
-            x1="22"
-            y1="5"
-            x2="22"
-            y2="12"
-            stroke="white"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            opacity="0.7"
-          />
-          {/* Registration crosshair - horizontal */}
-          <line
-            x1="18"
-            y1="8.5"
-            x2="26"
-            y2="8.5"
-            stroke="white"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            opacity="0.7"
-          />
-          {/* Datum point */}
-          <circle cx="22" cy="8.5" r="1.5" fill="white" />
         </svg>
       </div>
     ),

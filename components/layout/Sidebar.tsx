@@ -55,7 +55,7 @@ export default function Sidebar() {
       }}
     >
       {/* Company Switcher */}
-      <Box>
+      <Box sx={{ pt: 1 }}>
         <CompanySwitcher />
       </Box>
 
@@ -113,6 +113,7 @@ export default function Sidebar() {
           })}
         </List>
       </Box>
+
     </Box>
   );
 }

@@ -15,12 +15,12 @@ Enable viral growth through user-to-user referrals and streamlined team onboardi
 1. **Team Invitations:** Company admins send email invites for team members with specific roles
 2. **Referral Links:** Company admins generate shareable links for others to create their own companies
 
-### Prerequisite: Role Model Alignment
+### Role Model
 
-The current `user_company_access.role` CHECK constraint allows:
+The `user_company_access.role` CHECK constraint allows 4 roles:
 
 ```
-owner, admin, operator, bookkeeper, engineer, quality, sales
+owner, admin, user, operator
 ```
 
 This PRD uses the following roles for invitation targets:
@@ -28,15 +28,10 @@ This PRD uses the following roles for invitation targets:
 | Invitation Role | Maps to DB Role | Notes |
 |----------------|-----------------|-------|
 | `admin` | `admin` | Full company access |
+| `user` | `user` | Can use all modules but cannot manage team/settings |
 | `operator` | `operator` | Shop floor access only |
-| `bookkeeper` | `bookkeeper` | Financial access |
-| `engineer` | `engineer` | Technical access |
-| `quality` | `quality` | Quality inspection access |
-| `sales` | `sales` | Customer/quote access |
 
-The original PRD used a `user` role that does not exist in the DB. This has been replaced with the specific roles from the CHECK constraint. Referral link users who create their own company receive the `owner` role.
-
-> **Cross-reference:** The [Demo Company PRD](./demo-company.md) also uses these roles. If a role consolidation is planned, it should be done as a shared prerequisite migration.
+Referral link users who create their own company receive the `owner` role.
 
 ### Reconciliation with Existing Team Edge Function
 
@@ -140,7 +135,7 @@ CREATE TABLE invitations (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     accepted_at TIMESTAMPTZ,
     CONSTRAINT invitations_role_check CHECK (
-        role IN ('admin', 'operator', 'bookkeeper', 'engineer', 'quality', 'sales')
+        role IN ('admin', 'user', 'operator')
     ),
     CONSTRAINT invitations_status_check CHECK (
         status IN ('pending', 'accepted', 'expired', 'revoked')
@@ -974,7 +969,7 @@ app/
 | 3 | Rate limiting approach in serverless? | DB-backed — count recent rows in the invitations/referral_links tables. |
 | 4 | Email provider? | Resend via Python SDK in FastAPI backend. |
 | 5 | Coexist with existing team Edge Function? | Yes — both paths supported. Direct creation for operators, invitations for standard onboarding. |
-| 6 | Role model: `user` vs specific roles? | Use specific roles from DB CHECK constraint. No `user` role. |
+| 6 | Role model: `user` vs specific roles? | Simplified 3-role model: `admin`, `user`, `operator`. Old granular roles (bookkeeper, engineer, quality, sales) consolidated into `user`. |
 | 7 | Token persistence through auth flow? | localStorage — survives page reloads and redirects. |
 | 8 | Duplicate validation routes (GET+POST)? | Consolidate to GET only for validation. POST for acceptance/redemption. |
 | 9 | Where do invitation routes live? | FastAPI backend (`api/routes/invitation_routes.py`). Single codebase for all invitation logic. |

@@ -15,17 +15,15 @@ Provide every new user with an isolated sandbox environment pre-populated with r
 1. Create a `system_admins` infrastructure for platform-wide privileges (template management)
 2. Every new user automatically receives a personal demo company with realistic mock data that can be reset at any time
 
-### Prerequisite: Role Model Migration
+### Role Model
 
-The current `user_company_access.role` CHECK constraint allows 7 roles:
+The `user_company_access.role` CHECK constraint allows 4 roles:
 
 ```
-owner, admin, operator, bookkeeper, engineer, quality, sales
+owner, admin, user, operator
 ```
 
-This PRD uses the `admin` and `operator` roles, which already exist in the constraint. The demo company owner receives the `owner` role (matching the existing company creator pattern). No role migration is required for this PRD.
-
-> **Cross-reference:** The [Invitation System PRD](./invitation-system.md) also depends on the role model. If a role consolidation is planned, it should be done as a shared prerequisite migration before either PRD is implemented.
+This PRD uses the `owner` and `operator` roles. The demo company owner receives the `owner` role (matching the existing company creator pattern).
 
 ---
 

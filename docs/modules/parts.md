@@ -19,10 +19,9 @@ The Parts module manages the catalog of products/parts that Contour manufactures
 | Owner/Admin | View a list of all parts | I can see our product catalog |
 | Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
 | Owner/Admin | Filter parts by customer | I can see all parts for a specific customer |
-| Owner/Admin | Filter parts by active/inactive status | I can focus on current parts |
 | Owner/Admin | Create a new part with pricing tiers | I can quote and track new products |
 | Owner/Admin | Edit part information | I can update pricing or descriptions |
-| Owner/Admin | Mark a part as inactive | Old parts don't clutter my list but history is preserved |
+| Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
 | Salesperson | Look up part pricing when creating quotes | I can quickly provide accurate quotes |
 
@@ -38,7 +37,6 @@ The Parts module manages the catalog of products/parts that Contour manufactures
 | part_number | Text | Yes | Customer's part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
 | pricing | JSONB | No | Array of quantity-based price tiers (see below) |
-| is_active | Boolean | Yes | Active/inactive status (default: true) |
 | notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
@@ -92,13 +90,11 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 **Features:**
 
-- Table showing: Part Number, Description, Customer, Base Price (qty=1), Status
+- Table showing: Part Number, Description, Customer, Base Price (qty=1)
 
 - Search box (searches part number and description)
 
 - Filter dropdown: Customer (All / specific customer)
-
-- Filter toggle: All / Active only / Inactive only
 
 - "+ New Part" button
 
@@ -146,9 +142,7 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 - Material Cost (per unit)
 
-▸ **Status**
-
-- Active toggle
+▸ **Other**
 
 - Notes (multiline)
 
@@ -285,8 +279,6 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Can filter by customer
 
-- [ ] Can filter by active/inactive status
-
 - [ ] Can create new part with customer link
 
 - [ ] Can create generic part (no customer)
@@ -297,7 +289,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Pricing tiers enforce qty ascending order
 
-- [ ] Can toggle part active/inactive
+- [ ] Can delete a part (hard delete with confirmation)
 
 - [ ] Part number is unique per customer within company
 

@@ -64,7 +64,7 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
       >
         <TextField
           type="email"
-          placeholder="Enter your work email"
+          placeholder="Enter your email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}

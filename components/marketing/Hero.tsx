@@ -31,45 +31,61 @@ export default function Hero() {
         },
       }}
     >
-      <Container maxWidth="md">
-        <Box sx={{ textAlign: 'center' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 4 }}>
-            <JiggedIcon size={96} />
+      <Container maxWidth="lg">
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            alignItems: 'center',
+            gap: { xs: 4, md: 8 },
+          }}
+        >
+          {/* Icon — visual anchor */}
+          <Box
+            sx={{
+              flexShrink: 0,
+              display: 'flex',
+              justifyContent: 'center',
+            }}
+          >
+            <JiggedIcon size={160} />
           </Box>
 
-          <Typography
-            variant="h2"
-            component="h1"
-            sx={{
-              fontWeight: 700,
-              mb: 2,
-              fontSize: { xs: '2.25rem', sm: '3rem', md: '3.75rem' },
-              lineHeight: 1.1,
-            }}
-          >
-            Your Shop Floor,
-            <br />
-            Finally Under Control
-          </Typography>
+          {/* Content */}
+          <Box sx={{ textAlign: { xs: 'center', md: 'left' } }}>
+            <Typography
+              variant="h2"
+              component="h1"
+              sx={{
+                fontWeight: 700,
+                mb: 2,
+                fontSize: { xs: '2.25rem', sm: '3rem', md: '3.75rem' },
+                lineHeight: 1.1,
+              }}
+            >
+              Your Shop Floor,
+              <br />
+              Finally Under Control
+            </Typography>
 
-          <Typography
-            variant="body1"
-            sx={{
-              color: 'rgba(255, 255, 255, 0.85)',
-              mb: 4,
-              mx: 'auto',
-              maxWidth: 520,
-              fontSize: { xs: '1rem', md: '1.15rem' },
-              lineHeight: 1.7,
-            }}
-          >
-            Built for precision manufacturing.
-            <br />
-            Everything you need, nothing you don&apos;t.
-          </Typography>
+            <Typography
+              variant="body1"
+              sx={{
+                color: 'rgba(255, 255, 255, 0.85)',
+                mb: 4,
+                maxWidth: 520,
+                fontSize: { xs: '1rem', md: '1.15rem' },
+                lineHeight: 1.7,
+              }}
+            >
+              Built for precision manufacturing.
+              <br />
+              Everything you need, nothing you don&apos;t.
+            </Typography>
 
-          <Box sx={{ maxWidth: 480, mx: 'auto' }}>
-            <EmailCapture source="landing_hero" />
+            <Box sx={{ maxWidth: 480 }}>
+              <EmailCapture source="landing_hero" />
+            </Box>
           </Box>
         </Box>
       </Container>

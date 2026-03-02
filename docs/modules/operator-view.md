@@ -388,7 +388,7 @@ The operator view is designed mobile-first for use on smartphones in shop floor 
 
 - [ ] Owner can view list of active operators
 
-- [ ] Owner can deactivate operator accounts
+- [ ] Owner can delete operator accounts
 
 - [ ] Owner can reset operator password via email
 

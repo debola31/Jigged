@@ -18,10 +18,9 @@ The Customers module manages the master list of companies that Contour does busi
 |---|---|---|
 | Owner/Admin | View a list of all customers | I can see who we do business with |
 | Owner/Admin | Search customers by name | I can quickly find a specific customer |
-| Owner/Admin | Filter customers by active/inactive status | I can focus on current customers |
 | Owner/Admin | Create a new customer with contact details | I can start doing business with them |
 | Owner/Admin | Edit customer information | I can keep records up to date |
-| Owner/Admin | Mark a customer as inactive | They don't clutter my active list but history is preserved |
+| Owner/Admin | Delete a customer | I can remove customers we no longer do business with |
 | Owner/Admin | Bulk import customers from CSV | I can migrate from my legacy system |
 
 ---
@@ -43,7 +42,6 @@ The Customers module manages the master list of companies that Contour does busi
 | state | Text | No | State/province |
 | postal_code | Text | No | ZIP/postal code |
 | country | Text | No | Country (default: USA) |
-| is_active | Boolean | Yes | Active/inactive status (default: true) |
 | notes | Text | No | Internal notes |
 
 ---
@@ -56,11 +54,9 @@ The Customers module manages the master list of companies that Contour does busi
 
 **Features:**
 
-- Table showing: Name, Contact, Phone, City/State, Status
+- Table showing: Name, Contact, Phone, City/State
 
 - Search box (searches name)
-
-- Filter toggle: All / Active only / Inactive only
 
 - "+ New Customer" button
 
@@ -106,9 +102,7 @@ The Customers module manages the master list of companies that Contour does busi
 
 - Country
 
-▸ **Status**
-
-- Active toggle
+▸ **Other**
 
 - Notes (multiline)
 
@@ -118,7 +112,7 @@ The Customers module manages the master list of companies that Contour does busi
 
 - Cancel → Returns to list without saving
 
-- Delete (edit mode only) → Confirmation dialog, then soft-delete (mark inactive)
+- Delete (edit mode only) → Confirmation dialog, then hard delete
 
 ### 3. Customer Detail (Optional for Phase 0)
 
@@ -327,13 +321,11 @@ API keys remain in environment variables (secure). Default provider is Claude if
 
 - [ ] Can search customers by name
 
-- [ ] Can filter by active/inactive status
-
 - [ ] Can create new customer with required fields
 
 - [ ] Can edit existing customer
 
-- [ ] Can toggle customer active/inactive
+- [ ] Can delete a customer (hard delete with confirmation)
 
 - [ ] Customer name is unique within company
 

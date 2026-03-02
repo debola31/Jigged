@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-02-20T00:48:05Z
+-- Generated: 2026-03-02T23:09:44Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     "name" text,
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
-    CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'operator'::text, 'bookkeeper'::text, 'engineer'::text, 'quality'::text, 'sales'::text])))
+    CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text, 'operator'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."user_preferences"
@@ -2273,7 +2273,7 @@ COMMENT ON COLUMN "public"."user_company_access"."company_id"
     IS 'FK to companies. Cascades on delete. The company user can access.';
 
 COMMENT ON COLUMN "public"."user_company_access"."role"
-    IS 'Role in the company: admin (full access), user (can use all modules), operator (shop floor access only)';
+    IS 'Role in the company: owner (company creator, same permissions as admin), admin (full access), user (can use all modules), operator (shop floor access only)';
 
 COMMENT ON COLUMN "public"."user_company_access"."created_at"
     IS 'Timestamp when access was granted.';

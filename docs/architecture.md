@@ -85,7 +85,7 @@ companies (id, name, slug, settings, created_at, updated_at)
 user_company_access (
   user_id UUID REFERENCES auth.users,
   company_id UUID REFERENCES companies,
-  role TEXT  -- owner, admin, operator, engineer, sales, quality, bookkeeper
+  role TEXT  -- owner, admin, user, operator
 )
 
 user_preferences (

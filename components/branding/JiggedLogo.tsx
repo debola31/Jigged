@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import JiggedIcon from './JiggedIcon';
 
-type LogoSize = 'small' | 'medium' | 'large';
+type LogoSize = 'small' | 'medium' | 'large' | 'xlarge';
 
 interface JiggedLogoProps {
   size?: LogoSize;
@@ -16,6 +16,7 @@ const sizeMap = {
   small: { icon: 26, fontSize: '16px', gap: '10px' },
   medium: { icon: 32, fontSize: '20px', gap: '12px' },
   large: { icon: 48, fontSize: '30px', gap: '14px' },
+  xlarge: { icon: 72, fontSize: '42px', gap: '16px' },
 };
 
 export default function JiggedLogo({

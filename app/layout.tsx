@@ -15,11 +15,31 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { template: '%s — Jigged', default: 'Jigged' },
-  description: "Operations system for small manufacturing shops",
+  metadataBase: new URL('https://jigged.app'),
+  title: {
+    template: '%s | Jigged',
+    default: 'Jigged — Manufacturing Operations System',
+  },
+  description:
+    'Replace your rigid legacy ERP with a flexible operations system built for small precision manufacturing shops. Real-time visibility, flexible inventory, and operators who actually log their work.',
   icons: {
     icon: '/icon.svg',
     apple: '/apple-icon.png',
+  },
+  openGraph: {
+    title: 'Jigged — Manufacturing Operations System',
+    description:
+      'The operations system built for small manufacturing shops. Track jobs, manage inventory, and empower your operators.',
+    url: 'https://jigged.app',
+    siteName: 'Jigged',
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Jigged — Manufacturing Operations System',
+    description:
+      'The operations system built for small manufacturing shops. Track jobs, manage inventory, and empower your operators.',
   },
 };
 

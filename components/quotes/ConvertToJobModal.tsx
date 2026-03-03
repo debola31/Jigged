@@ -11,8 +11,9 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { usePathname } from 'next/navigation';
 import type { QuoteWithRelations } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
@@ -30,6 +31,7 @@ export default function ConvertToJobModal({
   quote,
   onConverted,
 }: ConvertToJobModalProps) {
+  const pathname = usePathname();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingRouting, setCheckingRouting] = useState(false);
@@ -90,8 +92,9 @@ export default function ConvertToJobModal({
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
   };
 
+  const returnToUrl = `${pathname}?convert=true`;
   const createRoutingUrl = quote.part_id
-    ? `/dashboard/${quote.company_id}/parts/${quote.part_id}/routing/new`
+    ? `/dashboard/${quote.company_id}/parts/${quote.part_id}/routing/new?returnTo=${encodeURIComponent(returnToUrl)}`
     : null;
 
   return (
@@ -165,9 +168,7 @@ export default function ConvertToJobModal({
                       variant="outlined"
                       size="small"
                       href={createRoutingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      startIcon={<OpenInNewIcon />}
+                      startIcon={<ArrowForwardIcon />}
                       sx={{ mt: 1 }}
                     >
                       Create Routing

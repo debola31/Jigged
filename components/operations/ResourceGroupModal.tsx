@@ -143,7 +143,7 @@ export default function ResourceGroupModal({
         <Button onClick={onClose} disabled={loading}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} variant="contained" disabled={loading}>
+        <Button onClick={handleSubmit} variant="contained" disabled={loading || !formData.name.trim()}>
           {loading ? 'Saving...' : 'Save'}
         </Button>
       </DialogActions>

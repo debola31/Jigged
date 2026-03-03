@@ -18,6 +18,7 @@ interface RoutingWizardProps {
   companyId: string;
   partId: string;
   mode: 'create' | 'edit';
+  returnTo?: string;
 }
 
 /**
@@ -25,7 +26,7 @@ interface RoutingWizardProps {
  * Goes straight to the workflow builder (operations and connections).
  * Routing name is auto-generated as "Routing - {part_number}".
  */
-export default function RoutingWizard({ companyId, partId, mode }: RoutingWizardProps) {
+export default function RoutingWizard({ companyId, partId, mode, returnTo }: RoutingWizardProps) {
   const router = useRouter();
   const isEditMode = mode === 'edit';
 
@@ -101,7 +102,11 @@ export default function RoutingWizard({ companyId, partId, mode }: RoutingWizard
 
   // Handle cancel
   const handleCancel = () => {
-    router.back();
+    if (returnTo) {
+      router.push(returnTo);
+    } else {
+      router.back();
+    }
   };
 
   // Handle save
@@ -123,8 +128,12 @@ export default function RoutingWizard({ companyId, partId, mode }: RoutingWizard
         isEditMode ? originalEdgeIds : new Set()
       );
 
-      // Navigate to the part detail page
-      router.push(`/dashboard/${companyId}/parts/${partId}`);
+      // Navigate to returnTo URL if provided, otherwise to the part detail page
+      if (returnTo) {
+        router.push(returnTo);
+      } else {
+        router.push(`/dashboard/${companyId}/parts/${partId}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save routing');
     } finally {
@@ -186,6 +195,13 @@ export default function RoutingWizard({ companyId, partId, mode }: RoutingWizard
           {saving ? 'Saving...' : 'Save Routing'}
         </Button>
       </Box>
+
+      {/* Return-to context banner */}
+      {returnTo && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Create a routing for this part to continue with job creation. You&apos;ll return to the {returnTo.includes('/quotes/') ? 'quote' : 'job form'} after saving.
+        </Alert>
+      )}
 
       {/* Error Alert */}
       {error && (

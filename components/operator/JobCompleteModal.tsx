@@ -190,7 +190,7 @@ export default function JobCompleteModal({
         <Button
           variant="contained"
           onClick={handleConfirm}
-          disabled={loading}
+          disabled={loading || !operatorId}
           sx={{ minWidth: 140, minHeight: 48 }}
         >
           {loading ? <CircularProgress size={24} /> : 'Confirm Complete'}

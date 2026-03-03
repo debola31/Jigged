@@ -22,7 +22,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
 import {
@@ -270,10 +270,15 @@ export default function JobForm({
                   <Button
                     variant="outlined"
                     size="small"
-                    href={`/dashboard/${companyId}/parts/${formData.part_id}/routing/new`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    startIcon={<OpenInNewIcon />}
+                    href={(() => {
+                      const returnParams = new URLSearchParams();
+                      if (formData.customer_id) returnParams.set('customer_id', formData.customer_id);
+                      if (formData.part_id) returnParams.set('part_id', formData.part_id);
+                      if (formData.description) returnParams.set('description', formData.description);
+                      const returnTo = `/dashboard/${companyId}/jobs/new?${returnParams.toString()}`;
+                      return `/dashboard/${companyId}/parts/${formData.part_id}/routing/new?returnTo=${encodeURIComponent(returnTo)}`;
+                    })()}
+                    startIcon={<ArrowForwardIcon />}
                     sx={{ mt: 1 }}
                   >
                     Create Routing
@@ -323,7 +328,7 @@ export default function JobForm({
               <Button
                 variant="contained"
                 onClick={handleSubmit}
-                disabled={loading}
+                disabled={loading || (!!selectedPart && !selectedPart.has_routing)}
                 startIcon={loading ? <CircularProgress size={20} /> : null}
               >
                 {loading ? 'Saving...' : mode === 'create' ? 'Create Job' : 'Save Changes'}

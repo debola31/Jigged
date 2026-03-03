@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-02T23:09:44Z
+-- Generated: 2026-03-03T04:07:23Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -10,6 +10,19 @@ BEGIN;
 -- ============================================================
 -- 2. TABLES (ordered by foreign key dependencies)
 -- ============================================================
+CREATE TABLE IF NOT EXISTS "public"."demo_templates"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "name" character varying(100) NOT NULL,
+    "version" integer NOT NULL DEFAULT 1,
+    "is_active" boolean DEFAULT false,
+    "template_data" jsonb NOT NULL,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "created_by" uuid,
+    CONSTRAINT "demo_templates_pkey" PRIMARY KEY (id),
+    CONSTRAINT "demo_templates_name_version_key" UNIQUE (name, version)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."companies"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -18,8 +31,28 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "settings" jsonb DEFAULT '{}'::jsonb,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
+    "is_demo" boolean DEFAULT false,
+    "demo_template_id" uuid,
+    "demo_owner_id" uuid,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."ai_chat_queries"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "user_id" uuid NOT NULL,
+    "question" text NOT NULL,
+    "tool_calls" jsonb NOT NULL DEFAULT '[]'::jsonb,
+    "response" text NOT NULL,
+    "chart_config" jsonb,
+    "provider" character varying(20) NOT NULL,
+    "model" character varying(50),
+    "tokens_used" integer,
+    "duration_ms" integer,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "ai_chat_queries_pkey" PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."ai_config"
@@ -34,6 +67,20 @@ CREATE TABLE IF NOT EXISTS "public"."ai_config"
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "ai_config_pkey" PRIMARY KEY (id),
     CONSTRAINT "ai_config_unique_company_feature" UNIQUE (company_id, feature)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."ai_insight_cache"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "insight_type" character varying(50) NOT NULL,
+    "metric_data" jsonb NOT NULL,
+    "ai_summary" text NOT NULL,
+    "chart_config" jsonb,
+    "computed_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "expires_at" timestamp with time zone NOT NULL DEFAULT (now() + '01:00:00'::interval),
+    CONSTRAINT "ai_insight_cache_pkey" PRIMARY KEY (id),
+    CONSTRAINT "ai_insight_cache_company_id_insight_type_key" UNIQUE (company_id, insight_type)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."customers"
@@ -69,6 +116,7 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_items"
     "cost_per_unit" numeric(12,4),
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
+    "reorder_point" numeric,
     CONSTRAINT "inventory_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "inventory_items_quantity_non_negative" CHECK ((quantity >= (0)::numeric))
 );
@@ -89,14 +137,13 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "customer_id" uuid,
     "part_number" text NOT NULL,
     "description" text,
     "pricing" jsonb DEFAULT '[]'::jsonb,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
-    CONSTRAINT "parts_unique_per_customer" UNIQUE (company_id, customer_id, part_number),
+    CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
     CONSTRAINT "parts_valid_pricing" CHECK (validate_pricing_json(pricing))
 );
 
@@ -131,14 +178,14 @@ CREATE TABLE IF NOT EXISTS "public"."routings"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "part_id" uuid,
+    "part_id" uuid NOT NULL,
     "name" text NOT NULL,
     "description" text,
-    "is_default" boolean DEFAULT false,
     "created_by" uuid,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "routings_pkey" PRIMARY KEY (id)
+    CONSTRAINT "routings_pkey" PRIMARY KEY (id),
+    CONSTRAINT "routings_part_id_unique" UNIQUE (part_id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
@@ -175,6 +222,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     "role" text DEFAULT 'operator'::text,
     "created_at" timestamp with time zone DEFAULT now(),
     "name" text,
+    "pin_hash" text,
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
     CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text, 'operator'::text])))
@@ -262,7 +310,6 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "company_id" uuid NOT NULL,
     "job_number" text NOT NULL,
     "quote_id" uuid,
-    "routing_id" uuid,
     "customer_id" uuid,
     "part_id" uuid,
     "description" text,
@@ -318,7 +365,6 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "customer_id" uuid,
     "part_id" uuid,
     "description" text,
-    "routing_id" uuid,
     "quantity" integer NOT NULL DEFAULT 1,
     "unit_price" numeric(12,4),
     "total_price" numeric(12,4),
@@ -337,9 +383,12 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
 -- ============================================================
 -- 3. ROW LEVEL SECURITY
 -- ============================================================
+ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."ai_insight_cache" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."demo_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_unit_conversions" ENABLE ROW LEVEL SECURITY;
@@ -361,6 +410,22 @@ ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
 -- ============================================================
 -- 4. RLS POLICIES
 -- ============================================================
+DROP POLICY IF EXISTS "Users can insert chat queries for own company" ON "public"."ai_chat_queries";
+CREATE POLICY "Users can insert chat queries for own company"
+    ON "public"."ai_chat_queries"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+
+DROP POLICY IF EXISTS "Users can read own company chat history" ON "public"."ai_chat_queries";
+CREATE POLICY "Users can read own company chat history"
+    ON "public"."ai_chat_queries"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+
 DROP POLICY IF EXISTS "Admins can delete AI config" ON "public"."ai_config";
 CREATE POLICY "Admins can delete AI config"
     ON "public"."ai_config"
@@ -386,6 +451,14 @@ CREATE POLICY "Users can view their company's AI config"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "Users can read own company insights" ON "public"."ai_insight_cache";
+CREATE POLICY "Users can read own company insights"
+    ON "public"."ai_insight_cache"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
 
 DROP POLICY IF EXISTS "Admins can update companies" ON "public"."companies";
 CREATE POLICY "Admins can update companies"
@@ -428,6 +501,12 @@ CREATE POLICY "Users can view customers"
     ON "public"."customers"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_templates";
+CREATE POLICY "All authenticated users can read active templates"
+    ON "public"."demo_templates"
+    FOR SELECT
+    USING ((is_active = true));
 
 DROP POLICY IF EXISTS "Users can delete inventory_items" ON "public"."inventory_items";
 CREATE POLICY "Users can delete inventory_items"
@@ -953,11 +1032,29 @@ CREATE POLICY "Users can upload files to their company folder"
 -- ============================================================
 -- 5. FOREIGN KEY CONSTRAINTS
 -- ============================================================
+ALTER TABLE "public"."ai_chat_queries"
+    ADD CONSTRAINT "ai_chat_queries_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."ai_chat_queries"
+    ADD CONSTRAINT "ai_chat_queries_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."ai_config"
     ADD CONSTRAINT "ai_config_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."ai_insight_cache"
+    ADD CONSTRAINT "ai_insight_cache_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."companies"
+    ADD CONSTRAINT "companies_demo_owner_id_fkey" FOREIGN KEY (demo_owner_id) REFERENCES auth.users(id);
+
+ALTER TABLE "public"."companies"
+    ADD CONSTRAINT "companies_demo_template_id_fkey" FOREIGN KEY (demo_template_id) REFERENCES demo_templates(id);
+
 ALTER TABLE "public"."customers"
     ADD CONSTRAINT "customers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."demo_templates"
+    ADD CONSTRAINT "demo_templates_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."inventory_items"
     ADD CONSTRAINT "inventory_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1016,9 +1113,6 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."jobs"
-    ADD CONSTRAINT "jobs_routing_id_fkey" FOREIGN KEY (routing_id) REFERENCES routings(id) ON DELETE SET NULL;
-
 ALTER TABLE "public"."operation_types"
     ADD CONSTRAINT "operation_types_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1040,9 +1134,6 @@ ALTER TABLE "public"."operator_sessions"
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."parts"
-    ADD CONSTRAINT "parts_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
-
 ALTER TABLE "public"."quote_attachments"
     ADD CONSTRAINT "quote_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1063,9 +1154,6 @@ ALTER TABLE "public"."quotes"
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_routing_id_fkey" FOREIGN KEY (routing_id) REFERENCES routings(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."resource_groups"
     ADD CONSTRAINT "resource_groups_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1092,7 +1180,7 @@ ALTER TABLE "public"."routings"
     ADD CONSTRAINT "routings_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."routings"
-    ADD CONSTRAINT "routings_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT "routings_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."user_company_access"
     ADD CONSTRAINT "user_company_access_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1109,6 +1197,8 @@ ALTER TABLE "public"."user_preferences"
 -- ============================================================
 -- 6. INDEXES
 -- ============================================================
+CREATE INDEX IF NOT EXISTS idx_ai_chat_queries_rate_limit ON public.ai_chat_queries USING btree (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_companies_demo_owner ON public.companies USING btree (demo_owner_id) WHERE (is_demo = true);
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
@@ -1133,7 +1223,6 @@ CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_part ON public.jobs USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_routing ON public.jobs USING btree (routing_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_operation_types_company ON public.operation_types USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_operation_types_group ON public.operation_types USING btree (resource_group_id);
@@ -1143,7 +1232,6 @@ CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_parts_customer_id ON public.parts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_number ON public.parts USING btree (company_id, part_number);
 CREATE INDEX IF NOT EXISTS idx_parts_pricing ON public.parts USING gin (pricing);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_company ON public.quote_attachments USING btree (company_id);
@@ -1152,7 +1240,6 @@ CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (comp
 CREATE INDEX IF NOT EXISTS idx_quotes_customer ON public.quotes USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_number ON public.quotes USING btree (quote_number);
 CREATE INDEX IF NOT EXISTS idx_quotes_part ON public.quotes USING btree (part_id);
-CREATE INDEX IF NOT EXISTS idx_quotes_routing ON public.quotes USING btree (routing_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_status ON public.quotes USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_resource_groups_company ON public.resource_groups USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_routing ON public.routing_edges USING btree (routing_id);
@@ -1161,7 +1248,6 @@ CREATE INDEX IF NOT EXISTS idx_routing_edges_target ON public.routing_edges USIN
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_operation_type ON public.routing_nodes USING btree (operation_type_id);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_routing ON public.routing_nodes USING btree (routing_id);
 CREATE INDEX IF NOT EXISTS idx_routings_company ON public.routings USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_routings_default ON public.routings USING btree (part_id, is_default) WHERE (is_default = true);
 CREATE INDEX IF NOT EXISTS idx_routings_part ON public.routings USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_company_id ON public.user_company_access USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_name ON public.user_company_access USING btree (name);
@@ -1171,81 +1257,308 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON public.user_preferenc
 -- ============================================================
 -- 7. FUNCTIONS
 -- ============================================================
-CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_routing_id uuid DEFAULT NULL::uuid, p_due_date date DEFAULT NULL::date, p_priority text DEFAULT 'normal'::text)
- RETURNS uuid
+CREATE OR REPLACE FUNCTION public._populate_demo_company(p_company_id uuid, p_user_id uuid, p_template_id uuid)
+ RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
+ SET search_path TO 'public'
 AS $function$
 DECLARE
-    v_quote RECORD;
-    v_job_id UUID;
+    v_template JSONB;
+    v_ref_map JSONB := '{}';
+    v_item JSONB;
+    v_new_id UUID;
+    v_node JSONB;
+    v_edge JSONB;
+    v_op JSONB;
     v_routing_id UUID;
-    v_ops_count INTEGER;
+    v_job_id UUID;
 BEGIN
-    -- Get the quote
-    SELECT * INTO v_quote FROM quotes WHERE id = p_quote_id;
+    -- Get template data
+    SELECT template_data INTO v_template
+    FROM demo_templates
+    WHERE id = p_template_id;
 
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Quote not found: %', p_quote_id;
+    IF v_template IS NULL THEN
+        RAISE EXCEPTION 'Template % not found', p_template_id;
     END IF;
 
-    IF v_quote.status != 'accepted' THEN
-        RAISE EXCEPTION 'Quote must be accepted before converting. Current status: %', v_quote.status;
+    -- -----------------------------------------------------------------------
+    -- Insert customers
+    -- -----------------------------------------------------------------------
+    IF v_template->'customers' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO customers (id, company_id, name, contact_name, contact_email,
+                                   contact_phone, city, state, country)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name', v_item->>'contact_name', v_item->>'contact_email',
+                    v_item->>'contact_phone', v_item->>'city', v_item->>'state',
+                    COALESCE(v_item->>'country', 'USA'));
+        END LOOP;
     END IF;
 
-    IF v_quote.converted_to_job_id IS NOT NULL THEN
-        RAISE EXCEPTION 'Quote already converted to job: %', v_quote.converted_to_job_id;
+    -- -----------------------------------------------------------------------
+    -- Insert resource_groups
+    -- -----------------------------------------------------------------------
+    IF v_template->'resource_groups' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO resource_groups (id, company_id, name, description)
+            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description');
+        END LOOP;
     END IF;
 
-    -- Determine which routing to use
-    v_routing_id := COALESCE(p_routing_id, v_quote.routing_id);
+    -- -----------------------------------------------------------------------
+    -- Insert operation_types (depends on resource_groups)
+    -- -----------------------------------------------------------------------
+    IF v_template->'operation_types' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-    -- Create the job
-    INSERT INTO jobs (
-        company_id,
-        quote_id,
-        routing_id,
-        customer_id,
-        part_id,
-        description,
-        quantity_ordered,
-        due_date,
-        priority,
-        created_by
-    ) VALUES (
-        v_quote.company_id,
-        v_quote.id,
-        v_routing_id,
-        v_quote.customer_id,
-        v_quote.part_id,
-        v_quote.description,
-        v_quote.quantity,
-        p_due_date,
-        p_priority,
-        v_quote.created_by
-    )
-    RETURNING id INTO v_job_id;
-
-    -- If there's a routing, copy operations to the job
-    IF v_routing_id IS NOT NULL THEN
-        SELECT create_job_operations_from_routing(v_job_id, v_routing_id) INTO v_ops_count;
+            INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description)
+            VALUES (v_new_id, p_company_id,
+                    (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
+                    v_item->>'name',
+                    (v_item->>'labor_rate')::NUMERIC,
+                    v_item->>'description');
+        END LOOP;
     END IF;
 
-    -- Update the quote with conversion info
-    UPDATE quotes
-    SET
-        status = 'converted',
-        converted_to_job_id = v_job_id,
-        converted_at = NOW()
-    WHERE id = p_quote_id;
+    -- -----------------------------------------------------------------------
+    -- Insert parts (depends on customers)
+    -- -----------------------------------------------------------------------
+    IF v_template->'parts' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-    RETURN v_job_id;
+            INSERT INTO parts (id, company_id, customer_id, part_number, description, pricing)
+            VALUES (v_new_id, p_company_id,
+                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
+                    v_item->>'part_number',
+                    v_item->>'description',
+                    COALESCE(v_item->'pricing', '[]'::JSONB));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert inventory_items
+    -- -----------------------------------------------------------------------
+    IF v_template->'inventory_items' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO inventory_items (id, company_id, name, description, sku, primary_unit, quantity, cost_per_unit)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name',
+                    v_item->>'description',
+                    v_item->>'sku',
+                    v_item->>'primary_unit',
+                    COALESCE((v_item->>'quantity')::NUMERIC, 0),
+                    (v_item->>'cost_per_unit')::NUMERIC);
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert routings + routing_nodes + routing_edges
+    -- -----------------------------------------------------------------------
+    IF v_template->'routings' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_routing_id := v_new_id;
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO routings (id, company_id, part_id, name, description, is_default, created_by)
+            VALUES (v_new_id, p_company_id,
+                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
+                    v_item->>'name',
+                    v_item->>'description',
+                    COALESCE((v_item->>'is_default')::BOOLEAN, TRUE),
+                    p_user_id);
+
+            -- Insert nodes for this routing
+            IF v_item->'nodes' IS NOT NULL THEN
+                FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes')
+                LOOP
+                    v_new_id := gen_random_uuid();
+                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_node->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+                    INSERT INTO routing_nodes (id, routing_id, operation_type_id,
+                                               run_time_per_unit, instructions, materials)
+                    VALUES (v_new_id,
+                            v_routing_id,
+                            (v_ref_map->>(v_node->>'operation_type_ref'))::UUID,
+                            (v_node->>'run_time_per_unit')::NUMERIC,
+                            v_node->>'instructions',
+                            COALESCE(v_node->'materials', '[]'::JSONB));
+                END LOOP;
+            END IF;
+
+            -- Insert edges for this routing
+            IF v_item->'edges' IS NOT NULL THEN
+                FOR v_edge IN SELECT * FROM jsonb_array_elements(v_item->'edges')
+                LOOP
+                    INSERT INTO routing_edges (routing_id, source_node_id, target_node_id)
+                    VALUES (
+                        v_routing_id,
+                        (v_ref_map->>(v_edge->>'source_ref'))::UUID,
+                        (v_ref_map->>(v_edge->>'target_ref'))::UUID
+                    );
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert quotes (depends on customers, parts, routings)
+    -- -----------------------------------------------------------------------
+    IF v_template->'quotes' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO quotes (id, company_id, quote_number, customer_id, part_id,
+                                routing_id, quantity, unit_price, total_price, status,
+                                description, created_by)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'quote_number',
+                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
+                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
+                    CASE WHEN v_item->>'routing_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'routing_ref'))::UUID
+                         ELSE NULL END,
+                    COALESCE((v_item->>'quantity')::INTEGER, 1),
+                    (v_item->>'unit_price')::NUMERIC,
+                    (v_item->>'total_price')::NUMERIC,
+                    COALESCE(v_item->>'status', 'draft'),
+                    v_item->>'description',
+                    p_user_id);
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert jobs + job_operations (depends on customers, parts, quotes, routings)
+    -- -----------------------------------------------------------------------
+    IF v_template->'jobs' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_job_id := v_new_id;
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO jobs (id, company_id, job_number, customer_id, part_id,
+                              quote_id, routing_id, description, status, created_by)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'job_number',
+                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
+                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
+                    CASE WHEN v_item->>'quote_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID
+                         ELSE NULL END,
+                    CASE WHEN v_item->>'routing_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'routing_ref'))::UUID
+                         ELSE NULL END,
+                    v_item->>'description',
+                    COALESCE(v_item->>'status', 'pending'),
+                    p_user_id);
+
+            -- Insert job_operations
+            IF v_item->'operations' IS NOT NULL THEN
+                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations')
+                LOOP
+                    v_new_id := gen_random_uuid();
+                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+                    INSERT INTO job_operations (id, job_id, sequence, operation_name,
+                                                operation_type_id, estimated_setup_hours,
+                                                estimated_run_hours_per_unit,
+                                                quantity_completed, status,
+                                                routing_node_id, instructions)
+                    VALUES (v_new_id,
+                            v_job_id,
+                            (v_op->>'sequence')::INTEGER,
+                            v_op->>'operation_name',
+                            CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
+                                 THEN (v_ref_map->>(v_op->>'operation_type_ref'))::UUID
+                                 ELSE NULL END,
+                            COALESCE((v_op->>'estimated_setup_hours')::NUMERIC, 0),
+                            COALESCE((v_op->>'estimated_run_hours_per_unit')::NUMERIC, 0),
+                            COALESCE((v_op->>'quantity_completed')::INTEGER, 0),
+                            COALESCE(v_op->>'status', 'pending'),
+                            CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
+                                 THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID
+                                 ELSE NULL END,
+                            v_op->>'instructions');
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
 END;
 $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_routing_id uuid DEFAULT NULL::uuid, p_due_date date DEFAULT NULL::date, p_priority text DEFAULT 'normal'::text, p_notes text DEFAULT NULL::text)
+CREATE OR REPLACE FUNCTION public.clone_demo_company(p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_template_id UUID;
+    v_company_id UUID;
+    v_user_name TEXT;
+BEGIN
+    -- 1. Get active template
+    SELECT id INTO v_template_id
+    FROM demo_templates
+    WHERE name = p_template_name AND is_active = TRUE
+    LIMIT 1;
+
+    IF v_template_id IS NULL THEN
+        RAISE EXCEPTION 'No active demo template found for name: %', p_template_name;
+    END IF;
+
+    -- 2. Get user's display name
+    SELECT raw_user_meta_data->>'name'
+    INTO v_user_name
+    FROM auth.users WHERE id = p_user_id;
+
+    v_user_name := COALESCE(v_user_name, 'Demo');
+
+    -- 3. Create demo company
+    INSERT INTO companies (name, is_demo, demo_template_id, demo_owner_id)
+    VALUES (v_user_name || '''s Demo Shop', TRUE, v_template_id, p_user_id)
+    RETURNING id INTO v_company_id;
+
+    -- 4. Create user_company_access (owner role)
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    VALUES (p_user_id, v_company_id, 'owner', v_user_name);
+
+    -- 5. Populate demo data
+    PERFORM _populate_demo_company(v_company_id, p_user_id, v_template_id);
+
+    RETURN v_company_id;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_due_date date DEFAULT NULL::date, p_priority text DEFAULT 'normal'::text, p_notes text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1258,27 +1571,32 @@ DECLARE
 BEGIN
   -- Get the quote
   SELECT * INTO v_quote FROM quotes WHERE id = p_quote_id;
-  
+
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Quote not found: %', p_quote_id;
   END IF;
-  
+
   IF v_quote.status != 'accepted' THEN
     RAISE EXCEPTION 'Quote must be accepted before converting. Current status: %', v_quote.status;
   END IF;
-  
+
   IF v_quote.converted_to_job_id IS NOT NULL THEN
     RAISE EXCEPTION 'Quote already converted to job: %', v_quote.converted_to_job_id;
   END IF;
-  
-  -- Determine which routing to use
-  v_routing_id := COALESCE(p_routing_id, v_quote.routing_id);
-  
+
+  -- Auto-resolve routing from part
+  IF v_quote.part_id IS NOT NULL THEN
+    SELECT id INTO v_routing_id FROM routings WHERE part_id = v_quote.part_id;
+  END IF;
+
+  IF v_routing_id IS NULL AND v_quote.part_id IS NOT NULL THEN
+    RAISE EXCEPTION 'No routing defined for part. Create a routing before converting to a job.';
+  END IF;
+
   -- Create the job
   INSERT INTO jobs (
     company_id,
     quote_id,
-    routing_id,
     customer_id,
     part_id,
     part_number_text,
@@ -1291,7 +1609,6 @@ BEGIN
   ) VALUES (
     v_quote.company_id,
     v_quote.id,
-    v_routing_id,
     v_quote.customer_id,
     v_quote.part_id,
     v_quote.part_number_text,
@@ -1303,19 +1620,19 @@ BEGIN
     v_quote.created_by
   )
   RETURNING id INTO v_job_id;
-  
+
   -- If there's a routing, copy operations to the job
   IF v_routing_id IS NOT NULL THEN
     SELECT create_job_operations_from_routing(v_job_id, v_routing_id) INTO v_ops_count;
   END IF;
-  
+
   -- Update the quote with conversion info
-  UPDATE quotes 
-  SET 
+  UPDATE quotes
+  SET
     converted_to_job_id = v_job_id,
     converted_at = NOW()
   WHERE id = p_quote_id;
-  
+
   RETURN v_job_id;
 END;
 $function$
@@ -1521,6 +1838,64 @@ AS $function$
       AND company_id = check_company_id
       AND role IN ('owner', 'admin')
   );
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.reset_demo_company(p_company_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_template_id UUID;
+    v_owner_id UUID;
+    v_is_demo BOOLEAN;
+BEGIN
+    -- 1. Verify this is a demo company
+    SELECT is_demo, demo_template_id, demo_owner_id
+    INTO v_is_demo, v_template_id, v_owner_id
+    FROM companies
+    WHERE id = p_company_id;
+
+    IF NOT COALESCE(v_is_demo, FALSE) THEN
+        RAISE EXCEPTION 'Cannot reset: company % is not a demo company', p_company_id;
+    END IF;
+
+    -- 2. Delete all company data in reverse FK order
+    -- operator_sessions has operation_type_id ON DELETE RESTRICT, so delete first
+    DELETE FROM operator_sessions WHERE company_id = p_company_id;
+    DELETE FROM inventory_transactions WHERE company_id = p_company_id;
+    DELETE FROM job_attachments WHERE company_id = p_company_id;
+    DELETE FROM quote_attachments WHERE company_id = p_company_id;
+    -- job_operations must be deleted before jobs (or rely on CASCADE)
+    DELETE FROM job_operations WHERE job_id IN (
+        SELECT id FROM jobs WHERE company_id = p_company_id
+    );
+    DELETE FROM jobs WHERE company_id = p_company_id;
+    DELETE FROM quotes WHERE company_id = p_company_id;
+    -- routing_edges and routing_nodes must be deleted before routings
+    DELETE FROM routing_edges WHERE routing_id IN (
+        SELECT id FROM routings WHERE company_id = p_company_id
+    );
+    DELETE FROM routing_nodes WHERE routing_id IN (
+        SELECT id FROM routings WHERE company_id = p_company_id
+    );
+    DELETE FROM routings WHERE company_id = p_company_id;
+    DELETE FROM parts WHERE company_id = p_company_id;
+    DELETE FROM inventory_items WHERE company_id = p_company_id;
+    DELETE FROM operation_types WHERE company_id = p_company_id;
+    DELETE FROM resource_groups WHERE company_id = p_company_id;
+    DELETE FROM customers WHERE company_id = p_company_id;
+
+    -- Delete non-owner user_company_access records (demo operators)
+    DELETE FROM user_company_access
+    WHERE company_id = p_company_id AND user_id != v_owner_id;
+
+    -- 3. Re-populate from template
+    PERFORM _populate_demo_company(p_company_id, v_owner_id, v_template_id);
+END;
 $function$
 
 ;
@@ -1751,7 +2126,7 @@ COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
 COMMENT ON TABLE "public"."parts"
-    IS 'Parts catalog with customer-specific or generic parts. Each part has a part number, description, and flexible volume-based pricing stored as JSONB. Parts can belong to a specific customer or be generic (customer_id = NULL). Referenced by quotes, jobs, and routings.';
+    IS 'Parts catalog. Each part has a company-unique part number, description, and flexible volume-based pricing stored as JSONB. Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
 
 COMMENT ON TABLE "public"."quote_attachments"
     IS 'PDF attachments for quotes. Phase 0 limits to one attachment per quote (enforced in UI). When quote converts to job, attachment is COPIED to job_attachments.';
@@ -1775,7 +2150,7 @@ COMMENT ON TABLE "public"."routing_nodes"
  execution flow. Supports parallel and series execution patterns.';
 
 COMMENT ON TABLE "public"."routings"
-    IS 'Manufacturing process templates defining the sequence of operations to produce a part. Can be linked to a specific part or be standalone. Contains routing_operations as child records. Used as templates when creating jobs.';
+    IS 'Manufacturing process definitions (one per part). Each routing is a DAG of operation nodes connected by edges defining execution dependencies. Deleting a part cascades to its routing.';
 
 COMMENT ON TABLE "public"."user_company_access"
     IS 'Junction table linking Supabase auth users to companies with role-based access. Enables multi-tenant access control. Users can belong to multiple companies with different roles (owner, admin, operator).';
@@ -1993,9 +2368,6 @@ COMMENT ON COLUMN "public"."jobs"."job_number"
 COMMENT ON COLUMN "public"."jobs"."quote_id"
     IS 'FK to quotes. Set if job created from accepted quote. SET NULL if quote deleted.';
 
-COMMENT ON COLUMN "public"."jobs"."routing_id"
-    IS 'FK to routings. Process template used for this job. SET NULL if routing deleted.';
-
 COMMENT ON COLUMN "public"."jobs"."customer_id"
     IS 'FK to customers. Required - every job must have a customer. RESTRICT on delete.';
 
@@ -2074,9 +2446,6 @@ COMMENT ON COLUMN "public"."parts"."id"
 COMMENT ON COLUMN "public"."parts"."company_id"
     IS 'FK to companies. Cascades on delete. Isolates parts per tenant.';
 
-COMMENT ON COLUMN "public"."parts"."customer_id"
-    IS 'FK to customers. NULL for generic parts not tied to a specific customer. SET NULL if customer deleted, converting to generic part.';
-
 COMMENT ON COLUMN "public"."parts"."part_number"
     IS 'Part identifier, typically customer-assigned. Unique per customer within company. Example: "AE36589E-RT", "WIDGET-001"';
 
@@ -2136,9 +2505,6 @@ COMMENT ON COLUMN "public"."quotes"."part_id"
 
 COMMENT ON COLUMN "public"."quotes"."description"
     IS 'Description of quoted work. May differ from part description for custom work.';
-
-COMMENT ON COLUMN "public"."quotes"."routing_id"
-    IS 'FK to routings. Optional process template for this quote. SET NULL if routing deleted.';
 
 COMMENT ON COLUMN "public"."quotes"."quantity"
     IS 'Number of units quoted. Default: 1';
@@ -2250,9 +2616,6 @@ COMMENT ON COLUMN "public"."routings"."name"
 
 COMMENT ON COLUMN "public"."routings"."description"
     IS 'Detailed description of the manufacturing process.';
-
-COMMENT ON COLUMN "public"."routings"."is_default"
-    IS 'If true, this is the default routing for the linked part. Only one routing per part should be default.';
 
 COMMENT ON COLUMN "public"."routings"."created_by"
     IS 'UUID of user who created the routing.';

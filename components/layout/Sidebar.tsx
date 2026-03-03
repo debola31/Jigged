@@ -10,10 +10,9 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import WorkIcon from '@mui/icons-material/Work';
-import PeopleIcon from '@mui/icons-material/People';
+import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
-import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import BuildIcon from '@mui/icons-material/Build';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import GroupIcon from '@mui/icons-material/Group';
@@ -24,10 +23,9 @@ const menuItems = [
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Operations', path: '/operations', icon: BuildIcon },
-  { name: 'Routings', path: '/routings', icon: AccountTreeIcon },
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
-  { name: 'Customers', path: '/customers', icon: PeopleIcon },
+  { name: 'Customers', path: '/customers', icon: BusinessIcon },
   { name: 'Team', path: '/team', icon: GroupIcon },
 ];
 

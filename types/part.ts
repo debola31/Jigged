@@ -12,20 +12,20 @@ export interface PricingTier {
 export interface Part {
   id: string;
   company_id: string;
-  customer_id: string | null;
   part_number: string;
   description: string | null;
   pricing: PricingTier[];
   created_at: string;
   updated_at: string;
-  // Optional joined fields (populated by queries that join customers table)
-  customer?: {
-    id: string;
-    name: string;
-  } | null;
   // Optional relation counts (populated by getPartWithRelations)
   quotes_count?: number;
   jobs_count?: number;
+  // Optional routing info (populated by getPartWithRelations)
+  routing?: {
+    id: string;
+    nodes_count: number;
+    total_run_time_per_unit: number | null;
+  } | null;
 }
 
 /**
@@ -33,7 +33,6 @@ export interface Part {
  */
 export interface PartFormData {
   part_number: string;
-  customer_id: string; // Empty string for generic parts
   description: string;
   pricing: PricingTier[];
 }
@@ -43,7 +42,6 @@ export interface PartFormData {
  */
 export const EMPTY_PART_FORM: PartFormData = {
   part_number: '',
-  customer_id: '',
   description: '',
   pricing: [{ qty: 1, price: 0 }],
 };
@@ -62,7 +60,6 @@ export function sortPricingTiers(tiers: PricingTier[]): PricingTier[] {
 export function partToFormData(part: Part): PartFormData {
   return {
     part_number: part.part_number,
-    customer_id: part.customer_id || '',
     description: part.description || '',
     pricing: part.pricing.length > 0 ? sortPricingTiers(part.pricing) : [{ qty: 1, price: 0 }],
   };

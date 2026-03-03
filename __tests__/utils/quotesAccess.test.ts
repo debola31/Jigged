@@ -85,7 +85,6 @@ import {
   markQuoteAsApproved,
   markQuoteAsRejected,
   convertQuoteToJob,
-  getCustomerParts,
   getPartWithPricing,
   getQuoteAttachments,
   getQuoteAttachmentCount,
@@ -1050,7 +1049,7 @@ describe('quotesAccess utilities', () => {
         return mockQueryBuilder;
       });
 
-      const result = await convertQuoteToJob('quote-1', { due_date: '2024-12-31', priority: 'high' });
+      const result = await convertQuoteToJob('quote-1');
 
       expect(result.job.id).toBe('job-1');
       expect(result.job.job_number).toBe('J-2024-001');
@@ -1075,7 +1074,7 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1', {})).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'Only approved quotes can be converted to jobs'
       );
     });
@@ -1099,30 +1098,13 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1', {})).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'This quote has already been converted to a job'
       );
     });
   });
 
   // ============== Helper Function Tests ==============
-
-  describe('getCustomerParts', () => {
-    it('returns parts for a specific customer', async () => {
-      const mockParts = [
-        { id: 'part-1', part_number: 'PART001', description: 'Part 1', pricing: [] },
-        { id: 'part-2', part_number: 'PART002', description: 'Part 2', pricing: [] },
-      ];
-      mockQueryBuilder.data = mockParts;
-      mockQueryBuilder.error = null;
-
-      const result = await getCustomerParts('company-1', 'customer-1');
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
-      expect(result).toHaveLength(2);
-    });
-  });
 
   describe('getPartWithPricing', () => {
     it('returns part with pricing tiers', async () => {

@@ -49,10 +49,10 @@ Success looks like:
 | Term | Definition |
 |---|---|
 | Job | A manufacturing order to produce parts for a customer. |
-| Routing | The sequence of operations required to complete a job. |
+| Routing | A workflow diagram defining how a part is manufactured. Each part has exactly one routing (1:1). Managed from the part detail page. |
 | Operation | A single step in a routing (e.g., CNC Turning). |
 | Operation Type | A category of operation (e.g., Machining, QC). |
-| Part | A product with part number and revision. |
+| Part | A company-wide product with part number. Not tied to a specific customer. |
 | Quote | A price estimate. Approved quotes become jobs. |
 
 ### 2. Users and Use Cases
@@ -251,7 +251,9 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 
-- job: id, customer_id, template_id, created_by, status, estimated_price, actual_price, priority, due_date, created_at, updated_at
+- **Part**: id, company_id, part_number, description, pricing, notes, created_at, updated_at (company-wide entity, no customer_id)
+
+- job: id, customer_id, part_id, created_by, status, estimated_price, actual_price, priority, due_date, created_at, updated_at (routing auto-resolved from part)
 
 - job Attachment: id, work_order_id, file_name, file_url, file_type, uploaded_by, created_at
 
@@ -271,7 +273,13 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 **Key Relationships:**
 
+- Part → Routing (one-to-one; each part has exactly one routing)
+
+- Part → Company (many-to-one; parts are company-wide, not customer-specific)
+
 - job → Customer (many-to-one)
+
+- job → Part (many-to-one; routing auto-resolved from part)
 
 - job → Template (many-to-one, optional)
 

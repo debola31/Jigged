@@ -71,7 +71,6 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | legacy_quote_number | Text | No | Original quote number from legacy system (for migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | part_id | UUID (FK) | No | Link to existing part (optional) |
-| routing_id | UUID (FK) | No | Link to routing (for routing-based quotes) |
 | part_number_text | Text | No | Ad-hoc part number (when part_id is null) |
 | description | Text | No | Part/job description |
 | quantity | Integer | Yes | Number of units quoted |
@@ -149,7 +148,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 - Radio: ○ Existing Part  ○ New/Ad-hoc Part
 
 - If Existing Part:
-  - Part dropdown (filtered by selected customer + generic parts)
+  - Part dropdown (all company parts, independent of selected customer)
 
   - Shows: part number - description
 
@@ -222,6 +221,8 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 **Trigger:** Click "Convert to Job" on Approved quote
 
+**Prerequisite:** The quote must reference a part (part_id is not null) and that part must have a routing defined. If the part has no routing, the conversion is blocked and a message is shown with a link to create a routing from the part detail page.
+
 **Modal Content:**
 
 - Summary: "Create job from Quote Q-0042?"
@@ -238,9 +239,11 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 - Additional Notes (optional)
 
+**Note:** Routing is auto-resolved from the part. There is no routing selection in this modal.
+
 **Actions:**
 
-- Create Job → Creates job, redirects to job detail
+- Create Job → Creates job (routing auto-resolved from part), redirects to job detail
 
 - Cancel → Closes modal
 
@@ -318,7 +321,7 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 ### Part Quick Create
 
-**Trigger:** "+ New Part" button next to part dropdown (only visible when "Existing Part" is selected AND a customer is selected)
+**Trigger:** "+ New Part" button next to part dropdown (only visible when "Existing Part" is selected)
 
 **Modal: Quick Create Part**
 
@@ -326,8 +329,6 @@ To streamline the quoting workflow, users can create new customers and parts dir
 ┌─────────────────────────────────────────────┐
 │  Quick Create Part                       ✕  │
 ├─────────────────────────────────────────────┤
-│                                             │
-│  Customer: Acme Corp (read-only)            │
 │                                             │
 │  Part Number *      [____________]          │
 │  Description        [____________]          │
@@ -341,13 +342,11 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 **Behavior:**
 
-1. User selects a customer first (required)
+1. User clicks "+ New Part" button
 
-2. User clicks "+ New Part" button
+2. Modal opens
 
-3. Modal opens with customer pre-filled (read-only)
-
-4. On success:
+3. On success:
   - Modal closes
 
   - New part auto-selected in dropdown
@@ -356,11 +355,11 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
   - Toast: "Part created successfully"
 
-1. On error: Show inline validation errors
+4. On error: Show inline validation errors
 
 **Required Fields:**
 
-- Part Number (unique per customer within company)
+- Part Number (unique within company)
 
 **Optional Fields (for quick entry):**
 
@@ -380,12 +379,12 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 ▸ Part
   ○ Existing Part  ○ New/Ad-hoc Part
-  
+
   If Existing Part:
   ┌─────────────────────────────────────┐
-  │ [Part Dropdown          ▼]  [+ New] │  ← Only visible when customer selected
+  │ [Part Dropdown          ▼]  [+ New] │  ← All company parts (independent of customer)
   └─────────────────────────────────────┘
-  
+
   If Ad-hoc Part:
   [Part Number field]
   [Description field]
@@ -396,8 +395,7 @@ To streamline the quoting workflow, users can create new customers and parts dir
 | Scenario | Behavior |
 |---|---|
 | Quick create customer with duplicate code | Show error: "Customer code already exists" |
-| Quick create part without customer selected | "+ New Part" button disabled with tooltip |
-| Quick create part with duplicate part number | Show error: "Part number already exists for this customer" |
+| Quick create part with duplicate part number | Show error: "Part number already exists in this company" |
 | Modal closed without saving | Form state preserved, no changes made |
 | Network error during creation | Show error, keep modal open for retry |
 
@@ -409,11 +407,9 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 - [ ] New customer auto-selected after creation
 
-- [ ] "+ New Part" button visible when customer is selected
+- [ ] "+ New Part" button visible when "Existing Part" is selected
 
-- [ ] "+ New Part" button disabled/hidden when no customer selected
-
-- [ ] Quick Create Part modal shows selected customer (read-only)
+- [ ] Quick Create Part modal opens without customer dependency
 
 - [ ] New part auto-selected after creation
 
@@ -566,9 +562,9 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] New customer auto-selected in dropdown after creation
 
-- [ ] "+ New Part" button visible only when customer is selected
+- [ ] "+ New Part" button visible when "Existing Part" is selected
 
-- [ ] Quick Create Part modal shows selected customer (read-only)
+- [ ] Quick Create Part modal opens without customer dependency
 
 - [ ] New part auto-selected in dropdown after creation
 
@@ -588,8 +584,8 @@ In Phase 1, quotes will support **routing-based cost estimation**:
 
 ### How It Works
 
-1. When creating a quote for a part that has a **routing** defined:
-  - System calculates estimated cost from routing operations
+1. When creating a quote for a part that has a **routing** defined (1:1 with part):
+  - System calculates estimated cost from the part's routing operations
 
   - Each operation: `estimated_hours × resource.labor_rate`
 
@@ -691,7 +687,7 @@ While creating/editing a quote, users can create new entities without leaving th
 
 - **"Create New Customer"** option in customer dropdown - opens modal
 
-- **"Create New Part"** option in part dropdown - opens modal with customer pre-selected
+- **"Create New Part"** option in part dropdown - opens modal (parts are company-wide, no customer pre-selection)
 
 - Newly created entity is automatically selected
 

@@ -2,11 +2,11 @@
 
 ## Overview
 
-The Parts module manages the catalog of products/parts that Contour manufactures. Parts are typically customer-specific and include pricing information. Parts can be referenced when creating quotes and jobs.
+The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include pricing information and can have a routing defining their manufacturing process.
 
 **Priority:** Must Have (Build Second)
 
-**Dependencies:** Customers module (parts are linked to customers)
+**Dependencies:** None (parts are independent company-wide entities)
 
 **Database Table:** `parts`
 
@@ -18,11 +18,11 @@ The Parts module manages the catalog of products/parts that Contour manufactures
 |---|---|---|
 | Owner/Admin | View a list of all parts | I can see our product catalog |
 | Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
-| Owner/Admin | Filter parts by customer | I can see all parts for a specific customer |
 | Owner/Admin | Create a new part with pricing tiers | I can quote and track new products |
 | Owner/Admin | Edit part information | I can update pricing or descriptions |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
+| Owner/Admin | Create or edit a routing from the part detail page | I can define the manufacturing process for a part |
 | Salesperson | Look up part pricing when creating quotes | I can quickly provide accurate quotes |
 
 ---
@@ -33,17 +33,16 @@ The Parts module manages the catalog of products/parts that Contour manufactures
 |---|---|---|---|
 | id | UUID | Yes | Primary key (auto-generated) |
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
-| customer_id | UUID (FK) | No | Link to customer (NULL for generic parts) |
-| part_number | Text | Yes | Customer's part number (e.g., "AE36589E-RT") |
+| part_number | Text | Yes | Part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
 | pricing | JSONB | No | Array of quantity-based price tiers (see below) |
 | notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, customer_id, part_number)`
+**Unique Constraint:** `(company_id, part_number)`
 
-This allows the same part number for different customers.
+Part numbers must be unique within a company.
 
 ### Pricing JSONB Structure
 
@@ -90,11 +89,9 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 **Features:**
 
-- Table showing: Part Number, Description, Customer, Base Price (qty=1)
+- Table showing: Part Number, Description, Base Price (qty=1)
 
 - Search box (searches part number and description)
-
-- Filter dropdown: Customer (All / specific customer)
 
 - "+ New Part" button
 
@@ -113,8 +110,6 @@ The `pricing` column stores an array of quantity/price tier objects:
 **Form Sections:**
 
 ▸ **Basic Information**
-
-- Customer (dropdown, optional - "Generic Part" if none selected)
 
 - Part Number (required)
 
@@ -154,7 +149,7 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 - Delete (edit mode only) → Confirmation dialog
 
-### 3. Part Detail (Optional for Phase 0)
+### 3. Part Detail
 
 **Route:** `/dashboard/{companyId}/parts/{id}`
 
@@ -162,13 +157,18 @@ Read-only view showing:
 
 - All part fields
 
-- Customer link
-
 - Related quotes (future)
 
 - Related jobs (future)
 
 - Edit button
+
+▸ **Routing Info Card**
+
+The part detail page includes a routing info card that shows:
+
+- If routing exists: Routing name, number of operations, and an "Edit Routing" button (links to `/dashboard/{companyId}/parts/{id}/routing/edit`)
+- If no routing exists: A "Create Routing" button (links to `/dashboard/{companyId}/parts/{id}/routing/new`)
 
 ---
 
@@ -234,22 +234,13 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 3. **Review Mappings** - Display with confidence indicators
 
-4. **Customer Matching** - Additional step for parts:
-  - Match by `customer_code` column in CSV
+4. **Validate** - Check for duplicate part numbers within company
 
-  - Assign all to specific customer (dropdown)
-
-  - Leave unassigned (generic parts)
-
-1. **Validate** - Check for duplicate part numbers per customer
-
-2. **Execute** - Import with results summary
+5. **Execute** - Import with results summary
 
 ### Conflict Detection
 
-- **Duplicate part_number** within same customer → Conflict
-
-- **Unmatched customer_code** → Warning (can proceed as generic)
+- **Duplicate part_number** within company → Conflict
 
 ### API Endpoints
 
@@ -263,9 +254,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - part_number is required
 
-- part_number must be unique per customer
-
-- If customer_code provided, must match existing customer (or flag as orphan)
+- part_number must be unique within the company
 
 ---
 
@@ -277,11 +266,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Can search parts by number or description
 
-- [ ] Can filter by customer
-
-- [ ] Can create new part with customer link
-
-- [ ] Can create generic part (no customer)
+- [ ] Can create new part
 
 - [ ] Can edit existing part
 
@@ -291,7 +276,13 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Can delete a part (hard delete with confirmation)
 
-- [ ] Part number is unique per customer within company
+- [ ] Part number is unique within company
+
+- [ ] Part detail page shows routing info card
+
+- [ ] Can create routing from part detail page if none exists
+
+- [ ] Can edit routing from part detail page if one exists
 
 - [ ] Form shows validation errors inline
 
@@ -303,11 +294,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Confidence scores displayed with color coding
 
-- [ ] Can select customer matching strategy
-
-- [ ] Detects duplicate part numbers per customer
-
-- [ ] Flags unmatched customer codes as warnings
+- [ ] Detects duplicate part numbers within company
 
 - [ ] Can skip conflicts and import valid rows
 

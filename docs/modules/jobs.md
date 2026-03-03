@@ -10,9 +10,7 @@ The Jobs module tracks production work through the shop. Jobs represent actual w
 
 - Customers module (jobs have a customer)
 
-- Parts module (jobs reference parts)
-
-- Routings module (jobs typically have routings)
+- Parts module (jobs reference parts; routing is auto-resolved from the part)
 
 - Quotes module (jobs are typically created from quotes)
 
@@ -73,8 +71,7 @@ IN_PROGRESS ◄──► ON_HOLD
 | job_number | Text | Auto | Auto-generated: J-0001, J-0002, etc. |
 | quote_id | UUID (FK) | No | Link to source quote (if created from quote) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| part_id | UUID (FK) | Yes | Link to part |
-| routing_id | UUID (FK) | Yes | Link to routing |
+| part_id | UUID (FK) | Yes | Link to part (routing is auto-resolved from the part's routing) |
 | description | Text | No | Job/part description |
 | status | Text | Yes | pending, in_progress, on_hold, completed, shipped, cancelled |
 | started_at | Timestamp | No | When job moved to in_progress |
@@ -132,15 +129,13 @@ IN_PROGRESS ◄──► ON_HOLD
 
 ▸ **Customer** (required)
 
-- Customer dropdown with search with quick create part UX option similar to quotes
+- Customer dropdown with search with quick create option similar to quotes
 
 ▸ **Part** (required)
 
-- Part dropdown (filtered by selected customer). A part must be selected to proceed.
+- Part dropdown (all company parts, independent of selected customer). A part must be selected to proceed. If the selected part has no routing, a warning is shown with a link to create one from the part detail page.
 
-▸ **Routing** (required)
-
-- Routing dropdown (filtered by selected part). Auto-selects the default routing if one exists. If no routings exist for the part, a link to create one is shown.
+**Note:** Routing is auto-resolved from the selected part. There is no routing dropdown. The part must have a routing defined for the job to be created.
 
 ▸ **Notes**
 
@@ -276,9 +271,13 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - [ ] Part is required when creating a job (no ad-hoc jobs without a part)
 
-- [ ] Routing is required when creating a job (operations must be defined)
+- [ ] Part must have a routing to create a job (routing auto-resolved from part)
 
-- [ ] Quote-to-job conversion requires a routing; quotes without a part cannot be converted
+- [ ] No routing dropdown in job form — routing is auto-resolved
+
+- [ ] Customer and part selection are independent (not cascading)
+
+- [ ] Quote-to-job conversion requires the part to have a routing; blocked with link to create one if missing
 
 - [ ] Jobs list shows "Current Op" column with DAG-aware next operation
 
@@ -292,7 +291,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 ## Job Operations Tracking
 
-Jobs with routings automatically have operations copied from the routing. These operations can be stepped through on the Job Detail page with Start, Complete, Skip, and Undo actions.
+Jobs automatically have operations copied from the part's routing when created. These operations can be stepped through on the Job Detail page with Start, Complete, Skip, and Undo actions.
 
 **Operation Status Workflow:**
 

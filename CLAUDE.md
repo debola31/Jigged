@@ -123,8 +123,12 @@ user_preferences (id, user_id, last_company_id, created_at, updated_at)
 
 All app routes include a `companyId` to ensure data isolation:
 - `/dashboard/{companyId}`
-- `/work-orders/{companyId}`
-- `/inventory/{companyId}`
+- `/dashboard/{companyId}/parts`
+- `/dashboard/{companyId}/parts/{partId}/routing/new` -- Create routing for part
+- `/dashboard/{companyId}/parts/{partId}/routing/edit` -- Edit routing for part
+- `/dashboard/{companyId}/quotes`
+- `/dashboard/{companyId}/jobs`
+- `/dashboard/{companyId}/operations`
 
 ### Auth Flow
 
@@ -149,6 +153,11 @@ All app routes include a `companyId` to ensure data isolation:
 │   ├── select-company/      # Company selector
 │   ├── no-access/           # No access page
 │   └── dashboard/[companyId]/ # Dashboard (protected)
+│       ├── parts/
+│       │   └── [partId]/routing/  # Routing editor (1:1 with part)
+│       ├── quotes/
+│       ├── jobs/
+│       └── operations/
 ├── components/
 │   ├── auth/                # Auth-related components
 │   └── providers/           # Context providers

@@ -113,7 +113,6 @@ export async function getJobWithRelations(
       customers!left(id, name),
       parts!left(id, part_number, description),
       quotes!jobs_quote_id_fkey(id, quote_number, total_price),
-      routings!left(id, name),
       job_operations(
         *,
         operation_types!left(id, name, labor_rate)
@@ -155,8 +154,20 @@ export async function createJob(
     throw new Error('Part is required');
   }
 
-  if (!formData.routing_id) {
-    throw new Error('Routing is required');
+  // Auto-resolve routing from part (1:1 relationship)
+  const { data: routing, error: routingError } = await supabase
+    .from('routings')
+    .select('id')
+    .eq('part_id', formData.part_id)
+    .maybeSingle();
+
+  if (routingError) {
+    console.error('Error fetching routing for part:', routingError);
+    throw routingError;
+  }
+
+  if (!routing) {
+    throw new Error('No routing defined for this part. Create a routing before creating a job.');
   }
 
   // Get current user
@@ -167,8 +178,7 @@ export async function createJob(
     .insert({
       company_id: companyId,
       customer_id: formData.customer_id,
-      part_id: formData.part_id || null,
-      routing_id: formData.routing_id || null,
+      part_id: formData.part_id,
       description: formData.description.trim() || null,
       status: 'pending',
       created_by: user?.id || null,
@@ -182,14 +192,11 @@ export async function createJob(
     throw error;
   }
 
-  // If there's a routing, copy operations to job
-  if (formData.routing_id) {
-    try {
-      await createJobOperationsFromRouting(data.id, formData.routing_id);
-    } catch (opsError) {
-      console.error('Failed to copy operations from routing:', opsError);
-      // Don't fail the job creation, just log the error
-    }
+  // Copy operations from routing to job
+  try {
+    await createJobOperationsFromRouting(data.id, routing.id);
+  } catch (opsError) {
+    console.error('Failed to copy operations from routing:', opsError);
   }
 
   return data;
@@ -223,7 +230,6 @@ export async function updateJob(jobId: string, formData: JobFormData): Promise<J
     .update({
       customer_id: formData.customer_id,
       part_id: formData.part_id || null,
-      routing_id: formData.routing_id || null,
       description: formData.description.trim() || null,
       updated_at: new Date().toISOString(),
     })
@@ -906,55 +912,6 @@ export async function getCustomersForSelect(
 
   if (error) {
     console.error('Error fetching customers for select:', error);
-    throw error;
-  }
-
-  return data || [];
-}
-
-/**
- * Get parts for a customer (for dropdown)
- */
-export async function getPartsForCustomer(
-  companyId: string,
-  customerId: string
-): Promise<Array<{ id: string; part_number: string; description: string | null }>> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('parts')
-    .select('id, part_number, description')
-    .eq('company_id', companyId)
-    .eq('customer_id', customerId)
-    .order('part_number');
-
-  if (error) {
-    console.error('Error fetching parts for customer:', error);
-    throw error;
-  }
-
-  return data || [];
-}
-
-/**
- * Get routings for a part (for dropdown)
- */
-export async function getRoutingsForPart(
-  companyId: string,
-  partId: string
-): Promise<Array<{ id: string; name: string; is_default: boolean }>> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('routings')
-    .select('id, name, is_default')
-    .eq('company_id', companyId)
-    .eq('part_id', partId)
-    .order('is_default', { ascending: false })
-    .order('name');
-
-  if (error) {
-    console.error('Error fetching routings for part:', error);
     throw error;
   }
 

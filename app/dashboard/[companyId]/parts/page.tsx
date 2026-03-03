@@ -42,6 +42,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, deletePart, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import CheckIcon from '@mui/icons-material/Check';
 import type { Part } from '@/types/part';
 
 export default function PartsPage() {
@@ -94,7 +95,6 @@ export default function PartsPage() {
     try {
       const data = await getAllParts(
         companyId,
-        undefined, // All customers
         searchDebounced,
         sortModel.field,
         sortModel.sort
@@ -221,16 +221,17 @@ export default function PartsPage() {
       valueFormatter: (params) => params.value ?? '—',
     },
     {
-      colId: 'customer',
-      headerName: 'Customer',
-      flex: 1,
-      minWidth: 150,
-      valueGetter: (params) => {
-        if (!params.data) return '';
-        if (!params.data.customer_id) return '—';
-        // Customer was deleted (SET NULL fired but we still have stale reference)
-        if (!params.data.customer) return 'Unknown (deleted)';
-        return params.data.customer.name;
+      colId: 'routing',
+      headerName: 'Routing',
+      width: 100,
+      sortable: false,
+      cellRenderer: (params: ICellRendererParams<Part>) => {
+        if (!params.data?.routing) return '—';
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <CheckIcon sx={{ color: 'success.main', fontSize: 20 }} />
+          </Box>
+        );
       },
     },
     {

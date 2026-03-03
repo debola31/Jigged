@@ -2,7 +2,8 @@
  * Routings Data Access Layer
  *
  * Functions for CRUD operations on routings, nodes, and edges.
- * Supports the visual workflow builder with parallel/series operations.
+ * Each part has exactly one routing (1:1 relationship).
+ * Routing names are auto-generated from the part number.
  */
 
 import { getSupabase } from '@/lib/supabase';
@@ -13,8 +14,6 @@ import type {
   RoutingWithPart,
   RoutingWithStats,
   RoutingWithGraph,
-  RoutingNodeWithOperation,
-  RoutingFormData,
   RoutingNodeFormData,
 } from '@/types/routings';
 
@@ -23,7 +22,104 @@ import type {
 // ============================================
 
 /**
- * Get all routings for a company with optional filters.
+ * Get the routing for a specific part (1:1 relationship).
+ * Returns null if the part has no routing.
+ */
+export async function getRoutingForPart(partId: string): Promise<RoutingWithGraph | null> {
+  const supabase = getSupabase();
+
+  // Fetch routing for this part
+  const { data: routing, error: routingError } = await supabase
+    .from('routings')
+    .select(`
+      *,
+      part:parts(id, part_number, description)
+    `)
+    .eq('part_id', partId)
+    .maybeSingle();
+
+  if (routingError) {
+    console.error('Error fetching routing for part:', routingError);
+    throw routingError;
+  }
+
+  if (!routing) return null;
+
+  // Fetch nodes with operation types
+  const { data: nodes, error: nodesError } = await supabase
+    .from('routing_nodes')
+    .select(`
+      *,
+      operation_type:operation_types(
+        id,
+        name,
+        labor_rate,
+        resource_group_id,
+        resource_group:resource_groups(id, name)
+      )
+    `)
+    .eq('routing_id', routing.id)
+    .order('created_at', { ascending: true });
+
+  if (nodesError) {
+    console.error('Error fetching routing nodes:', nodesError);
+    throw nodesError;
+  }
+
+  // Fetch edges
+  const { data: edges, error: edgesError } = await supabase
+    .from('routing_edges')
+    .select('*')
+    .eq('routing_id', routing.id);
+
+  if (edgesError) {
+    console.error('Error fetching routing edges:', edgesError);
+    throw edgesError;
+  }
+
+  return {
+    ...routing,
+    nodes: nodes || [],
+    edges: edges || [],
+  };
+}
+
+/**
+ * Get routing summary for a part (lightweight, for display).
+ */
+export async function getRoutingSummaryForPart(
+  partId: string
+): Promise<{ id: string; nodeCount: number; totalRunTime: number | null } | null> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('routings')
+    .select(`
+      id,
+      routing_nodes(id, run_time_per_unit)
+    `)
+    .eq('part_id', partId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching routing summary:', error);
+    throw error;
+  }
+
+  if (!data) return null;
+
+  const nodes = (data.routing_nodes as Array<{ id: string; run_time_per_unit: number | null }>) || [];
+  const totalRun = nodes.reduce((sum, n) => sum + (n.run_time_per_unit || 0), 0);
+
+  return {
+    id: data.id,
+    nodeCount: nodes.length,
+    totalRunTime: totalRun || null,
+  };
+}
+
+/**
+ * Get all routings for a company (for admin/listing purposes).
  */
 export async function getRoutings(
   companyId: string,
@@ -63,14 +159,12 @@ export async function getRoutings(
     throw error;
   }
 
-  // Calculate stats from nodes
   interface RoutingRow {
     id: string;
     company_id: string;
-    part_id: string | null;
+    part_id: string;
     name: string;
     description: string | null;
-    is_default: boolean;
     created_by: string | null;
     created_at: string;
     updated_at: string;
@@ -110,7 +204,7 @@ export async function getRouting(routingId: string): Promise<RoutingWithPart | n
     .single();
 
   if (error) {
-    if (error.code === 'PGRST116') return null; // Not found
+    if (error.code === 'PGRST116') return null;
     console.error('Error fetching routing:', error);
     throw error;
   }
@@ -124,7 +218,6 @@ export async function getRouting(routingId: string): Promise<RoutingWithPart | n
 export async function getRoutingWithGraph(routingId: string): Promise<RoutingWithGraph | null> {
   const supabase = getSupabase();
 
-  // Fetch routing with part
   const { data: routing, error: routingError } = await supabase
     .from('routings')
     .select(`
@@ -140,7 +233,6 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
     throw routingError;
   }
 
-  // Fetch nodes with operation types
   const { data: nodes, error: nodesError } = await supabase
     .from('routing_nodes')
     .select(`
@@ -161,7 +253,6 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
     throw nodesError;
   }
 
-  // Fetch edges
   const { data: edges, error: edgesError } = await supabase
     .from('routing_edges')
     .select('*')
@@ -180,95 +271,6 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
 }
 
 /**
- * Create a new routing.
- */
-export async function createRouting(
-  companyId: string,
-  formData: RoutingFormData
-): Promise<Routing> {
-  const supabase = getSupabase();
-
-  // If setting as default, unset other defaults for this part
-  if (formData.is_default && formData.part_id) {
-    await supabase
-      .from('routings')
-      .update({ is_default: false })
-      .eq('company_id', companyId)
-      .eq('part_id', formData.part_id)
-      .eq('is_default', true);
-  }
-
-  const { data, error } = await supabase
-    .from('routings')
-    .insert({
-      company_id: companyId,
-      name: formData.name.trim(),
-      part_id: formData.part_id || null,
-      description: formData.description.trim() || null,
-      is_default: formData.is_default,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating routing:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-/**
- * Update an existing routing.
- */
-export async function updateRouting(
-  routingId: string,
-  formData: RoutingFormData
-): Promise<Routing> {
-  const supabase = getSupabase();
-
-  // Get current routing to check company_id
-  const { data: current, error: fetchError } = await supabase
-    .from('routings')
-    .select('company_id, part_id')
-    .eq('id', routingId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  // If setting as default, unset other defaults for this part
-  if (formData.is_default && formData.part_id) {
-    await supabase
-      .from('routings')
-      .update({ is_default: false })
-      .eq('company_id', current.company_id)
-      .eq('part_id', formData.part_id)
-      .eq('is_default', true)
-      .neq('id', routingId);
-  }
-
-  const { data, error } = await supabase
-    .from('routings')
-    .update({
-      name: formData.name.trim(),
-      part_id: formData.part_id || null,
-      description: formData.description.trim() || null,
-      is_default: formData.is_default,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', routingId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating routing:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-/**
  * Delete a routing (cascades to nodes and edges).
  */
 export async function deleteRouting(routingId: string): Promise<void> {
@@ -280,76 +282,6 @@ export async function deleteRouting(routingId: string): Promise<void> {
     console.error('Error deleting routing:', error);
     throw error;
   }
-}
-
-/**
- * Clone a routing with all its nodes and edges.
- */
-export async function cloneRouting(
-  routingId: string,
-  newName: string
-): Promise<Routing> {
-  const supabase = getSupabase();
-
-  // Get original routing with graph
-  const original = await getRoutingWithGraph(routingId);
-  if (!original) throw new Error('Routing not found');
-
-  // Create new routing
-  const { data: newRouting, error: routingError } = await supabase
-    .from('routings')
-    .insert({
-      company_id: original.company_id,
-      name: newName.trim(),
-      part_id: original.part_id,
-      description: original.description,
-      is_default: false,
-    })
-    .select()
-    .single();
-
-  if (routingError) throw routingError;
-
-  // Map old node IDs to new node IDs
-  const nodeIdMap = new Map<string, string>();
-
-  // Clone nodes
-  if (original.nodes.length > 0) {
-    for (const node of original.nodes) {
-      const { data: newNode, error: nodeError } = await supabase
-        .from('routing_nodes')
-        .insert({
-          routing_id: newRouting.id,
-          operation_type_id: node.operation_type_id,
-          run_time_per_unit: node.run_time_per_unit,
-          instructions: node.instructions,
-          metadata: node.metadata,
-          materials: node.materials || [],
-        })
-        .select()
-        .single();
-
-      if (nodeError) throw nodeError;
-      nodeIdMap.set(node.id, newNode.id);
-    }
-  }
-
-  // Clone edges with mapped node IDs
-  if (original.edges.length > 0) {
-    const newEdges = original.edges.map((edge) => ({
-      routing_id: newRouting.id,
-      source_node_id: nodeIdMap.get(edge.source_node_id)!,
-      target_node_id: nodeIdMap.get(edge.target_node_id)!,
-    }));
-
-    const { error: edgesError } = await supabase
-      .from('routing_edges')
-      .insert(newEdges);
-
-    if (edgesError) throw edgesError;
-  }
-
-  return newRouting;
 }
 
 // ============================================
@@ -459,7 +391,6 @@ export async function createRoutingEdge(
     .single();
 
   if (error) {
-    // Handle duplicate edge
     if (error.code === '23505') {
       throw new Error('This connection already exists');
     }
@@ -490,7 +421,6 @@ export async function deleteRoutingEdge(edgeId: string): Promise<void> {
 
 /**
  * Save the entire graph from React Flow.
- * This handles adding/removing nodes and edges efficiently.
  */
 export async function saveRoutingGraph(
   routingId: string,
@@ -513,30 +443,24 @@ export async function saveRoutingGraph(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  // Delete removed edges first (due to FK constraints)
   if (deletedEdgeIds.length > 0) {
     const { error: deleteEdgesError } = await supabase
       .from('routing_edges')
       .delete()
       .in('id', deletedEdgeIds);
-
     if (deleteEdgesError) throw deleteEdgesError;
   }
 
-  // Delete removed nodes
   if (deletedNodeIds.length > 0) {
     const { error: deleteNodesError } = await supabase
       .from('routing_nodes')
       .delete()
       .in('id', deletedNodeIds);
-
     if (deleteNodesError) throw deleteNodesError;
   }
 
-  // Track new node ID mappings (temp ID → real ID)
   const nodeIdMap = new Map<string, string>();
 
-  // Insert new nodes and update existing
   for (const node of nodes) {
     if (node.isNew) {
       const { data, error } = await supabase
@@ -551,7 +475,6 @@ export async function saveRoutingGraph(
         })
         .select()
         .single();
-
       if (error) throw error;
       nodeIdMap.set(node.id, data.id);
     } else {
@@ -565,13 +488,11 @@ export async function saveRoutingGraph(
           updated_at: new Date().toISOString(),
         })
         .eq('id', node.id);
-
       if (error) throw error;
       nodeIdMap.set(node.id, node.id);
     }
   }
 
-  // Insert new edges with mapped node IDs
   const newEdges = edges.filter((e) => e.isNew);
   if (newEdges.length > 0) {
     const edgesToInsert = newEdges.map((edge) => ({
@@ -583,84 +504,7 @@ export async function saveRoutingGraph(
     const { error: insertEdgesError } = await supabase
       .from('routing_edges')
       .insert(edgesToInsert);
-
     if (insertEdgesError) throw insertEdgesError;
-  }
-}
-
-// ============================================
-// Utility Functions
-// ============================================
-
-/**
- * Check if a routing name already exists for a company.
- */
-export async function checkRoutingNameExists(
-  companyId: string,
-  name: string,
-  excludeId?: string
-): Promise<boolean> {
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from('routings')
-    .select('id')
-    .eq('company_id', companyId)
-    .ilike('name', name.trim());
-
-  if (excludeId) {
-    query = query.neq('id', excludeId);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error('Error checking routing name:', error);
-    throw error;
-  }
-
-  return (data?.length || 0) > 0;
-}
-
-/**
- * Get the default routing for a part.
- */
-export async function getDefaultRoutingForPart(partId: string): Promise<Routing | null> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('routings')
-    .select('*')
-    .eq('part_id', partId)
-    .eq('is_default', true)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    console.error('Error fetching default routing:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-/**
- * Bulk delete routings.
- */
-export async function bulkDeleteRoutings(routingIds: string[]): Promise<void> {
-  if (routingIds.length === 0) return;
-
-  const supabase = getSupabase();
-  const BATCH_SIZE = 100;
-
-  for (let i = 0; i < routingIds.length; i += BATCH_SIZE) {
-    const batch = routingIds.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase.from('routings').delete().in('id', batch);
-
-    if (error) {
-      console.error('Error bulk deleting routings:', error);
-      throw error;
-    }
   }
 }
 
@@ -694,10 +538,11 @@ interface PendingEdge {
 /**
  * Save a routing with its complete graph from the wizard.
  * Handles both create and edit modes.
+ * Routing name is auto-generated as "Routing - {part_number}".
  *
  * @param companyId - Company ID
+ * @param partId - Part ID (required, 1:1 relationship)
  * @param routingId - Existing routing ID (null for create mode)
- * @param formData - Routing form data (name, part_id, description, is_default)
  * @param pendingNodes - Nodes from the workflow builder
  * @param pendingEdges - Edges from the workflow builder
  * @param originalNodeIds - Original node IDs to track deletions (edit mode only)
@@ -705,8 +550,8 @@ interface PendingEdge {
  */
 export async function saveRoutingWithGraph(
   companyId: string,
+  partId: string,
   routingId: string | null,
-  formData: RoutingFormData,
   pendingNodes: PendingNode[],
   pendingEdges: PendingEdge[],
   originalNodeIds: Set<string>,
@@ -715,25 +560,52 @@ export async function saveRoutingWithGraph(
   const supabase = getSupabase();
   const isEditMode = !!routingId;
 
+  // Get the part number for auto-naming
+  const { data: partData, error: partError } = await supabase
+    .from('parts')
+    .select('part_number')
+    .eq('id', partId)
+    .single();
+
+  if (partError) throw partError;
+  const autoName = `Routing - ${partData.part_number}`;
+
   // Step 1: Create or update the routing
   let routing: Routing;
   if (isEditMode) {
-    routing = await updateRouting(routingId, formData);
+    const { data, error } = await supabase
+      .from('routings')
+      .update({
+        name: autoName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', routingId)
+      .select()
+      .single();
+    if (error) throw error;
+    routing = data;
   } else {
-    routing = await createRouting(companyId, formData);
+    const { data, error } = await supabase
+      .from('routings')
+      .insert({
+        company_id: companyId,
+        part_id: partId,
+        name: autoName,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    routing = data;
   }
 
   // Step 2: Determine which nodes/edges to delete, create, or update
   const currentNodeIds = new Set(pendingNodes.map((n) => n.tempId));
   const currentEdgeIds = new Set(pendingEdges.map((e) => e.tempId));
 
-  // Nodes to delete: in original but not in current
   const nodesToDelete = [...originalNodeIds].filter((id) => !currentNodeIds.has(id));
-
-  // Edges to delete: in original but not in current
   const edgesToDelete = [...originalEdgeIds].filter((id) => !currentEdgeIds.has(id));
 
-  // Step 3: Delete removed edges first (due to FK constraints)
+  // Step 3: Delete removed edges first
   if (edgesToDelete.length > 0) {
     const { error } = await supabase
       .from('routing_edges')
@@ -752,14 +624,13 @@ export async function saveRoutingWithGraph(
   }
 
   // Step 5: Create/update nodes and track ID mappings
-  const nodeIdMap = new Map<string, string>(); // tempId -> realId
+  const nodeIdMap = new Map<string, string>();
 
   for (const node of pendingNodes) {
     const isTempId = node.tempId.startsWith('temp-');
     const isExisting = originalNodeIds.has(node.tempId);
 
     if (isTempId || !isExisting) {
-      // Create new node
       const { data, error } = await supabase
         .from('routing_nodes')
         .insert({
@@ -772,11 +643,9 @@ export async function saveRoutingWithGraph(
         })
         .select()
         .single();
-
       if (error) throw error;
       nodeIdMap.set(node.tempId, data.id);
     } else {
-      // Update existing node
       const { error } = await supabase
         .from('routing_nodes')
         .update({
@@ -787,7 +656,6 @@ export async function saveRoutingWithGraph(
           updated_at: new Date().toISOString(),
         })
         .eq('id', node.tempId);
-
       if (error) throw error;
       nodeIdMap.set(node.tempId, node.tempId);
     }
@@ -808,7 +676,6 @@ export async function saveRoutingWithGraph(
     const { error } = await supabase
       .from('routing_edges')
       .insert(edgesToInsert);
-
     if (error) throw error;
   }
 

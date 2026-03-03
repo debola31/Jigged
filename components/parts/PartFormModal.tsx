@@ -15,8 +15,6 @@ interface PartFormModalProps {
   onClose: () => void;
   onCreated: (part: Part) => void;
   companyId: string;
-  /** Pre-selected customer ID when creating part from QuoteForm */
-  preselectedCustomerId?: string;
 }
 
 /**
@@ -28,7 +26,6 @@ export default function PartFormModal({
   onClose,
   onCreated,
   companyId,
-  preselectedCustomerId,
 }: PartFormModalProps) {
   // Key to force re-render of form when modal opens
   const [formKey, setFormKey] = useState(0);
@@ -46,11 +43,6 @@ export default function PartFormModal({
       onClose();
     }
   };
-
-  // Create initial data with preselected customer if provided
-  const initialData = preselectedCustomerId
-    ? { ...EMPTY_PART_FORM, customer_id: preselectedCustomerId }
-    : EMPTY_PART_FORM;
 
   return (
     <Dialog
@@ -83,8 +75,7 @@ export default function PartFormModal({
           key={formKey}
           mode="create"
           companyId={companyId}
-          initialData={initialData}
-          preselectedCustomerId={preselectedCustomerId}
+          initialData={EMPTY_PART_FORM}
           onSuccess={handleSuccess}
           onCancel={onClose}
         />

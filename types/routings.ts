@@ -27,10 +27,9 @@ export interface RoutingNodeMaterial {
 export interface Routing {
   id: string;
   company_id: string;
-  part_id: string | null;
+  part_id: string;
   name: string;
   description: string | null;
-  is_default: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -80,7 +79,7 @@ export interface RoutingWithPart extends Routing {
 }
 
 /**
- * Routing with node count and total time estimates for list display.
+ * Routing with node count and total time estimates for display.
  */
 export interface RoutingWithStats extends RoutingWithPart {
   nodes_count: number;
@@ -149,25 +148,9 @@ export type FlowEdge = Edge;
 // Form Data Types
 // ============================================
 
-/**
- * Form data for creating/editing routing metadata.
- */
-export interface RoutingFormData {
-  name: string;
-  part_id: string;
-  description: string;
-  is_default: boolean;
-}
-
-/**
- * Empty routing form data for new routing creation.
- */
-export const EMPTY_ROUTING_FORM: RoutingFormData = {
-  name: '',
-  part_id: '',
-  description: '',
-  is_default: false,
-};
+// RoutingFormData removed — Step 1 of wizard eliminated.
+// Routing name is auto-generated from part number.
+// Routing is always scoped to a part via URL context.
 
 /**
  * Form data for creating/editing a routing node.
@@ -193,17 +176,7 @@ export const EMPTY_NODE_FORM: RoutingNodeFormData = {
 // Utility Functions
 // ============================================
 
-/**
- * Convert a Routing entity to form data.
- */
-export function routingToFormData(routing: Routing): RoutingFormData {
-  return {
-    name: routing.name,
-    part_id: routing.part_id || '',
-    description: routing.description || '',
-    is_default: routing.is_default,
-  };
-}
+// routingToFormData removed — no longer needed with Step 1 elimination.
 
 /**
  * Convert a RoutingNode entity to form data.

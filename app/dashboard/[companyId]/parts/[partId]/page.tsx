@@ -16,11 +16,10 @@ import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
-import Link from 'next/link';
-import MuiLink from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
@@ -188,28 +187,66 @@ export default function PartDetailPage() {
           </Card>
         </Grid>
 
-        {/* Customer Card */}
+        {/* Routing Card */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Customer
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <AccountTreeIcon sx={{ color: 'text.secondary' }} />
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Routing
+                </Typography>
+              </Box>
               <Divider sx={{ mb: 2 }} />
-              {part.customer ? (
-                <Box>
-                  <MuiLink
-                    component={Link}
-                    href={`/dashboard/${companyId}/customers/${part.customer.id}`}
-                    sx={{ fontWeight: 500 }}
-                  >
-                    {part.customer.name}
-                  </MuiLink>
+              {part.routing ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Operations
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {part.routing.nodes_count}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Run Time
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {part.routing.total_run_time_per_unit !== null
+                        ? `${part.routing.total_run_time_per_unit} min/unit`
+                        : '—'}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<AccountTreeIcon />}
+                      onClick={() =>
+                        router.push(`/dashboard/${companyId}/parts/${partId}/routing/edit`)
+                      }
+                    >
+                      Edit Routing
+                    </Button>
+                  </Box>
                 </Box>
               ) : (
-                <Typography variant="body1" color="text.secondary">
-                  Generic Part (no customer assigned)
-                </Typography>
+                <Box>
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                    No routing defined
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<AccountTreeIcon />}
+                    onClick={() =>
+                      router.push(`/dashboard/${companyId}/parts/${partId}/routing/new`)
+                    }
+                  >
+                    Create Routing
+                  </Button>
+                </Box>
               )}
             </CardContent>
           </Card>

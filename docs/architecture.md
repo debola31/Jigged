@@ -31,10 +31,10 @@ Jigged/
 │   └── dashboard/[companyId]/  # Protected routes
 │       ├── customers/
 │       ├── parts/
+│       │   └── [partId]/routing/  # Routing editor (1:1 with part)
 │       ├── quotes/
 │       ├── jobs/
-│       ├── operations/
-│       └── routings/
+│       └── operations/
 │
 ├── components/
 │   ├── providers/           # AuthProvider, ThemeProvider
@@ -129,7 +129,7 @@ All dashboard routes wrapped in AuthGuard component which verifies authenticatio
 
 - Header: Top navigation with company name, user menu
 
-- Sidebar: 240px fixed navigation (Dashboard, Customers, Parts, Quotes, Jobs, Operations, Routings)
+- Sidebar: 240px fixed navigation (Dashboard, Customers, Parts, Quotes, Jobs, Operations)
 
 - Main Content: Flex container with page content
 
@@ -184,15 +184,15 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - customers - Customer records
 
-- parts - Part definitions with pricing tiers
+- parts - Part definitions with pricing tiers (company-wide, no customer_id)
 
 - operation_types - Available operations
 
-- routings, routing_operations - Process definitions
+- routings, routing_nodes, routing_edges - Process definitions (1:1 with parts)
 
-- quotes, quote_attachments - Customer quotes
+- quotes, quote_attachments - Customer quotes (no routing_id)
 
-- jobs, job_operations - Work orders
+- jobs, job_operations - Work orders (no routing_id; routing auto-resolved from part)
 
 **Status Workflows:**
 
@@ -283,10 +283,11 @@ All app routes include company context for multi-tenant data isolation:
 /dashboard/{companyId}              # Main dashboard
 /dashboard/{companyId}/customers    # Customers module
 /dashboard/{companyId}/parts        # Parts module
+/dashboard/{companyId}/parts/{partId}/routing/new   # Create routing for part
+/dashboard/{companyId}/parts/{partId}/routing/edit  # Edit routing for part
 /dashboard/{companyId}/quotes       # Quotes module
 /dashboard/{companyId}/jobs         # Jobs module
 /dashboard/{companyId}/operations   # Operations module
-/dashboard/{companyId}/routings     # Routings module
 ```
 
 **Benefits:**
@@ -313,13 +314,14 @@ user_preferences    -- Last accessed company, settings
 
 ```sql
 customers            -- Customer records
-parts                -- Part definitions with pricing
+parts                -- Part definitions with pricing (company-wide, no customer_id)
 operation_types      -- Available operations
-routings             -- Process routings
-routing_operations   -- Steps in routings
-quotes               -- Customer quotes
+routings             -- Process routings (1:1 with parts, unique part_id)
+routing_nodes        -- Operation nodes in routing workflow
+routing_edges        -- Connections between routing nodes
+quotes               -- Customer quotes (no routing_id)
 quote_attachments    -- Quote files
-jobs                 -- Work orders
+jobs                 -- Work orders (no routing_id; routing auto-resolved from part)
 job_operations       -- Steps in jobs
 ```
 

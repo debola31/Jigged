@@ -42,6 +42,7 @@ import {
   resumeJob,
   getJobAttachmentUrl,
 } from '@/utils/jobsAccess';
+import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
 import type { JobWithRelations, JobOperation, JobAttachment } from '@/types/job';
 import { JobStatusChip, OperationsPanel, ViewRoutingModal } from '@/components/jobs';
 
@@ -58,10 +59,32 @@ export default function JobDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
+  const [routingInfo, setRoutingInfo] = useState<{
+    id: string;
+    nodeCount: number;
+    totalRunTime: number | null;
+  } | null>(null);
 
   useEffect(() => {
     fetchJob();
   }, [jobId]);
+
+  // Fetch routing info through the part (1:1 relationship)
+  useEffect(() => {
+    const fetchRoutingInfo = async () => {
+      if (!job?.part_id) {
+        setRoutingInfo(null);
+        return;
+      }
+      try {
+        const summary = await getRoutingSummaryForPart(job.part_id);
+        setRoutingInfo(summary);
+      } catch (err) {
+        console.error('Error fetching routing info:', err);
+      }
+    };
+    fetchRoutingInfo();
+  }, [job?.part_id]);
 
   const fetchJob = async () => {
     try {
@@ -367,14 +390,14 @@ export default function JobDetailPage() {
 
                 <Box>
                   <Typography variant="body2" color="text.secondary">Routing</Typography>
-                  {job.routings ? (
+                  {routingInfo ? (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                       <MuiLink
                         component={Link}
-                        href={`/dashboard/${companyId}/routings/${job.routing_id}/edit`}
+                        href={`/dashboard/${companyId}/parts/${job.part_id}/routing/edit`}
                         sx={{ fontWeight: 500 }}
                       >
-                        {job.routings.name}
+                        {routingInfo.nodeCount} operation{routingInfo.nodeCount !== 1 ? 's' : ''}
                       </MuiLink>
                       <Tooltip title="View Workflow">
                         <IconButton
@@ -391,7 +414,7 @@ export default function JobDetailPage() {
                       </Tooltip>
                     </Box>
                   ) : (
-                    <Typography>—</Typography>
+                    <Typography>{'\u2014'}</Typography>
                   )}
                 </Box>
               </Box>
@@ -553,12 +576,12 @@ export default function JobDetailPage() {
       </Dialog>
 
       {/* View Routing Workflow Modal */}
-      {job.routing_id && job.routings && (
+      {routingInfo && (
         <ViewRoutingModal
           open={workflowModalOpen}
           onClose={() => setWorkflowModalOpen(false)}
-          routingId={job.routing_id}
-          routingName={job.routings.name}
+          routingId={routingInfo.id}
+          routingName={`Routing (${routingInfo.nodeCount} operation${routingInfo.nodeCount !== 1 ? 's' : ''})`}
           companyId={companyId}
         />
       )}

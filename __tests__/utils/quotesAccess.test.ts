@@ -20,6 +20,7 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
     'order',
     'range',
     'single',
+    'maybeSingle',
     'limit',
   ];
 
@@ -85,7 +86,6 @@ import {
   markQuoteAsApproved,
   markQuoteAsRejected,
   convertQuoteToJob,
-  getCustomerParts,
   getPartWithPricing,
   getQuoteAttachments,
   getQuoteAttachmentCount,
@@ -991,23 +991,59 @@ describe('quotesAccess utilities', () => {
 
   describe('convertQuoteToJob', () => {
     it('converts approved quote to job', async () => {
-      let callCount = 0;
+      let quotesCallCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'quotes' && callCount === 1) {
+        if (table === 'quotes') {
+          quotesCallCount++;
+          if (quotesCallCount === 1) {
+            // First quotes call: fetch quote
+            return {
+              ...mockQueryBuilder,
+              select: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                eq: vi.fn().mockReturnValue({
+                  ...mockQueryBuilder,
+                  single: vi.fn().mockReturnValue({
+                    data: {
+                      ...mockQuote,
+                      status: 'approved',
+                      converted_to_job_id: null,
+                      quote_attachments: [],
+                    },
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+          // Subsequent quotes calls: update quote with conversion info
+          return {
+            ...mockQueryBuilder,
+            update: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                select: vi.fn().mockReturnValue({
+                  ...mockQueryBuilder,
+                  single: vi.fn().mockReturnValue({
+                    data: { ...mockQuote, converted_to_job_id: 'job-1' },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'routings') {
+          // Routing lookup (auto-resolve from part)
           return {
             ...mockQueryBuilder,
             select: vi.fn().mockReturnValue({
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: {
-                    ...mockQuote,
-                    status: 'approved',
-                    converted_to_job_id: null,
-                    quote_attachments: [],
-                  },
+                maybeSingle: vi.fn().mockReturnValue({
+                  data: { id: 'routing-1' },
                   error: null,
                 }),
               }),
@@ -1029,28 +1065,10 @@ describe('quotesAccess utilities', () => {
             }),
           };
         }
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            update: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                select: vi.fn().mockReturnValue({
-                  ...mockQueryBuilder,
-                  single: vi.fn().mockReturnValue({
-                    data: { ...mockQuote, converted_to_job_id: 'job-1' },
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-          };
-        }
         return mockQueryBuilder;
       });
 
-      const result = await convertQuoteToJob('quote-1', { due_date: '2024-12-31', priority: 'high' });
+      const result = await convertQuoteToJob('quote-1');
 
       expect(result.job.id).toBe('job-1');
       expect(result.job.job_number).toBe('J-2024-001');
@@ -1075,7 +1093,7 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1', {})).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'Only approved quotes can be converted to jobs'
       );
     });
@@ -1099,30 +1117,13 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1', {})).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'This quote has already been converted to a job'
       );
     });
   });
 
   // ============== Helper Function Tests ==============
-
-  describe('getCustomerParts', () => {
-    it('returns parts for a specific customer', async () => {
-      const mockParts = [
-        { id: 'part-1', part_number: 'PART001', description: 'Part 1', pricing: [] },
-        { id: 'part-2', part_number: 'PART002', description: 'Part 2', pricing: [] },
-      ];
-      mockQueryBuilder.data = mockParts;
-      mockQueryBuilder.error = null;
-
-      const result = await getCustomerParts('company-1', 'customer-1');
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
-      expect(result).toHaveLength(2);
-    });
-  });
 
   describe('getPartWithPricing', () => {
     it('returns part with pricing tiers', async () => {

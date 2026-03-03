@@ -22,15 +22,16 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
 import {
   createJob,
   updateJob,
   deleteJob,
   getCustomersForSelect,
-  getPartsForCustomer,
-  getRoutingsForPart,
 } from '@/utils/jobsAccess';
+import { getPartsForSelect } from '@/utils/partsAccess';
 import type { JobFormData } from '@/types/job';
 import { EMPTY_JOB_FORM } from '@/types/job';
 
@@ -61,11 +62,9 @@ export default function JobForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
-  const [parts, setParts] = useState<Array<{ id: string; part_number: string; description: string | null }>>([]);
-  const [routings, setRoutings] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
+  const [parts, setParts] = useState<Array<{ id: string; part_number: string; description: string | null; has_routing: boolean }>>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
-  const [loadingParts, setLoadingParts] = useState(false);
-  const [loadingRoutings, setLoadingRoutings] = useState(false);
+  const [loadingParts, setLoadingParts] = useState(true);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -91,17 +90,12 @@ export default function JobForm({
     fetchCustomers();
   }, [companyId]);
 
-  // Fetch parts when customer changes
+  // Fetch all parts on mount (parts are independent of customer)
   useEffect(() => {
     const fetchParts = async () => {
-      if (!formData.customer_id) {
-        setParts([]);
-        return;
-      }
-
       setLoadingParts(true);
       try {
-        const data = await getPartsForCustomer(companyId, formData.customer_id);
+        const data = await getPartsForSelect(companyId);
         setParts(data);
       } catch (err) {
         console.error('Error fetching parts:', err);
@@ -110,47 +104,16 @@ export default function JobForm({
       }
     };
     fetchParts();
-  }, [companyId, formData.customer_id]);
+  }, [companyId]);
 
-  // Fetch routings when part changes
-  useEffect(() => {
-    const fetchRoutings = async () => {
-      if (!formData.part_id) {
-        setRoutings([]);
-        return;
-      }
-
-      setLoadingRoutings(true);
-      try {
-        const data = await getRoutingsForPart(companyId, formData.part_id);
-        setRoutings(data);
-        // Auto-select default routing if creating new job
-        if (mode === 'create' && data.length > 0) {
-          const defaultRouting = data.find(r => r.is_default) || data[0];
-          if (defaultRouting && !formData.routing_id) {
-            setFormData(prev => ({ ...prev, routing_id: defaultRouting.id }));
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching routings:', err);
-      } finally {
-        setLoadingRoutings(false);
-      }
-    };
-    fetchRoutings();
-  }, [companyId, formData.part_id, mode]);
+  // Get the selected part object for routing status display
+  const selectedPart = formData.part_id
+    ? parts.find((p) => p.id === formData.part_id)
+    : null;
 
   const handleChange = (field: keyof JobFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     setFieldErrors(prev => ({ ...prev, [field]: '' }));
-
-    // Clear dependent fields when parent changes
-    if (field === 'customer_id') {
-      setFormData(prev => ({ ...prev, part_id: '', routing_id: '' }));
-    }
-    if (field === 'part_id') {
-      setFormData(prev => ({ ...prev, routing_id: '' }));
-    }
   };
 
   const validate = (): boolean => {
@@ -162,10 +125,6 @@ export default function JobForm({
 
     if (!formData.part_id) {
       errors.part_id = 'Part is required';
-    }
-
-    if (!formData.routing_id) {
-      errors.routing_id = 'Routing is required';
     }
 
     setFieldErrors(errors);
@@ -273,7 +232,7 @@ export default function JobForm({
             </FormControl>
 
             {/* Part Selection */}
-            <FormControl fullWidth disabled={!formData.customer_id || loadingParts} error={!!fieldErrors.part_id}>
+            <FormControl fullWidth disabled={loadingParts} error={!!fieldErrors.part_id}>
               <InputLabel>Part *</InputLabel>
               <Select
                 value={formData.part_id}
@@ -292,51 +251,40 @@ export default function JobForm({
                   {fieldErrors.part_id}
                 </Typography>
               )}
-              {!formData.customer_id && (
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                  Select a customer first to see their parts
-                </Typography>
-              )}
             </FormControl>
 
-            {/* Routing Selection */}
-            {formData.part_id && (
-              <FormControl fullWidth disabled={loadingRoutings} error={!!fieldErrors.routing_id}>
-                <InputLabel>Routing *</InputLabel>
-                <Select
-                  value={formData.routing_id}
-                  label="Routing *"
-                  onChange={(e) => handleChange('routing_id', e.target.value)}
+            {/* Routing Status Display */}
+            {formData.part_id && selectedPart && (
+              selectedPart.has_routing ? (
+                <Alert
+                  severity="success"
+                  icon={<CheckCircleOutlineIcon />}
                 >
-                  {routings.map((r) => (
-                    <MenuItem key={r.id} value={r.id}>
-                      {r.name}
-                      {r.is_default && ' (Default)'}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {fieldErrors.routing_id && (
-                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>
-                    {fieldErrors.routing_id}
+                  This part has a routing defined. Operations will be copied to the job.
+                </Alert>
+              ) : (
+                <Alert severity="warning">
+                  <Typography variant="body2" gutterBottom>
+                    No routing defined for this part. A routing is required to create a job.
                   </Typography>
-                )}
-                {routings.length === 0 && !loadingRoutings && (
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                    No routings defined for this part.{' '}
-                    <Typography
-                      component="a"
-                      variant="caption"
-                      color="primary"
-                      href={`/dashboard/${companyId}/routings/new?partId=${formData.part_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{ cursor: 'pointer', textDecoration: 'underline' }}
-                    >
-                      Create a routing
-                    </Typography>
-                  </Typography>
-                )}
-              </FormControl>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    href={(() => {
+                      const returnParams = new URLSearchParams();
+                      if (formData.customer_id) returnParams.set('customer_id', formData.customer_id);
+                      if (formData.part_id) returnParams.set('part_id', formData.part_id);
+                      if (formData.description) returnParams.set('description', formData.description);
+                      const returnTo = `/dashboard/${companyId}/jobs/new?${returnParams.toString()}`;
+                      return `/dashboard/${companyId}/parts/${formData.part_id}/routing/new?returnTo=${encodeURIComponent(returnTo)}`;
+                    })()}
+                    startIcon={<ArrowForwardIcon />}
+                    sx={{ mt: 1 }}
+                  >
+                    Create Routing
+                  </Button>
+                </Alert>
+              )
             )}
 
             <Divider />
@@ -380,7 +328,7 @@ export default function JobForm({
               <Button
                 variant="contained"
                 onClick={handleSubmit}
-                disabled={loading}
+                disabled={loading || (!!selectedPart && !selectedPart.has_routing)}
                 startIcon={loading ? <CircularProgress size={20} /> : null}
               >
                 {loading ? 'Saving...' : mode === 'create' ? 'Create Job' : 'Save Changes'}

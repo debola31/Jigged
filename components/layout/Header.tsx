@@ -22,12 +22,17 @@ function getPageTitle(pathname: string): string {
     return 'Quotes';
   }
 
-  // Check for parts routes first (more specific matching)
+  // Check for parts routes (including routing sub-routes)
   if (segments.includes('parts')) {
+    // Routing sub-routes under parts: /parts/[partId]/routing/new or /edit
+    if (segments.includes('routing')) {
+      if (segments.includes('new')) return 'New Routing';
+      if (segments.includes('edit')) return 'Edit Routing';
+      return 'Routing';
+    }
     if (segments.includes('new')) return 'New Part';
     if (segments.includes('edit')) return 'Edit Part';
     if (segments.includes('import')) return 'Import Parts';
-    // Check if there's a partId (detail page)
     const partsIndex = segments.indexOf('parts');
     if (partsIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[partsIndex + 1])) {
       return 'Part Details';
@@ -65,18 +70,6 @@ function getPageTitle(pathname: string): string {
       return 'Job Details';
     }
     return 'Jobs';
-  }
-
-  // Check for routings routes
-  if (segments.includes('routings')) {
-    if (segments.includes('new')) return 'New Routing';
-    if (segments.includes('edit')) return 'Edit Routing';
-    // Check if there's a routingId (detail page)
-    const routingsIndex = segments.indexOf('routings');
-    if (routingsIndex < segments.length - 1 && !['new', 'edit'].includes(segments[routingsIndex + 1])) {
-      return 'Routing Details';
-    }
-    return 'Routings';
   }
 
   // Check for inventory routes

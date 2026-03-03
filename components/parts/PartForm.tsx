@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -27,9 +27,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import type { Part, PartFormData } from '@/types/part';
 import { validatePricingTiers } from '@/types/part';
 import { createPart, updatePart, deletePart, checkPartNumberExists } from '@/utils/partsAccess';
-import { getAllCustomers } from '@/utils/customerAccess';
-import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
-import type { Customer } from '@/types/customer';
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -37,8 +34,6 @@ interface PartFormProps {
   initialData: PartFormData;
   partId?: string;
   part?: Part; // Full Part with relations for delete dialog
-  /** Optional: Pre-selected customer ID (for modal usage from QuoteForm) */
-  preselectedCustomerId?: string;
   onSuccess?: (part?: Part) => void;
   onCancel?: () => void;
 }
@@ -49,15 +44,12 @@ export default function PartForm({
   initialData,
   partId,
   part,
-  preselectedCustomerId,
   onSuccess,
   onCancel,
 }: PartFormProps) {
   const router = useRouter();
 
   const [formData, setFormData] = useState<PartFormData>(initialData);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customersLoading, setCustomersLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -69,21 +61,6 @@ export default function PartForm({
     severity: 'error',
   });
 
-  // Fetch customers on mount
-  useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        const data = await getAllCustomers(companyId);
-        setCustomers(data);
-      } catch (err) {
-        console.error('Error fetching customers:', err);
-      } finally {
-        setCustomersLoading(false);
-      }
-    };
-    fetchCustomers();
-  }, [companyId]);
-
   const handleChange =
     (field: keyof PartFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -93,14 +70,6 @@ export default function PartForm({
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
       }
     };
-
-  const handleCustomerChange = (value: string) => {
-    setFormData((prev) => ({ ...prev, customer_id: value }));
-    // Clear part number error when customer changes (might affect uniqueness)
-    if (fieldErrors.part_number) {
-      setFieldErrors((prev) => ({ ...prev, part_number: '' }));
-    }
-  };
 
   // Pricing tier handlers
   const handleAddTier = () => {
@@ -136,21 +105,16 @@ export default function PartForm({
       errors.part_number = 'Part number is required';
     }
 
-    // Check uniqueness of part number (uses CURRENT form customer_id)
+    // Check uniqueness of part number
     if (formData.part_number.trim() && !errors.part_number) {
       try {
-        const customerId = formData.customer_id.trim() || null;
         const exists = await checkPartNumberExists(
           companyId,
           formData.part_number,
-          customerId,
           mode === 'edit' ? partId : undefined
         );
         if (exists) {
-          const customerName = customerId
-            ? customers.find((c) => c.id === customerId)?.name || 'selected customer'
-            : 'generic parts';
-          errors.part_number = `Part number already exists for ${customerName}`;
+          errors.part_number = 'Part number already exists';
         }
       } catch {
         setError('Error validating part number');
@@ -251,7 +215,7 @@ export default function PartForm({
             Basic Information
           </Typography>
           <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 required
@@ -261,21 +225,6 @@ export default function PartForm({
                 error={!!fieldErrors.part_number}
                 helperText={fieldErrors.part_number || 'Unique identifier for this part'}
                 disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <SearchableSelect
-                options={customers.map((c): SelectOption => ({
-                  id: c.id,
-                  label: c.name,
-                }))}
-                value={formData.customer_id}
-                onChange={handleCustomerChange}
-                label="Customer"
-                disabled={loading || customersLoading}
-                loading={customersLoading}
-                allowNone
-                noneLabel="No Customer (Generic Part)"
               />
             </Grid>
             <Grid size={{ xs: 12 }}>

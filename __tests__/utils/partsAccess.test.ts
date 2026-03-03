@@ -21,6 +21,7 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
     'order',
     'range',
     'single',
+    'maybeSingle',
     'limit',
   ];
 
@@ -79,69 +80,46 @@ describe('partsAccess utilities', () => {
   const mockPart: Part = {
     id: 'part-1',
     company_id: 'company-1',
-    customer_id: 'customer-1',
     part_number: 'PART001',
     description: 'Test Part',
     pricing: [
       { qty: 1, price: 10.0 },
       { qty: 10, price: 8.5 },
     ],
-    notes: 'Test notes',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
-    customer: {
-      id: 'customer-1',
-      name: 'Test Customer',
-    },
   };
 
-  const mockGenericPart: Part = {
+  const mockPart2: Part = {
     ...mockPart,
     id: 'part-2',
-    customer_id: null,
     part_number: 'GENERIC001',
-    customer: null,
   };
 
   describe('getAllParts', () => {
-    it('returns parts for a company with customer data', async () => {
-      mockQueryBuilder.data = [mockPart, mockGenericPart];
+    it('returns parts for a company with routing data', async () => {
+      mockQueryBuilder.data = [
+        { ...mockPart, routings: [{ id: 'routing-1' }] },
+        { ...mockPart2, routings: [] },
+      ];
       mockQueryBuilder.error = null;
 
       const result = await getAllParts('company-1');
 
       expect(mockSupabase.from).toHaveBeenCalledWith('parts');
       expect(mockQueryBuilder.select).toHaveBeenCalled();
-      // Verify select was called with customer join (exact format may vary)
+      // Verify select was called with routing join
       const selectCall = (mockQueryBuilder.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(selectCall).toContain('customers!left');
+      expect(selectCall).toContain('routings');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
       expect(result).toHaveLength(2);
-    });
-
-    it('filters by customer ID', async () => {
-      mockQueryBuilder.data = [mockPart];
-      mockQueryBuilder.error = null;
-
-      await getAllParts('company-1', 'customer-1');
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
-    });
-
-    it('filters generic parts using .is() for null', async () => {
-      mockQueryBuilder.data = [mockGenericPart];
-      mockQueryBuilder.error = null;
-
-      await getAllParts('company-1', 'generic');
-
-      expect(mockQueryBuilder.is).toHaveBeenCalledWith('customer_id', null);
     });
 
     it('applies search filter correctly', async () => {
       mockQueryBuilder.data = [mockPart];
       mockQueryBuilder.error = null;
 
-      await getAllParts('company-1', undefined, 'PART001');
+      await getAllParts('company-1', 'PART001');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
         'part_number.ilike.%PART001%,description.ilike.%PART001%'
@@ -160,13 +138,8 @@ describe('partsAccess utilities', () => {
   });
 
   describe('getPart', () => {
-    it('returns single part by ID with customer data', async () => {
-      // Mock data should have 'customers' (plural) as returned by Supabase join
-      const mockDataFromSupabase = {
-        ...mockPart,
-        customers: mockPart.customer, // Supabase returns 'customers' from join
-      };
-      mockQueryBuilder.data = mockDataFromSupabase;
+    it('returns single part by ID', async () => {
+      mockQueryBuilder.data = mockPart;
       mockQueryBuilder.error = null;
 
       const result = await getPart('part-1');
@@ -174,9 +147,7 @@ describe('partsAccess utilities', () => {
       expect(mockSupabase.from).toHaveBeenCalledWith('parts');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'part-1');
       expect(mockQueryBuilder.single).toHaveBeenCalled();
-      // Result should have 'customer' (singular) after transformation
       expect(result?.id).toBe(mockPart.id);
-      expect(result?.customer).toEqual(mockPart.customer);
     });
 
     it('returns null when part not found', async () => {
@@ -190,17 +161,12 @@ describe('partsAccess utilities', () => {
   });
 
   describe('getPartWithRelations', () => {
-    it('returns part with customer and counts', async () => {
-      // This function makes 3 Supabase calls, so we need to track them
-      let _callCount = 0;
-      const partDataFromSupabase = {
-        ...mockPart,
-        customers: mockPart.customer, // Supabase returns 'customers' from join
-      };
+    it('returns part with counts and routing info', async () => {
+      // This function makes 4 Supabase calls (parts, quotes, jobs, routings)
+      let callCount = 0;
 
-      // Override from() to return different data based on table
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        _callCount++;
+        callCount++;
         if (table === 'parts') {
           return {
             ...mockQueryBuilder,
@@ -209,7 +175,7 @@ describe('partsAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: partDataFromSupabase,
+                  data: mockPart,
                   error: null,
                 }),
               }),
@@ -237,6 +203,20 @@ describe('partsAccess utilities', () => {
               }),
             }),
           };
+        } else if (table === 'routings') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                maybeSingle: vi.fn().mockReturnValue({
+                  data: { id: 'routing-1', routing_nodes: [{ id: 'node-1', run_time_per_unit: 5 }] },
+                  error: null,
+                }),
+              }),
+            }),
+          };
         }
         return mockQueryBuilder;
       });
@@ -245,31 +225,25 @@ describe('partsAccess utilities', () => {
 
       expect(mockSupabase.from).toHaveBeenCalledWith('parts');
       expect(result?.id).toBe(mockPart.id);
-      expect(result?.customer).toEqual(mockPart.customer);
       expect(result?.quotes_count).toBe(5);
       expect(result?.jobs_count).toBe(3);
+      expect(result?.routing).toEqual({
+        id: 'routing-1',
+        nodes_count: 1,
+        total_run_time_per_unit: 5,
+      });
     });
   });
 
   describe('checkPartNumberExists', () => {
-    it('returns true when part number exists for customer', async () => {
+    it('returns true when part number exists', async () => {
       mockQueryBuilder.data = [{ id: 'existing-part' }];
       mockQueryBuilder.error = null;
 
-      const result = await checkPartNumberExists('company-1', 'PART001', 'customer-1');
+      const result = await checkPartNumberExists('company-1', 'PART001');
 
       expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('part_number', 'PART001');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'customer-1');
-      expect(result).toBe(true);
-    });
-
-    it('uses .is() for null customer_id (generic parts)', async () => {
-      mockQueryBuilder.data = [{ id: 'generic-part' }];
-      mockQueryBuilder.error = null;
-
-      const result = await checkPartNumberExists('company-1', 'GENERIC001', null);
-
-      expect(mockQueryBuilder.is).toHaveBeenCalledWith('customer_id', null);
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
       expect(result).toBe(true);
     });
 
@@ -277,7 +251,7 @@ describe('partsAccess utilities', () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      const result = await checkPartNumberExists('company-1', 'NONEXISTENT', 'customer-1');
+      const result = await checkPartNumberExists('company-1', 'NONEXISTENT');
 
       expect(result).toBe(false);
     });
@@ -286,7 +260,7 @@ describe('partsAccess utilities', () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      await checkPartNumberExists('company-1', 'PART001', 'customer-1', 'exclude-this-id');
+      await checkPartNumberExists('company-1', 'PART001', 'exclude-this-id');
 
       expect(mockQueryBuilder.neq).toHaveBeenCalledWith('id', 'exclude-this-id');
     });
@@ -295,27 +269,23 @@ describe('partsAccess utilities', () => {
   describe('createPart', () => {
     const mockFormData: PartFormData = {
       part_number: 'NEW001',
-      customer_id: 'customer-1',
       description: 'New Part',
       pricing: [
         { qty: 1, price: 15.0 },
         { qty: 50, price: 12.0 },
       ],
-      notes: 'New part notes',
     };
 
     it('inserts part and returns data', async () => {
       const mockCreatedPart: Part = {
         id: 'new-part-uuid',
         company_id: 'company-1',
-        customer_id: 'customer-1',
         part_number: 'NEW001',
         description: 'New Part',
         pricing: [
           { qty: 1, price: 15.0 },
           { qty: 50, price: 12.0 },
         ],
-        notes: 'New part notes',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -332,22 +302,6 @@ describe('partsAccess utilities', () => {
       expect(result).toEqual(mockCreatedPart);
     });
 
-    it('converts empty customer_id to null for generic parts', async () => {
-      const genericFormData: PartFormData = {
-        ...mockFormData,
-        customer_id: '',
-      };
-
-      mockQueryBuilder.data = mockGenericPart;
-      mockQueryBuilder.error = null;
-
-      await createPart('company-1', genericFormData);
-
-      // Check that insert was called with customer_id: null
-      const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(insertCall.customer_id).toBeNull();
-    });
-
     it('throws error when insert fails', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { message: 'Insert failed', code: '23505' };
@@ -362,10 +316,8 @@ describe('partsAccess utilities', () => {
   describe('updatePart', () => {
     const mockFormData: PartFormData = {
       part_number: 'PART001',
-      customer_id: 'customer-1',
       description: 'Updated Part',
       pricing: [{ qty: 1, price: 20.0 }],
-      notes: 'Updated notes',
     };
 
     it('updates part and returns data', async () => {
@@ -373,7 +325,6 @@ describe('partsAccess utilities', () => {
         ...mockPart,
         description: 'Updated Part',
         pricing: [{ qty: 1, price: 20.0 }],
-        notes: 'Updated notes',
       };
 
       mockQueryBuilder.data = mockUpdatedPart;

@@ -3,64 +3,42 @@ import type { Part, PartFormData, PricingTier } from '@/types/part';
 import { sortPricingTiers } from '@/types/part';
 
 /**
- * Interface for part data as returned from Supabase with joined customer data.
- * The 'customers' field uses plural because Supabase uses the table name for joins.
+ * Interface for part data as returned from Supabase.
  */
-interface PartWithCustomerJoin {
+interface PartRow {
   id: string;
   company_id: string;
-  customer_id: string | null;
   part_number: string;
   description: string | null;
   pricing: PricingTier[];
   created_at: string;
   updated_at: string;
-  customers: { id: string; name: string } | null;
 }
 
 /**
  * Get all parts for a company with optional filters.
  * Fetches in batches of 1000 to bypass Supabase's default row limit.
- * Use this for client-side pagination in AG Grid.
  */
 export async function getAllParts(
   companyId: string,
-  customerId?: string | null, // undefined=all, null/'generic'=generic only, string=specific customer
   search: string = '',
   sortField: string = 'part_number',
   sortDirection: 'asc' | 'desc' = 'asc'
 ): Promise<Part[]> {
   const supabase = getSupabase();
   const BATCH_SIZE = 1000;
-  let allData: PartWithCustomerJoin[] = [];
+  let allData: PartRow[] = [];
   let offset = 0;
   let hasMore = true;
 
-  // Fetch in batches until we get all data
   while (hasMore) {
     let query = supabase
       .from('parts')
-      .select(
-        `
-        *,
-        customers!left (
-          id,
-          name
-        )
-      `
-      )
+      .select('*, routings(id)')
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    // Filter by customer
-    if (customerId === null || customerId === 'generic') {
-      query = query.is('customer_id', null);
-    } else if (customerId) {
-      query = query.eq('customer_id', customerId);
-    }
-
-    // Apply search (part_number or description)
     if (search.trim()) {
       query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
     }
@@ -73,24 +51,30 @@ export async function getAllParts(
     }
 
     allData = [...allData, ...(data || [])];
-
-    // If we got fewer than BATCH_SIZE, we've reached the end
     hasMore = (data?.length || 0) === BATCH_SIZE;
     offset += BATCH_SIZE;
   }
 
-  // Transform the joined data and sort pricing tiers
-  return allData.map((part: PartWithCustomerJoin) => ({
-    ...part,
-    customer: part.customers || null,
-    pricing: sortPricingTiers(part.pricing || []),
-  }));
+  return allData.map((part) => {
+    const routings = (part as unknown as Record<string, unknown>).routings as Array<{ id: string }> | { id: string } | null;
+    const routingRecord = Array.isArray(routings) ? routings[0] : routings;
+    return {
+      id: part.id,
+      company_id: part.company_id,
+      part_number: part.part_number,
+      description: part.description,
+      pricing: sortPricingTiers(part.pricing || []),
+      created_at: part.created_at,
+      updated_at: part.updated_at,
+      routing: routingRecord
+        ? { id: routingRecord.id, nodes_count: 0, total_run_time_per_unit: null }
+        : undefined,
+    };
+  });
 }
 
 /**
- * Get parts with server-side pagination for AG Grid infinite row model.
- * Uses Supabase .range() to fetch only the requested slice.
- * Sorting is applied server-side before range, so it works across entire dataset.
+ * Get parts with server-side pagination for AG Grid.
  */
 export async function getPartsPaginated(
   companyId: string,
@@ -104,20 +88,11 @@ export async function getPartsPaginated(
 
   let query = supabase
     .from('parts')
-    .select(
-      `
-      *,
-      customers!left (
-        id,
-        name
-      )
-    `
-    )
+    .select('*')
     .eq('company_id', companyId)
     .order(sortField, { ascending: sortDirection === 'asc' })
-    .range(offset, offset + limit - 1); // Supabase range is inclusive
+    .range(offset, offset + limit - 1);
 
-  // Apply search (part_number or description)
   if (search.trim()) {
     query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
   }
@@ -129,17 +104,14 @@ export async function getPartsPaginated(
     throw error;
   }
 
-  // Transform the joined data and sort pricing tiers
-  return (data || []).map((part: PartWithCustomerJoin) => ({
+  return (data || []).map((part: PartRow) => ({
     ...part,
-    customer: part.customers || null,
     pricing: sortPricingTiers(part.pricing || []),
   }));
 }
 
 /**
- * Get total count of parts for a company (for AG Grid row count).
- * Uses Supabase head:true with count:'exact' for efficient counting.
+ * Get total count of parts for a company.
  */
 export async function getPartsCount(
   companyId: string,
@@ -152,7 +124,6 @@ export async function getPartsCount(
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId);
 
-  // Apply search (part_number or description)
   if (search.trim()) {
     query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
   }
@@ -168,22 +139,14 @@ export async function getPartsCount(
 }
 
 /**
- * Get a single part by ID
+ * Get a single part by ID.
  */
 export async function getPart(partId: string): Promise<Part | null> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('parts')
-    .select(
-      `
-      *,
-      customers!left (
-        id,
-        name
-      )
-    `
-    )
+    .select('*')
     .eq('id', partId)
     .single();
 
@@ -196,29 +159,20 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   return {
     ...data,
-    customer: data.customers || null,
     pricing: sortPricingTiers(data.pricing || []),
   };
 }
 
 /**
- * Get a part with related quotes and jobs counts
+ * Get a part with related quotes/jobs counts and routing info.
  */
 export async function getPartWithRelations(partId: string): Promise<Part | null> {
   const supabase = getSupabase();
 
-  // Get part with customer
+  // Get part
   const { data: part, error: partError } = await supabase
     .from('parts')
-    .select(
-      `
-      *,
-      customers!left (
-        id,
-        name
-      )
-    `
-    )
+    .select('*')
     .eq('id', partId)
     .single();
 
@@ -227,11 +181,9 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     throw partError;
   }
 
-  if (!part) {
-    return null;
-  }
+  if (!part) return null;
 
-  // Get quotes count for this part
+  // Get quotes count
   const { count: quotesCount, error: quotesError } = await supabase
     .from('quotes')
     .select('*', { count: 'exact', head: true })
@@ -241,7 +193,7 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     console.error('Error fetching quotes count:', quotesError);
   }
 
-  // Get jobs count for this part
+  // Get jobs count
   const { count: jobsCount, error: jobsError } = await supabase
     .from('jobs')
     .select('*', { count: 'exact', head: true })
@@ -251,28 +203,81 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     console.error('Error fetching jobs count:', jobsError);
   }
 
+  // Get routing info (1:1 — at most one routing per part)
+  const { data: routingData, error: routingError } = await supabase
+    .from('routings')
+    .select(`
+      id,
+      routing_nodes(id, run_time_per_unit)
+    `)
+    .eq('part_id', partId)
+    .maybeSingle();
+
+  if (routingError) {
+    console.error('Error fetching routing info:', routingError);
+  }
+
+  let routingInfo: Part['routing'] = null;
+  if (routingData) {
+    const nodes = (routingData.routing_nodes as Array<{ id: string; run_time_per_unit: number | null }>) || [];
+    const totalRunTime = nodes.reduce((sum, n) => sum + (n.run_time_per_unit || 0), 0);
+    routingInfo = {
+      id: routingData.id,
+      nodes_count: nodes.length,
+      total_run_time_per_unit: totalRunTime || null,
+    };
+  }
+
   return {
     ...part,
-    customer: part.customers || null,
     pricing: sortPricingTiers(part.pricing || []),
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
+    routing: routingInfo,
   };
 }
 
 /**
- * Check if a part number already exists for a company+customer combination.
- * CRITICAL: Uses .is() for NULL customer_id checks, not .eq()
- *
- * @param companyId - Company ID
- * @param partNumber - Part number to check
- * @param customerId - Customer ID, or null for generic parts
- * @param excludeId - Part ID to exclude (for edit mode)
+ * Lightweight parts query for dropdowns.
+ * Returns id, part_number, description, and whether the part has a routing.
+ */
+export async function getPartsForSelect(
+  companyId: string
+): Promise<Array<{ id: string; part_number: string; description: string | null; pricing: PricingTier[]; has_routing: boolean }>> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts')
+    .select(`
+      id,
+      part_number,
+      description,
+      pricing,
+      routings(id)
+    `)
+    .eq('company_id', companyId)
+    .order('part_number', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching parts for select:', error);
+    throw error;
+  }
+
+  return (data || []).map((p: { id: string; part_number: string; description: string | null; pricing: PricingTier[]; routings: Array<{ id: string }> | { id: string } | null }) => ({
+    id: p.id,
+    part_number: p.part_number,
+    description: p.description,
+    pricing: p.pricing || [],
+    has_routing: Array.isArray(p.routings) ? p.routings.length > 0 : !!p.routings,
+  }));
+}
+
+/**
+ * Check if a part number already exists for a company.
  */
 export async function checkPartNumberExists(
   companyId: string,
   partNumber: string,
-  customerId: string | null,
   excludeId?: string
 ): Promise<boolean> {
   const supabase = getSupabase();
@@ -282,13 +287,6 @@ export async function checkPartNumberExists(
     .select('id')
     .eq('company_id', companyId)
     .ilike('part_number', partNumber);
-
-  // CRITICAL: Use .is() for NULL, not .eq()
-  if (customerId === null) {
-    query = query.is('customer_id', null);
-  } else {
-    query = query.eq('customer_id', customerId);
-  }
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -305,19 +303,16 @@ export async function checkPartNumberExists(
 }
 
 /**
- * Create a new part
+ * Create a new part.
  */
 export async function createPart(companyId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
-
-  // Sort pricing tiers before insert
   const sortedPricing = sortPricingTiers(formData.pricing);
 
   const { data, error } = await supabase
     .from('parts')
     .insert({
       company_id: companyId,
-      customer_id: formData.customer_id.trim() || null,
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
       pricing: sortedPricing,
@@ -337,18 +332,15 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
 }
 
 /**
- * Update an existing part
+ * Update an existing part.
  */
 export async function updatePart(partId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
-
-  // Sort pricing tiers before update
   const sortedPricing = sortPricingTiers(formData.pricing);
 
   const { data, error } = await supabase
     .from('parts')
     .update({
-      customer_id: formData.customer_id.trim() || null,
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
       pricing: sortedPricing,
@@ -371,7 +363,7 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
 
 /**
  * Delete a part permanently.
- * CRITICAL: Catches FK constraint error and throws user-friendly message.
+ * CASCADE will delete its routing (and routing's nodes/edges).
  */
 export async function deletePart(partId: string): Promise<void> {
   const supabase = getSupabase();
@@ -379,7 +371,6 @@ export async function deletePart(partId: string): Promise<void> {
   const { error } = await supabase.from('parts').delete().eq('id', partId);
 
   if (error) {
-    // FK constraint violation
     if (error.code === '23503') {
       throw new Error(
         'Cannot delete this part because it is referenced by quotes or jobs. Remove those references first.'
@@ -392,20 +383,16 @@ export async function deletePart(partId: string): Promise<void> {
 
 /**
  * Bulk delete parts permanently.
- * Deletes in batches to avoid URL length limits.
- * CRITICAL: Catches FK constraint error and throws user-friendly message.
  */
 export async function bulkDeleteParts(partIds: string[]): Promise<void> {
   if (partIds.length === 0) return;
 
-  // Filter out any undefined/null values
   const validIds = partIds.filter((id) => id && typeof id === 'string');
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
-  const BATCH_SIZE = 100; // Delete in batches to avoid URL length limits
+  const BATCH_SIZE = 100;
 
-  // Process in batches
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
 
@@ -415,13 +402,11 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
       .in('id', batch);
 
     if (error) {
-      // FK constraint violation
       if (error.code === '23503') {
         throw new Error(
           'Cannot delete some parts because they are referenced by quotes or jobs. Remove those references first.'
         );
       }
-      // RLS policy violation
       if (error.code === '42501' || error.message?.includes('policy')) {
         throw new Error(
           'Permission denied. You may not have permission to delete these parts.'

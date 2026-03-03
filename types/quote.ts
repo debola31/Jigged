@@ -15,7 +15,6 @@ export interface Quote {
   customer_id: string;
   part_id: string | null;
   description: string | null;
-  routing_id: string | null;
   quantity: number;
   unit_price: number | null;
   total_price: number | null;
@@ -75,13 +74,6 @@ export interface QuoteFilters {
   status?: QuoteStatus | 'all';
   customerId?: string;
   search?: string;
-}
-
-/**
- * Data for converting quote to job
- */
-export interface ConvertToJobData {
-  routing_id?: string;
 }
 
 /**

@@ -4,13 +4,15 @@
 
 The Routings module provides a **visual workflow diagram builder** for defining manufacturing processes. Unlike traditional linear operation lists, routings in Jigged are **node-based workflow diagrams** where operations can run in **parallel** or **series**.
 
+Each part has **exactly one routing** (1:1 relationship). Routings are managed from the **part detail page**, not a standalone routings page. There is no separate "Routings" entry in the sidebar navigation.
+
 Users build routings by dragging operations onto a canvas and connecting them with edges to define execution flow. This enables complex manufacturing processes where multiple operations can happen simultaneously on different machines, reducing total production time.
 
 **Priority:** Must Have (Build after Operations, before Jobs)
 
 **Dependencies:**
 
-- Parts module (routings are linked to parts)
+- Parts module (each part has exactly one routing; routings are accessed from the part detail page)
 
 - Operations module (routings reference operation types)
 
@@ -82,9 +84,8 @@ Multiple operations run at the same time on different machines, then converge.
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
 | company_id | uuid | Yes | FK to companies |
-| part_id | uuid | Yes | FK to parts |
-| name | text | No | Optional routing name |
-| is_default | boolean | Yes | Default routing for this part |
+| part_id | uuid | Yes | FK to parts (unique — one routing per part) |
+| name | text | Yes | Auto-generated from part number (e.g., "Routing - AE36589E-RT") |
 
 ### Routing Nodes Table (`routing_nodes`)
 
@@ -114,23 +115,35 @@ Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when
 
 | As a... | I want to... | So that... |
 |---|---|---|
-| Owner/Admin | Build a routing by dragging operations onto a canvas | I can visually design manufacturing workflows |
+| Owner/Admin | Build a routing for a part by dragging operations onto a canvas | I can visually design manufacturing workflows |
 | Owner/Admin | Connect operations with edges to define execution order | I can specify which operations depend on others |
 | Owner/Admin | Create parallel branches for simultaneous operations | Multiple operations can run at the same time |
 | Owner/Admin | View estimated total time (sum of all operations) | I can accurately quote jobs |
-| Owner/Admin | Clone an existing routing | I can quickly create similar workflows |
-| Owner/Admin | Set a default routing for a part | Jobs are auto-populated with correct operations |
+| Owner/Admin | Access the routing editor from the part detail page | I can manage the routing in context of the part |
 | Owner/Admin | Validate my workflow has no cycles | I avoid invalid routing configurations |
 
 ---
 
 ## Validation Rules
 
-- Routing name is required and must be unique within the company
+- Routing name is auto-generated from the part number and must be unique within the company
 
-- At least one operation (node) is required to save a routing. An error is shown on Step 2 if no operations have been added.
+- Each part can have at most one routing (enforced by unique constraint on part_id)
+
+- At least one operation (node) is required to save a routing. An error is shown if no operations have been added.
 
 - Workflow must have no cycles (DAG only)
+
+---
+
+## Routes
+
+Routings are accessed from the part detail page. There is no standalone routings list page.
+
+- **Create routing:** `/dashboard/{companyId}/parts/{partId}/routing/new` -- Opens the workflow builder directly (no Step 1 name/part selection; the routing name is auto-generated from the part number)
+- **Edit routing:** `/dashboard/{companyId}/parts/{partId}/routing/edit` -- Opens the workflow builder for the existing routing
+
+The routing wizard skips Step 1 (name and part selection) and goes straight to the workflow builder (Step 2), since the part context is already known and the routing name is auto-generated.
 
 ---
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -16,7 +16,8 @@ import InputAdornment from '@mui/material/InputAdornment';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
 import { calculateUnitPrice, calculateTotalPrice } from '@/types/quote';
 import type { PricingTier } from '@/types/part';
-import { createQuote, updateQuote, getCustomerParts, getQuoteAttachments } from '@/utils/quotesAccess';
+import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
+import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
@@ -121,34 +122,27 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     loadCustomers();
   }, [companyId, initialData.customer_id]);
 
-  // Load parts when customer changes
-  const loadParts = useCallback(async (customerId: string) => {
-    if (!customerId) {
-      setParts([]);
-      return;
-    }
-    setLoadingParts(true);
-    try {
-      const data = await getCustomerParts(companyId, customerId);
-      setParts(data);
-
-      // If editing with existing part, find and set it
-      if (initialData.part_id) {
-        const found = data.find((p) => p.id === initialData.part_id);
-        if (found) setSelectedPart(found);
-      }
-    } catch (err) {
-      console.error('Error loading parts:', err);
-    } finally {
-      setLoadingParts(false);
-    }
-  }, [companyId, initialData.part_id]);
-
+  // Load all parts on mount (parts are independent of customer)
   useEffect(() => {
-    if (formData.customer_id) {
-      loadParts(formData.customer_id);
-    }
-  }, [formData.customer_id, loadParts]);
+    const loadParts = async () => {
+      setLoadingParts(true);
+      try {
+        const data = await getPartsForSelect(companyId);
+        setParts(data);
+
+        // If editing with existing part, find and set it
+        if (initialData.part_id) {
+          const found = data.find((p) => p.id === initialData.part_id);
+          if (found) setSelectedPart(found);
+        }
+      } catch (err) {
+        console.error('Error loading parts:', err);
+      } finally {
+        setLoadingParts(false);
+      }
+    };
+    loadParts();
+  }, [companyId, initialData.part_id]);
 
   // Load attachments in edit mode
   const loadAttachments = useCallback(async () => {
@@ -181,12 +175,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     };
   }, [mode, tempAttachments]);
 
+  // Track whether the user manually edited the unit price
+  const isPriceManuallyEdited = useRef(false);
+
   // Auto-fill price when part or quantity changes
   useEffect(() => {
     if (formData.part_type === 'existing' && selectedPart?.pricing?.length) {
       const qty = parseInt(formData.quantity, 10) || 1;
       const suggestedPrice = calculateUnitPrice(selectedPart.pricing, qty);
       if (suggestedPrice !== null) {
+        isPriceManuallyEdited.current = false;
         setFormData((prev) => ({
           ...prev,
           unit_price: String(suggestedPrice),
@@ -213,12 +211,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       return;
     }
     setSelectedCustomer(value);
-    setSelectedPart(null);
-    setParts([]); // Clear parts list when customer changes
     setFormData((prev) => ({
       ...prev,
       customer_id: value?.id || '',
-      part_id: '',
     }));
     if (fieldErrors.customer_id) {
       setFieldErrors((prev) => ({ ...prev, customer_id: '' }));
@@ -249,11 +244,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     };
     setCustomers((prev) => [...prev, newOption]);
     setSelectedCustomer(newOption);
-    setSelectedPart(null);
     setFormData((prev) => ({
       ...prev,
       customer_id: customer.id,
-      part_id: '',
     }));
     // Always clear the error when a customer is selected
     setFieldErrors((prev) => ({ ...prev, customer_id: '' }));
@@ -430,7 +423,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
 
           <Autocomplete
-                options={formData.customer_id ? [CREATE_NEW_PART, ...parts] : parts}
+                options={[CREATE_NEW_PART, ...parts]}
                 getOptionLabel={(option) =>
                   option.isCreateNew
                     ? option.part_number
@@ -441,7 +434,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 value={selectedPart}
                 onChange={handlePartChange}
                 loading={loadingParts}
-                disabled={loading || !formData.customer_id}
+                disabled={loading}
                 filterOptions={(options, state) => {
                   // Always keep "Create New" at the top, then filter the rest
                   const createNew = options.find((o) => o.isCreateNew);
@@ -486,48 +479,74 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     {...params}
                     label="Select Part"
                     error={!!fieldErrors.part_id}
-                    helperText={
-                      fieldErrors.part_id ||
-                      (!formData.customer_id ? 'Select a customer first' : '')
-                    }
+                    helperText={fieldErrors.part_id}
                   />
                 )}
                 slotProps={{}}
                 fullWidth
               />
 
-              {/* Pricing Tiers Display */}
-              {selectedPart?.pricing && selectedPart.pricing.length > 0 && (
-                <Box
-                  sx={{
-                    mt: 2,
-                    p: 2,
-                    bgcolor: 'rgba(255, 255, 255, 0.05)',
-                    borderRadius: 1,
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                  }}
-                >
-                  <Typography variant="subtitle2" gutterBottom>
-                    Pricing Tiers:
-                  </Typography>
-                  {[...selectedPart.pricing]
-                    .sort((a, b) => a.qty - b.qty)
-                    .map((tier, i) => (
-                      <Typography key={i} variant="body2" color="text.secondary">
-                        {tier.qty}+ units: {formatCurrency(tier.price)}/ea
-                      </Typography>
-                    ))}
-                </Box>
-              )}
         </CardContent>
       </Card>
 
-      {/* Pricing */}
+      {/* Pricing — combined tiers + inputs */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
             Pricing
           </Typography>
+
+          {/* Pricing tiers from selected part */}
+          {selectedPart?.pricing && selectedPart.pricing.length > 0 && (() => {
+            const sortedTiers = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
+            const qty = parseInt(formData.quantity, 10) || 1;
+            // Find active tier: highest tier where qty <= order quantity
+            let activeTierQty: number | null = null;
+            for (let i = sortedTiers.length - 1; i >= 0; i--) {
+              if (sortedTiers[i].qty <= qty) {
+                activeTierQty = sortedTiers[i].qty;
+                break;
+              }
+            }
+            if (activeTierQty === null && sortedTiers.length > 0) {
+              activeTierQty = sortedTiers[0].qty;
+            }
+
+            return (
+              <Box
+                sx={{
+                  mb: 3,
+                  p: 2,
+                  bgcolor: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                }}
+              >
+                <Typography variant="subtitle2" gutterBottom>
+                  Part Pricing Tiers
+                </Typography>
+                {sortedTiers.map((tier, i) => {
+                  const isActive = tier.qty === activeTierQty;
+                  return (
+                    <Typography
+                      key={i}
+                      variant="body2"
+                      sx={{
+                        color: isActive ? 'primary.main' : 'text.secondary',
+                        fontWeight: isActive ? 600 : 400,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
+                      }}
+                    >
+                      {isActive ? '▸' : '\u2003'} {tier.qty}+ units: {formatCurrency(tier.price)}/ea
+                    </Typography>
+                  );
+                })}
+              </Box>
+            );
+          })()}
+
           <Grid container spacing={3} alignItems="flex-end">
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
@@ -551,7 +570,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 label="Unit Price"
                 type="number"
                 value={formData.unit_price}
-                onChange={handleChange('unit_price')}
+                onChange={(e) => {
+                  isPriceManuallyEdited.current = true;
+                  handleChange('unit_price')(e);
+                }}
                 error={!!fieldErrors.unit_price}
                 helperText={fieldErrors.unit_price}
                 disabled={loading}
@@ -574,6 +596,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Box>
             </Grid>
           </Grid>
+
+          {/* Auto-fill status helper text */}
+          {selectedPart?.pricing && selectedPart.pricing.length > 0 && formData.unit_price && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
+              {isPriceManuallyEdited.current
+                ? 'Custom price'
+                : (() => {
+                    const qty = parseInt(formData.quantity, 10) || 1;
+                    const sorted = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
+                    for (let i = sorted.length - 1; i >= 0; i--) {
+                      if (sorted[i].qty <= qty) {
+                        return `Auto-filled from ${sorted[i].qty}+ tier. Edit to override.`;
+                      }
+                    }
+                    return `Auto-filled from ${sorted[0]?.qty}+ tier. Edit to override.`;
+                  })()
+              }
+            </Typography>
+          )}
         </CardContent>
       </Card>
 
@@ -644,7 +685,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         onClose={() => setPartModalOpen(false)}
         onCreated={handlePartCreated}
         companyId={companyId}
-        preselectedCustomerId={formData.customer_id}
       />
     </Box>
   );

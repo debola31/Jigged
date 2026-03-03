@@ -60,7 +60,6 @@ export interface Job {
   company_id: string;
   job_number: string;
   quote_id: string | null;
-  routing_id: string | null;
   customer_id: string;
   part_id: string | null;
   description: string | null;
@@ -104,11 +103,6 @@ export interface JobWithRelations extends Job {
     quote_number: string;
     total_price: number | null;
   } | null;
-  // Joined routing data
-  routings?: {
-    id: string;
-    name: string;
-  } | null;
   // Joined operations
   job_operations?: JobOperation[];
   // Joined attachments
@@ -130,7 +124,6 @@ export interface JobWithAttachments extends Job {
 export interface JobFormData {
   customer_id: string;
   part_id: string;
-  routing_id: string;
   description: string;
 }
 
@@ -149,7 +142,6 @@ export interface JobFilters {
 export const EMPTY_JOB_FORM: JobFormData = {
   customer_id: '',
   part_id: '',
-  routing_id: '',
   description: '',
 };
 
@@ -160,7 +152,6 @@ export function jobToFormData(job: Job): JobFormData {
   return {
     customer_id: job.customer_id,
     part_id: job.part_id || '',
-    routing_id: job.routing_id || '',
     description: job.description || '',
   };
 }

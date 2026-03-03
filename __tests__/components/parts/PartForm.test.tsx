@@ -5,7 +5,6 @@ import { render, routerMocks, resetRouterMocks } from '../../test-utils';
 import PartForm from '@/components/parts/PartForm';
 import { EMPTY_PART_FORM } from '@/types/part';
 import type { PartFormData, Part } from '@/types/part';
-import type { Customer } from '@/types/customer';
 
 // Mock partsAccess utilities
 const mockCreatePart = vi.fn();
@@ -20,56 +19,6 @@ vi.mock('@/utils/partsAccess', () => ({
   checkPartNumberExists: (...args: unknown[]) => mockCheckPartNumberExists(...args),
 }));
 
-// Mock customerAccess utilities
-const mockGetAllCustomers = vi.fn();
-
-vi.mock('@/utils/customerAccess', () => ({
-  getAllCustomers: (...args: unknown[]) => mockGetAllCustomers(...args),
-}));
-
-const mockCustomers: Customer[] = [
-  {
-    id: 'customer-1',
-    company_id: 'test-company-id',
-    name: 'Test Customer 1',
-    phone: null,
-    email: null,
-    website: null,
-    contact_name: null,
-    contact_phone: null,
-    contact_email: null,
-    address_line1: null,
-    address_line2: null,
-    city: null,
-    state: null,
-    postal_code: null,
-    country: 'USA',
-    notes: null,
-    created_at: '2024-01-01T00:00:00Z',
-    updated_at: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'customer-2',
-    company_id: 'test-company-id',
-    name: 'Test Customer 2',
-    phone: null,
-    email: null,
-    website: null,
-    contact_name: null,
-    contact_phone: null,
-    contact_email: null,
-    address_line1: null,
-    address_line2: null,
-    city: null,
-    state: null,
-    postal_code: null,
-    country: 'USA',
-    notes: null,
-    created_at: '2024-01-02T00:00:00Z',
-    updated_at: '2024-01-02T00:00:00Z',
-  },
-];
-
 describe('PartForm', () => {
   const user = userEvent.setup();
 
@@ -78,8 +27,6 @@ describe('PartForm', () => {
     resetRouterMocks();
     // Default: part number doesn't exist (validation passes)
     mockCheckPartNumberExists.mockResolvedValue(false);
-    // Default: return mock customers
-    mockGetAllCustomers.mockResolvedValue(mockCustomers);
   });
 
   describe('Validation', () => {
@@ -91,11 +38,6 @@ describe('PartForm', () => {
           initialData={EMPTY_PART_FORM}
         />
       );
-
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
 
       // Verify the Part Number field exists and is empty
       const partNumberInput = screen.getByLabelText(/part number/i);
@@ -145,11 +87,6 @@ describe('PartForm', () => {
         />
       );
 
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
-
       // Click "Add Tier" button
       const addTierButton = screen.getByRole('button', { name: /add tier/i });
       await user.click(addTierButton);
@@ -181,9 +118,9 @@ describe('PartForm', () => {
         />
       );
 
-      // Wait for customers to load
+      // Wait for render
       await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
+        expect(screen.getByText(/pricing tiers/i)).toBeInTheDocument();
       });
 
       // Find delete buttons in the pricing table
@@ -198,27 +135,6 @@ describe('PartForm', () => {
     });
   });
 
-  describe('Customer Selection', () => {
-    it('shows customer dropdown with "No Customer" option', async () => {
-      render(
-        <PartForm
-          mode="create"
-          companyId="test-company-id"
-          initialData={EMPTY_PART_FORM}
-        />
-      );
-
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalledWith('test-company-id');
-      });
-
-      // Find the customer select
-      const customerLabel = screen.getByLabelText(/customer/i);
-      expect(customerLabel).toBeInTheDocument();
-    });
-  });
-
   describe('Create mode', () => {
     const validFormData: PartFormData = {
       ...EMPTY_PART_FORM,
@@ -230,11 +146,9 @@ describe('PartForm', () => {
       const mockPart: Part = {
         id: 'new-part-uuid',
         company_id: 'test-company-id',
-        customer_id: null,
         part_number: 'NEW-PART-001',
         description: 'Test Part Description',
         pricing: [{ qty: 1, price: 0 }],
-        notes: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -249,11 +163,6 @@ describe('PartForm', () => {
         />
       );
 
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
-
       // Click save
       const saveButton = screen.getByRole('button', { name: /save/i });
       await user.click(saveButton);
@@ -263,7 +172,6 @@ describe('PartForm', () => {
         expect(mockCheckPartNumberExists).toHaveBeenCalledWith(
           'test-company-id',
           'NEW-PART-001',
-          null,
           undefined
         );
       });
@@ -297,11 +205,6 @@ describe('PartForm', () => {
         />
       );
 
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
-
       // Click save
       const saveButton = screen.getByRole('button', { name: /save/i });
       await user.click(saveButton);
@@ -319,7 +222,6 @@ describe('PartForm', () => {
   describe('Edit mode', () => {
     const existingPartData: PartFormData = {
       part_number: 'EXIST-001',
-      customer_id: 'customer-1',
       description: 'Existing Part',
       pricing: [
         { qty: 1, price: 10.0 },
@@ -330,14 +232,12 @@ describe('PartForm', () => {
     const existingPart: Part = {
       id: 'existing-part-uuid',
       company_id: 'test-company-id',
-      customer_id: 'customer-1',
       part_number: 'EXIST-001',
       description: 'Existing Part',
       pricing: [
         { qty: 1, price: 10.0 },
         { qty: 50, price: 8.0 },
       ],
-      notes: 'Important part',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
       quotes_count: 2,
@@ -354,11 +254,6 @@ describe('PartForm', () => {
           part={existingPart}
         />
       );
-
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
 
       // Check that form fields are pre-filled
       expect(screen.getByLabelText(/part number/i)).toHaveValue('EXIST-001');
@@ -378,11 +273,6 @@ describe('PartForm', () => {
           part={existingPart}
         />
       );
-
-      // Wait for customers to load
-      await waitFor(() => {
-        expect(mockGetAllCustomers).toHaveBeenCalled();
-      });
 
       // Click delete button
       const deleteButton = screen.getByRole('button', { name: /delete/i });

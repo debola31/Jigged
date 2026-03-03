@@ -20,6 +20,7 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
     'order',
     'range',
     'single',
+    'maybeSingle',
     'limit',
   ];
 
@@ -990,23 +991,59 @@ describe('quotesAccess utilities', () => {
 
   describe('convertQuoteToJob', () => {
     it('converts approved quote to job', async () => {
-      let callCount = 0;
+      let quotesCallCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'quotes' && callCount === 1) {
+        if (table === 'quotes') {
+          quotesCallCount++;
+          if (quotesCallCount === 1) {
+            // First quotes call: fetch quote
+            return {
+              ...mockQueryBuilder,
+              select: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                eq: vi.fn().mockReturnValue({
+                  ...mockQueryBuilder,
+                  single: vi.fn().mockReturnValue({
+                    data: {
+                      ...mockQuote,
+                      status: 'approved',
+                      converted_to_job_id: null,
+                      quote_attachments: [],
+                    },
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+          // Subsequent quotes calls: update quote with conversion info
+          return {
+            ...mockQueryBuilder,
+            update: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                select: vi.fn().mockReturnValue({
+                  ...mockQueryBuilder,
+                  single: vi.fn().mockReturnValue({
+                    data: { ...mockQuote, converted_to_job_id: 'job-1' },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'routings') {
+          // Routing lookup (auto-resolve from part)
           return {
             ...mockQueryBuilder,
             select: vi.fn().mockReturnValue({
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: {
-                    ...mockQuote,
-                    status: 'approved',
-                    converted_to_job_id: null,
-                    quote_attachments: [],
-                  },
+                maybeSingle: vi.fn().mockReturnValue({
+                  data: { id: 'routing-1' },
                   error: null,
                 }),
               }),
@@ -1023,24 +1060,6 @@ describe('quotesAccess utilities', () => {
                 single: vi.fn().mockReturnValue({
                   data: { id: 'job-1', job_number: 'J-2024-001' },
                   error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            update: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                select: vi.fn().mockReturnValue({
-                  ...mockQueryBuilder,
-                  single: vi.fn().mockReturnValue({
-                    data: { ...mockQuote, converted_to_job_id: 'job-1' },
-                    error: null,
-                  }),
                 }),
               }),
             }),

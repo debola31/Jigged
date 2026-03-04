@@ -9,7 +9,8 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
-import { SummaryCard, RecentActivity } from '@/components/dashboard';
+import { SummaryCard, RecentActivity, InsightsSection } from '@/components/dashboard';
+import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
 import {
   getDashboardMetrics,
@@ -122,6 +123,14 @@ export default function DashboardPage() {
           />
         </Grid>
       </Grid>
+
+      {/* AI Insights */}
+      <InsightsSection companyId={companyId} />
+
+      {/* AI Chat */}
+      <Box sx={{ mb: 4 }}>
+        <InsightsChat companyId={companyId} />
+      </Box>
 
       {/* Recent Activity */}
       <RecentActivity activities={activities} loading={loading} />

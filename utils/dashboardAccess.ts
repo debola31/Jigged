@@ -1,10 +1,7 @@
 import { getSupabase } from '@/lib/supabase';
 
-// ============== Dashboard Metrics ==============
+// ============== Types ==============
 
-/**
- * Activity item for the recent activity feed
- */
 export interface ActivityItem {
   id: string;
   type: 'quote' | 'job';
@@ -14,239 +11,241 @@ export interface ActivityItem {
   customerName?: string;
 }
 
+// ============== Pinned Metrics ==============
+
+export type MetricKey =
+  | 'open_quotes'
+  | 'active_jobs'
+  | 'weekly_revenue'
+  | 'monthly_revenue'
+  | 'at_risk_count'
+  | 'low_inventory_count'
+  | 'total_customers'
+  | 'total_parts';
+
+export interface MetricDefinition {
+  key: MetricKey;
+  label: string;
+  format: 'number' | 'currency';
+}
+
+export const AVAILABLE_METRICS: MetricDefinition[] = [
+  { key: 'open_quotes', label: 'Open Quotes', format: 'number' },
+  { key: 'active_jobs', label: 'Active Jobs', format: 'number' },
+  { key: 'weekly_revenue', label: 'Revenue This Week', format: 'currency' },
+  { key: 'monthly_revenue', label: 'Revenue This Month', format: 'currency' },
+  { key: 'at_risk_count', label: 'At-Risk Jobs', format: 'number' },
+  { key: 'low_inventory_count', label: 'Low Inventory', format: 'number' },
+  { key: 'total_customers', label: 'Customers', format: 'number' },
+  { key: 'total_parts', label: 'Parts', format: 'number' },
+];
+
+export const DEFAULT_PINNED_METRICS: MetricKey[] = [
+  'open_quotes',
+  'active_jobs',
+  'weekly_revenue',
+];
+
 /**
- * Dashboard metrics summary
+ * Get the user's pinned metric keys from user_preferences.
+ * Returns defaults if no preference is stored.
  */
-export interface DashboardMetrics {
-  openQuotesCount: number;
-  activeJobsCount: number;
-  weeklyRevenue: number;
+export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return DEFAULT_PINNED_METRICS;
+
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error || !data) return DEFAULT_PINNED_METRICS;
+
+  const prefs = data.preferences as Record<string, unknown> | null;
+  const pinned = prefs?.dashboard_pinned_metrics;
+  if (Array.isArray(pinned) && pinned.length > 0) {
+    return pinned as MetricKey[];
+  }
+  return DEFAULT_PINNED_METRICS;
 }
 
 /**
- * Get count of open quotes (draft + pending_approval)
+ * Save the user's pinned metric keys to user_preferences.
  */
-export async function getOpenQuotesCount(companyId: string): Promise<number> {
+export async function setPinnedMetricKeys(keys: MetricKey[]): Promise<void> {
   const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
 
-  const { count, error } = await supabase
-    .from('quotes')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .in('status', ['draft', 'pending_approval']);
+  // Read existing preferences first
+  const { data: existing } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
 
-  if (error) {
-    console.error('Error fetching open quotes count:', error);
-    throw error;
+  const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
+  const updatedPrefs = { ...currentPrefs, dashboard_pinned_metrics: keys };
+
+  await supabase
+    .from('user_preferences')
+    .upsert(
+      {
+        user_id: user.id,
+        preferences: updatedPrefs,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
+}
+
+// ============== Metric Value Queries ==============
+
+async function getCount(table: string, companyId: string, filters?: Record<string, string[]>): Promise<number> {
+  const supabase = getSupabase();
+  let query = supabase.from(table).select('*', { count: 'exact', head: true }).eq('company_id', companyId);
+
+  if (filters) {
+    for (const [col, values] of Object.entries(filters)) {
+      query = query.in(col, values);
+    }
   }
 
+  const { count, error } = await query;
+  if (error) throw error;
   return count || 0;
 }
 
-/**
- * Get count of active jobs (pending + in_progress)
- */
-export async function getActiveJobsCount(companyId: string): Promise<number> {
+async function getWeeklyRevenue(companyId: string): Promise<number> {
   const supabase = getSupabase();
-
-  const { count, error } = await supabase
-    .from('jobs')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .in('status', ['pending', 'in_progress']);
-
-  if (error) {
-    console.error('Error fetching active jobs count:', error);
-    throw error;
-  }
-
-  return count || 0;
-}
-
-/**
- * Get revenue from shipped jobs this week
- * Revenue is calculated from the linked quote's total_price
- */
-export async function getWeeklyRevenue(companyId: string): Promise<number> {
-  const supabase = getSupabase();
-
-  // Calculate start of current week (Sunday)
   const now = new Date();
-  const dayOfWeek = now.getDay();
   const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - dayOfWeek);
+  startOfWeek.setDate(now.getDate() - now.getDay());
   startOfWeek.setHours(0, 0, 0, 0);
 
   const { data, error } = await supabase
     .from('jobs')
-    .select(`
-      id,
-      quotes!jobs_quote_id_fkey(total_price)
-    `)
+    .select('id, quotes!jobs_quote_id_fkey(total_price)')
     .eq('company_id', companyId)
     .eq('status', 'shipped')
     .gte('shipped_at', startOfWeek.toISOString());
 
-  if (error) {
-    console.error('Error fetching weekly revenue:', error);
-    throw error;
-  }
+  if (error) throw error;
 
-  // Sum up the prices from linked quotes
-  const total = (data || []).reduce(
+  return (data || []).reduce(
     (sum: number, job: { quotes: { total_price: number | null } | null }) => {
-      const price = job.quotes?.total_price || 0;
-      return sum + price;
+      return sum + (job.quotes?.total_price || 0);
     },
     0
   );
-  return total;
 }
 
-/**
- * Get all dashboard metrics in a single call
- */
-export async function getDashboardMetrics(
-  companyId: string
-): Promise<DashboardMetrics> {
-  const [openQuotesCount, activeJobsCount, weeklyRevenue] = await Promise.all([
-    getOpenQuotesCount(companyId),
-    getActiveJobsCount(companyId),
-    getWeeklyRevenue(companyId),
-  ]);
-
-  return {
-    openQuotesCount,
-    activeJobsCount,
-    weeklyRevenue,
-  };
-}
-
-/**
- * Get recent activity by inferring from timestamps
- * Combines quotes and jobs, sorted by most recent timestamp
- */
-export async function getRecentActivity(
-  companyId: string,
-  limit: number = 10
-): Promise<ActivityItem[]> {
+async function getMonthlyRevenue(companyId: string): Promise<number> {
   const supabase = getSupabase();
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  // Fetch recent quotes (created_at)
-  const { data: quotes, error: quotesError } = await supabase
-    .from('quotes')
-    .select(
-      `
-      id,
-      quote_number,
-      created_at,
-      customers!left(name)
-    `
-    )
-    .eq('company_id', companyId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (quotesError) {
-    console.error('Error fetching quotes for activity:', quotesError);
-    throw quotesError;
-  }
-
-  // Fetch recent jobs with their various timestamps
-  const { data: jobs, error: jobsError } = await supabase
+  const { data, error } = await supabase
     .from('jobs')
-    .select(
-      `
-      id,
-      job_number,
-      created_at,
-      started_at,
-      completed_at,
-      shipped_at,
-      customers!left(name)
-    `
-    )
+    .select('id, quotes!jobs_quote_id_fkey(total_price)')
     .eq('company_id', companyId)
-    .order('created_at', { ascending: false })
-    .limit(limit * 2); // Fetch more since each job can have multiple activities
+    .eq('status', 'shipped')
+    .gte('shipped_at', startOfMonth.toISOString());
 
-  if (jobsError) {
-    console.error('Error fetching jobs for activity:', jobsError);
-    throw jobsError;
-  }
+  if (error) throw error;
 
-  // Build activity items
-  const activities: ActivityItem[] = [];
-
-  // Add quote created activities
-  for (const quote of quotes || []) {
-    activities.push({
-      id: `quote-created-${quote.id}`,
-      type: 'quote',
-      entityNumber: quote.quote_number,
-      action: 'created',
-      timestamp: quote.created_at,
-      customerName: (quote.customers as { name: string } | null)?.name,
-    });
-  }
-
-  // Add job activities (created, started, completed, shipped)
-  for (const job of jobs || []) {
-    const customerName = (job.customers as { name: string } | null)?.name;
-
-    // Job created
-    if (job.created_at) {
-      activities.push({
-        id: `job-created-${job.id}`,
-        type: 'job',
-        entityNumber: job.job_number,
-        action: 'created',
-        timestamp: job.created_at,
-        customerName,
-      });
-    }
-
-    // Job started
-    if (job.started_at) {
-      activities.push({
-        id: `job-started-${job.id}`,
-        type: 'job',
-        entityNumber: job.job_number,
-        action: 'started',
-        timestamp: job.started_at,
-        customerName,
-      });
-    }
-
-    // Job completed
-    if (job.completed_at) {
-      activities.push({
-        id: `job-completed-${job.id}`,
-        type: 'job',
-        entityNumber: job.job_number,
-        action: 'completed',
-        timestamp: job.completed_at,
-        customerName,
-      });
-    }
-
-    // Job shipped
-    if (job.shipped_at) {
-      activities.push({
-        id: `job-shipped-${job.id}`,
-        type: 'job',
-        entityNumber: job.job_number,
-        action: 'shipped',
-        timestamp: job.shipped_at,
-        customerName,
-      });
-    }
-  }
-
-  // Sort by timestamp descending and take the top N
-  activities.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  return (data || []).reduce(
+    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
+      return sum + (job.quotes?.total_price || 0);
+    },
+    0
   );
+}
 
-  return activities.slice(0, limit);
+async function getAtRiskCount(companyId: string): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('id, due_date, job_operations(status)')
+    .eq('company_id', companyId)
+    .in('status', ['pending', 'in_progress'])
+    .not('due_date', 'is', null);
+
+  if (error) throw error;
+
+  const now = new Date();
+  let atRisk = 0;
+  for (const job of data || []) {
+    if (!job.due_date) continue;
+    const dueDate = new Date(job.due_date);
+    const totalDays = Math.max(1, (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    // Simple heuristic: if less than 3 days remaining, it's at risk
+    if (totalDays < 3) atRisk++;
+  }
+  return atRisk;
+}
+
+async function getLowInventoryCount(companyId: string): Promise<number> {
+  const supabase = getSupabase();
+  // Items where quantity <= reorder_point
+  const { data, error } = await supabase
+    .from('inventory_items')
+    .select('id, quantity, reorder_point')
+    .eq('company_id', companyId)
+    .not('reorder_point', 'is', null);
+
+  if (error) throw error;
+
+  return (data || []).filter(
+    (item: { quantity: number | null; reorder_point: number | null }) =>
+      (item.quantity ?? 0) <= (item.reorder_point ?? 0)
+  ).length;
+}
+
+/**
+ * Get the value for a single metric key.
+ */
+export async function getMetricValue(companyId: string, key: MetricKey): Promise<number> {
+  switch (key) {
+    case 'open_quotes':
+      return getCount('quotes', companyId, { status: ['draft', 'pending_approval'] });
+    case 'active_jobs':
+      return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
+    case 'weekly_revenue':
+      return getWeeklyRevenue(companyId);
+    case 'monthly_revenue':
+      return getMonthlyRevenue(companyId);
+    case 'at_risk_count':
+      return getAtRiskCount(companyId);
+    case 'low_inventory_count':
+      return getLowInventoryCount(companyId);
+    case 'total_customers':
+      return getCount('customers', companyId);
+    case 'total_parts':
+      return getCount('parts', companyId);
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Get values for all pinned metrics in parallel.
+ */
+export async function getPinnedMetricValues(
+  companyId: string,
+  keys: MetricKey[]
+): Promise<Record<MetricKey, number>> {
+  const results = await Promise.all(
+    keys.map(async (key) => {
+      try {
+        const value = await getMetricValue(companyId, key);
+        return [key, value] as const;
+      } catch {
+        return [key, 0] as const;
+      }
+    })
+  );
+  return Object.fromEntries(results) as Record<MetricKey, number>;
 }

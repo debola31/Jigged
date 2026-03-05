@@ -22,7 +22,8 @@ You have access to tools that query the company's data. Use them to answer quest
 
 Guidelines:
 - Always use the available tools to get real data. Never make up numbers.
-- Keep summaries to 1-3 sentences. Shop owners are busy.
+- For dashboard card summaries: respond with a single short phrase (under 12 words). Examples: "Flat at $0 for 8 weeks", "Pipeline healthy — 50% in progress", "3 jobs at risk of delay".
+- For chat responses: keep to 1 sentence max (under 20 words). Be direct. Shop owners are busy.
 - When data supports it, include a chart_config in your response.
 - Highlight actionable insights: what should the owner DO about this data?
 - Compare to previous periods when relevant (e.g., "up 12% vs last week").
@@ -34,27 +35,27 @@ DASHBOARD_INSIGHT_CONFIG = {
     "revenue_trend": {
         "function": "get_revenue_by_period",
         "params": {"period_type": "weekly", "num_periods": 8},
-        "summary_prompt": "Summarize this weekly revenue trend for a shop owner. Note any trends up or down.",
+        "summary_prompt": "Write a single short phrase (under 12 words) summarizing this revenue trend. Example: 'Up 15% vs last week' or 'Flat at $0 for 8 weeks'.",
     },
     "job_pipeline": {
         "function": "get_job_status_distribution",
         "params": {},
-        "summary_prompt": "Summarize this job pipeline status distribution. Flag if too many jobs are on hold or pending.",
+        "summary_prompt": "Write a single short phrase (under 12 words) summarizing this job pipeline. Example: 'Pipeline healthy — 50% in progress' or '8 jobs on hold'.",
     },
     "quote_conversion": {
         "function": "get_quote_conversion_rate",
         "params": {"period_type": "weekly", "num_periods": 8},
-        "summary_prompt": "Summarize quote conversion rates. Highlight if conversion is improving or declining.",
+        "summary_prompt": "Write a single short phrase (under 12 words) summarizing quote conversion. Example: '65% conversion this month' or 'Declining — down from 80%'.",
     },
     "at_risk_jobs": {
         "function": "get_at_risk_jobs",
         "params": {},
-        "summary_prompt": "Summarize at-risk jobs. Prioritize high-severity items the owner should act on immediately.",
+        "summary_prompt": "Write a single short phrase (under 12 words) summarizing at-risk jobs. Example: '3 jobs behind schedule' or 'No jobs at risk'.",
     },
     "inventory_alerts": {
         "function": "get_inventory_alerts",
         "params": {},
-        "summary_prompt": "Summarize inventory alerts. List items that need immediate reordering.",
+        "summary_prompt": "Write a single short phrase (under 12 words) summarizing inventory alerts. Example: '2 items below reorder point' or 'All levels OK'.",
     },
 }
 
@@ -1009,14 +1010,14 @@ async def _generate_insight_summary(
         provider = ClaudeProvider()
         response = provider.client.messages.create(
             model=provider.model,
-            max_tokens=200,
+            max_tokens=60,
             system=INSIGHTS_SYSTEM_PROMPT,
             messages=[{
                 "role": "user",
                 "content": (
                     f"{prompt_hint}\n\n"
                     f"Metric data:\n```json\n{json.dumps(metric_data, indent=2)}\n```\n\n"
-                    "Respond with ONLY the summary text (1-3 sentences). No JSON, no markdown."
+                    "Respond with ONLY a single short phrase (under 12 words). No JSON, no markdown, no sentences."
                 ),
             }],
         )
@@ -1029,23 +1030,27 @@ async def _generate_insight_summary(
 
 
 def _fallback_summary(insight_type: str, metric_data: dict) -> str:
-    """Generate a simple template-based summary when AI is unavailable."""
+    """Generate a short phrase summary when AI is unavailable."""
     if insight_type == "revenue_trend":
         total = metric_data.get("total_revenue", 0)
-        return f"Total revenue over the period: ${total:,.2f}."
+        return f"${total:,.0f} total revenue"
     elif insight_type == "job_pipeline":
         total = metric_data.get("total_jobs", 0)
-        return f"You currently have {total} jobs across all stages."
+        return f"{total} jobs across all stages"
     elif insight_type == "quote_conversion":
         periods = metric_data.get("periods", [])
         if periods:
             latest = periods[-1]
-            return f"Latest conversion rate: {latest.get('conversion_rate', 0)}%."
-        return "No quote conversion data available."
+            return f"{latest.get('conversion_rate', 0)}% conversion rate"
+        return "No conversion data yet"
     elif insight_type == "at_risk_jobs":
         total = metric_data.get("total_at_risk", 0)
-        return f"{total} job(s) are potentially at risk of falling behind schedule."
+        if total == 0:
+            return "No jobs at risk"
+        return f"{total} job{'s' if total != 1 else ''} at risk"
     elif insight_type == "inventory_alerts":
         total = metric_data.get("total_alerts", 0)
-        return f"{total} inventory item(s) are at or below reorder point."
-    return "Insight data available."
+        if total == 0:
+            return "All levels OK"
+        return f"{total} item{'s' if total != 1 else ''} below reorder point"
+    return "Data available"

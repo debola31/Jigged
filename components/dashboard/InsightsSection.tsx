@@ -7,15 +7,21 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import InsightCard from '@/components/insights/InsightCard';
 import {
   getDashboardInsights,
   refreshInsights,
+  getSavedInsights,
+  deleteSavedInsight,
   type InsightCard as InsightCardType,
+  type SavedInsight,
 } from '@/utils/insightsAccess';
 
 interface InsightsSectionProps {
   companyId: string;
+  /** Incremented when a new insight is saved, to trigger refetch */
+  savedVersion?: number;
 }
 
 /**
@@ -23,8 +29,9 @@ interface InsightsSectionProps {
  * Displays in a responsive 2-column grid (1-column on mobile).
  * Includes a Refresh button to force-recompute insights.
  */
-export default function InsightsSection({ companyId }: InsightsSectionProps) {
+export default function InsightsSection({ companyId, savedVersion = 0 }: InsightsSectionProps) {
   const [insights, setInsights] = useState<InsightCardType[]>([]);
+  const [savedInsights, setSavedInsights] = useState<SavedInsight[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +42,12 @@ export default function InsightsSection({ companyId }: InsightsSectionProps) {
     try {
       setLoading(true);
       setError(null);
-      const data = await getDashboardInsights(companyId);
-      setInsights(data);
+      const [builtIn, saved] = await Promise.all([
+        getDashboardInsights(companyId),
+        getSavedInsights(companyId).catch(() => []),
+      ]);
+      setInsights(builtIn);
+      setSavedInsights(saved);
     } catch (err) {
       console.error('Error fetching insights:', err);
       setError('Failed to load AI insights. The insights service may be temporarily unavailable.');
@@ -47,7 +58,7 @@ export default function InsightsSection({ companyId }: InsightsSectionProps) {
 
   useEffect(() => {
     fetchInsights();
-  }, [fetchInsights]);
+  }, [fetchInsights, savedVersion]);
 
   const handleRefresh = async () => {
     if (!companyId || refreshing) return;
@@ -62,6 +73,15 @@ export default function InsightsSection({ companyId }: InsightsSectionProps) {
       setError('Failed to refresh insights. Please try again.');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleRemoveSaved = async (insightId: string) => {
+    try {
+      await deleteSavedInsight(companyId, insightId);
+      setSavedInsights((prev) => prev.filter((s) => s.id !== insightId));
+    } catch (err) {
+      console.error('Error deleting saved insight:', err);
     }
   };
 
@@ -84,9 +104,12 @@ export default function InsightsSection({ companyId }: InsightsSectionProps) {
           mb: 2,
         }}
       >
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          AI Insights
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            Insights
+          </Typography>
+          <AutoAwesomeIcon sx={{ fontSize: 20, color: 'primary.main' }} />
+        </Box>
         <Button
           variant="outlined"
           size="small"
@@ -114,11 +137,34 @@ export default function InsightsSection({ companyId }: InsightsSectionProps) {
                 <InsightCard insight={null} loading={true} />
               </Grid>
             ))
-          : insights.map((insight) => (
-              <Grid key={insight.type} size={{ xs: 12, md: 6 }}>
-                <InsightCard insight={insight} />
-              </Grid>
-            ))}
+          : (
+            <>
+              {/* Pre-built insight cards */}
+              {insights.map((insight) => (
+                <Grid key={insight.type} size={{ xs: 12, md: 6 }}>
+                  <InsightCard insight={insight} />
+                </Grid>
+              ))}
+              {/* Saved insight cards */}
+              {savedInsights.map((saved) => (
+                <Grid key={saved.id} size={{ xs: 12, md: 6 }}>
+                  <InsightCard
+                    insight={{
+                      type: 'saved',
+                      summary: saved.answer,
+                      metric_data: {},
+                      chart_config: saved.chart_config,
+                      computed_at: saved.created_at,
+                      is_cached: false,
+                    }}
+                    title={saved.question}
+                    removable
+                    onRemove={() => handleRemoveSaved(saved.id)}
+                  />
+                </Grid>
+              ))}
+            </>
+          )}
       </Grid>
     </Box>
   );

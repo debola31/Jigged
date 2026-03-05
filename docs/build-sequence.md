@@ -53,7 +53,7 @@ JOB (shipped)
 | 6 | Dashboard | 1-2 | ✅ Complete | — | Phase 0 Module: Dashboard |
 | 7 | Operator View | 2-3 | ✅ Complete | — | Phase 0 Module: Operator View |
 | 8 | Inventory | 2-3 | ✅ Complete | — | [Phase 0 Module: Inventory](modules/inventory.md) |
-| 9 | Invitation & Demo content | 1-2 | ⬜ Not Started | - |  |
+| 9 | Invitation & Demo Mode | 1-2 | ⬜ Not Started | - |  |
 
 ---
 
@@ -3604,17 +3604,17 @@ Phase 0 is complete when Shane can:
   - inventory_transactions remain orphaned for audit purposes (store item_name snapshot)
 
 [Invitation System](modules/invitation-system.md)
-### 5.3 Demo Reset Flow
+### 5.3 Demo Mode Flow
 
-  1. User clicks "Reset Demo" in demo company settings
+  1. User clicks "Enter Demo Mode" during onboarding or from Settings
 
-  2. Confirmation modal: "This will delete all your changes to the demo"
+  2. System creates a hidden demo company (if first time), seeds it with template data, mirrors team access
 
-  3. User confirms
+  3. App navigates to demo company — Demo Mode banner appears on every page with "Back to My Company" link
 
-  4. System deletes all company data and re-clones from active template
+  4. User browses and practices with full CRUD in the demo company
 
-  5. Page refreshes with fresh demo data
+  5. User clicks "Back to My Company" when ready — navigates back to real company
 
   ---
 
@@ -3636,22 +3636,22 @@ Phase 0 is complete when Shane can:
 
   - InvitationsList - Table of pending/accepted invitations
 
-  - DemoResetButton - Button with confirmation for resetting demo
+  - DemoModeBanner - Persistent info banner on every page in demo mode with "Back to My Company" and "Reset"
 
-  - DemoBanner - Visual indicator when viewing demo company
+  - DemoModeSettings - Settings page section with Enter/Exit/Reset controls
 
   ---
 
 ## 7. Open Questions
 
-  1. Should demo companies count toward any limits? (e.g., if we add company limits later)
-    1. No
+  1. Should demo data count toward any limits? (e.g., if we add usage limits later)
+    1. No — filter by is_demo = FALSE in billing queries
 
   2. Should we track referral chain analytics? (who referred who for growth metrics)
     1. Yes
 
-  3. Should demo operators be interactive? (can log in as demo operator for full experience)
-    1. Yes
+  3. Do we need sample operators? No — real operators enter Demo Mode via Settings
+    1. Resolved
 
   4. Rate limiting on referral creation? (prevent spam link generation)
     1. Yes
@@ -3662,7 +3662,7 @@ Phase 0 is complete when Shane can:
 
   - Referral conversion rate - % of referral link clicks that result in signups
 
-  - Demo engagement - % of users who interact with demo before creating real data
+  - Demo mode entry rate - % of new users who enter demo mode
 
   - Team invitation acceptance rate - % of team invites accepted vs expired
 
@@ -3690,7 +3690,7 @@ Phase 0 is complete when Shane can:
 
   Referrals: POST/GET/DELETE /api/referrals, GET /api/referrals/validate/{code}, POST /api/referrals/redeem/{code}
 
-  Demo: POST /api/demo/reset/{company_id}, GET/POST /api/demo/templates
+  Demo Mode: POST /api/demo/create, POST /api/demo/reset, GET /api/demo/status, GET/POST /api/demo/templates
 
   [Platform Foundation](modules/invitation-system.md#platform-foundation)
 ## 1. Overview
@@ -3757,170 +3757,99 @@ Phase 0 is complete when Shane can:
 
     - [ ] At least one bootstrap admin can be added
 
-  [Demo Company](modules/invitation-system.md#demo-company)
+  [Demo Mode](modules/demo-mode.md)
 ## 1. Overview
 
-    Provide every user with an isolated sandbox environment pre-populated with realistic manufacturing data to explore Jigged risk-free.
+    Provide users with a pre-populated sandbox via a hidden demo company, accessed through a Demo Mode toggle in Settings. The demo company is architecturally separate (own company_id, full RLS isolation) but presented as a seamless mode switch.
 
 ### Problem Statement
 
-    - New users have no safe way to explore features before committing real data
+    - New users face an empty dashboard with no reference for how the system looks populated
 
-    - Learning curve is steep without example data to reference
+    - Learning the quote-to-job workflow is difficult without example data
 
 ### Solution
 
-    Every new user automatically receives a personal demo company with realistic mock data that can be reset at any time.
+    Users enter Demo Mode from Settings or onboarding. A hidden demo company is created behind the scenes, pre-populated with realistic data. RLS handles isolation — zero query-level changes needed.
 
     ---
 
-## 2. User Stories
+## 2. Feature Specifications
 
-    **System Admin: Create/update demo templates, set active template version, view template usage statistics**
+    - 3 Customers, 6 Parts, 4 Resource Groups, 8 Operation Types, 3 Routings, 5 Quotes, 4 Jobs, 10+ Job Operations, 8 Inventory Items
 
-    **All Users: Automatically receive demo company on signup, access demo risk-free, reset demo at any time, switch between real and demo company, demo operators are interactive**
+    - Demo Mode controls in Settings page + banner with "Back to My Company" on every page
 
-    ---
+    - Full CRUD in demo mode — it's a real company, just pre-populated
 
-## 3. Feature Specifications
-
-### 3.1 Demo Company Naming
-
-    Format: "{User's First Name}'s Demo Shop" (e.g., "John's Demo Shop")
-
-### 3.2 Demo Data Included
-
-    - 3 Customers (Acme Manufacturing, Ajax Industries, Precision Corp)
-
-    - 6 Parts with pricing tiers
-
-    - 4 Resource Groups (CNC, Manual, Quality, Finishing)
-
-    - 8 Operation Types with labor rates
-
-    - 3 Routings with nodes and edges
-
-    - 5 Quotes (draft, pending, accepted)
-
-    - 4 Jobs (pending, in_progress, completed)
-
-    - 10+ Job Operations, 8 Inventory Items
-
-    - 2 Demo Operators (Mike Johnson, Sarah Williams) - interactive with PIN codes
-
-### 3.3 Reset Behavior
-
-    1. Deletes all user-created/modified data in demo company
-
-    2. Re-clones from current active template
-
-    3. Preserves company name and user_company_access record
-
-    4. Instant operation (< 3 seconds)
-
-    > 💡 Demo companies do NOT count toward any future limits
+    - Enter from onboarding card or Settings; reset from banner or Settings
 
     ---
 
-## 4. Database Schema
-
-### 4.1 New Table: demo_templates
+## 3. Database Schema
 
     ```sql
-    CREATE TABLE demo_templates (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      name VARCHAR(100) NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      is_active BOOLEAN DEFAULT FALSE,
-      template_data JSONB NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      created_by UUID REFERENCES auth.users(id),
-      UNIQUE(name, version)
-    );
-    ```
+    -- Link real company to its demo company
+    ALTER TABLE companies ADD COLUMN demo_company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
 
-### 4.2 Companies Table Modifications
-
-    ```sql
+    -- Flag to identify demo companies
     ALTER TABLE companies ADD COLUMN is_demo BOOLEAN DEFAULT FALSE;
-    ALTER TABLE companies ADD COLUMN demo_template_id UUID REFERENCES demo_templates(id);
-    ALTER TABLE companies ADD COLUMN demo_owner_id UUID REFERENCES auth.users(id);
-    ```
 
-### 4.3 Database Functions
+    -- Template storage
+    CREATE TABLE demo_data_templates (same structure as before);
+    ```
 
     ```sql
-    CREATE FUNCTION clone_demo_company(p_user_id UUID, p_template_name VARCHAR DEFAULT 'default') RETURNS UUID
-    CREATE FUNCTION reset_demo_company(p_company_id UUID) RETURNS VOID
+    CREATE FUNCTION create_demo_company(p_source_company_id UUID, p_user_id UUID) RETURNS UUID
+    CREATE FUNCTION reset_demo_company(p_source_company_id UUID, p_user_id UUID) RETURNS VOID
+    CREATE FUNCTION sync_demo_access(p_source_company_id UUID, p_demo_company_id UUID) RETURNS VOID
     ```
 
     ---
 
-## 5. User Flows
+## 4. UI Components
 
-### 5.1 Demo Creation on Signup
+    **DemoModeSettings**: Settings page section with Enter/Exit/Reset controls. Lives at `/dashboard/[companyId]/settings/demo`.
 
-    1. User completes email verification → 2. System calls clone_demo_company(user_id) → 3. Demo company created with user's name → 4. Demo populated from active template → 5. user_company_access record created (role: admin) → 6. User lands on dashboard
+    **DemoModeBanner**: Persistent info banner on every page in demo mode: "You're in demo mode. Changes here won't affect your real company. [Back to My Company] [Reset]"
 
-### 5.2 Demo Reset Flow
+    **Header DEMO Badge**: Real company name + "DEMO" badge when in demo mode.
 
-    1. User clicks Reset Demo button → 2. Confirmation dialog shown → 3. User confirms → 4. Loading indicator → 5. reset_demo_company() called → 6. Page reloads with fresh data → 7. Success toast
-
-    ---
-
-## 6. UI Components
-
-    **DemoBanner**: Sticky banner at top when viewing demo. Text: "You're viewing your demo company." Contains Reset Demo button.
-
-    **DemoResetButton**: Appears in DemoBanner and Settings. Opens confirmation dialog. Shows loading state during reset.
-
-    **Company Switcher Enhancement**: Demo company shows (Demo) suffix or badge with different icon/color.
+    **OnboardingCard**: Welcome card offering "Enter Demo Mode" or "Skip, I'll start fresh"
 
     ---
 
-## 7. API Endpoints
+## 5. API Endpoints
 
-    - POST /api/demo/create - Create demo for current user
+    - POST /api/demo/create - Create demo company + seed + mirror access
 
-    - POST /api/demo/reset/{company_id} - Reset demo company
+    - POST /api/demo/reset - Wipe demo data + re-seed from template
 
-    - GET /api/demo/templates - List templates (System Admin)
+    - GET /api/demo/status - Check demo mode status
 
-    - POST /api/demo/templates - Create template (System Admin)
-
-    - PUT /api/demo/templates/{id}/activate - Set active template (System Admin)
+    - GET/POST /api/demo/templates - Template management (System Admin)
 
     ---
 
-## 8. Success Metrics
+## 6. Acceptance Criteria
 
-    - Demo engagement: % of users who interact with demo before creating real data
+    - [ ] companies.demo_company_id and is_demo columns exist
 
-    - Demo reset usage: How often users reset their demo
+    - [ ] demo_data_templates table with seed data
 
-    - Time to first real job: How quickly users go from signup to creating real jobs
+    - [ ] create_demo_company() creates, seeds, and mirrors access
 
-    ---
+    - [ ] reset_demo_company() wipes and re-seeds
 
-## 9. Acceptance Criteria
+    - [ ] Settings page shows demo mode controls
 
-    - [ ] demo_templates table with seed data
+    - [ ] Demo mode supports full CRUD (standard company behavior)
 
-    - [ ] companies.is_demo, demo_template_id, demo_owner_id columns
+    - [ ] Company selector hides demo companies
 
-    - [ ] clone_demo_company() function works
+    - [ ] Login redirect never targets a demo company
 
-    - [ ] reset_demo_company() function works (< 3 seconds)
-
-    - [ ] Signup flow creates demo company automatically
-
-    - [ ] DemoBanner displays when viewing demo
-
-    - [ ] Demo company appears in company switcher with badge
-
-    - [ ] Reset Demo button works with confirmation
-
-    - [ ] Demo operators can be logged into
+    - [ ] All team roles mirrored to demo company
 
   [Invitation System](modules/invitation-system.md#invitation-system)
 ## 1. Overview
@@ -3943,9 +3872,9 @@ Phase 0 is complete when Shane can:
 
     **Company Admin**: Invite team members with role, generate referral links (max 5 uses), see who redeemed, revoke invitations/links
 
-    **Invited User**: Receive email link, see company + role, sign up/in and join, also get demo company (PRD 0B)
+    **Invited User**: Receive email link, see company + role, sign up/in and join
 
-    **Referred User**: Click referral link, see referrer, sign up + name company, become owner + get demo (PRD 0B)
+    **Referred User**: Click referral link, see referrer, sign up + name company, become owner
 
     ---
 
@@ -4023,11 +3952,11 @@ Phase 0 is complete when Shane can:
 
 ### 5.1 Team Invitation Flow
 
-    Admin clicks Invite → Enters email + role → System sends email via Resend → Recipient clicks /signup?invite=TOKEN → Validates, shows company/role → User signs up/in → accept_invitation() → Demo created (PRD 0B) → Redirect to dashboard
+    Admin clicks Invite → Enters email + role → System sends email via Resend → Recipient clicks /signup?invite=TOKEN → Validates, shows company/role → User signs up/in → accept_invitation() → Redirect to dashboard
 
 ### 5.2 Referral Link Flow
 
-    Admin creates link → Shares URL → Recipient visits /signup?ref=CODE → Shows Referred by {Company} → User signs up + names company → redeem_referral() → Demo created (PRD 0B) → Redirect to new company
+    Admin creates link → Shares URL → Recipient visits /signup?ref=CODE → Shows Referred by {Company} → User signs up + names company → redeem_referral() → Redirect to new company
 
     ---
 
@@ -4079,7 +4008,7 @@ Phase 0 is complete when Shane can:
 
     - [ ] Rate limiting prevents spam
 
-    - [ ] All flows create demo company via PRD 0B
+    - [ ] Demo mode can be entered independently from Settings
 
   > 📋 This PRD has been split into three separate documents for clearer implementation.
 
@@ -4091,7 +4020,7 @@ Phase 0 is complete when Shane can:
 
   1. [**[Phase 0A: Platform Foundation](https://www.notion.so/Phase-0A-Platform-Foundation-2e95314e84758186a863f4c8f68c3d5d)**](https://www.notion.so/Phase-0A-Platform-Foundation-2e95314e84758186a863f4c8f68c3d5d) - system_admins table for platform-level admin privileges
 
-  2. [**[Phase 0B: Demo Company](https://www.notion.so/Phase-0B-Demo-Company-2e95314e847581518912ed236a58976a)**](https://www.notion.so/Phase-0B-Demo-Company-2e95314e847581518912ed236a58976a) - Sandbox environment with demo data, reset functionality, DemoBanner
+  2. **Phase 0B: Demo Mode** - Hidden demo company with Settings toggle, banner, and reset functionality
 
   3. [**[Phase 0C: Invitation System](https://www.notion.so/Phase-0C-Invitation-System-2e95314e847581bdb102d04827204734)**](https://www.notion.so/Phase-0C-Invitation-System-2e95314e847581bdb102d04827204734) - Team invitations, referral links, email via Resend
 
@@ -4104,7 +4033,7 @@ Phase 0 is complete when Shane can:
   ```plain text
   Phase 0A: Platform Foundation
           ↓
-  Phase 0B: Demo Company
+  Phase 0B: Demo Mode
           ↓
   Phase 0C: Invitation System
   ```
@@ -4119,7 +4048,7 @@ Phase 0 is complete when Shane can:
 
   **Phase 0A** establishes platform-level admin capabilities (Small effort)
 
-  **Phase 0B** provides demo company sandbox with realistic manufacturing data (Medium effort)
+  **Phase 0B** provides demo mode via hidden demo company with Settings toggle and banner (Medium effort)
 
   **Phase 0C** enables viral growth via team invites and referral links (Large effort)
 

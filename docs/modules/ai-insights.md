@@ -633,7 +633,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 | 1 | Should insight cards be configurable per user or per company? | **Resolved: Per company for MVP.** Phase 1 adds per-user customization. |
 | 2 | Should chat support follow-up questions (multi-turn)? | **Resolved: No for MVP.** Single Q&A per interaction. Phase 1 adds multi-turn. |
 | 3 | What happens when a company has very little data? | **Resolved:** Empty state messaging per card. Minimum thresholds: revenue trend needs 2+ weeks of shipped jobs, conversion rate needs 5+ quotes. |
-| 4 | Should insights be available during demo company usage? | **Open.** Demo companies could show insights based on demo data, demonstrating the feature to new users. |
+| 4 | Should insights be available in Demo Mode? | **Resolved: Yes.** Demo Mode uses a hidden demo company with its own `company_id`. All insight queries naturally scope to the active company — no special filtering needed. See [Demo Mode PRD](./demo-mode.md). |
 | 5 | Token cost budget per company per month? | **Open.** Need to establish pricing tier limits once usage patterns are observed. |
 
 ---

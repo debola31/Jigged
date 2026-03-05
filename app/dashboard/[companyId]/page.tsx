@@ -10,6 +10,7 @@ import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
 import { SummaryCard, RecentActivity } from '@/components/dashboard';
+import OnboardingCard from '@/components/demo/OnboardingCard';
 import {
   getDashboardMetrics,
   getRecentActivity,
@@ -73,6 +74,11 @@ export default function DashboardPage() {
     router.push(`/dashboard/${companyId}/jobs?status=active`);
   };
 
+  const isEmpty = !loading && metrics != null
+    && metrics.openQuotesCount === 0
+    && metrics.activeJobsCount === 0
+    && metrics.weeklyRevenue === 0;
+
   return (
     <Box>
       {error && (
@@ -80,6 +86,9 @@ export default function DashboardPage() {
           {error}
         </Alert>
       )}
+
+      {/* Onboarding Card — shown when dashboard is empty and no demo exists */}
+      <OnboardingCard companyId={companyId} isEmpty={isEmpty} />
 
       {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>

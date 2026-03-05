@@ -110,7 +110,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
   };
 
   return (
-    <Box sx={{ mb: 3 }}>
+    <Box sx={{ mb: 2 }}>
       {/* Input Row */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 1.5 }}>
         <TextField
@@ -175,7 +175,7 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
 
       {/* Inline Response */}
       {result && !loading && (
-        <Card elevation={2} sx={{ mt: 2, p: 2.5 }}>
+        <Card elevation={2} sx={{ mt: 2, p: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.5 }}>
             <AutoAwesomeIcon sx={{ fontSize: 16, color: 'primary.main' }} />
             <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600, flex: 1 }}>

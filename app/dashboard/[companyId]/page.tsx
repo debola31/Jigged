@@ -36,10 +36,14 @@ export default function DashboardPage() {
       <OnboardingCard companyId={companyId} isEmpty={isEmpty} />
 
       {/* Pinned Metrics */}
-      <PinnedMetrics companyId={companyId} />
+      <Box sx={{ mb: 4 }}>
+        <PinnedMetrics companyId={companyId} />
+      </Box>
 
       {/* Ask Bar */}
-      <InsightsChat companyId={companyId} onInsightSaved={handleInsightSaved} />
+      <Box sx={{ mb: 4 }}>
+        <InsightsChat companyId={companyId} onInsightSaved={handleInsightSaved} />
+      </Box>
 
       {/* Insights */}
       <InsightsSection companyId={companyId} savedVersion={savedVersion} />

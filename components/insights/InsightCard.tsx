@@ -22,6 +22,8 @@ interface InsightCardProps {
   /** Show × remove button */
   removable?: boolean;
   onRemove?: () => void;
+  /** Chart height in pixels */
+  chartHeight?: number;
 }
 
 const INSIGHT_LABELS: Record<string, string> = {
@@ -150,6 +152,7 @@ export default function InsightCard({
   title: titleOverride,
   removable = false,
   onRemove,
+  chartHeight = 200,
 }: InsightCardProps) {
   if (loading || !insight) {
     return (
@@ -225,11 +228,11 @@ export default function InsightCard({
         {isAlertType ? (
           <AlertList insight={insight} />
         ) : insight.chart_config ? (
-          <InsightChart chartConfig={insight.chart_config} height={200} />
+          <InsightChart chartConfig={insight.chart_config} height={chartHeight} />
         ) : (
           <Box
             sx={{
-              height: 200,
+              height: chartHeight,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

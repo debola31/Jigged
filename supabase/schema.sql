@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-03T04:07:23Z
+-- Generated: 2026-03-05T19:42:35Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -10,7 +10,7 @@ BEGIN;
 -- ============================================================
 -- 2. TABLES (ordered by foreign key dependencies)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS "public"."demo_templates"
+CREATE TABLE IF NOT EXISTS "public"."demo_data_templates"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "name" character varying(100) NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "updated_at" timestamp with time zone DEFAULT now(),
     "is_demo" boolean DEFAULT false,
     "demo_template_id" uuid,
-    "demo_owner_id" uuid,
+    "demo_company_id" uuid,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
 );
@@ -214,6 +214,16 @@ CREATE TABLE IF NOT EXISTS "public"."routing_edges"
     CONSTRAINT "routing_edges_no_self_loop" CHECK ((source_node_id <> target_node_id))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."system_admins"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "created_by" uuid,
+    CONSTRAINT "system_admins_pkey" PRIMARY KEY (id),
+    CONSTRAINT "system_admins_user_id_key" UNIQUE (user_id)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."user_company_access"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -223,6 +233,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     "created_at" timestamp with time zone DEFAULT now(),
     "name" text,
     "pin_hash" text,
+    "email" text,
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
     CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text, 'operator'::text])))
@@ -388,7 +399,7 @@ ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_insight_cache" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."demo_templates" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_unit_conversions" ENABLE ROW LEVEL SECURITY;
@@ -404,6 +415,7 @@ ALTER TABLE "public"."resource_groups" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_edges" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_nodes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."system_admins" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_company_access" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
 
@@ -502,11 +514,17 @@ CREATE POLICY "Users can view customers"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
-DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_templates";
+DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_data_templates";
 CREATE POLICY "All authenticated users can read active templates"
-    ON "public"."demo_templates"
+    ON "public"."demo_data_templates"
     FOR SELECT
     USING ((is_active = true));
+
+DROP POLICY IF EXISTS "System admins can manage demo_data_templates" ON "public"."demo_data_templates";
+CREATE POLICY "System admins can manage demo_data_templates"
+    ON "public"."demo_data_templates"
+    FOR ALL
+    USING (is_system_admin(auth.uid()));
 
 DROP POLICY IF EXISTS "Users can delete inventory_items" ON "public"."inventory_items";
 CREATE POLICY "Users can delete inventory_items"
@@ -935,6 +953,18 @@ CREATE POLICY "Users can view routings"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "System admins can insert system_admins" ON "public"."system_admins";
+CREATE POLICY "System admins can insert system_admins"
+    ON "public"."system_admins"
+    FOR INSERT
+    WITH CHECK (is_system_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "System admins can read system_admins" ON "public"."system_admins";
+CREATE POLICY "System admins can read system_admins"
+    ON "public"."system_admins"
+    FOR SELECT
+    USING (is_system_admin(auth.uid()));
+
 DROP POLICY IF EXISTS "Admins can delete company access" ON "public"."user_company_access";
 CREATE POLICY "Admins can delete company access"
     ON "public"."user_company_access"
@@ -1045,15 +1075,15 @@ ALTER TABLE "public"."ai_insight_cache"
     ADD CONSTRAINT "ai_insight_cache_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."companies"
-    ADD CONSTRAINT "companies_demo_owner_id_fkey" FOREIGN KEY (demo_owner_id) REFERENCES auth.users(id);
+    ADD CONSTRAINT "companies_demo_company_id_fkey" FOREIGN KEY (demo_company_id) REFERENCES companies(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."companies"
-    ADD CONSTRAINT "companies_demo_template_id_fkey" FOREIGN KEY (demo_template_id) REFERENCES demo_templates(id);
+    ADD CONSTRAINT "companies_demo_template_id_fkey" FOREIGN KEY (demo_template_id) REFERENCES demo_data_templates(id);
 
 ALTER TABLE "public"."customers"
     ADD CONSTRAINT "customers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."demo_templates"
+ALTER TABLE "public"."demo_data_templates"
     ADD CONSTRAINT "demo_templates_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."inventory_items"
@@ -1182,6 +1212,12 @@ ALTER TABLE "public"."routings"
 ALTER TABLE "public"."routings"
     ADD CONSTRAINT "routings_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."system_admins"
+    ADD CONSTRAINT "system_admins_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
+
+ALTER TABLE "public"."system_admins"
+    ADD CONSTRAINT "system_admins_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id);
+
 ALTER TABLE "public"."user_company_access"
     ADD CONSTRAINT "user_company_access_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1198,7 +1234,8 @@ ALTER TABLE "public"."user_preferences"
 -- 6. INDEXES
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_ai_chat_queries_rate_limit ON public.ai_chat_queries USING btree (company_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_companies_demo_owner ON public.companies USING btree (demo_owner_id) WHERE (is_demo = true);
+CREATE INDEX IF NOT EXISTS idx_companies_demo_company ON public.companies USING btree (demo_company_id) WHERE (demo_company_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_companies_is_demo ON public.companies USING btree (is_demo) WHERE (is_demo = true);
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
@@ -1257,307 +1294,6 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON public.user_preferenc
 -- ============================================================
 -- 7. FUNCTIONS
 -- ============================================================
-CREATE OR REPLACE FUNCTION public._populate_demo_company(p_company_id uuid, p_user_id uuid, p_template_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-DECLARE
-    v_template JSONB;
-    v_ref_map JSONB := '{}';
-    v_item JSONB;
-    v_new_id UUID;
-    v_node JSONB;
-    v_edge JSONB;
-    v_op JSONB;
-    v_routing_id UUID;
-    v_job_id UUID;
-BEGIN
-    -- Get template data
-    SELECT template_data INTO v_template
-    FROM demo_templates
-    WHERE id = p_template_id;
-
-    IF v_template IS NULL THEN
-        RAISE EXCEPTION 'Template % not found', p_template_id;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert customers
-    -- -----------------------------------------------------------------------
-    IF v_template->'customers' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO customers (id, company_id, name, contact_name, contact_email,
-                                   contact_phone, city, state, country)
-            VALUES (v_new_id, p_company_id,
-                    v_item->>'name', v_item->>'contact_name', v_item->>'contact_email',
-                    v_item->>'contact_phone', v_item->>'city', v_item->>'state',
-                    COALESCE(v_item->>'country', 'USA'));
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert resource_groups
-    -- -----------------------------------------------------------------------
-    IF v_template->'resource_groups' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO resource_groups (id, company_id, name, description)
-            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description');
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert operation_types (depends on resource_groups)
-    -- -----------------------------------------------------------------------
-    IF v_template->'operation_types' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description)
-            VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
-                    v_item->>'name',
-                    (v_item->>'labor_rate')::NUMERIC,
-                    v_item->>'description');
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert parts (depends on customers)
-    -- -----------------------------------------------------------------------
-    IF v_template->'parts' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO parts (id, company_id, customer_id, part_number, description, pricing)
-            VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                    v_item->>'part_number',
-                    v_item->>'description',
-                    COALESCE(v_item->'pricing', '[]'::JSONB));
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert inventory_items
-    -- -----------------------------------------------------------------------
-    IF v_template->'inventory_items' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO inventory_items (id, company_id, name, description, sku, primary_unit, quantity, cost_per_unit)
-            VALUES (v_new_id, p_company_id,
-                    v_item->>'name',
-                    v_item->>'description',
-                    v_item->>'sku',
-                    v_item->>'primary_unit',
-                    COALESCE((v_item->>'quantity')::NUMERIC, 0),
-                    (v_item->>'cost_per_unit')::NUMERIC);
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert routings + routing_nodes + routing_edges
-    -- -----------------------------------------------------------------------
-    IF v_template->'routings' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_routing_id := v_new_id;
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO routings (id, company_id, part_id, name, description, is_default, created_by)
-            VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
-                    v_item->>'name',
-                    v_item->>'description',
-                    COALESCE((v_item->>'is_default')::BOOLEAN, TRUE),
-                    p_user_id);
-
-            -- Insert nodes for this routing
-            IF v_item->'nodes' IS NOT NULL THEN
-                FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes')
-                LOOP
-                    v_new_id := gen_random_uuid();
-                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_node->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-                    INSERT INTO routing_nodes (id, routing_id, operation_type_id,
-                                               run_time_per_unit, instructions, materials)
-                    VALUES (v_new_id,
-                            v_routing_id,
-                            (v_ref_map->>(v_node->>'operation_type_ref'))::UUID,
-                            (v_node->>'run_time_per_unit')::NUMERIC,
-                            v_node->>'instructions',
-                            COALESCE(v_node->'materials', '[]'::JSONB));
-                END LOOP;
-            END IF;
-
-            -- Insert edges for this routing
-            IF v_item->'edges' IS NOT NULL THEN
-                FOR v_edge IN SELECT * FROM jsonb_array_elements(v_item->'edges')
-                LOOP
-                    INSERT INTO routing_edges (routing_id, source_node_id, target_node_id)
-                    VALUES (
-                        v_routing_id,
-                        (v_ref_map->>(v_edge->>'source_ref'))::UUID,
-                        (v_ref_map->>(v_edge->>'target_ref'))::UUID
-                    );
-                END LOOP;
-            END IF;
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert quotes (depends on customers, parts, routings)
-    -- -----------------------------------------------------------------------
-    IF v_template->'quotes' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO quotes (id, company_id, quote_number, customer_id, part_id,
-                                routing_id, quantity, unit_price, total_price, status,
-                                description, created_by)
-            VALUES (v_new_id, p_company_id,
-                    v_item->>'quote_number',
-                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
-                    CASE WHEN v_item->>'routing_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'routing_ref'))::UUID
-                         ELSE NULL END,
-                    COALESCE((v_item->>'quantity')::INTEGER, 1),
-                    (v_item->>'unit_price')::NUMERIC,
-                    (v_item->>'total_price')::NUMERIC,
-                    COALESCE(v_item->>'status', 'draft'),
-                    v_item->>'description',
-                    p_user_id);
-        END LOOP;
-    END IF;
-
-    -- -----------------------------------------------------------------------
-    -- Insert jobs + job_operations (depends on customers, parts, quotes, routings)
-    -- -----------------------------------------------------------------------
-    IF v_template->'jobs' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
-        LOOP
-            v_new_id := gen_random_uuid();
-            v_job_id := v_new_id;
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO jobs (id, company_id, job_number, customer_id, part_id,
-                              quote_id, routing_id, description, status, created_by)
-            VALUES (v_new_id, p_company_id,
-                    v_item->>'job_number',
-                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
-                    CASE WHEN v_item->>'quote_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID
-                         ELSE NULL END,
-                    CASE WHEN v_item->>'routing_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'routing_ref'))::UUID
-                         ELSE NULL END,
-                    v_item->>'description',
-                    COALESCE(v_item->>'status', 'pending'),
-                    p_user_id);
-
-            -- Insert job_operations
-            IF v_item->'operations' IS NOT NULL THEN
-                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations')
-                LOOP
-                    v_new_id := gen_random_uuid();
-                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-                    INSERT INTO job_operations (id, job_id, sequence, operation_name,
-                                                operation_type_id, estimated_setup_hours,
-                                                estimated_run_hours_per_unit,
-                                                quantity_completed, status,
-                                                routing_node_id, instructions)
-                    VALUES (v_new_id,
-                            v_job_id,
-                            (v_op->>'sequence')::INTEGER,
-                            v_op->>'operation_name',
-                            CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
-                                 THEN (v_ref_map->>(v_op->>'operation_type_ref'))::UUID
-                                 ELSE NULL END,
-                            COALESCE((v_op->>'estimated_setup_hours')::NUMERIC, 0),
-                            COALESCE((v_op->>'estimated_run_hours_per_unit')::NUMERIC, 0),
-                            COALESCE((v_op->>'quantity_completed')::INTEGER, 0),
-                            COALESCE(v_op->>'status', 'pending'),
-                            CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
-                                 THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID
-                                 ELSE NULL END,
-                            v_op->>'instructions');
-                END LOOP;
-            END IF;
-        END LOOP;
-    END IF;
-END;
-$function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.clone_demo_company(p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
- RETURNS uuid
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-DECLARE
-    v_template_id UUID;
-    v_company_id UUID;
-    v_user_name TEXT;
-BEGIN
-    -- 1. Get active template
-    SELECT id INTO v_template_id
-    FROM demo_templates
-    WHERE name = p_template_name AND is_active = TRUE
-    LIMIT 1;
-
-    IF v_template_id IS NULL THEN
-        RAISE EXCEPTION 'No active demo template found for name: %', p_template_name;
-    END IF;
-
-    -- 2. Get user's display name
-    SELECT raw_user_meta_data->>'name'
-    INTO v_user_name
-    FROM auth.users WHERE id = p_user_id;
-
-    v_user_name := COALESCE(v_user_name, 'Demo');
-
-    -- 3. Create demo company
-    INSERT INTO companies (name, is_demo, demo_template_id, demo_owner_id)
-    VALUES (v_user_name || '''s Demo Shop', TRUE, v_template_id, p_user_id)
-    RETURNING id INTO v_company_id;
-
-    -- 4. Create user_company_access (owner role)
-    INSERT INTO user_company_access (user_id, company_id, role, name)
-    VALUES (p_user_id, v_company_id, 'owner', v_user_name);
-
-    -- 5. Populate demo data
-    PERFORM _populate_demo_company(v_company_id, p_user_id, v_template_id);
-
-    RETURN v_company_id;
-END;
-$function$
-
-;
-
 CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_due_date date DEFAULT NULL::date, p_priority text DEFAULT 'normal'::text, p_notes text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -1634,6 +1370,63 @@ BEGIN
   WHERE id = p_quote_id;
 
   RETURN v_job_id;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.create_demo_company(p_source_company_id uuid, p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_source_name TEXT;
+    v_demo_company_id UUID;
+    v_existing_demo_id UUID;
+BEGIN
+    -- Auth check: caller must be the requesting user
+    IF p_user_id != auth.uid() THEN
+        RAISE EXCEPTION 'Access denied: cannot create demo company for another user';
+    END IF;
+
+    -- Idempotency: return existing demo company if one exists
+    SELECT demo_company_id INTO v_existing_demo_id
+    FROM companies
+    WHERE id = p_source_company_id;
+
+    IF v_existing_demo_id IS NOT NULL THEN
+        RETURN v_existing_demo_id;
+    END IF;
+
+    -- Get source company name
+    SELECT name INTO v_source_name
+    FROM companies WHERE id = p_source_company_id;
+
+    IF v_source_name IS NULL THEN
+        RAISE EXCEPTION 'Source company not found: %', p_source_company_id;
+    END IF;
+
+    -- Create demo company
+    INSERT INTO companies (name, is_demo)
+    VALUES (v_source_name || ' - Demo', TRUE)
+    RETURNING id INTO v_demo_company_id;
+
+    -- Link demo to source company
+    UPDATE companies SET demo_company_id = v_demo_company_id
+    WHERE id = p_source_company_id;
+
+    -- Mirror all user_company_access from source to demo
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT uca.user_id, v_demo_company_id, uca.role, uca.name
+    FROM user_company_access uca
+    WHERE uca.company_id = p_source_company_id;
+
+    -- Seed demo data from active template
+    PERFORM seed_demo_data(v_demo_company_id, p_user_id, p_template_name);
+
+    RETURN v_demo_company_id;
 END;
 $function$
 
@@ -1842,59 +1635,366 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.reset_demo_company(p_company_id uuid)
+CREATE OR REPLACE FUNCTION public.is_system_admin(check_user_id uuid)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    RETURN EXISTS (SELECT 1 FROM system_admins WHERE user_id = check_user_id);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.reset_demo_company(p_source_company_id uuid, p_user_id uuid)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
 DECLARE
-    v_template_id UUID;
-    v_owner_id UUID;
-    v_is_demo BOOLEAN;
+    v_demo_company_id UUID;
+    v_template_name VARCHAR;
 BEGIN
-    -- 1. Verify this is a demo company
-    SELECT is_demo, demo_template_id, demo_owner_id
-    INTO v_is_demo, v_template_id, v_owner_id
-    FROM companies
-    WHERE id = p_company_id;
-
-    IF NOT COALESCE(v_is_demo, FALSE) THEN
-        RAISE EXCEPTION 'Cannot reset: company % is not a demo company', p_company_id;
+    -- Auth check: caller must be the requesting user
+    IF p_user_id != auth.uid() THEN
+        RAISE EXCEPTION 'Access denied';
     END IF;
 
-    -- 2. Delete all company data in reverse FK order
-    -- operator_sessions has operation_type_id ON DELETE RESTRICT, so delete first
-    DELETE FROM operator_sessions WHERE company_id = p_company_id;
-    DELETE FROM inventory_transactions WHERE company_id = p_company_id;
-    DELETE FROM job_attachments WHERE company_id = p_company_id;
-    DELETE FROM quote_attachments WHERE company_id = p_company_id;
-    -- job_operations must be deleted before jobs (or rely on CASCADE)
+    -- Get demo company id from source company
+    SELECT demo_company_id INTO v_demo_company_id
+    FROM companies WHERE id = p_source_company_id;
+
+    IF v_demo_company_id IS NULL THEN
+        RAISE EXCEPTION 'No demo company exists for company: %', p_source_company_id;
+    END IF;
+
+    -- Delete all data in demo company (reverse FK order)
+    DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
+    DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
+    DELETE FROM job_attachments WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_attachments WHERE company_id = v_demo_company_id;
     DELETE FROM job_operations WHERE job_id IN (
-        SELECT id FROM jobs WHERE company_id = p_company_id
+        SELECT id FROM jobs WHERE company_id = v_demo_company_id
     );
-    DELETE FROM jobs WHERE company_id = p_company_id;
-    DELETE FROM quotes WHERE company_id = p_company_id;
-    -- routing_edges and routing_nodes must be deleted before routings
+    DELETE FROM jobs WHERE company_id = v_demo_company_id;
+    DELETE FROM quotes WHERE company_id = v_demo_company_id;
     DELETE FROM routing_edges WHERE routing_id IN (
-        SELECT id FROM routings WHERE company_id = p_company_id
+        SELECT id FROM routings WHERE company_id = v_demo_company_id
     );
     DELETE FROM routing_nodes WHERE routing_id IN (
-        SELECT id FROM routings WHERE company_id = p_company_id
+        SELECT id FROM routings WHERE company_id = v_demo_company_id
     );
-    DELETE FROM routings WHERE company_id = p_company_id;
-    DELETE FROM parts WHERE company_id = p_company_id;
-    DELETE FROM inventory_items WHERE company_id = p_company_id;
-    DELETE FROM operation_types WHERE company_id = p_company_id;
-    DELETE FROM resource_groups WHERE company_id = p_company_id;
-    DELETE FROM customers WHERE company_id = p_company_id;
+    DELETE FROM routings WHERE company_id = v_demo_company_id;
+    DELETE FROM parts WHERE company_id = v_demo_company_id;
+    DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
+    DELETE FROM operation_types WHERE company_id = v_demo_company_id;
+    DELETE FROM resource_groups WHERE company_id = v_demo_company_id;
+    DELETE FROM customers WHERE company_id = v_demo_company_id;
 
-    -- Delete non-owner user_company_access records (demo operators)
-    DELETE FROM user_company_access
-    WHERE company_id = p_company_id AND user_id != v_owner_id;
+    -- Delete AI data for demo company
+    DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
+    DELETE FROM ai_insight_cache WHERE company_id = v_demo_company_id;
 
-    -- 3. Re-populate from template
-    PERFORM _populate_demo_company(p_company_id, v_owner_id, v_template_id);
+    -- Re-seed from template
+    PERFORM seed_demo_data(v_demo_company_id, p_user_id);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.seed_demo_data(p_company_id uuid, p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_template JSONB;
+    v_ref_map JSONB := '{}';
+    v_item JSONB;
+    v_new_id UUID;
+    v_node JSONB;
+    v_edge JSONB;
+    v_op JSONB;
+    v_routing_id UUID;
+    v_job_id UUID;
+BEGIN
+    -- Get active template data
+    SELECT template_data INTO v_template
+    FROM demo_data_templates
+    WHERE name = p_template_name AND is_active = TRUE
+    LIMIT 1;
+
+    IF v_template IS NULL THEN
+        RAISE EXCEPTION 'No active demo data template found for name: %', p_template_name;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert customers
+    -- -----------------------------------------------------------------------
+    IF v_template->'customers' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO customers (id, company_id, name, contact_name, contact_email,
+                                   contact_phone, city, state, country, created_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name', v_item->>'contact_name', v_item->>'contact_email',
+                    v_item->>'contact_phone', v_item->>'city', v_item->>'state',
+                    COALESCE(v_item->>'country', 'USA'),
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert resource_groups
+    -- -----------------------------------------------------------------------
+    IF v_template->'resource_groups' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO resource_groups (id, company_id, name, description, created_at)
+            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description',
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert operation_types (depends on resource_groups)
+    -- -----------------------------------------------------------------------
+    IF v_template->'operation_types' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description, created_at)
+            VALUES (v_new_id, p_company_id,
+                    (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
+                    v_item->>'name',
+                    (v_item->>'labor_rate')::NUMERIC,
+                    v_item->>'description',
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert parts (no customer_id — removed by simplify_operations)
+    -- -----------------------------------------------------------------------
+    IF v_template->'parts' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO parts (id, company_id, part_number, description, pricing, created_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'part_number',
+                    v_item->>'description',
+                    COALESCE(v_item->'pricing', '[]'::JSONB),
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert inventory_items
+    -- -----------------------------------------------------------------------
+    IF v_template->'inventory_items' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO inventory_items (id, company_id, name, description, sku, primary_unit,
+                                         quantity, cost_per_unit, reorder_point, created_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name',
+                    v_item->>'description',
+                    v_item->>'sku',
+                    v_item->>'primary_unit',
+                    COALESCE((v_item->>'quantity')::NUMERIC, 0),
+                    (v_item->>'cost_per_unit')::NUMERIC,
+                    (v_item->>'reorder_point')::NUMERIC,
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert routings + routing_nodes + routing_edges (1:1 with parts)
+    -- -----------------------------------------------------------------------
+    IF v_template->'routings' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_routing_id := v_new_id;
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO routings (id, company_id, part_id, name, description, created_by, created_at)
+            VALUES (v_new_id, p_company_id,
+                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
+                    v_item->>'name',
+                    v_item->>'description',
+                    p_user_id,
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+
+            -- Insert nodes for this routing
+            IF v_item->'nodes' IS NOT NULL THEN
+                FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes')
+                LOOP
+                    v_new_id := gen_random_uuid();
+                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_node->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+                    INSERT INTO routing_nodes (id, routing_id, operation_type_id,
+                                               run_time_per_unit, instructions, materials)
+                    VALUES (v_new_id,
+                            v_routing_id,
+                            (v_ref_map->>(v_node->>'operation_type_ref'))::UUID,
+                            (v_node->>'run_time_per_unit')::NUMERIC,
+                            v_node->>'instructions',
+                            COALESCE(v_node->'materials', '[]'::JSONB));
+                END LOOP;
+            END IF;
+
+            -- Insert edges for this routing
+            IF v_item->'edges' IS NOT NULL THEN
+                FOR v_edge IN SELECT * FROM jsonb_array_elements(v_item->'edges')
+                LOOP
+                    INSERT INTO routing_edges (routing_id, source_node_id, target_node_id)
+                    VALUES (
+                        v_routing_id,
+                        (v_ref_map->>(v_edge->>'source_ref'))::UUID,
+                        (v_ref_map->>(v_edge->>'target_ref'))::UUID
+                    );
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert quotes (depends on customers, parts)
+    -- Note: converted_to_job_id is set in a post-jobs UPDATE pass below
+    -- No routing_id — removed by simplify_operations
+    -- -----------------------------------------------------------------------
+    IF v_template->'quotes' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO quotes (id, company_id, quote_number, customer_id, part_id,
+                                quantity, unit_price, total_price, status,
+                                description, created_by, created_at, status_changed_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'quote_number',
+                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
+                    CASE WHEN v_item->>'part_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID
+                         ELSE NULL END,
+                    COALESCE((v_item->>'quantity')::INTEGER, 1),
+                    (v_item->>'unit_price')::NUMERIC,
+                    (v_item->>'total_price')::NUMERIC,
+                    COALESCE(v_item->>'status', 'draft'),
+                    v_item->>'description',
+                    p_user_id,
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
+                    (v_item->>'status_changed_at')::TIMESTAMPTZ);
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert jobs + job_operations (depends on customers, parts, quotes)
+    -- No routing_id — removed by simplify_operations
+    -- -----------------------------------------------------------------------
+    IF v_template->'jobs' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_job_id := v_new_id;
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO jobs (id, company_id, job_number, customer_id, part_id,
+                              quote_id, description, status, created_by,
+                              created_at, started_at, completed_at, shipped_at, status_changed_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'job_number',
+                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
+                    CASE WHEN v_item->>'part_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID
+                         ELSE NULL END,
+                    CASE WHEN v_item->>'quote_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID
+                         ELSE NULL END,
+                    v_item->>'description',
+                    COALESCE(v_item->>'status', 'pending'),
+                    p_user_id,
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
+                    (v_item->>'started_at')::TIMESTAMPTZ,
+                    (v_item->>'completed_at')::TIMESTAMPTZ,
+                    (v_item->>'shipped_at')::TIMESTAMPTZ,
+                    (v_item->>'status_changed_at')::TIMESTAMPTZ);
+
+            -- Insert job_operations
+            IF v_item->'operations' IS NOT NULL THEN
+                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations')
+                LOOP
+                    v_new_id := gen_random_uuid();
+                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+                    INSERT INTO job_operations (id, job_id, sequence, operation_name,
+                                                operation_type_id, estimated_setup_hours,
+                                                estimated_run_hours_per_unit,
+                                                actual_setup_hours, actual_run_hours,
+                                                quantity_completed, quantity_scrapped, status,
+                                                routing_node_id, instructions,
+                                                started_at, completed_at, created_at)
+                    VALUES (v_new_id,
+                            v_job_id,
+                            (v_op->>'sequence')::INTEGER,
+                            v_op->>'operation_name',
+                            CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
+                                 THEN (v_ref_map->>(v_op->>'operation_type_ref'))::UUID
+                                 ELSE NULL END,
+                            COALESCE((v_op->>'estimated_setup_hours')::NUMERIC, 0),
+                            COALESCE((v_op->>'estimated_run_hours_per_unit')::NUMERIC, 0),
+                            (v_op->>'actual_setup_hours')::NUMERIC,
+                            (v_op->>'actual_run_hours')::NUMERIC,
+                            COALESCE((v_op->>'quantity_completed')::INTEGER, 0),
+                            COALESCE((v_op->>'quantity_scrapped')::INTEGER, 0),
+                            COALESCE(v_op->>'status', 'pending'),
+                            CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
+                                 THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID
+                                 ELSE NULL END,
+                            v_op->>'instructions',
+                            (v_op->>'started_at')::TIMESTAMPTZ,
+                            (v_op->>'completed_at')::TIMESTAMPTZ,
+                            COALESCE((v_op->>'created_at')::TIMESTAMPTZ, NOW()));
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Post-insert: link converted quotes to their jobs
+    -- (handles circular FK: quotes.converted_to_job_id -> jobs.id)
+    -- -----------------------------------------------------------------------
+    IF v_template->'quotes' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
+        LOOP
+            IF v_item->>'converted_to_job_ref' IS NOT NULL THEN
+                UPDATE quotes
+                SET converted_to_job_id = (v_ref_map->>(v_item->>'converted_to_job_ref'))::UUID,
+                    converted_at = (v_item->>'converted_at')::TIMESTAMPTZ
+                WHERE id = (v_ref_map->>(v_item->>'_ref'))::UUID;
+            END IF;
+        END LOOP;
+    END IF;
 END;
 $function$
 
@@ -1923,6 +2023,36 @@ BEGIN
     NEW.quote_number := generate_quote_number(NEW.company_id);
   END IF;
   RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.sync_demo_access(p_source_company_id uuid, p_demo_company_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    -- Add any missing access entries (new team members since demo was created)
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT uca.user_id, p_demo_company_id, uca.role, uca.name
+    FROM user_company_access uca
+    WHERE uca.company_id = p_source_company_id
+      AND NOT EXISTS (
+        SELECT 1 FROM user_company_access
+        WHERE user_id = uca.user_id AND company_id = p_demo_company_id
+      );
+
+    -- Update roles that changed in the source company
+    UPDATE user_company_access demo_uca
+    SET role = source_uca.role
+    FROM user_company_access source_uca
+    WHERE demo_uca.company_id = p_demo_company_id
+      AND source_uca.company_id = p_source_company_id
+      AND demo_uca.user_id = source_uca.user_id
+      AND demo_uca.role != source_uca.role;
 END;
 $function$
 

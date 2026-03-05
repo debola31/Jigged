@@ -3,6 +3,8 @@ import { getSupabase } from '@/lib/supabase';
 export interface Company {
   id: string;
   name: string;
+  is_demo?: boolean;
+  demo_company_id?: string | null;
 }
 
 export interface UserCompanyAccess {
@@ -24,7 +26,8 @@ export async function getUserCompanies(userId: string): Promise<UserCompanyAcces
       role,
       companies (
         id,
-        name
+        name,
+        is_demo
       )
     `)
     .eq('user_id', userId);
@@ -34,7 +37,10 @@ export async function getUserCompanies(userId: string): Promise<UserCompanyAcces
     throw error;
   }
 
-  return (data || []) as UserCompanyAccess[];
+  // Filter out demo companies — they should never appear in company lists
+  return ((data || []) as UserCompanyAccess[]).filter(
+    (c) => !c.companies?.is_demo
+  );
 }
 
 /**
@@ -63,6 +69,17 @@ export async function getLastCompany(userId: string): Promise<string | null> {
  */
 export async function setLastCompany(userId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
+
+  // Guard: never save a demo company as last_company_id
+  const { data: company } = await supabase
+    .from('companies')
+    .select('is_demo')
+    .eq('id', companyId)
+    .single();
+
+  if (company?.is_demo) {
+    return;
+  }
 
   const { error } = await supabase
     .from('user_preferences')
@@ -174,7 +191,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
 
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name')
+    .select('id, name, is_demo, demo_company_id')
     .eq('id', companyId)
     .single();
 

@@ -1,5 +1,7 @@
 # Demo Company & Platform Foundation
 
+> **SUPERSEDED:** This PRD has been replaced by [Demo Mode](./demo-mode.md). The demo mode approach revives the demo company architecture (separate `company_id`, RLS isolation) but wraps it in a seamless mode-toggle UX — the demo company is hidden from the user. See [Demo Mode PRD Section 16](./demo-mode.md#16-supersedes) for the full lineage. This file is retained for historical reference only.
+
 ## 1. Overview
 
 Provide every new user with an isolated sandbox environment pre-populated with realistic manufacturing data to explore Jigged risk-free. Establish platform-level administrative capabilities required to manage demo templates.

@@ -66,7 +66,7 @@ The team management UI (`/dashboard/[companyId]/settings/team`) will show a unif
 - Click link to see company name and assigned role
 - Sign up with email and password
 - Automatically join the company with the specified role
-- Optionally receive a demo company (if Demo Company feature is deployed)
+- Can enter Demo Mode from Settings to explore features
 
 ### Invited User (Existing Account)
 
@@ -83,7 +83,7 @@ The team management UI (`/dashboard/[companyId]/settings/team`) will show a unif
 - Sign up with email and password
 - Name their new company
 - Become the `owner` of the new company
-- Optionally receive a demo company (if Demo Company feature is deployed)
+- Can enter Demo Mode from Settings to explore features
 
 ---
 
@@ -548,7 +548,7 @@ The signup page must handle three modes:
 
 Current behavior, with updated post-signup messaging:
 - Remove "an administrator will grant you access" text
-- Replace with "You'll be set up with a demo company to explore"
+- Replace with "You can enter Demo Mode to explore the system"
 
 #### Mode 2: Invitation Signup (`?invite=TOKEN`)
 
@@ -825,6 +825,7 @@ The settings section doesn't currently exist. Create a settings layout:
 /dashboard/[companyId]/settings/
 ├── team            # Team management + invitations
 ├── referrals       # Referral link management
+├── demo            # Demo mode enter/exit/reset (see demo-mode.md)
 └── (future pages)
 ```
 
@@ -832,44 +833,15 @@ Navigation: Add a "Settings" item to the sidebar menu, with sub-navigation for T
 
 ---
 
-## 13. Demo Company Integration (Optional Hook)
+## 13. Demo Mode Integration (Optional)
 
-If the [Demo Company feature](./demo-company.md) is deployed, the following hook points apply:
+The [Demo Mode feature](./demo-mode.md) is independent of the Invitation System. Demo mode is user-initiated (entered on demand from Settings or onboarding), so no automatic hooks are needed in the invitation or referral flows.
 
-### On Invitation Acceptance
+**Post-signup experience for invited/referred users:**
+- Invited users join an existing company — they see whatever data that company already has
+- Referred users create a new company — they land on an empty dashboard with the onboarding card offering "Enter Demo Mode"
 
-After `accept_invitation()` returns a `company_id`:
-```python
-# Optional: create demo company for the new user
-# Only if Demo Company feature is deployed
-if demo_feature_enabled():
-    await create_demo_company(user_id)
-```
-
-### On Referral Redemption
-
-After `redeem_referral()` returns a `new_company_id`:
-```python
-# Optional: create demo company for the new user
-if demo_feature_enabled():
-    await create_demo_company(user_id)
-```
-
-### Feature Detection
-
-```python
-def demo_feature_enabled() -> bool:
-    """Check if demo company feature is deployed."""
-    # Check if demo_templates table exists and has an active template
-    result = supabase.from_('demo_templates') \
-        .select('id') \
-        .eq('is_active', True) \
-        .limit(1) \
-        .execute()
-    return bool(result.data)
-```
-
-This ensures the Invitation System works independently of the Demo Company feature. If demo_templates doesn't exist (feature not deployed), the hook is silently skipped.
+No code integration required between these two features.
 
 ---
 
@@ -884,8 +856,10 @@ app/
 │   ├── page.tsx         # Redirects to /team
 │   ├── team/
 │   │   └── page.tsx     # Team management + invitations
-│   └── referrals/
-│       └── page.tsx     # Referral link management
+│   ├── referrals/
+│   │   └── page.tsx     # Referral link management
+│   └── demo/
+│       └── page.tsx     # Demo mode enter/exit/reset
 ```
 
 ### Modified Routes
@@ -894,7 +868,7 @@ app/
 |-------|--------|
 | `/signup` | Handle `?invite=TOKEN` and `?ref=CODE` params |
 | `/login` | Handle `?invite=TOKEN` param (store in localStorage) |
-| `/no-access` | Update messaging: "Your demo company is being set up" or "Contact your admin" |
+| `/no-access` | Update messaging: "Contact your admin for access" |
 
 ---
 
@@ -955,7 +929,7 @@ app/
 - [ ] Token persists through signup → email verification → login flow via localStorage
 - [ ] Settings/Team page shows unified team view + pending invitations
 - [ ] Settings/Referrals page shows links with usage stats and redemptions
-- [ ] Demo company integration is optional (works with or without Demo Company feature)
+- [ ] Demo Mode feature is independent (works with or without Demo Mode feature deployed)
 - [ ] Existing team Edge Function continues to work alongside invitations
 
 ---
@@ -964,7 +938,7 @@ app/
 
 | # | Question | Resolution |
 |---|----------|------------|
-| 1 | Should demo company creation be required on invitation acceptance? | No — optional hook. Invitations work independently. |
+| 1 | Should demo mode be auto-entered on invitation acceptance? | No — demo mode is user-initiated. Invitations work independently. |
 | 2 | Should we track referral chain analytics? | Yes — `referred_by_company_id` column enables recursive CTE queries. |
 | 3 | Rate limiting approach in serverless? | DB-backed — count recent rows in the invitations/referral_links tables. |
 | 4 | Email provider? | Resend via Python SDK in FastAPI backend. |
@@ -978,7 +952,7 @@ app/
 
 ## 18. Dependencies
 
-- **No hard dependency on [Demo Company](./demo-company.md):** Demo creation is an optional hook. If the Demo Company feature is not deployed, invitations still work — users just join companies without getting a demo.
+- **No dependency on [Demo Mode](./demo-mode.md):** Demo mode is user-initiated and fully independent. Invitations work the same with or without demo mode deployed.
 - **Resend account:** Must be set up with a verified sending domain before email features work.
 - **DNS configuration:** SPF, DKIM, and DMARC records for `mail.jigged.app`.
 

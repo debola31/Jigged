@@ -17,6 +17,7 @@ import Skeleton from '@mui/material/Skeleton';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CheckIcon from '@mui/icons-material/Check';
 import { useCompanies } from '@/hooks/useCompanies';
+import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { JiggedLogo } from '@/components/branding';
 
 function getInitials(name: string): string {
@@ -42,6 +43,7 @@ export default function CompanySwitcher() {
   const params = useParams();
   const currentCompanyId = params.companyId as string;
   const { companies, loading } = useCompanies();
+  const { isDemoMode, realCompanyName } = useDemoMode();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const hasMultipleCompanies = companies.length > 1;
 
@@ -71,7 +73,10 @@ export default function CompanySwitcher() {
     );
   }
 
-  const companyName = currentCompany?.companies?.name || 'Select Company';
+  // In demo mode, show the real company name (not the internal "X - Demo" name)
+  const companyName = isDemoMode
+    ? realCompanyName || 'Select Company'
+    : currentCompany?.companies?.name || 'Select Company';
 
   return (
     <>

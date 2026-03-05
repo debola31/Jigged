@@ -4,8 +4,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useDemoMode } from '@/components/providers/DemoModeProvider';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -85,6 +87,11 @@ function getPageTitle(pathname: string): string {
     return 'Inventory';
   }
 
+  // Check for settings routes
+  if (segments.includes('settings')) {
+    return 'Settings';
+  }
+
   // Map other route segments to display titles
   const titleMap: Record<string, string> = {};
 
@@ -104,6 +111,7 @@ export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const { signOut } = useAuth();
+  const { isDemoMode } = useDemoMode();
   const pageTitle = getPageTitle(pathname);
 
   const handleSignOut = async () => {
@@ -129,9 +137,19 @@ export default function Header() {
         zIndex: 1100,
       }}
     >
-      <Typography variant="h5" component="h1" sx={{ fontWeight: 600, color: 'white' }}>
-        {pageTitle}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Typography variant="h5" component="h1" sx={{ fontWeight: 600, color: 'white' }}>
+          {pageTitle}
+        </Typography>
+        {isDemoMode && (
+          <Chip
+            label="DEMO"
+            size="small"
+            color="warning"
+            sx={{ fontWeight: 600, letterSpacing: 0.5 }}
+          />
+        )}
+      </Box>
       <Button
         onClick={handleSignOut}
         startIcon={<LogoutIcon />}

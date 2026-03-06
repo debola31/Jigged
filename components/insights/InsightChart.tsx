@@ -14,6 +14,20 @@ interface InsightChartProps {
   height?: number;
 }
 
+/** Format ISO timestamps and date strings into clean short labels. */
+function formatLabel(value: string): string {
+  if (/^\d{4}-\d{2}/.test(value)) {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      if (date.getDate() === 1 || value.includes('T00:00:00')) {
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      }
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  }
+  return value.length > 12 ? value.slice(0, 12) + '...' : value;
+}
+
 /**
  * Wrapper component that renders MUI X Charts based on chart_config.
  * Supports: area, pie, bar, bar_horizontal, sparkline chart types.
@@ -50,7 +64,7 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
   ];
 
   // Extract x-axis labels and y-axis values
-  const xLabels = data.map((d) => String(d[x_key] ?? ''));
+  const xLabels = data.map((d) => formatLabel(String(d[x_key] ?? '')));
   const yValues = data.map((d) => Number(d[y_key] ?? 0));
 
   if (chart_type === 'area') {
@@ -80,7 +94,7 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
             },
           ]}
           height={height}
-          margin={{ top: 20, right: 20, bottom: 40, left: 60 }}
+          margin={{ top: 20, right: 20, bottom: 50, left: 80 }}
           sx={{
             '& .MuiChartsAxis-line': { stroke: theme.palette.divider },
             '& .MuiChartsAxis-tick': { stroke: theme.palette.divider },
@@ -153,7 +167,7 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
             },
           ]}
           height={height}
-          margin={{ top: 20, right: 20, bottom: 40, left: 60 }}
+          margin={{ top: 20, right: 20, bottom: 50, left: 80 }}
           sx={{
             '& .MuiChartsAxis-line': { stroke: theme.palette.divider },
             '& .MuiChartsAxis-tick': { stroke: theme.palette.divider },
@@ -189,7 +203,7 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
           ]}
           layout="horizontal"
           height={height}
-          margin={{ top: 20, right: 20, bottom: 40, left: 100 }}
+          margin={{ top: 20, right: 20, bottom: 50, left: 100 }}
           sx={{
             '& .MuiChartsAxis-line': { stroke: theme.palette.divider },
             '& .MuiChartsAxis-tick': { stroke: theme.palette.divider },

@@ -175,7 +175,7 @@ class ClaudeProvider(AIProvider):
         Returns:
             Dict with keys: content, tool_calls, model, tokens_used
         """
-        from services.insights_service import execute_tool
+        from services.insights_service import execute_sql_tool, execute_tool
 
         # Extract company_id from the first user message
         company_id = self._extract_company_id(messages)
@@ -215,11 +215,20 @@ class ClaudeProvider(AIProvider):
                     if block.type == "tool_use":
                         tool_names_called.append(block.name)
                         try:
-                            result_data = execute_tool(
-                                company_id=company_id,
-                                tool_name=block.name,
-                                tool_input=block.input,
-                            )
+                            if block.name == "execute_sql":
+                                # Text-to-SQL: run via SQL executor
+                                result_data = await execute_sql_tool(
+                                    company_id=company_id,
+                                    sql=block.input.get("sql", ""),
+                                    description=block.input.get("description", ""),
+                                )
+                            else:
+                                # Predefined tool: run via metric function dispatcher
+                                result_data = execute_tool(
+                                    company_id=company_id,
+                                    tool_name=block.name,
+                                    tool_input=block.input,
+                                )
                             tool_results.append({
                                 "type": "tool_result",
                                 "tool_use_id": block.id,

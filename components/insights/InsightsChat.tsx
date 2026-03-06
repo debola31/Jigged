@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import TextField from '@mui/material/TextField';
@@ -10,12 +10,9 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
-import BookmarkIcon from '@mui/icons-material/Bookmark';
 import InsightChart from './InsightChart';
 import {
   submitChatQuery,
@@ -27,10 +24,16 @@ import {
 const MAX_SAVED = 5;
 
 const EXAMPLE_PROMPTS = [
-  'Revenue trend',
-  'Top customer?',
-  'Jobs behind schedule?',
-  'Quote pipeline worth?',
+  'What is my revenue trend over time?',
+  'Who is my top customer by revenue?',
+  'Are any jobs behind schedule?',
+  'What is my quote pipeline worth?',
+];
+
+const LOADING_MESSAGES = [
+  'Querying your data...',
+  'Analyzing results...',
+  'Building your answer...',
 ];
 
 interface InsightsChatProps {
@@ -58,6 +61,23 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
   const [result, setResult] = useState<ChatResult | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
+  const loadingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (loading) {
+      setLoadingMsgIdx(0);
+      loadingIntervalRef.current = setInterval(() => {
+        setLoadingMsgIdx((prev) => (prev + 1) % LOADING_MESSAGES.length);
+      }, 2000);
+    } else if (loadingIntervalRef.current) {
+      clearInterval(loadingIntervalRef.current);
+      loadingIntervalRef.current = null;
+    }
+    return () => {
+      if (loadingIntervalRef.current) clearInterval(loadingIntervalRef.current);
+    };
+  }, [loading]);
 
   const handleSubmit = async (inputQuestion?: string) => {
     const q = (inputQuestion || question).trim();
@@ -119,12 +139,6 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
     }
   };
 
-  const saveTooltip = saved
-    ? 'Saved to dashboard'
-    : atLimit
-      ? 'Remove a chart below to save new ones'
-      : 'Save to dashboard';
-
   return (
     <Box sx={{ mb: 2 }}>
       {/* Input Row */}
@@ -177,7 +191,7 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mt: 2 }}>
           <CircularProgress size={16} />
           <Typography variant="body2" color="text.secondary">
-            Analyzing your data...
+            {LOADING_MESSAGES[loadingMsgIdx]}
           </Typography>
         </Box>
       )}
@@ -197,31 +211,6 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
             <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600, flex: 1 }}>
               {result.question}
             </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              {saved && (
-                <Typography variant="caption" color="success.main">
-                  Saved
-                </Typography>
-              )}
-              <Tooltip title={saveTooltip}>
-                <span>
-                  <IconButton
-                    size="small"
-                    onClick={handleSave}
-                    disabled={saving || saved || atLimit}
-                    aria-label="Save to dashboard"
-                  >
-                    {saving ? (
-                      <CircularProgress size={16} />
-                    ) : saved ? (
-                      <BookmarkIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                    ) : (
-                      <BookmarkBorderIcon sx={{ fontSize: 18 }} />
-                    )}
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </Box>
           </Box>
 
           {result.chart_config && (
@@ -233,6 +222,27 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
           <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
             {result.answer}
           </Typography>
+
+          {result.chart_config && !saved && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={handleSave}
+                disabled={saving || atLimit}
+                startIcon={saving ? <CircularProgress size={14} /> : <BookmarkBorderIcon />}
+              >
+                {atLimit ? 'Limit reached' : 'Save to dashboard'}
+              </Button>
+            </Box>
+          )}
+          {saved && (
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
+              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                Saved to dashboard
+              </Typography>
+            </Box>
+          )}
         </Card>
       )}
     </Box>

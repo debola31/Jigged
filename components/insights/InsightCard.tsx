@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import Typography from '@mui/material/Typography';
@@ -176,6 +177,16 @@ export default function InsightCard({
   const title = titleOverride || INSIGHT_LABELS[insight.type] || insight.type;
   const timeAgo = getTimeAgo(insight.computed_at);
 
+  const [expanded, setExpanded] = useState(false);
+  const summaryRef = useRef<HTMLElement>(null);
+  const [isClamped, setIsClamped] = useState(false);
+
+  useEffect(() => {
+    if (summaryRef.current) {
+      setIsClamped(summaryRef.current.scrollHeight > summaryRef.current.clientHeight);
+    }
+  }, [insight.summary]);
+
   return (
     <Card
       elevation={2}
@@ -245,18 +256,31 @@ export default function InsightCard({
         )}
       </Box>
 
-      {/* Short Summary Phrase */}
+      {/* Summary */}
       <Typography
+        ref={summaryRef}
         variant="body2"
         color="text.secondary"
-        sx={{
+        sx={expanded ? {} : {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
         }}
       >
         {insight.summary}
       </Typography>
+      {(isClamped || expanded) && (
+        <Typography
+          variant="caption"
+          color="primary.main"
+          onClick={() => setExpanded(!expanded)}
+          sx={{ cursor: 'pointer', mt: 0.5, display: 'block' }}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </Typography>
+      )}
     </Card>
   );
 }

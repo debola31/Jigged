@@ -32,11 +32,10 @@ from models.insights_models import (
     SaveInsightRequest,
 )
 from services.insights_service import (
-    INSIGHTS_SYSTEM_PROMPT,
+    _build_chat_system_prompt,
     compute_dashboard_insights,
-    execute_tool,
 )
-from tools.metric_tools import METRIC_TOOLS
+from tools.metric_tools import CHAT_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -210,8 +209,8 @@ async def chat(company_id: str, request: ChatRequest):
         # Execute the AI chat with tools
         result = await provider.chat_with_tools(
             messages=messages,
-            tools=METRIC_TOOLS,
-            system_prompt=INSIGHTS_SYSTEM_PROMPT,
+            tools=CHAT_TOOLS,
+            system_prompt=_build_chat_system_prompt(),
             max_tokens=4000,
         )
 
@@ -230,7 +229,7 @@ async def chat(company_id: str, request: ChatRequest):
             supabase = _get_supabase_service_role()
             supabase.table("ai_chat_queries").insert({
                 "company_id": company_id,
-                "user_id": "00000000-0000-0000-0000-000000000000",  # Placeholder when no auth
+                "user_id": None,
                 "question": request.question,
                 "tool_calls": result.get("tool_calls", []),
                 "response": result["content"],

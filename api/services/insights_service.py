@@ -16,29 +16,47 @@ from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 
-# AI system prompt for generating insight summaries and chat responses
-INSIGHTS_SYSTEM_PROMPT = """You are a business analyst for a small precision manufacturing shop.
-You have access to tools that query the company's data. Use them to answer questions accurately and concisely.
+# AI system prompt for dashboard card summaries (used by compute_dashboard_insights)
+DASHBOARD_SUMMARY_PROMPT = """You are a business analyst for a small precision manufacturing shop.
+Respond with ONLY a single short phrase (under 12 words). No JSON, no markdown, no sentences.
+Examples: "Flat at $0 for 8 weeks", "Pipeline healthy — 50% in progress", "3 jobs at risk of delay"."""
 
-Guidelines:
-- Always use the available tools to get real data. Never make up numbers.
-- For dashboard card summaries: respond with a single short phrase (under 12 words). Examples: "Flat at $0 for 8 weeks", "Pipeline healthy — 50% in progress", "3 jobs at risk of delay".
-- For chat responses: keep to 1 sentence max (under 20 words). Be direct. Shop owners are busy.
-- ALWAYS include a chart_config JSON block when the data has multiple values, trends, comparisons, or distributions. Use area for trends over time, bar for comparisons, bar_horizontal for ranked lists, pie for distributions. Only omit charts for yes/no answers or single-number lookups.
-- Highlight actionable insights: what should the owner DO about this data?
-- Compare to previous periods when relevant (e.g., "up 12% vs last week").
-- Flag risks prominently (at-risk jobs, low inventory, revenue decline).
-- Use plain language. Avoid jargon. These are machinists, not MBAs.
+# Keep old name as alias for backward compat (dashboard summary generation)
+INSIGHTS_SYSTEM_PROMPT = DASHBOARD_SUMMARY_PROMPT
 
-chart_config format (include as a ```json code block when applicable):
-{
-  "chart_type": "area" | "pie" | "bar" | "bar_horizontal" | "sparkline",
-  "data": [{"x_key_value": ..., "y_key_value": ...}, ...],
-  "x_key": "field_name",
-  "y_key": "field_name",
-  "x_label": "Axis Label",
-  "y_label": "Axis Label"
-}"""
+
+def _build_chat_system_prompt() -> str:
+    """Build the full system prompt for chat interactions with schema context."""
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    return (
+        "You are a business analyst for a small precision manufacturing shop.\n"
+        "You have access to the execute_sql tool to query the company's PostgreSQL database.\n\n"
+        "Use execute_sql to answer questions by writing SELECT queries. "
+        "Always use $1 as the company_id placeholder.\n\n"
+        f"{SCHEMA_CONTEXT}\n\n"
+        "Guidelines:\n"
+        "- Always use execute_sql to get real data. Never make up numbers.\n"
+        "- For chat responses: be direct and concise. 1-3 sentences max. Shop owners are busy.\n"
+        "- ALWAYS include a chart_config JSON block when the data has multiple values, trends, comparisons, or distributions.\n"
+        "- Use area for trends over time, bar for comparisons, bar_horizontal for ranked lists, pie for distributions.\n"
+        "- Only omit charts for yes/no answers or single-number lookups.\n"
+        "- Answer with facts and numbers only. Do not add advice, opinions, or recommendations unless the user asks.\n"
+        "- Include comparisons to previous periods when the data supports it (e.g., 'up 12% vs last week').\n"
+        "- Flag risks prominently (at-risk jobs, low inventory, revenue decline).\n"
+        "- Use plain language. Avoid jargon. These are machinists, not MBAs.\n"
+        "- In SQL, ALWAYS filter by company_id = $1 on tables that have company_id.\n"
+        "- For tables without company_id (job_operations, routing_nodes, etc.), JOIN through parent tables.\n\n"
+        "chart_config format (include as a ```json code block when applicable):\n"
+        "{\n"
+        '  "chart_type": "area" | "pie" | "bar" | "bar_horizontal" | "sparkline",\n'
+        '  "data": [{"x_key_value": ..., "y_key_value": ...}, ...],\n'
+        '  "x_key": "field_name",\n'
+        '  "y_key": "field_name",\n'
+        '  "x_label": "Axis Label",\n'
+        '  "y_label": "Axis Label"\n'
+        "}"
+    )
 
 # Mapping of dashboard insight types to their metric functions and defaults
 DASHBOARD_INSIGHT_CONFIG = {
@@ -808,7 +826,8 @@ TOOL_FUNCTIONS = {
 
 def execute_tool(company_id: str, tool_name: str, tool_input: dict) -> dict:
     """
-    Execute a metric tool by name, injecting company_id.
+    Execute a predefined metric tool by name, injecting company_id.
+    Used by dashboard cache and as fallback for any predefined chat tools.
 
     Args:
         company_id: The company UUID
@@ -823,6 +842,28 @@ def execute_tool(company_id: str, tool_name: str, tool_input: dict) -> dict:
         raise ValueError(f"Unknown tool: {tool_name}")
 
     return func(company_id=company_id, **tool_input)
+
+
+async def execute_sql_tool(company_id: str, sql: str, description: str = "") -> dict:
+    """
+    Execute an AI-generated SQL query via the SQL executor.
+    This is the handler for the 'execute_sql' chat tool.
+
+    Args:
+        company_id: The company UUID (bound as $1)
+        sql: The SELECT query with $1 placeholder
+        description: Brief description of what the query computes
+
+    Returns:
+        Dict with columns, rows, row_count (or error message)
+    """
+    from tools.sql_executor import execute_sql_query
+
+    return await execute_sql_query(
+        company_id=company_id,
+        sql=sql,
+        description=description,
+    )
 
 
 # ============================================================

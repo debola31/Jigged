@@ -60,8 +60,8 @@ async def init_pool() -> Optional[asyncpg.Pool]:
     try:
         _pool = await asyncpg.create_pool(
             dsn=dsn,
-            min_size=1,
-            max_size=3,
+            min_size=0,
+            max_size=1,
             command_timeout=STATEMENT_TIMEOUT_MS / 1000,
         )
         logger.info("AI SQL executor pool initialized.")

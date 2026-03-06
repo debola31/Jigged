@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS "public"."ai_insight_cache"
     CONSTRAINT "ai_insight_cache_company_id_insight_type_key" UNIQUE (company_id, insight_type)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."saved_insights"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "question" text NOT NULL,
+    "answer" text NOT NULL,
+    "chart_config" jsonb,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "saved_insights_pkey" PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."customers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -397,6 +409,7 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
 ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_insight_cache" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."saved_insights" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
@@ -437,6 +450,26 @@ CREATE POLICY "Users can read own company chat history"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+
+DROP POLICY IF EXISTS "Users can read own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can read own saved insights"
+    ON "public"."saved_insights"
+    FOR SELECT
+    USING ((user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can insert own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can insert own saved insights"
+    ON "public"."saved_insights"
+    FOR INSERT
+    WITH CHECK ((user_id = auth.uid() AND company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+
+DROP POLICY IF EXISTS "Users can delete own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can delete own saved insights"
+    ON "public"."saved_insights"
+    FOR DELETE
+    USING ((user_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Admins can delete AI config" ON "public"."ai_config";
 CREATE POLICY "Admins can delete AI config"

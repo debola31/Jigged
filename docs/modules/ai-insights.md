@@ -2,13 +2,13 @@
 
 ## Overview
 
-The AI Insights module gives shop owners and administrators an intelligent data analyst built into their dashboard. It surfaces actionable business insights through pre-built metric cards with charts and a natural language chat interface for ad-hoc questions — so a 50-year-old shop owner who's great at machining doesn't need to be great at spreadsheets.
+The AI Insights module gives shop owners and administrators an intelligent data analyst built into their dashboard. Users ask questions in plain English and the AI returns text answers with optional charts. Users pin the answers they find valuable to build a personalized dashboard — so a 50-year-old shop owner who's great at machining doesn't need to be great at spreadsheets.
 
 **Priority:** Should Have (FR-17: Dashboard with AI Insights), Could Have (FR-18: Natural Language Queries)
 
 **Dependencies:** Dashboard, Jobs, Quotes, Customers, Parts, Operations, Inventory modules
 
-**Database Tables:** `ai_insight_cache`, `ai_chat_queries`, `ai_config` (existing)
+**Database Tables:** `ai_insight_cache`, `ai_chat_queries`, `ai_config` (existing), `saved_insights`
 
 **Chart Library:** `@mui/x-charts` (MUI's native charting — seamless dark theme integration)
 
@@ -28,44 +28,81 @@ The AI Insights module gives shop owners and administrators an intelligent data 
 | Admin | See inventory items that need reordering | I can prevent stockouts before they delay jobs |
 | User | Click example prompts to quickly ask common questions | I can get answers without knowing what to type |
 | Admin | Have insights cached so the page loads fast | I'm not waiting for AI every time I open the dashboard |
+| Admin | Pin AI-generated charts to my dashboard | I build a personalized view of the metrics I care about |
+| Admin | Remove pinned charts I no longer need | I can keep my dashboard focused and relevant |
+| Admin | See starter prompts when my chart grid is empty | I know how to get started without reading docs |
 
 ---
 
 ## Architecture
 
-### Key Design Decision: Tool-Use Pattern (NOT Raw SQL)
+### Key Design Decision: Text-to-SQL with Safety Layers
 
-The AI does **not** generate SQL queries. Instead, it selects from pre-defined metric functions (tools) that execute safe, company-scoped Supabase queries. This is:
+The AI chat uses a **text-to-SQL** approach: the AI generates SQL queries against the database schema, which are validated and executed via a read-only database connection. This replaces the earlier predefined metric tools approach for chat, which was limited to a fixed set of query patterns.
 
-- **Secure** — no SQL injection risk, no access to other companies' data
-- **Predictable** — bounded query cost and execution time
-- **Auditable** — every AI interaction logs which tools were called
+**Why text-to-SQL:**
+- **Flexible** — any analytical question can be answered without adding new Python functions
+- **Extensible** — adding new tables or columns is automatic (just update the schema context)
+- **Natural** — SQL is the lingua franca for data queries; LLMs are very good at generating it
 
-### Flow
+**Safety layers (defense in depth):**
+1. **SQL validation** — SELECT-only, forbidden keywords, table allowlist, `$1` placeholder required for company_id
+2. **Parameterized company_id** — AI writes `company_id = $1`, backend binds actual UUID (no string interpolation)
+3. **Table allowlist** — Only 17 business tables. Auth/system/AI tables blocked.
+4. **Read-only Postgres role** — `jigged_ai_readonly` with SELECT-only grants on allowed tables
+5. **Statement timeout** — 5 seconds via asyncpg connection config
+6. **Row limit** — 200 rows max, enforced programmatically
+7. **Self-correction** — AI sees SQL errors as tool results and can retry (up to 5 iterations)
+
+### Two Code Paths: Chat vs Dashboard Cache
+
+| | Chat (Ask Bar) | Dashboard Cache |
+|---|---|---|
+| **How it works** | AI generates SQL via `execute_sql` tool | Direct Python metric functions |
+| **Tools** | `CHAT_TOOLS` (text-to-SQL) | `METRIC_TOOLS` (predefined functions) |
+| **Flexibility** | Any question | Fixed 5 insight types |
+| **Speed** | 3-8 seconds (AI + SQL) | < 1 second (cached) |
+
+The dashboard cache path (`compute_dashboard_insights`) still uses the 10 predefined metric functions for fast, predictable card rendering. Only the chat path uses text-to-SQL.
+
+### Chat Flow
 
 ```
-1. User asks question (or dashboard triggers proactive insight)
-       │
-       ▼
-2. FastAPI backend constructs prompt with available metric tools
-   + company context (company_id, company name)
-       │
-       ▼
-3. AI responds with tool calls
-   (e.g., "call get_revenue_by_period with last 8 weeks")
-       │
-       ▼
-4. Backend executes metric functions
-   (Supabase queries, always scoped to company_id)
-       │
-       ▼
-5. AI interprets results → returns:
+1. User asks question in ask bar
+       |
+       v
+2. FastAPI backend constructs prompt with:
+   - Database schema context (17 tables, columns, types, relationships)
+   - execute_sql tool definition
+   - Chart formatting guidelines
+       |
+       v
+3. AI generates SQL query via execute_sql tool call
+   (e.g., SELECT COUNT(*) FROM jobs WHERE started_at >= NOW() - INTERVAL '7 days' AND company_id = $1)
+       |
+       v
+4. Backend validates SQL:
+   - SELECT/WITH only, no forbidden keywords
+   - All tables in allowlist
+   - $1 placeholder present
+       |
+       v
+5. Backend executes via read-only asyncpg connection
+   (company_id bound as $1 parameter, 5s timeout, 200 row limit)
+       |
+       v
+6. AI interprets results -> returns:
    - Natural language summary
    - Optional chart_config (chart type + formatted data)
-       │
-       ▼
-6. Frontend renders text + MUI X Chart
+       |
+       v
+7. Frontend renders text + optional MUI X Chart
+   - Save button only shown when chart_config exists
 ```
+
+### Hybrid Tool Architecture
+
+`CHAT_TOOLS` is a list that currently contains only `execute_sql`, but is designed for extensibility. As user behavior patterns emerge, predefined Python tools can be added alongside SQL for queries that are too complex or error-prone for AI-generated SQL (e.g., multi-step business logic like at-risk job severity scoring). See GitHub issue for tracking.
 
 ### Extending the Existing AI Infrastructure
 
@@ -79,16 +116,49 @@ Default provider: Claude (Anthropic). Fallback behavior same as CSV import.
 
 ---
 
-## Pre-defined Metric Functions (AI Tools)
+## SQL Validation Rules
 
-These are the functions the AI can call. Each returns structured data suitable for charting.
+The `sql_validator.py` module enforces these rules before any query reaches the database:
+
+| Rule | Detail |
+|---|---|
+| Single statement | No `;` chaining |
+| SELECT/WITH only | Must start with `SELECT` or `WITH` (for CTEs) |
+| Forbidden keywords | `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `INTO`, `pg_sleep`, `pg_catalog`, `information_schema` |
+| Table allowlist | Only 17 business tables (see below) |
+| Company scoping | Must contain `$1` at least once |
+| Nesting limit | Max 3 levels of subquery nesting |
+
+### Allowed Tables (17 business tables)
+
+`companies`, `customers`, `quotes`, `quote_attachments`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `resource_groups`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
+
+### Excluded Tables (auth/system/AI)
+
+`user_company_access`, `user_preferences`, `system_admins`, `ai_chat_queries`, `ai_insight_cache`, `ai_config`, `saved_insights`, `demo_data_templates`
+
+### Adding a New Table to AI Scope
+
+When a new business table is added to the database and should be queryable by the AI chat:
+
+1. Add table name to `ALLOWED_TABLES` in `api/tools/schema_context.py`
+2. Add table description (columns, types, relationships) to `SCHEMA_CONTEXT` string in same file
+3. Create a new migration with:
+   - `GRANT SELECT ON <table> TO jigged_ai_readonly`
+   - `CREATE POLICY ai_readonly_select ON <table> FOR SELECT TO jigged_ai_readonly USING (true)`
+
+---
+
+## Pre-defined Metric Functions (Dashboard Cache Only)
+
+These functions are used by `compute_dashboard_insights()` for the 5 cached dashboard cards. They are **not** used by the chat path (which uses text-to-SQL instead).
 
 | Function | Description | Parameters | Returns |
 |---|---|---|---|
 | `get_revenue_by_period` | Revenue from shipped jobs over time | `period_type` (daily/weekly/monthly), `num_periods` (default: 8) | `[{period, amount, job_count}]` |
 | `get_job_status_distribution` | Current job counts by status | — | `[{status, count}]` |
 | `get_quote_conversion_rate` | Quotes accepted vs total | `period_type`, `num_periods` | `{current_rate, previous_rate, trend_direction, periods: [{period, accepted, total, rate}]}` |
-| `get_job_cycle_times` | Avg days from created → shipped | `period_type`, `num_periods` | `[{period, avg_days, job_count}]` |
+| `get_job_cycle_times` | Avg days from created -> shipped | `period_type`, `num_periods` | `[{period, avg_days, job_count}]` |
 | `get_customer_revenue_breakdown` | Revenue ranked by customer | `period_type`, `num_periods`, `limit` (default: 10) | `[{customer_name, revenue, job_count, pct_of_total}]` |
 | `get_part_profitability` | Revenue vs estimated labor cost by part | `limit` (default: 10) | `[{part_number, description, revenue, estimated_cost, margin_pct}]` |
 | `get_inventory_alerts` | Items at or below reorder point | — | `[{item_name, sku, quantity, reorder_point, unit}]` |
@@ -96,7 +166,7 @@ These are the functions the AI can call. Each returns structured data suitable f
 | `get_resource_utilization` | Booked hours by resource group | `period_type`, `num_periods` | `[{resource_group, booked_hours, job_count}]` |
 | `get_revenue_forecast` | Pipeline value from open quotes | — | `{total_pipeline, weighted_pipeline, quote_count, avg_conversion_rate}` |
 
-All functions implicitly receive `company_id` from the authenticated request context. The AI never sees or passes company IDs directly.
+All functions implicitly receive `company_id` from the authenticated request context.
 
 ### At-Risk Job Severity Calculation
 
@@ -107,7 +177,7 @@ severity = based on:
   - "warning" if < 75% complete and > 75% of estimated time used
   - "on_track" otherwise
 
-Estimated time = sum of (estimated_run_hours_per_unit × job quantity) across job_operations
+Estimated time = sum of (estimated_run_hours_per_unit x job quantity) across job_operations
 Actual progress = sum of quantity_completed / job quantity across job_operations
 ```
 
@@ -115,7 +185,9 @@ Actual progress = sum of quantity_completed / job quantity across job_operations
 
 ## Data Model
 
-### New Table: `ai_insight_cache`
+> **Migration files:** `supabase/migrations/20260305000000_create_ai_insights_tables.sql` and `supabase/migrations/20260305000001_create_ai_readonly_role.sql`
+
+### Table: `ai_insight_cache`
 
 Caches pre-computed dashboard insight cards to avoid calling the AI on every page load.
 
@@ -130,30 +202,7 @@ Caches pre-computed dashboard insight cards to avoid calling the AI on every pag
 | computed_at | TIMESTAMPTZ | Yes | When this insight was computed |
 | expires_at | TIMESTAMPTZ | Yes | Cache expiry (default: `computed_at + 1 hour`) |
 
-```sql
-CREATE TABLE ai_insight_cache (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    insight_type VARCHAR(50) NOT NULL,
-    metric_data JSONB NOT NULL,
-    ai_summary TEXT NOT NULL,
-    chart_config JSONB,
-    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '1 hour'),
-    UNIQUE(company_id, insight_type)
-);
-
--- RLS
-ALTER TABLE ai_insight_cache ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can read own company insights"
-    ON ai_insight_cache FOR SELECT
-    USING (company_id IN (
-        SELECT company_id FROM user_company_access WHERE user_id = auth.uid()
-    ));
-```
-
-### New Table: `ai_chat_queries`
+### Table: `ai_chat_queries`
 
 Logs chat interactions for analytics, debugging, and cost tracking.
 
@@ -163,7 +212,7 @@ Logs chat interactions for analytics, debugging, and cost tracking.
 | company_id | UUID | Yes | FK to `companies` |
 | user_id | UUID | Yes | FK to `auth.users` |
 | question | TEXT | Yes | User's natural language question |
-| tool_calls | JSONB | Yes | Which metric functions the AI invoked |
+| tool_calls | JSONB | Yes | Which tools the AI invoked (e.g., `execute_sql` with SQL queries) |
 | response | TEXT | Yes | AI's natural language response |
 | chart_config | JSONB | No | Chart config if a chart was generated |
 | provider | VARCHAR(20) | Yes | AI provider used (`'anthropic'`, `'openai'`, `'gemini'`) |
@@ -172,141 +221,108 @@ Logs chat interactions for analytics, debugging, and cost tracking.
 | duration_ms | INTEGER | No | End-to-end response time |
 | created_at | TIMESTAMPTZ | Yes | Timestamp |
 
-```sql
-CREATE TABLE ai_chat_queries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    question TEXT NOT NULL,
-    tool_calls JSONB NOT NULL DEFAULT '[]',
-    response TEXT NOT NULL,
-    chart_config JSONB,
-    provider VARCHAR(20) NOT NULL,
-    model VARCHAR(50),
-    tokens_used INTEGER,
-    duration_ms INTEGER,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+### Table: `saved_insights`
 
--- RLS
-ALTER TABLE ai_chat_queries ENABLE ROW LEVEL SECURITY;
+User-pinned chart cards on the dashboard (max 5 per user per company).
 
-CREATE POLICY "Users can read own company chat history"
-    ON ai_chat_queries FOR SELECT
-    USING (company_id IN (
-        SELECT company_id FROM user_company_access
-        WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'user')
-    ));
-
-CREATE POLICY "Users can insert chat queries for own company"
-    ON ai_chat_queries FOR INSERT
-    WITH CHECK (company_id IN (
-        SELECT company_id FROM user_company_access
-        WHERE user_id = auth.uid() AND role IN ('owner', 'admin', 'user')
-    ));
-
--- Index for rate limiting lookups
-CREATE INDEX idx_ai_chat_queries_rate_limit
-    ON ai_chat_queries (company_id, created_at DESC);
-```
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | UUID | Yes | Primary key, `gen_random_uuid()` |
+| user_id | UUID | Yes | FK to `auth.users` |
+| company_id | UUID | Yes | FK to `companies` |
+| question | TEXT | Yes | The user's original question |
+| answer | TEXT | Yes | AI-generated answer text |
+| chart_config | JSONB | No | Chart configuration for rendering |
+| created_at | TIMESTAMPTZ | Yes | Timestamp |
 
 ---
 
 ## UI Screens
 
-### 1. Dashboard Enhancement — Insights Section
+### 1. Dashboard — User-Built Insights
 
 **Route:** `/dashboard/{companyId}` (existing page, enhanced)
 
-The existing dashboard gets a new `InsightsSection` below the current summary cards grid and above the Recent Activity accordion.
+The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a user-curated chart grid. No static pre-built charts — users build their own dashboard by asking questions and pinning the results.
 
 **Layout:**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  [Existing: Open Quotes] [Active Jobs] [Revenue]        │  ← existing summary cards
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  AI Insights                              [View All →]  │
-│                                                         │
-│  ┌─────────────────────┐ ┌─────────────────────┐       │
-│  │ Revenue Trend        │ │ Job Pipeline         │       │
-│  │ ~~~~ chart ~~~~      │ │    🍩 donut chart    │       │
-│  │ "Revenue up 12%..."  │ │ "4 in progress..."   │       │
-│  └─────────────────────┘ └─────────────────────┘       │
-│  ┌─────────────────────┐ ┌─────────────────────┐       │
-│  │ Quote Conversion     │ │ At-Risk Jobs         │       │
-│  │   67% ↑              │ │ ⚠ J-0023 (critical) │       │
-│  │ "Up from 55%..."     │ │ ⚠ J-0041 (warning)  │       │
-│  └─────────────────────┘ └─────────────────────┘       │
-│  ┌─────────────────────┐                               │
-│  │ Inventory Alerts     │                               │
-│  │ 3 items low stock    │                               │
-│  └─────────────────────┘                               │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│  [Existing: Recent Activity accordion]                   │
-└─────────────────────────────────────────────────────────┘
++-----------------------------------------------------------+
+|  Pinned Metrics (customizable, 1-4 KPIs)                  |
+|  [Open Quotes: 12] | [Active Jobs: 5] | [Revenue: $14K]  |
+|  + Add metric / Edit metrics                              |
++-----------------------------------------------------------+
+|  Ask about your shop data...                     [Send]   |
+|  [Revenue trend] [Top customer?] [Jobs behind?] [Quote]   |
+|                                                           |
+|  +-----------------------------------------------------+ |
+|  | >> Revenue trend this month               [Save]     | |
+|  |                                                      | |
+|  |  +----------------------------------------------+   | |
+|  |  |     Area chart: Revenue by week               |   | |
+|  |  +----------------------------------------------+   | |
+|  |  "Revenue is up 12% this week..."                    | |
+|  +-----------------------------------------------------+ |
++-----------------------------------------------------------+
+|  Your Charts (3/5)                                        |
+|                                                           |
+|  +------------------------+ +------------------------+    |
+|  | Revenue trend       [x] | | Top customer        [x] |  |
+|  | ~~~~ area chart ~~~~~~~ | | --- bar chart --------- |  |
+|  | "Up 12% this week"      | | "Acme: 38% of rev"     |  |
+|  +------------------------+ +------------------------+    |
+|  +------------------------+                               |
+|  | Job pipeline        [x] |                              |
+|  |    donut chart          |                              |
+|  | "4 in progress..."      |                              |
+|  +------------------------+                               |
++-----------------------------------------------------------+
 ```
 
-- 5 insight cards in a responsive 2-column grid (1-column on mobile)
-- Each card: title + chart/visual + AI-generated summary text
-- "View All" link navigates to the full insights page
-- Cards use default `<Card elevation={2}>` per design system
-- Loading state: `<CircularProgress>` per card while computing
-- Stale cache indicator: subtle "(updated 45m ago)" timestamp
-
-### 2. Full Insights Page with Chat
-
-**Route:** `/dashboard/{companyId}/insights`
-
-**Layout:**
+**Empty state (no saved charts yet):**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Ask a question about your business                     │
-│  ┌─────────────────────────────────────────── [Send] ┐  │
-│  │ What's my most profitable part?                    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                                                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ Revenue  │ │ Top      │ │ Jobs     │ │ Quote    │  │
-│  │ trend    │ │ customer │ │ behind   │ │ pipeline │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
-│  ↑ pre-canned example prompt chips                      │
-│                                                         │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  AI Response Area                                │   │
-│  │                                                  │   │
-│  │  "Your most profitable part is ACM-001           │   │
-│  │   (Precision Bracket) with a 42% margin..."      │   │
-│  │                                                  │   │
-│  │  ┌─────────────────────────────────────────┐    │   │
-│  │  │     Bar chart: Part profitability        │    │   │
-│  │  └─────────────────────────────────────────┘    │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
-│                                                         │
-│  All Insights                            [Refresh ↻]    │
-│  (expanded versions of the 5 dashboard cards)           │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
++-----------------------------------------------------------+
+|  Your Charts                                              |
+|  + - - - - - - - - - - - - - - - - - - - - - - - - - +   |
+|  | Ask a question above and save the answer to build  |   |
+|  | your dashboard.                                    |   |
+|  + - - - - - - - - - - - - - - - - - - - - - - - - - +   |
++-----------------------------------------------------------+
 ```
 
-**Chat features:**
+**Pinned Metrics (PinnedMetrics component):**
+- Flat KPI strip at top of dashboard (no card wrappers)
+- 1-4 customizable metrics selected via MetricPickerModal
+- Available metrics: open_quotes, active_jobs, weekly_revenue, monthly_revenue, at_risk_count, low_inventory_count, total_customers, total_parts
+- Persisted to localStorage per user
+- "+ Add metric" / "Edit metrics" text link below
+
+**Ask Bar (InsightsChat component):**
 - Text input with Send button (also submits on Enter)
-- Pre-canned example prompt chips below the input (click to auto-fill)
-- Response area shows AI text + optional chart
-- Loading state: typing indicator animation during AI processing
+- Pre-canned example prompt chips below the input (click to submit)
+- Response appears inline: AI text + optional chart in a Card
+- Save button only shown when response includes a chart (`chart_config` is not null)
+- Save icon saves to "Your Charts" grid (max 5)
+- Save disabled at 5/5 with tooltip: "Remove a chart below to save new ones"
+- "Saved" text feedback shown after successful save; card auto-dismisses after 1.5s
+- Rotating loading messages while AI processes ("Querying your data...", "Analyzing results...", "Building your answer..." — cycles every 2 seconds)
 - Single Q&A per interaction (no conversation history for MVP)
-- Error state: "Couldn't process that question. Try rephrasing or pick an example above."
+- Error state: inline Alert with error message
+
+**Your Charts grid (InsightsSection component):**
+- Shows only user-saved insight cards
+- "Your Charts (N/5)" header with count indicator
+- 2-column responsive grid (1-column on mobile)
+- Each card: title (question) + chart + AI summary + x remove button
+- Empty state: dashed border box with message
 
 **Example prompt chips:**
-- "Show revenue trend"
-- "Who's my top customer?"
-- "Which jobs are behind schedule?"
-- "What's my quote pipeline worth?"
+- "Revenue trend"
+- "Top customer?"
+- "Jobs behind schedule?"
+- "Quote pipeline worth?"
 
 ### 3. Chart Types
 
@@ -369,7 +385,7 @@ Force-refresh all cached insights. Returns updated insights.
 
 ### `POST /api/insights/{company_id}/chat`
 
-Submit a natural language question.
+Submit a natural language question. The AI generates SQL to query the database and returns a natural language answer with an optional chart.
 
 **Request:**
 
@@ -394,7 +410,7 @@ Submit a natural language question.
     "x_label": "Revenue ($)",
     "y_label": "Customer"
   },
-  "tool_calls": ["get_customer_revenue_breakdown"],
+  "tool_calls": ["execute_sql"],
   "provider": "anthropic",
   "tokens_used": 1240
 }
@@ -420,6 +436,18 @@ Returns the user's recent chat queries (last 20).
 }
 ```
 
+### `POST /api/insights/{company_id}/saved`
+
+Save a chart response to the user's dashboard. Requires `chart_config` to be present.
+
+### `GET /api/insights/{company_id}/saved`
+
+List user's saved insights for this company.
+
+### `DELETE /api/insights/{company_id}/saved/{insight_id}`
+
+Delete a saved insight. Verifies ownership.
+
 ---
 
 ## Rate Limiting & Cost Controls
@@ -428,6 +456,8 @@ Returns the user's recent chat queries (last 20).
 |---|---|---|
 | Chat queries per company per hour | 20 | Prevents runaway AI costs for a single company |
 | Max tokens per chat query | 4,000 | Keeps individual responses bounded |
+| SQL statement timeout | 5 seconds | Prevents long-running queries |
+| SQL row limit | 200 rows | Bounds data transfer and AI context |
 | Insight cache TTL | 1 hour | Balance freshness vs AI cost |
 | Max concurrent insight refreshes per company | 1 | Prevents duplicate computation |
 
@@ -452,58 +482,96 @@ if count.count >= 20:
 
 ```
 api/
-├── routes/
-│   └── insights_routes.py          # All 4 endpoints
-├── services/
-│   ├── ai/
-│   │   ├── base_provider.py        # Add chat_with_tools() abstract method
-│   │   ├── claude_provider.py      # Implement chat_with_tools() for Claude
-│   │   ├── openai_provider.py      # Implement chat_with_tools() for OpenAI
-│   │   ├── gemini_provider.py      # Implement chat_with_tools() for Gemini
-│   │   └── factory.py              # Add 'insights_chat' feature support
-│   └── insights_service.py         # Metric functions + insight orchestration
-├── models/
-│   └── insights_models.py          # Pydantic request/response schemas
-└── tools/
-    └── metric_tools.py             # Tool definitions for AI (JSON schema format)
++-- routes/
+|   +-- insights_routes.py          # All endpoints (dashboard, chat, saved CRUD)
++-- services/
+|   +-- ai/
+|   |   +-- base_provider.py        # chat_with_tools() abstract method
+|   |   +-- claude_provider.py      # chat_with_tools() implementation + execute_sql dispatch
+|   |   +-- openai_provider.py      # Future: chat_with_tools() for OpenAI
+|   |   +-- gemini_provider.py      # Future: chat_with_tools() for Gemini
+|   |   +-- factory.py              # 'insights_chat' feature support
+|   +-- insights_service.py         # Metric functions (dashboard cache) + chat system prompt + execute_sql_tool()
++-- models/
+|   +-- insights_models.py          # Pydantic request/response schemas
++-- tools/
+    +-- metric_tools.py             # METRIC_TOOLS (dashboard) + CHAT_TOOLS (text-to-SQL)
+    +-- schema_context.py           # Database schema string for AI system prompt (17 tables)
+    +-- sql_validator.py            # SQL validation before execution
+    +-- sql_executor.py             # asyncpg connection pool + parameterized query execution
 ```
 
 ### Frontend Files
 
 ```
 components/
-├── dashboard/
-│   ├── InsightsSection.tsx         # Container for 5 insight cards on dashboard
-│   └── InsightCard.tsx             # Individual card: title + chart + AI summary
-└── insights/
-    ├── InsightsChat.tsx            # Chat input + response + example chips
-    └── InsightChart.tsx            # MUI X Charts wrapper rendering from chart_config
-
-app/dashboard/[companyId]/
-└── insights/
-    └── page.tsx                    # Full insights page with chat
++-- dashboard/
+|   +-- InsightsSection.tsx         # Saved chart cards grid + empty state
+|   +-- PinnedMetrics.tsx           # Customizable KPI strip (1-4 metrics)
+|   +-- MetricPickerModal.tsx       # Modal for selecting pinned metrics
++-- insights/
+    +-- InsightCard.tsx             # Individual card: title + chart + AI summary
+    +-- InsightsChat.tsx            # Ask bar: input + example chips + inline response + save
+    +-- InsightChart.tsx            # MUI X Charts wrapper rendering from chart_config
 
 utils/
-└── insightsAccess.ts              # Frontend fetch helpers (pattern: dashboardAccess.ts)
++-- insightsAccess.ts              # Insights API helpers (chat, save, delete, fetch)
++-- dashboardAccess.ts             # Metric values + pinned metric keys (localStorage)
 ```
 
 ---
 
-## AI System Prompt (for metric tool selection)
+## Environment Variables
 
-The backend constructs this prompt when calling the AI:
+| Variable | Description | Required |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key | Yes |
+| `SUPABASE_SECRET_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (backend) | Yes |
+| `ANTHROPIC_API_KEY` | Claude API key for AI features | Yes |
+| `AI_READONLY_DATABASE_URL` | PostgreSQL connection string for read-only AI queries | Yes (for chat) |
+
+The `AI_READONLY_DATABASE_URL` should point to a read-only Postgres role (see Database Setup below).
+
+---
+
+## Database Setup: Read-Only AI Role
+
+The text-to-SQL chat feature requires a read-only database role to execute AI-generated queries safely.
+
+**Migration:** `supabase/migrations/20260305000001_create_ai_readonly_role.sql`
+
+Before running the migration, replace `CHANGE_ME_secure_password` with a real password. Then set the environment variable:
+```
+AI_READONLY_DATABASE_URL=postgresql://jigged_ai_readonly:your_password@db.xxx.supabase.co:5432/postgres
+```
+
+---
+
+## AI System Prompt (for chat)
+
+The chat system prompt includes:
+
+1. **Role description** — Business analyst for a precision manufacturing shop
+2. **Database schema** — All 17 tables with column names, types, enum values, foreign key relationships, and important notes (imported from `schema_context.py`)
+3. **SQL guidelines** — Use `$1` for company_id, join patterns for tables without company_id
+4. **Example queries** — 4 common patterns for reference
+5. **Response guidelines** — Keep summaries concise, include chart_config when appropriate, highlight actionable insights
 
 ```
 You are a business analyst for a small precision manufacturing shop.
-You have access to tools that query the company's data. Use them to
-answer questions accurately and concisely.
+You answer questions by querying the company's PostgreSQL database using the
+execute_sql tool.
+
+[Full database schema with 17 tables, columns, types, relationships]
 
 Guidelines:
-- Always use the available tools to get real data. Never make up numbers.
+- Always use execute_sql to get real data. Never make up numbers.
+- Use $1 as a placeholder for company_id in all queries.
 - Keep summaries to 1-3 sentences. Shop owners are busy.
-- When data supports it, include a chart_config in your response.
+- When data supports it, include a chart_config JSON block.
 - Highlight actionable insights: what should the owner DO about this data?
-- Compare to previous periods when relevant (e.g., "up 12% vs last week").
+- Compare to previous periods when relevant.
 - Flag risks prominently (at-risk jobs, low inventory, revenue decline).
 - Use plain language. Avoid jargon. These are machinists, not MBAs.
 ```
@@ -514,26 +582,35 @@ Guidelines:
 
 ### Phase 0 — MVP
 
-- [ ] 5 pre-built insight cards on dashboard (InsightsSection)
-- [ ] `@mui/x-charts` integration with dark theme
-- [ ] 10 metric tool functions in FastAPI
-- [ ] `chat_with_tools()` added to AI provider base class + Claude implementation
-- [ ] Basic chat interface on `/dashboard/{companyId}/insights`
-- [ ] `ai_insight_cache` table with 1-hour TTL
-- [ ] `ai_chat_queries` table with rate limiting
-- [ ] Rate limiting: 20 queries/company/hour
-- [ ] Loading and error states for all components
-- [ ] Mobile-responsive layout (1-column on small screens)
+- [x] `@mui/x-charts` integration with dark theme
+- [x] 10 metric tool functions in FastAPI (for dashboard cache)
+- [x] `ai_insight_cache` table with 1-hour TTL
+- [x] `ai_chat_queries` table with rate limiting
+- [x] Rate limiting: 20 queries/company/hour
+- [x] PinnedMetrics component with customizable KPI strip (1-4 metrics)
+- [x] MetricPickerModal for metric selection
+- [x] Ask bar on dashboard with example prompt chips (InsightsChat)
+- [x] Inline AI response with optional chart + save button (chart responses only)
+- [x] Saved insights CRUD: save (max 5), list, delete
+- [x] "Your Charts" grid showing only user-saved insights
+- [x] Empty state with message
+- [x] Loading states with rotating messages for all components
+- [x] Mobile-responsive layout (1-column on small screens)
+- [x] Text-to-SQL architecture: schema context, SQL validator, SQL executor
+- [x] `execute_sql` tool for AI chat with safety layers
+- [x] Read-only database role for AI queries
+- [x] `chat_with_tools()` added to AI provider base class + Claude implementation
 
 ### Phase 1 — Enhanced
 
-- [ ] Customizable dashboard (drag/reorder insight cards, show/hide)
+- [ ] Header alert badge for at-risk jobs and low inventory (AlertBadge popover)
 - [ ] Additional chart types (scatter, heatmap for schedule visualization)
 - [ ] Multi-turn conversation history in chat
+- [ ] Predefined tools for complex business logic queries (based on user behavior)
 - [ ] OpenAI and Gemini `chat_with_tools()` implementations
 - [ ] Export charts as PNG images
-- [ ] Date range picker for insight cards (not just fixed periods)
-- [ ] In-app notification badges for critical insights (at-risk jobs, stockouts)
+- [ ] Date range picker for chart queries (not just fixed periods)
+- [ ] Drag/reorder saved chart cards
 
 ### Phase 2 — Predictive
 
@@ -542,7 +619,7 @@ Guidelines:
 - [ ] Scheduled insight digests (weekly email summary to admins)
 - [ ] Operator performance analytics (for admin view — not operator-facing)
 - [ ] Comparative analytics (month-over-month, customer vs customer)
-- [ ] Natural language → chart builder ("Show me a bar chart of revenue by customer for Q1")
+- [ ] Natural language -> chart builder ("Show me a bar chart of revenue by customer for Q1")
 
 ---
 
@@ -554,6 +631,7 @@ Guidelines:
 | Dashboard insight cards (fresh computation) | < 3 seconds |
 | Individual metric function execution | < 1 second |
 | Chat response end-to-end | < 8 seconds |
+| SQL query execution | < 5 seconds (enforced timeout) |
 | Cache refresh | Background, non-blocking |
 
 These targets assume the small data volumes typical of target shops (1-50 users, hundreds of jobs, not millions).
@@ -567,6 +645,8 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 - Chat question must be non-empty and under 500 characters
 - Chat rate limit: 20 queries per company per hour (configurable)
 - Insight cache is per-company, per-type (UNIQUE constraint)
+- AI-generated SQL validated before execution (see SQL Validation Rules)
+- SQL executed via read-only role with parameterized company_id
 
 ---
 
@@ -579,47 +659,61 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 | Metric function fails | Individual insight card shows error state. Other cards unaffected. |
 | No data available | Card shows empty state: "Not enough data yet. Create some quotes and jobs to see insights here." |
 | Chat question unrelated to data | AI responds: "I can only answer questions about your shop's data. Try asking about revenue, jobs, quotes, customers, or inventory." |
+| SQL validation fails | AI sees the error and can retry with corrected SQL (up to 5 iterations) |
+| SQL execution timeout | Returns error to AI; AI can simplify the query or explain the limitation |
+| SQL references blocked table | Validator rejects; AI informed and retries with allowed tables |
 | Company has no AI config | Falls back to Anthropic/Claude (default provider behavior from factory.py) |
+| Text-only response (no chart) | Save button hidden — only chart responses can be saved to dashboard |
 
 ---
 
 ## Acceptance Criteria
 
-### Dashboard Insight Cards
+### Pinned Metrics
 
-- [ ] 5 insight cards render below existing summary cards on the dashboard
-- [ ] Each card displays a chart (or alert list) and an AI-generated summary
-- [ ] Cards load from cache when available (< 500ms)
-- [ ] Cards compute fresh when cache is expired (< 3 seconds)
-- [ ] Loading spinner shown per card while computing
-- [ ] Graceful degradation: metric data shown even if AI summary fails
-- [ ] "View All" link navigates to full insights page
-- [ ] Responsive: 2-column on desktop, 1-column on mobile
-- [ ] Charts use MUI theme colors (no hardcoded values)
+- [ ] KPI strip renders at top of dashboard with 1-4 user-selected metrics
+- [ ] MetricPickerModal allows selecting/deselecting metrics (max 4)
+- [ ] Metric selection persisted to localStorage
+- [ ] Values fetched from backend on load
+- [ ] "+ Add metric" / "Edit metrics" link visible below strip
 
-### Chat Interface
+### Ask Bar (InsightsChat)
 
 - [ ] Text input accepts natural language questions
-- [ ] Pre-canned example chips populate the input on click
-- [ ] AI response includes text and optional chart
-- [ ] Loading state shown during AI processing
+- [ ] Pre-canned example chips submit on click (not just populate)
+- [ ] AI response includes text and optional chart, displayed inline
+- [ ] Save button only visible when response includes a chart
+- [ ] Save icon saves response to "Your Charts" grid (max 5 per company)
+- [ ] Save disabled at 5/5 with tooltip: "Remove a chart below to save new ones"
+- [ ] "Saved" text feedback shown after successful save
+- [ ] Rotating loading messages shown during AI processing
 - [ ] Rate limit enforced: 20 queries/company/hour
 - [ ] Rate limit exceeded shows clear error message
 - [ ] Chat queries logged to `ai_chat_queries` table
-- [ ] Recent chat history viewable on insights page
+
+### Your Charts Grid (InsightsSection)
+
+- [ ] Shows only user-saved insight cards (no pre-built static charts)
+- [ ] "Your Charts (N/5)" header with count indicator
+- [ ] Responsive: 2-column on desktop, 1-column on mobile
+- [ ] Each card: question as title + chart + AI summary + x remove button
+- [ ] Empty state: dashed border box with message
+- [ ] Charts use MUI theme colors (no hardcoded values)
 
 ### Security
 
 - [ ] All endpoints verify user role (owner/admin/user only)
-- [ ] All metric functions scoped to `company_id`
-- [ ] No raw SQL generated or executed by AI
+- [ ] All queries scoped to `company_id` via parameterized `$1` placeholder
+- [ ] SQL validated before execution: SELECT-only, table allowlist, no forbidden keywords
+- [ ] SQL executed via read-only Postgres role (`jigged_ai_readonly`)
+- [ ] Statement timeout (5s) and row limit (200) enforced
 - [ ] Operator role cannot access any insights endpoints
 - [ ] RLS policies on `ai_insight_cache` and `ai_chat_queries`
 
 ### AI Provider Integration
 
 - [ ] `chat_with_tools()` method added to `AIProvider` base class
-- [ ] Claude provider implements `chat_with_tools()`
+- [ ] Claude provider implements `chat_with_tools()` with `execute_sql` tool dispatch
 - [ ] `get_provider()` supports `'insights_chat'` feature type
 - [ ] Per-company provider configuration works via `ai_config` table
 - [ ] Default fallback to Anthropic/Claude when no config exists
@@ -635,6 +729,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 | 3 | What happens when a company has very little data? | **Resolved:** Empty state messaging per card. Minimum thresholds: revenue trend needs 2+ weeks of shipped jobs, conversion rate needs 5+ quotes. |
 | 4 | Should insights be available in Demo Mode? | **Resolved: Yes.** Demo Mode uses a hidden demo company with its own `company_id`. All insight queries naturally scope to the active company — no special filtering needed. See [Demo Mode PRD](./demo-mode.md). |
 | 5 | Token cost budget per company per month? | **Open.** Need to establish pricing tier limits once usage patterns are observed. |
+| 6 | When should predefined tools be added alongside execute_sql? | **Resolved:** Monitor user behavior patterns. Add predefined Python tools when SQL alone is too complex or error-prone for specific query types. Tracked in GitHub issue. |
 
 ---
 
@@ -642,6 +737,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 
 - **Insight engagement:** % of admin sessions that view insight cards on dashboard
 - **Chat adoption:** avg chat queries per active company per week
+- **SQL success rate:** % of AI-generated SQL queries that execute without errors
 - **Time on dashboard:** increase in time spent on dashboard page (indicates value)
 - **Feature retention:** % of companies using insights after 30 days
 - **AI accuracy:** user satisfaction with AI summaries (future: thumbs up/down feedback)

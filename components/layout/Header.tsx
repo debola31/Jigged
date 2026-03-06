@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -8,6 +8,7 @@ import Chip from '@mui/material/Chip';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import AlertBadge from './AlertBadge';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -110,6 +111,8 @@ function getPageTitle(pathname: string): string {
 export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
+  const params = useParams();
+  const companyId = params.companyId as string | undefined;
   const { signOut } = useAuth();
   const { isDemoMode } = useDemoMode();
   const pageTitle = getPageTitle(pathname);
@@ -150,20 +153,23 @@ export default function Header() {
           />
         )}
       </Box>
-      <Button
-        onClick={handleSignOut}
-        startIcon={<LogoutIcon />}
-        sx={{
-          color: 'rgba(255, 255, 255, 0.7)',
-          textTransform: 'none',
-          '&:hover': {
-            bgcolor: 'rgba(239, 68, 68, 0.1)',
-            color: 'error.main',
-          },
-        }}
-      >
-        Sign Out
-      </Button>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {companyId && <AlertBadge companyId={companyId} />}
+        <Button
+          onClick={handleSignOut}
+          startIcon={<LogoutIcon />}
+          sx={{
+            color: 'rgba(255, 255, 255, 0.7)',
+            textTransform: 'none',
+            '&:hover': {
+              bgcolor: 'rgba(239, 68, 68, 0.1)',
+              color: 'error.main',
+            },
+          }}
+        >
+          Sign Out
+        </Button>
+      </Box>
     </Box>
   );
 }

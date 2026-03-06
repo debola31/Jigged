@@ -1,130 +1,65 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useCallback, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Grid from '@mui/material/Grid';
-import Alert from '@mui/material/Alert';
-import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
-import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
-import { SummaryCard, RecentActivity } from '@/components/dashboard';
+import { InsightsSection, PinnedMetrics } from '@/components/dashboard';
+import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
-import {
-  getDashboardMetrics,
-  getRecentActivity,
-  type DashboardMetrics,
-  type ActivityItem,
-} from '@/utils/dashboardAccess';
-
-/**
- * Format a number as currency
- */
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-}
+import { getMetricValue } from '@/utils/dashboardAccess';
 
 export default function DashboardPage() {
   const params = useParams();
-  const router = useRouter();
   const companyId = params.companyId as string;
+  const [savedVersion, setSavedVersion] = useState(0);
+  const [savedCount, setSavedCount] = useState(0);
+  const [isEmpty, setIsEmpty] = useState(false);
 
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const handleInsightSaved = useCallback(() => {
+    setSavedVersion((v) => v + 1);
+  }, []);
 
-  const fetchDashboardData = useCallback(async () => {
-    if (!companyId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const [metricsData, activityData] = await Promise.all([
-        getDashboardMetrics(companyId),
-        getRecentActivity(companyId, 10),
-      ]);
-
-      setMetrics(metricsData);
-      setActivities(activityData);
-    } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-      setError('Failed to load dashboard data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
+  const handleSavedCountChange = useCallback((count: number) => {
+    setSavedCount(count);
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
-
-  const handleQuotesClick = () => {
-    router.push(`/dashboard/${companyId}/quotes?status=draft,pending_approval`);
-  };
-
-  const handleJobsClick = () => {
-    router.push(`/dashboard/${companyId}/jobs?status=active`);
-  };
-
-  const isEmpty = !loading && metrics != null
-    && metrics.openQuotesCount === 0
-    && metrics.activeJobsCount === 0
-    && metrics.weeklyRevenue === 0;
+    if (!companyId) return;
+    Promise.all([
+      getMetricValue(companyId, 'open_quotes'),
+      getMetricValue(companyId, 'active_jobs'),
+      getMetricValue(companyId, 'weekly_revenue'),
+    ]).then(([quotes, jobs, revenue]) => {
+      setIsEmpty(quotes === 0 && jobs === 0 && revenue === 0);
+    }).catch(() => {});
+  }, [companyId]);
 
   return (
     <Box>
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
-
       {/* Onboarding Card — shown when dashboard is empty and no demo exists */}
       <OnboardingCard companyId={companyId} isEmpty={isEmpty} />
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <SummaryCard
-            title="Open Quotes"
-            value={metrics?.openQuotesCount ?? 0}
-            icon={DescriptionOutlinedIcon}
-            color="default"
-            onClick={handleQuotesClick}
-            loading={loading}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-          <SummaryCard
-            title="Active Jobs"
-            value={metrics?.activeJobsCount ?? 0}
-            icon={WorkOutlineIcon}
-            color="default"
-            onClick={handleJobsClick}
-            loading={loading}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 12, md: 4 }}>
-          <SummaryCard
-            title="Revenue This Week"
-            value={formatCurrency(metrics?.weeklyRevenue ?? 0)}
-            icon={AttachMoneyIcon}
-            color="default"
-            loading={loading}
-          />
-        </Grid>
-      </Grid>
+      {/* Pinned Metrics */}
+      <Box sx={{ mb: 4 }}>
+        <PinnedMetrics companyId={companyId} />
+      </Box>
 
-      {/* Recent Activity */}
-      <RecentActivity activities={activities} loading={loading} />
+      {/* Ask Bar */}
+      <Box sx={{ mb: 4 }}>
+        <InsightsChat
+          companyId={companyId}
+          onInsightSaved={handleInsightSaved}
+          savedCount={savedCount}
+        />
+      </Box>
+
+      {/* Saved Charts */}
+      <InsightsSection
+        companyId={companyId}
+        savedVersion={savedVersion}
+        onSavedCountChange={handleSavedCountChange}
+      />
     </Box>
   );
 }

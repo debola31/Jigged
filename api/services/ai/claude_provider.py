@@ -1,12 +1,16 @@
 """Claude (Anthropic) AI provider implementation."""
 
 import json
+import logging
 import os
+import re
 from typing import Optional
 
 import anthropic
 
 from .base_provider import AIProvider, MappingSuggestion
+
+logger = logging.getLogger(__name__)
 
 
 MAPPING_PROMPT_TEMPLATE = """You are analyzing a CSV file to map columns to a customer database schema for a manufacturing ERP system.
@@ -154,3 +158,130 @@ class ClaudeProvider(AIProvider):
                 )
                 for header in csv_headers
             ]
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        system_prompt: str,
+        max_tokens: int = 4000,
+    ) -> dict:
+        """Run a tool-use conversation loop with Claude.
+
+        Calls the Anthropic API, executes any tool calls via the insights
+        service, passes results back, and repeats until the model produces
+        a final text response.
+
+        Returns:
+            Dict with keys: content, tool_calls, model, tokens_used
+        """
+        from services.insights_service import execute_sql_tool, execute_tool
+
+        # Extract company_id from the first user message
+        company_id = self._extract_company_id(messages)
+
+        # Build Anthropic-format messages
+        api_messages = [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+        ]
+
+        tool_names_called: list[str] = []
+        total_tokens = 0
+        max_iterations = 5  # Safety limit on tool-use loops
+
+        for _ in range(max_iterations):
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                messages=api_messages,
+                tools=tools,
+            )
+
+            total_tokens += (response.usage.input_tokens + response.usage.output_tokens)
+
+            # Check if the model wants to use tools
+            if response.stop_reason == "tool_use":
+                # Add the full assistant response (text + tool_use blocks)
+                api_messages.append({
+                    "role": "assistant",
+                    "content": response.content,
+                })
+
+                # Execute each tool call and collect results
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        tool_names_called.append(block.name)
+                        try:
+                            if block.name == "execute_sql":
+                                # Text-to-SQL: run via SQL executor
+                                result_data = await execute_sql_tool(
+                                    company_id=company_id,
+                                    sql=block.input.get("sql", ""),
+                                    description=block.input.get("description", ""),
+                                )
+                            else:
+                                # Predefined tool: run via metric function dispatcher
+                                result_data = execute_tool(
+                                    company_id=company_id,
+                                    tool_name=block.name,
+                                    tool_input=block.input,
+                                )
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": json.dumps(result_data),
+                            })
+                        except Exception as e:
+                            logger.warning(f"Tool {block.name} failed: {e}")
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": json.dumps({"error": str(e)}),
+                                "is_error": True,
+                            })
+
+                # Add tool results as user message
+                api_messages.append({
+                    "role": "user",
+                    "content": tool_results,
+                })
+            else:
+                # Final response — extract text content
+                text_parts = [
+                    block.text for block in response.content
+                    if hasattr(block, "text")
+                ]
+                final_content = "\n".join(text_parts)
+
+                return {
+                    "content": final_content,
+                    "tool_calls": tool_names_called,
+                    "model": self.model,
+                    "tokens_used": total_tokens,
+                }
+
+        # If we exhausted iterations, return whatever we have
+        text_parts = [
+            block.text for block in response.content
+            if hasattr(block, "text")
+        ]
+        return {
+            "content": "\n".join(text_parts) if text_parts else "I wasn't able to complete the analysis. Please try a simpler question.",
+            "tool_calls": tool_names_called,
+            "model": self.model,
+            "tokens_used": total_tokens,
+        }
+
+    @staticmethod
+    def _extract_company_id(messages: list[dict]) -> str:
+        """Extract company_id from the first user message."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                match = re.search(r"company_id:\s*([a-f0-9-]+)", content)
+                if match:
+                    return match.group(1)
+        raise ValueError("company_id not found in messages")

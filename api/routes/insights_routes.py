@@ -219,7 +219,11 @@ async def chat(company_id: str, request: ChatRequest):
 
         # Try to extract chart_config from the response
         # The AI may include it as a JSON block in its response
-        chart_config = _extract_chart_config(result["content"])
+        raw_content = result["content"]
+        chart_config = _extract_chart_config(raw_content)
+
+        # Strip code blocks from the answer text so users don't see raw JSON
+        clean_answer = _strip_code_blocks(raw_content)
 
         # Log to ai_chat_queries
         try:
@@ -240,7 +244,7 @@ async def chat(company_id: str, request: ChatRequest):
             logger.warning(f"Failed to log chat query: {e}")
 
         return ChatResponse(
-            answer=result["content"],
+            answer=clean_answer,
             chart_config=chart_config,
             tool_calls=result.get("tool_calls", []),
             provider="anthropic",
@@ -287,6 +291,17 @@ def _extract_chart_config(content: str) -> dict | None:
         pass
 
     return None
+
+
+def _strip_code_blocks(content: str) -> str:
+    """Remove all fenced code blocks (```...```) from AI response text."""
+    if "```" not in content:
+        return content.strip()
+
+    parts = content.split("```")
+    # Keep only even-indexed parts (outside code fences)
+    clean_parts = [parts[i] for i in range(len(parts)) if i % 2 == 0]
+    return "\n".join(clean_parts).strip()
 
 
 @router.get("/{company_id}/chat/history", response_model=ChatHistoryResponse)

@@ -14,8 +14,8 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
-import PushPinIcon from '@mui/icons-material/PushPin';
+import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
+import BookmarkIcon from '@mui/icons-material/Bookmark';
 import InsightChart from './InsightChart';
 import {
   submitChatQuery,
@@ -24,17 +24,7 @@ import {
   type ChartConfig,
 } from '@/utils/insightsAccess';
 
-interface InsightsChatProps {
-  companyId: string;
-  /** Called when user saves an insight so InsightsSection can refresh */
-  onInsightSaved?: () => void;
-}
-
-interface ChatResult {
-  question: string;
-  answer: string;
-  chart_config: ChartConfig | null;
-}
+const MAX_SAVED = 5;
 
 const EXAMPLE_PROMPTS = [
   'Revenue trend',
@@ -43,12 +33,25 @@ const EXAMPLE_PROMPTS = [
   'Quote pipeline worth?',
 ];
 
+interface InsightsChatProps {
+  companyId: string;
+  /** Called when user saves an insight so InsightsSection can refresh */
+  onInsightSaved?: () => void;
+  /** Current number of saved insights (for limit enforcement) */
+  savedCount?: number;
+}
+
+interface ChatResult {
+  question: string;
+  answer: string;
+  chart_config: ChartConfig | null;
+}
+
 /**
  * AskBar: Compact question input with inline response.
- * Shows input + example chips at the top of the dashboard.
- * Latest response appears directly below.
+ * Latest response appears directly below with optional chart + save action.
  */
-export default function InsightsChat({ companyId, onInsightSaved }: InsightsChatProps) {
+export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0 }: InsightsChatProps) {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,14 +96,21 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
     }
   };
 
+  const atLimit = savedCount >= MAX_SAVED;
+
   const handleSave = async () => {
-    if (!result || saving || saved) return;
+    if (!result || saving || saved || atLimit) return;
 
     setSaving(true);
     try {
       await saveInsight(companyId, result.question, result.answer, result.chart_config);
       setSaved(true);
       onInsightSaved?.();
+      // Dismiss inline response after brief feedback — chart now lives in "Your Charts"
+      setTimeout(() => {
+        setResult(null);
+        setSaved(false);
+      }, 1500);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save';
       setError(msg);
@@ -108,6 +118,12 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
       setSaving(false);
     }
   };
+
+  const saveTooltip = saved
+    ? 'Saved to dashboard'
+    : atLimit
+      ? 'Remove a chart below to save new ones'
+      : 'Save to dashboard';
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -181,25 +197,31 @@ export default function InsightsChat({ companyId, onInsightSaved }: InsightsChat
             <Typography variant="caption" color="primary.main" sx={{ fontWeight: 600, flex: 1 }}>
               {result.question}
             </Typography>
-            <Tooltip title={saved ? 'Saved to dashboard' : 'Save to dashboard'}>
-              <span>
-                <IconButton
-                  size="small"
-                  onClick={handleSave}
-                  disabled={saving || saved}
-                  sx={{ ml: 1 }}
-                  aria-label="Save to dashboard"
-                >
-                  {saving ? (
-                    <CircularProgress size={16} />
-                  ) : saved ? (
-                    <PushPinIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                  ) : (
-                    <PushPinOutlinedIcon sx={{ fontSize: 18 }} />
-                  )}
-                </IconButton>
-              </span>
-            </Tooltip>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {saved && (
+                <Typography variant="caption" color="success.main">
+                  Saved
+                </Typography>
+              )}
+              <Tooltip title={saveTooltip}>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={handleSave}
+                    disabled={saving || saved || atLimit}
+                    aria-label="Save to dashboard"
+                  >
+                    {saving ? (
+                      <CircularProgress size={16} />
+                    ) : saved ? (
+                      <BookmarkIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                    ) : (
+                      <BookmarkBorderIcon sx={{ fontSize: 18 }} />
+                    )}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Box>
           </Box>
 
           {result.chart_config && (

@@ -13,10 +13,15 @@ export default function DashboardPage() {
   const params = useParams();
   const companyId = params.companyId as string;
   const [savedVersion, setSavedVersion] = useState(0);
+  const [savedCount, setSavedCount] = useState(0);
   const [isEmpty, setIsEmpty] = useState(false);
 
   const handleInsightSaved = useCallback(() => {
     setSavedVersion((v) => v + 1);
+  }, []);
+
+  const handleSavedCountChange = useCallback((count: number) => {
+    setSavedCount(count);
   }, []);
 
   useEffect(() => {
@@ -42,11 +47,19 @@ export default function DashboardPage() {
 
       {/* Ask Bar */}
       <Box sx={{ mb: 4 }}>
-        <InsightsChat companyId={companyId} onInsightSaved={handleInsightSaved} />
+        <InsightsChat
+          companyId={companyId}
+          onInsightSaved={handleInsightSaved}
+          savedCount={savedCount}
+        />
       </Box>
 
-      {/* Insights */}
-      <InsightsSection companyId={companyId} savedVersion={savedVersion} />
+      {/* Saved Charts */}
+      <InsightsSection
+        companyId={companyId}
+        savedVersion={savedVersion}
+        onSavedCountChange={handleSavedCountChange}
+      />
     </Box>
   );
 }

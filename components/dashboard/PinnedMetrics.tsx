@@ -95,7 +95,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
                 <Divider orientation="vertical" flexItem sx={{ mr: 3, display: { xs: 'none', md: 'block' } }} />
               )}
               <Box>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5, fontWeight: 500 }}>
+                <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 500, color: 'text.primary' }}>
                   {def.label}
                 </Typography>
                 {loading ? (

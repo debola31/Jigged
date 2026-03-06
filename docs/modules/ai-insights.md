@@ -2,13 +2,13 @@
 
 ## Overview
 
-The AI Insights module gives shop owners and administrators an intelligent data analyst built into their dashboard. It surfaces actionable business insights through pre-built metric cards with charts and a natural language chat interface for ad-hoc questions — so a 50-year-old shop owner who's great at machining doesn't need to be great at spreadsheets.
+The AI Insights module gives shop owners and administrators an intelligent data analyst built into their dashboard. Users ask questions in plain English and the AI returns text answers with optional charts. Users pin the answers they find valuable to build a personalized dashboard — so a 50-year-old shop owner who's great at machining doesn't need to be great at spreadsheets.
 
 **Priority:** Should Have (FR-17: Dashboard with AI Insights), Could Have (FR-18: Natural Language Queries)
 
 **Dependencies:** Dashboard, Jobs, Quotes, Customers, Parts, Operations, Inventory modules
 
-**Database Tables:** `ai_insight_cache`, `ai_chat_queries`, `ai_config` (existing)
+**Database Tables:** `ai_insight_cache`, `ai_chat_queries`, `ai_config` (existing), `saved_insights`
 
 **Chart Library:** `@mui/x-charts` (MUI's native charting — seamless dark theme integration)
 
@@ -28,6 +28,9 @@ The AI Insights module gives shop owners and administrators an intelligent data 
 | Admin | See inventory items that need reordering | I can prevent stockouts before they delay jobs |
 | User | Click example prompts to quickly ask common questions | I can get answers without knowing what to type |
 | Admin | Have insights cached so the page loads fast | I'm not waiting for AI every time I open the dashboard |
+| Admin | Pin AI-generated charts to my dashboard | I build a personalized view of the metrics I care about |
+| Admin | Remove pinned charts I no longer need | I can keep my dashboard focused and relevant |
+| Admin | See starter prompts when my chart grid is empty | I know how to get started without reading docs |
 
 ---
 
@@ -214,99 +217,93 @@ CREATE INDEX idx_ai_chat_queries_rate_limit
 
 ## UI Screens
 
-### 1. Dashboard Enhancement — Insights Section
+### 1. Dashboard — User-Built Insights
 
 **Route:** `/dashboard/{companyId}` (existing page, enhanced)
 
-The existing dashboard gets a new `InsightsSection` below the current summary cards grid and above the Recent Activity accordion.
+The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a user-curated chart grid. No static pre-built charts — users build their own dashboard by asking questions and pinning the results.
 
 **Layout:**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  [Existing: Open Quotes] [Active Jobs] [Revenue]        │  ← existing summary cards
+│  Pinned Metrics (customizable, 1-4 KPIs)                │
+│  [Open Quotes: 12] | [Active Jobs: 5] | [Revenue: $14K] │
+│  + Add metric / Edit metrics                            │
 ├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  AI Insights                              [View All →]  │
-│                                                         │
-│  ┌─────────────────────┐ ┌─────────────────────┐       │
-│  │ Revenue Trend        │ │ Job Pipeline         │       │
-│  │ ~~~~ chart ~~~~      │ │    🍩 donut chart    │       │
-│  │ "Revenue up 12%..."  │ │ "4 in progress..."   │       │
-│  └─────────────────────┘ └─────────────────────┘       │
-│  ┌─────────────────────┐ ┌─────────────────────┐       │
-│  │ Quote Conversion     │ │ At-Risk Jobs         │       │
-│  │   67% ↑              │ │ ⚠ J-0023 (critical) │       │
-│  │ "Up from 55%..."     │ │ ⚠ J-0041 (warning)  │       │
-│  └─────────────────────┘ └─────────────────────┘       │
-│  ┌─────────────────────┐                               │
-│  │ Inventory Alerts     │                               │
-│  │ 3 items low stock    │                               │
-│  └─────────────────────┘                               │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│  [Existing: Recent Activity accordion]                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-- 5 insight cards in a responsive 2-column grid (1-column on mobile)
-- Each card: title + chart/visual + AI-generated summary text
-- "View All" link navigates to the full insights page
-- Cards use default `<Card elevation={2}>` per design system
-- Loading state: `<CircularProgress>` per card while computing
-- Stale cache indicator: subtle "(updated 45m ago)" timestamp
-
-### 2. Full Insights Page with Chat
-
-**Route:** `/dashboard/{companyId}/insights`
-
-**Layout:**
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Ask a question about your business                     │
-│  ┌─────────────────────────────────────────── [Send] ┐  │
-│  │ What's my most profitable part?                    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                                                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ Revenue  │ │ Top      │ │ Jobs     │ │ Quote    │  │
-│  │ trend    │ │ customer │ │ behind   │ │ pipeline │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
-│  ↑ pre-canned example prompt chips                      │
+│  Ask about your shop data...                   [Send]   │
+│  [Revenue trend] [Top customer?] [Jobs behind?] [Quote] │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │  AI Response Area                                │   │
-│  │                                                  │   │
-│  │  "Your most profitable part is ACM-001           │   │
-│  │   (Precision Bracket) with a 42% margin..."      │   │
+│  │ ✨ Revenue trend this month            [📌 Pin]  │   │
 │  │                                                  │   │
 │  │  ┌─────────────────────────────────────────┐    │   │
-│  │  │     Bar chart: Part profitability        │    │   │
+│  │  │     Area chart: Revenue by week          │    │   │
 │  │  └─────────────────────────────────────────┘    │   │
+│  │  "Revenue is up 12% this week..."               │   │
 │  └─────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────┤
+│  Your Charts ✨ (3/5)                                   │
 │                                                         │
-│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │
-│                                                         │
-│  All Insights                            [Refresh ↻]    │
-│  (expanded versions of the 5 dashboard cards)           │
-│                                                         │
+│  ┌─────────────────────┐ ┌─────────────────────┐       │
+│  │ Revenue trend    [×] │ │ Top customer     [×] │       │
+│  │ ~~~~ area chart ~~~~ │ │ ─── bar chart ────── │       │
+│  │ "Up 12% this week"   │ │ "Acme: 38% of rev"  │       │
+│  └─────────────────────┘ └─────────────────────┘       │
+│  ┌─────────────────────┐                               │
+│  │ Job pipeline     [×] │                               │
+│  │    🍩 donut chart     │                               │
+│  │ "4 in progress..."   │                               │
+│  └─────────────────────┘                               │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Chat features:**
+**Empty state (no saved charts yet):**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Your Charts ✨                                         │
+│  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  │
+│  │ Ask a question above and pin the answer to build │   │
+│  │ your dashboard.                                  │   │
+│  │                                                  │   │
+│  │ Try these to get started:                        │   │
+│  │ [Revenue trend this month] [Top customer]        │   │
+│  │ [Job pipeline breakdown]                         │   │
+│  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Pinned Metrics (PinnedMetrics component):**
+- Flat KPI strip at top of dashboard (no card wrappers)
+- 1-4 customizable metrics selected via MetricPickerModal
+- Available metrics: open_quotes, active_jobs, weekly_revenue, monthly_revenue, at_risk_count, low_inventory_count, total_customers, total_parts
+- Persisted to localStorage per user
+- "+ Add metric" / "Edit metrics" text link below
+
+**Ask Bar (InsightsChat component):**
 - Text input with Send button (also submits on Enter)
-- Pre-canned example prompt chips below the input (click to auto-fill)
-- Response area shows AI text + optional chart
-- Loading state: typing indicator animation during AI processing
+- Pre-canned example prompt chips below the input (click to submit)
+- Response appears inline: AI text + optional chart in a Card
+- Pin icon on response saves to "Your Charts" grid (max 5)
+- Pin disabled at 5/5 with tooltip: "Remove a chart below to pin new ones"
+- "Pinned" text feedback shown after successful save
 - Single Q&A per interaction (no conversation history for MVP)
-- Error state: "Couldn't process that question. Try rephrasing or pick an example above."
+- Error state: inline Alert with error message
+
+**Your Charts grid (InsightsSection component):**
+- Shows only user-saved/pinned insight cards
+- "Your Charts (N/5)" header with count indicator
+- 2-column responsive grid (1-column on mobile)
+- Each card: title (question) + chart + AI summary + × remove button
+- Empty state: dashed border box with message + clickable starter prompts
+- Starter prompts trigger the ask bar via callback
 
 **Example prompt chips:**
-- "Show revenue trend"
-- "Who's my top customer?"
-- "Which jobs are behind schedule?"
-- "What's my quote pipeline worth?"
+- "Revenue trend"
+- "Top customer?"
+- "Jobs behind schedule?"
+- "Quote pipeline worth?"
 
 ### 3. Chart Types
 
@@ -473,18 +470,17 @@ api/
 ```
 components/
 ├── dashboard/
-│   ├── InsightsSection.tsx         # Container for 5 insight cards on dashboard
-│   └── InsightCard.tsx             # Individual card: title + chart + AI summary
+│   ├── InsightsSection.tsx         # Saved/pinned chart cards grid + empty state
+│   ├── PinnedMetrics.tsx           # Customizable KPI strip (1-4 metrics)
+│   └── MetricPickerModal.tsx       # Modal for selecting pinned metrics
 └── insights/
-    ├── InsightsChat.tsx            # Chat input + response + example chips
+    ├── InsightCard.tsx             # Individual card: title + chart + AI summary
+    ├── InsightsChat.tsx            # Ask bar: input + example chips + inline response + pin
     └── InsightChart.tsx            # MUI X Charts wrapper rendering from chart_config
 
-app/dashboard/[companyId]/
-└── insights/
-    └── page.tsx                    # Full insights page with chat
-
 utils/
-└── insightsAccess.ts              # Frontend fetch helpers (pattern: dashboardAccess.ts)
+├── insightsAccess.ts              # Insights API helpers (chat, save, delete, fetch)
+└── dashboardAccess.ts             # Metric values + pinned metric keys (localStorage)
 ```
 
 ---
@@ -514,26 +510,31 @@ Guidelines:
 
 ### Phase 0 — MVP
 
-- [ ] 5 pre-built insight cards on dashboard (InsightsSection)
-- [ ] `@mui/x-charts` integration with dark theme
-- [ ] 10 metric tool functions in FastAPI
+- [x] `@mui/x-charts` integration with dark theme
+- [x] 10 metric tool functions in FastAPI
+- [x] `ai_insight_cache` table with 1-hour TTL
+- [x] `ai_chat_queries` table with rate limiting
+- [x] Rate limiting: 20 queries/company/hour
+- [x] PinnedMetrics component with customizable KPI strip (1-4 metrics)
+- [x] MetricPickerModal for metric selection
+- [x] Ask bar on dashboard with example prompt chips (InsightsChat)
+- [x] Inline AI response with optional chart + pin-to-save button
+- [x] Saved insights CRUD: save (max 5), list, delete
+- [x] "Your Charts" grid showing only user-pinned insights
+- [x] Empty state with starter prompts that trigger ask bar
+- [x] Loading and error states for all components
+- [x] Mobile-responsive layout (1-column on small screens)
 - [ ] `chat_with_tools()` added to AI provider base class + Claude implementation
-- [ ] Basic chat interface on `/dashboard/{companyId}/insights`
-- [ ] `ai_insight_cache` table with 1-hour TTL
-- [ ] `ai_chat_queries` table with rate limiting
-- [ ] Rate limiting: 20 queries/company/hour
-- [ ] Loading and error states for all components
-- [ ] Mobile-responsive layout (1-column on small screens)
 
 ### Phase 1 — Enhanced
 
-- [ ] Customizable dashboard (drag/reorder insight cards, show/hide)
+- [ ] Header alert badge for at-risk jobs and low inventory (AlertBadge popover)
 - [ ] Additional chart types (scatter, heatmap for schedule visualization)
 - [ ] Multi-turn conversation history in chat
 - [ ] OpenAI and Gemini `chat_with_tools()` implementations
 - [ ] Export charts as PNG images
-- [ ] Date range picker for insight cards (not just fixed periods)
-- [ ] In-app notification badges for critical insights (at-risk jobs, stockouts)
+- [ ] Date range picker for chart queries (not just fixed periods)
+- [ ] Drag/reorder saved chart cards
 
 ### Phase 2 — Predictive
 
@@ -585,28 +586,36 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 
 ## Acceptance Criteria
 
-### Dashboard Insight Cards
+### Pinned Metrics
 
-- [ ] 5 insight cards render below existing summary cards on the dashboard
-- [ ] Each card displays a chart (or alert list) and an AI-generated summary
-- [ ] Cards load from cache when available (< 500ms)
-- [ ] Cards compute fresh when cache is expired (< 3 seconds)
-- [ ] Loading spinner shown per card while computing
-- [ ] Graceful degradation: metric data shown even if AI summary fails
-- [ ] "View All" link navigates to full insights page
-- [ ] Responsive: 2-column on desktop, 1-column on mobile
-- [ ] Charts use MUI theme colors (no hardcoded values)
+- [ ] KPI strip renders at top of dashboard with 1-4 user-selected metrics
+- [ ] MetricPickerModal allows selecting/deselecting metrics (max 4)
+- [ ] Metric selection persisted to localStorage
+- [ ] Values fetched from backend on load
+- [ ] "+ Add metric" / "Edit metrics" link visible below strip
 
-### Chat Interface
+### Ask Bar (InsightsChat)
 
 - [ ] Text input accepts natural language questions
-- [ ] Pre-canned example chips populate the input on click
-- [ ] AI response includes text and optional chart
+- [ ] Pre-canned example chips submit on click (not just populate)
+- [ ] AI response includes text and optional chart, displayed inline
+- [ ] Pin icon saves response to "Your Charts" grid (max 5 per company)
+- [ ] Pin disabled at 5/5 with tooltip: "Remove a chart below to pin new ones"
+- [ ] "Pinned" text feedback shown after successful save
 - [ ] Loading state shown during AI processing
 - [ ] Rate limit enforced: 20 queries/company/hour
 - [ ] Rate limit exceeded shows clear error message
 - [ ] Chat queries logged to `ai_chat_queries` table
-- [ ] Recent chat history viewable on insights page
+
+### Your Charts Grid (InsightsSection)
+
+- [ ] Shows only user-saved/pinned insight cards (no pre-built static charts)
+- [ ] "Your Charts (N/5)" header with count indicator
+- [ ] Responsive: 2-column on desktop, 1-column on mobile
+- [ ] Each card: question as title + chart + AI summary + × remove button
+- [ ] Empty state: dashed border box with message + clickable starter prompts
+- [ ] Starter prompts trigger the ask bar when clicked
+- [ ] Charts use MUI theme colors (no hardcoded values)
 
 ### Security
 

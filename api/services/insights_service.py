@@ -24,11 +24,21 @@ Guidelines:
 - Always use the available tools to get real data. Never make up numbers.
 - For dashboard card summaries: respond with a single short phrase (under 12 words). Examples: "Flat at $0 for 8 weeks", "Pipeline healthy — 50% in progress", "3 jobs at risk of delay".
 - For chat responses: keep to 1 sentence max (under 20 words). Be direct. Shop owners are busy.
-- When data supports it, include a chart_config in your response.
+- ALWAYS include a chart_config JSON block when the data has multiple values, trends, comparisons, or distributions. Use area for trends over time, bar for comparisons, bar_horizontal for ranked lists, pie for distributions. Only omit charts for yes/no answers or single-number lookups.
 - Highlight actionable insights: what should the owner DO about this data?
 - Compare to previous periods when relevant (e.g., "up 12% vs last week").
 - Flag risks prominently (at-risk jobs, low inventory, revenue decline).
-- Use plain language. Avoid jargon. These are machinists, not MBAs."""
+- Use plain language. Avoid jargon. These are machinists, not MBAs.
+
+chart_config format (include as a ```json code block when applicable):
+{
+  "chart_type": "area" | "pie" | "bar" | "bar_horizontal" | "sparkline",
+  "data": [{"x_key_value": ..., "y_key_value": ...}, ...],
+  "x_key": "field_name",
+  "y_key": "field_name",
+  "x_label": "Axis Label",
+  "y_label": "Axis Label"
+}"""
 
 # Mapping of dashboard insight types to their metric functions and defaults
 DASHBOARD_INSIGHT_CONFIG = {

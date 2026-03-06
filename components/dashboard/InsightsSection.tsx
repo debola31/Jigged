@@ -6,7 +6,6 @@ import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
-import AlertTitle from '@mui/material/AlertTitle';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import InsightCard from '@/components/insights/InsightCard';
@@ -25,15 +24,10 @@ interface InsightsSectionProps {
   savedVersion?: number;
 }
 
-const INSIGHT_LABELS: Record<string, string> = {
-  at_risk_jobs: 'At-Risk Jobs',
-  inventory_alerts: 'Inventory Alerts',
-};
-
 /**
- * InsightsSection: Container for insight cards on the dashboard.
- * Alert-type insights render as compact banners above the chart grid.
- * Chart insights display in a responsive 2-column grid (1-column on mobile).
+ * InsightsSection: Container for chart insight cards on the dashboard.
+ * Alert-type insights (at_risk_jobs, inventory_alerts) are handled by the
+ * header AlertBadge component. Only chart insights display here.
  * Includes a Refresh button to force-recompute insights.
  */
 export default function InsightsSection({ companyId, savedVersion = 0 }: InsightsSectionProps) {
@@ -96,8 +90,6 @@ export default function InsightsSection({ companyId, savedVersion = 0 }: Insight
     'revenue_trend',
     'job_pipeline',
     'quote_conversion',
-    'at_risk_jobs',
-    'inventory_alerts',
   ];
 
   return (
@@ -136,52 +128,36 @@ export default function InsightsSection({ companyId, savedVersion = 0 }: Insight
         </Alert>
       )}
 
-      {/* Alert Banners (at_risk_jobs, inventory_alerts) */}
+      {/* Chart Insight Cards Grid (alert-type insights handled by header AlertBadge) */}
       {!loading && (() => {
-        const alertInsights = insights.filter(i => i.type === 'at_risk_jobs' || i.type === 'inventory_alerts');
         const chartInsights = insights.filter(i => i.type !== 'at_risk_jobs' && i.type !== 'inventory_alerts');
         return (
-          <>
-            {alertInsights.map(insight => {
-              const hasIssues = insight.type === 'at_risk_jobs'
-                ? ((insight.metric_data?.at_risk_jobs as unknown[]) || []).length > 0
-                : ((insight.metric_data?.alerts as unknown[]) || []).length > 0;
-              return (
-                <Alert key={insight.type} severity={hasIssues ? 'warning' : 'success'} sx={{ mb: 1.5 }}>
-                  <AlertTitle>{INSIGHT_LABELS[insight.type]}</AlertTitle>
-                  {insight.summary}
-                </Alert>
-              );
-            })}
-
-            {/* Chart Insight Cards Grid */}
-            <Grid container spacing={2}>
-              {chartInsights.map((insight) => (
-                <Grid key={insight.type} size={{ xs: 12, md: 6 }}>
-                  <InsightCard insight={insight} chartHeight={150} />
-                </Grid>
-              ))}
-              {/* Saved insight cards */}
-              {savedInsights.map((saved) => (
-                <Grid key={saved.id} size={{ xs: 12, md: 6 }}>
-                  <InsightCard
-                    insight={{
-                      type: 'saved',
-                      summary: saved.answer,
-                      metric_data: {},
-                      chart_config: saved.chart_config,
-                      computed_at: saved.created_at,
-                      is_cached: false,
-                    }}
-                    title={saved.question}
-                    removable
-                    onRemove={() => handleRemoveSaved(saved.id)}
-                    chartHeight={150}
-                  />
-                </Grid>
-              ))}
-            </Grid>
-          </>
+          <Grid container spacing={2}>
+            {chartInsights.map((insight) => (
+              <Grid key={insight.type} size={{ xs: 12, md: 6 }}>
+                <InsightCard insight={insight} chartHeight={150} />
+              </Grid>
+            ))}
+            {/* Saved insight cards */}
+            {savedInsights.map((saved) => (
+              <Grid key={saved.id} size={{ xs: 12, md: 6 }}>
+                <InsightCard
+                  insight={{
+                    type: 'saved',
+                    summary: saved.answer,
+                    metric_data: {},
+                    chart_config: saved.chart_config,
+                    computed_at: saved.created_at,
+                    is_cached: false,
+                  }}
+                  title={saved.question}
+                  removable
+                  onRemove={() => handleRemoveSaved(saved.id)}
+                  chartHeight={150}
+                />
+              </Grid>
+            ))}
+          </Grid>
         );
       })()}
 

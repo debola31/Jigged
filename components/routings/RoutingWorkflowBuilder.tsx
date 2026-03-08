@@ -402,8 +402,17 @@ export default function RoutingWorkflowBuilder({
   // Add Operation dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
-  // Edge selection state (for delete hint)
-  const [edgeSelected, setEdgeSelected] = useState(false);
+  // Selection state (for contextual delete hint)
+  const [selectionCounts, setSelectionCounts] = useState({ nodes: 0, edges: 0 });
+
+  const handleSelectionChange = useCallback(({ nodes: selectedNodes, edges: selectedEdges }: { nodes: Node[]; edges: Edge[] }) => {
+    setSelectionCounts((prev) => {
+      const n = selectedNodes.length;
+      const e = selectedEdges.length;
+      if (prev.nodes === n && prev.edges === e) return prev;
+      return { nodes: n, edges: e };
+    });
+  }, []);
 
   // Help popover state
   const [helpAnchorEl, setHelpAnchorEl] = useState<HTMLElement | null>(null);
@@ -1016,15 +1025,20 @@ export default function RoutingWorkflowBuilder({
 
           <Box sx={{ flex: 1 }} />
 
-          {/* Edge delete hint */}
-          {edgeSelected && (
+          {/* Contextual delete hint */}
+          {(selectionCounts.nodes > 0 || selectionCounts.edges > 0) && (
             <Chip
               icon={<DeleteOutlineIcon sx={{ fontSize: 16 }} />}
-              label="Press Delete to remove connection"
+              label={`Press Delete to remove ${
+                selectionCounts.nodes > 0 && selectionCounts.edges > 0
+                  ? 'selection'
+                  : selectionCounts.nodes > 0
+                    ? selectionCounts.nodes === 1 ? 'operation' : `${selectionCounts.nodes} operations`
+                    : selectionCounts.edges === 1 ? 'connection' : `${selectionCounts.edges} connections`
+              }`}
               size="small"
               color="error"
               variant="outlined"
-              sx={{ animation: 'fadeIn 0.2s ease-in' }}
             />
           )}
 
@@ -1102,9 +1116,7 @@ export default function RoutingWorkflowBuilder({
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgesDelete={onEdgesDelete}
-            onSelectionChange={({ edges: selectedEdges }) => {
-              setEdgeSelected(selectedEdges.length > 0);
-            }}
+            onSelectionChange={handleSelectionChange}
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}

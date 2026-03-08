@@ -10,8 +10,8 @@ import InsightCard from '@/components/insights/InsightCard';
 import {
   getSavedInsights,
   deleteSavedInsight,
-  type SavedInsight,
-} from '@/utils/insightsAccess';
+} from '@/utils/savedInsightsAccess';
+import type { SavedInsight } from '@/utils/insightsAccess';
 
 const MAX_SAVED = 5;
 

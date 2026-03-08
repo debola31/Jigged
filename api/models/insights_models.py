@@ -59,27 +59,3 @@ class ChatHistoryResponse(BaseModel):
     """Response containing chat history items."""
 
     queries: list[ChatHistoryItem]
-
-
-class SaveInsightRequest(BaseModel):
-    """Request to save a chart to the dashboard."""
-
-    question: str = Field(..., max_length=500, description="The question that generated this insight")
-    answer: str = Field(..., max_length=2000, description="The AI response text")
-    chart_config: Optional[dict] = Field(None, description="Chart configuration")
-
-
-class SavedInsight(BaseModel):
-    """A user-saved dashboard insight."""
-
-    id: str
-    question: str
-    answer: str
-    chart_config: Optional[dict] = None
-    created_at: datetime
-
-
-class SavedInsightsResponse(BaseModel):
-    """Response containing saved insights."""
-
-    insights: list[SavedInsight]

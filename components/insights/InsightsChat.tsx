@@ -16,10 +16,10 @@ import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
 import InsightChart from './InsightChart';
 import {
   submitChatQuery,
-  saveInsight,
   type ChatResponse,
   type ChartConfig,
 } from '@/utils/insightsAccess';
+import { saveInsight } from '@/utils/savedInsightsAccess';
 
 const MAX_SAVED = 5;
 

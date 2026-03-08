@@ -6,9 +6,9 @@ Endpoints:
 - POST /{company_id}/refresh     - Force-refresh all cached insights
 - POST /{company_id}/chat        - Submit natural language question
 - GET  /{company_id}/chat/history - Get last 20 chat queries
-- POST /{company_id}/saved       - Save a chart to dashboard
-- GET  /{company_id}/saved       - List saved insights
-- DELETE /{company_id}/saved/{id} - Delete a saved insight
+
+Note: Saved insights CRUD (get/save/delete) is handled client-side
+via direct Supabase queries with RLS policies.
 """
 
 import json
@@ -17,7 +17,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
 from models.insights_models import (
@@ -27,9 +27,6 @@ from models.insights_models import (
     ChatResponse,
     DashboardInsightsResponse,
     InsightCard,
-    SavedInsight,
-    SavedInsightsResponse,
-    SaveInsightRequest,
 )
 from services.insights_service import (
     _build_chat_system_prompt,
@@ -49,57 +46,6 @@ def _get_supabase_service_role() -> Client:
     if not url or not key:
         raise HTTPException(status_code=503, detail="Database not available")
     return create_client(url, key)
-
-
-def _verify_user_access(authorization: str, company_id: str) -> str:
-    """
-    Verify user has access to the company from the Authorization JWT.
-    Returns user_id if authorized.
-
-    Uses the Supabase service role client to verify the JWT and check
-    user_company_access for the correct role.
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-
-    token = authorization.split(" ", 1)[1]
-    supabase = _get_supabase_service_role()
-
-    try:
-        # Verify the JWT and get user info
-        user_response = supabase.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        user_id = user_response.user.id
-
-        # Check user has access to this company with appropriate role
-        access_response = (
-            supabase.table("user_company_access")
-            .select("role")
-            .eq("user_id", user_id)
-            .eq("company_id", company_id)
-            .maybe_single()
-            .execute()
-        )
-
-        if not access_response.data:
-            raise HTTPException(status_code=403, detail="No access to this company")
-
-        role = access_response.data.get("role")
-        if role not in ("owner", "admin", "user"):
-            raise HTTPException(
-                status_code=403,
-                detail="Insufficient role. Operators cannot access insights.",
-            )
-
-        return user_id
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Auth verification error: {e}")
-        raise HTTPException(status_code=401, detail="Authentication failed")
 
 
 def _check_chat_rate_limit(company_id: str) -> None:
@@ -339,159 +285,4 @@ async def get_chat_history(company_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch chat history: {str(e)}",
-        )
-
-
-# ============================================================
-# Saved Insights
-# ============================================================
-
-
-@router.post("/{company_id}/saved", response_model=SavedInsight)
-async def save_insight(
-    company_id: str,
-    request: SaveInsightRequest,
-    authorization: str = Header(None),
-):
-    """
-    Save a chart to the user's dashboard.
-    Enforces a maximum of 5 saved insights per user per company.
-    """
-    user_id = _verify_user_access(authorization, company_id)
-
-    try:
-        supabase = _get_supabase_service_role()
-
-        # Check count of existing saved insights
-        count_response = (
-            supabase.table("saved_insights")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-            .eq("company_id", company_id)
-            .execute()
-        )
-
-        count = count_response.count or 0
-        if count >= 5:
-            raise HTTPException(
-                status_code=400,
-                detail="Maximum 5 saved insights per company. Remove one to save another.",
-            )
-
-        # Insert the saved insight
-        insert_response = (
-            supabase.table("saved_insights")
-            .insert({
-                "user_id": user_id,
-                "company_id": company_id,
-                "question": request.question,
-                "answer": request.answer,
-                "chart_config": request.chart_config,
-            })
-            .execute()
-        )
-
-        row = insert_response.data[0]
-        return SavedInsight(
-            id=row["id"],
-            question=row["question"],
-            answer=row["answer"],
-            chart_config=row.get("chart_config"),
-            created_at=row["created_at"],
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error saving insight: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save insight: {str(e)}",
-        )
-
-
-@router.get("/{company_id}/saved", response_model=SavedInsightsResponse)
-async def get_saved_insights(
-    company_id: str,
-    authorization: str = Header(None),
-):
-    """
-    List user's saved insights for this company, sorted by newest first.
-    """
-    user_id = _verify_user_access(authorization, company_id)
-
-    try:
-        supabase = _get_supabase_service_role()
-
-        response = (
-            supabase.table("saved_insights")
-            .select("id, question, answer, chart_config, created_at")
-            .eq("user_id", user_id)
-            .eq("company_id", company_id)
-            .order("created_at", desc=True)
-            .execute()
-        )
-
-        insights = [
-            SavedInsight(
-                id=row["id"],
-                question=row["question"],
-                answer=row["answer"],
-                chart_config=row.get("chart_config"),
-                created_at=row["created_at"],
-            )
-            for row in response.data or []
-        ]
-
-        return SavedInsightsResponse(insights=insights)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching saved insights: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch saved insights: {str(e)}",
-        )
-
-
-@router.delete("/{company_id}/saved/{insight_id}")
-async def delete_saved_insight(
-    company_id: str,
-    insight_id: str,
-    authorization: str = Header(None),
-):
-    """
-    Delete a saved insight. Verifies the user owns it.
-    """
-    user_id = _verify_user_access(authorization, company_id)
-
-    try:
-        supabase = _get_supabase_service_role()
-
-        # Verify ownership before deleting
-        existing = (
-            supabase.table("saved_insights")
-            .select("id")
-            .eq("id", insight_id)
-            .eq("user_id", user_id)
-            .eq("company_id", company_id)
-            .maybe_single()
-            .execute()
-        )
-
-        if not existing or not existing.data:
-            raise HTTPException(status_code=404, detail="Saved insight not found")
-
-        supabase.table("saved_insights").delete().eq("id", insight_id).execute()
-
-        return {"status": "deleted"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting saved insight: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete saved insight: {str(e)}",
         )

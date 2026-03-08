@@ -16,6 +16,7 @@ export interface ActivityItem {
 export type MetricKey =
   | 'open_quotes'
   | 'active_jobs'
+  | 'in_progress_jobs'
   | 'revenue'
   | 'completed_jobs'
   | 'overdue_jobs';
@@ -32,6 +33,7 @@ export interface MetricDefinition {
 export const AVAILABLE_METRICS: MetricDefinition[] = [
   { key: 'open_quotes', label: 'Open Quotes', format: 'number' },
   { key: 'active_jobs', label: 'Active Jobs', format: 'number' },
+  { key: 'in_progress_jobs', label: 'In Progress', format: 'number' },
   { key: 'revenue', label: 'Revenue', format: 'currency', supportsTimePeriod: true },
   { key: 'completed_jobs', label: 'Completed Jobs', format: 'number', supportsTimePeriod: true },
   { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
@@ -40,7 +42,7 @@ export const AVAILABLE_METRICS: MetricDefinition[] = [
 export const DEFAULT_PINNED_METRICS: MetricKey[] = [
   'open_quotes',
   'active_jobs',
-  'revenue',
+  'in_progress_jobs',
   'completed_jobs',
 ];
 
@@ -294,6 +296,8 @@ export async function getMetricValue(
       return getCount('quotes', companyId, { status: ['draft', 'pending_approval'] });
     case 'active_jobs':
       return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
+    case 'in_progress_jobs':
+      return getCount('jobs', companyId, { status: ['in_progress'] });
     case 'revenue':
       return timePeriod === 'today' ? getDailyRevenue(companyId) : getWeeklyRevenue(companyId);
     case 'completed_jobs':

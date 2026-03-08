@@ -16,9 +16,12 @@ import {
   Select,
   MenuItem,
 } from '@mui/material';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import type { RoutingNodeFormData, OperationNodeData, RoutingNodeMaterial } from '@/types/routings';
 import type { InventoryItem } from '@/types/inventory';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
@@ -243,25 +246,57 @@ export default function NodeEditModal({
           </Box>
 
           {/* Materials Section */}
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box
+            sx={{
+              bgcolor: 'rgba(70, 130, 180, 0.08)',
+              borderLeft: '3px solid',
+              borderColor: 'primary.main',
+              borderRadius: 1,
+              p: 2,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+              <Inventory2OutlinedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                Materials
+                Materials Consumed
               </Typography>
-              <Button
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={handleAddMaterial}
-                disabled={saving || inventoryLoading}
-              >
-                Add Material
-              </Button>
+              {formData.materials.length > 0 && (
+                <Box sx={{ flex: 1 }} />
+              )}
+              {formData.materials.length > 0 && (
+                <Button
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={handleAddMaterial}
+                  disabled={saving || inventoryLoading}
+                >
+                  Add Material
+                </Button>
+              )}
             </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Inventory items consumed each time this operation runs in a job
+            </Typography>
 
             {formData.materials.length === 0 && (
-              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                No materials assigned to this operation
-              </Typography>
+              <Box sx={{ textAlign: 'center', py: 2 }}>
+                <Inventory2OutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  No materials added
+                </Typography>
+                <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mb: 1.5 }}>
+                  Track inventory items consumed each time this operation runs
+                </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={handleAddMaterial}
+                  disabled={saving || inventoryLoading}
+                >
+                  Add Material
+                </Button>
+              </Box>
             )}
 
             {formData.materials.map((material, index) => (
@@ -306,25 +341,21 @@ export default function NodeEditModal({
                   disabled={saving}
                   sx={{ width: 80 }}
                 />
-                <Select
-                  size="small"
-                  value={material.unit}
-                  onChange={(e) => handleMaterialChange(index, 'unit', e.target.value)}
-                  disabled={saving || !material.inventory_item_id}
-                  sx={{ width: 100 }}
-                  displayEmpty
-                >
-                  {!material.unit && (
-                    <MenuItem value="" disabled>
-                      Unit
-                    </MenuItem>
-                  )}
-                  {getAvailableUnits(material.inventory_item_id).map((unit) => (
-                    <MenuItem key={unit} value={unit}>
-                      {unit}
-                    </MenuItem>
-                  ))}
-                </Select>
+                <FormControl size="small" sx={{ width: 100 }} disabled={saving || !material.inventory_item_id}>
+                  <InputLabel>Unit</InputLabel>
+                  <Select
+                    value={material.unit}
+                    label="Unit"
+                    onChange={(e) => handleMaterialChange(index, 'unit', e.target.value)}
+                    displayEmpty
+                  >
+                    {getAvailableUnits(material.inventory_item_id).map((unit) => (
+                      <MenuItem key={unit} value={unit}>
+                        {unit}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
                 <IconButton
                   size="small"
                   onClick={() => handleRemoveMaterial(index)}

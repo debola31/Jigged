@@ -16,39 +16,45 @@ export interface ActivityItem {
 export type MetricKey =
   | 'open_quotes'
   | 'active_jobs'
-  | 'weekly_revenue'
-  | 'monthly_revenue'
-  | 'at_risk_count'
-  | 'low_inventory_count'
-  | 'total_customers'
-  | 'total_parts';
+  | 'revenue'
+  | 'completed_jobs'
+  | 'overdue_jobs';
+
+export type MetricTimePeriod = 'today' | 'this_week';
 
 export interface MetricDefinition {
   key: MetricKey;
   label: string;
   format: 'number' | 'currency';
+  supportsTimePeriod?: boolean;
 }
 
 export const AVAILABLE_METRICS: MetricDefinition[] = [
   { key: 'open_quotes', label: 'Open Quotes', format: 'number' },
   { key: 'active_jobs', label: 'Active Jobs', format: 'number' },
-  { key: 'weekly_revenue', label: 'Revenue This Week', format: 'currency' },
-  { key: 'monthly_revenue', label: 'Revenue This Month', format: 'currency' },
-  { key: 'at_risk_count', label: 'At-Risk Jobs', format: 'number' },
-  { key: 'low_inventory_count', label: 'Low Inventory', format: 'number' },
-  { key: 'total_customers', label: 'Customers', format: 'number' },
-  { key: 'total_parts', label: 'Parts', format: 'number' },
+  { key: 'revenue', label: 'Revenue', format: 'currency', supportsTimePeriod: true },
+  { key: 'completed_jobs', label: 'Completed Jobs', format: 'number', supportsTimePeriod: true },
+  { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
 ];
 
 export const DEFAULT_PINNED_METRICS: MetricKey[] = [
   'open_quotes',
   'active_jobs',
-  'weekly_revenue',
+  'revenue',
+  'completed_jobs',
 ];
+
+// Legacy key migration map
+const LEGACY_KEY_MAP: Record<string, MetricKey> = {
+  weekly_revenue: 'revenue',
+  monthly_revenue: 'revenue',
+};
+const REMOVED_KEYS = ['at_risk_count', 'low_inventory_count', 'total_customers', 'total_parts'];
 
 /**
  * Get the user's pinned metric keys from user_preferences.
  * Returns defaults if no preference is stored.
+ * Automatically migrates legacy keys.
  */
 export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
   const supabase = getSupabase();
@@ -66,7 +72,19 @@ export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
   const prefs = data.preferences as Record<string, unknown> | null;
   const pinned = prefs?.dashboard_pinned_metrics;
   if (Array.isArray(pinned) && pinned.length > 0) {
-    return pinned as MetricKey[];
+    // Migrate legacy keys
+    const migrated = pinned
+      .map((k: string) => LEGACY_KEY_MAP[k] || k)
+      .filter((k: string) => !REMOVED_KEYS.includes(k))
+      .filter((k: string, i: number, arr: string[]) => arr.indexOf(k) === i) as MetricKey[];
+
+    // Persist migration if keys changed
+    const changed = migrated.length !== pinned.length || migrated.some((k, i) => k !== pinned[i]);
+    if (changed) {
+      setPinnedMetricKeys(migrated).catch(() => {});
+    }
+
+    return migrated.length > 0 ? migrated : DEFAULT_PINNED_METRICS;
   }
   return DEFAULT_PINNED_METRICS;
 }
@@ -101,6 +119,65 @@ export async function setPinnedMetricKeys(keys: MetricKey[]): Promise<void> {
     );
 }
 
+// ============== Time Period Preferences ==============
+
+/**
+ * Get the user's saved time period preferences for metrics.
+ */
+export async function getMetricTimePeriods(): Promise<Partial<Record<MetricKey, MetricTimePeriod>>> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return {};
+
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error || !data) return {};
+
+  const prefs = data.preferences as Record<string, unknown> | null;
+  const periods = prefs?.dashboard_metric_periods;
+  if (periods && typeof periods === 'object') {
+    return periods as Partial<Record<MetricKey, MetricTimePeriod>>;
+  }
+  return {};
+}
+
+/**
+ * Save a single metric's time period preference.
+ */
+export async function setMetricTimePeriod(key: MetricKey, period: MetricTimePeriod): Promise<void> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { data: existing } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
+  const currentPeriods = (currentPrefs.dashboard_metric_periods as Record<string, string>) || {};
+  const updatedPrefs = {
+    ...currentPrefs,
+    dashboard_metric_periods: { ...currentPeriods, [key]: period },
+  };
+
+  await supabase
+    .from('user_preferences')
+    .upsert(
+      {
+        user_id: user.id,
+        preferences: updatedPrefs,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
+}
+
 // ============== Metric Value Queries ==============
 
 async function getCount(table: string, companyId: string, filters?: Record<string, string[]>): Promise<number> {
@@ -116,6 +193,28 @@ async function getCount(table: string, companyId: string, filters?: Record<strin
   const { count, error } = await query;
   if (error) throw error;
   return count || 0;
+}
+
+async function getDailyRevenue(companyId: string): Promise<number> {
+  const supabase = getSupabase();
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('id, quotes!jobs_quote_id_fkey(total_price)')
+    .eq('company_id', companyId)
+    .eq('status', 'shipped')
+    .gte('shipped_at', startOfDay.toISOString());
+
+  if (error) throw error;
+
+  return (data || []).reduce(
+    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
+      return sum + (job.quotes?.total_price || 0);
+    },
+    0
+  );
 }
 
 async function getWeeklyRevenue(companyId: string): Promise<number> {
@@ -142,89 +241,65 @@ async function getWeeklyRevenue(companyId: string): Promise<number> {
   );
 }
 
-async function getMonthlyRevenue(companyId: string): Promise<number> {
+async function getCompletedJobs(companyId: string, period: MetricTimePeriod): Promise<number> {
   const supabase = getSupabase();
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  let startDate: Date;
 
-  const { data, error } = await supabase
+  if (period === 'today') {
+    startDate = new Date(now);
+    startDate.setHours(0, 0, 0, 0);
+  } else {
+    startDate = new Date(now);
+    startDate.setDate(now.getDate() - now.getDay());
+    startDate.setHours(0, 0, 0, 0);
+  }
+
+  const { count, error } = await supabase
     .from('jobs')
-    .select('id, quotes!jobs_quote_id_fkey(total_price)')
+    .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
-    .eq('status', 'shipped')
-    .gte('shipped_at', startOfMonth.toISOString());
+    .in('status', ['completed', 'shipped'])
+    .gte('updated_at', startDate.toISOString());
 
   if (error) throw error;
-
-  return (data || []).reduce(
-    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
-      return sum + (job.quotes?.total_price || 0);
-    },
-    0
-  );
+  return count || 0;
 }
 
-async function getAtRiskCount(companyId: string): Promise<number> {
+async function getOverdueJobs(companyId: string): Promise<number> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const now = new Date().toISOString();
+
+  const { count, error } = await supabase
     .from('jobs')
-    .select('id, due_date, job_operations(status)')
+    .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .in('status', ['pending', 'in_progress'])
-    .not('due_date', 'is', null);
+    .lt('due_date', now);
 
   if (error) throw error;
-
-  const now = new Date();
-  let atRisk = 0;
-  for (const job of data || []) {
-    if (!job.due_date) continue;
-    const dueDate = new Date(job.due_date);
-    const totalDays = Math.max(1, (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    // Simple heuristic: if less than 3 days remaining, it's at risk
-    if (totalDays < 3) atRisk++;
-  }
-  return atRisk;
-}
-
-async function getLowInventoryCount(companyId: string): Promise<number> {
-  const supabase = getSupabase();
-  // Items where quantity <= reorder_point
-  const { data, error } = await supabase
-    .from('inventory_items')
-    .select('id, quantity, reorder_point')
-    .eq('company_id', companyId)
-    .not('reorder_point', 'is', null);
-
-  if (error) throw error;
-
-  return (data || []).filter(
-    (item: { quantity: number | null; reorder_point: number | null }) =>
-      (item.quantity ?? 0) <= (item.reorder_point ?? 0)
-  ).length;
+  return count || 0;
 }
 
 /**
  * Get the value for a single metric key.
  */
-export async function getMetricValue(companyId: string, key: MetricKey): Promise<number> {
+export async function getMetricValue(
+  companyId: string,
+  key: MetricKey,
+  timePeriod?: MetricTimePeriod
+): Promise<number> {
   switch (key) {
     case 'open_quotes':
       return getCount('quotes', companyId, { status: ['draft', 'pending_approval'] });
     case 'active_jobs':
       return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
-    case 'weekly_revenue':
-      return getWeeklyRevenue(companyId);
-    case 'monthly_revenue':
-      return getMonthlyRevenue(companyId);
-    case 'at_risk_count':
-      return getAtRiskCount(companyId);
-    case 'low_inventory_count':
-      return getLowInventoryCount(companyId);
-    case 'total_customers':
-      return getCount('customers', companyId);
-    case 'total_parts':
-      return getCount('parts', companyId);
+    case 'revenue':
+      return timePeriod === 'today' ? getDailyRevenue(companyId) : getWeeklyRevenue(companyId);
+    case 'completed_jobs':
+      return getCompletedJobs(companyId, timePeriod ?? 'this_week');
+    case 'overdue_jobs':
+      return getOverdueJobs(companyId);
     default:
       return 0;
   }
@@ -235,12 +310,13 @@ export async function getMetricValue(companyId: string, key: MetricKey): Promise
  */
 export async function getPinnedMetricValues(
   companyId: string,
-  keys: MetricKey[]
+  keys: MetricKey[],
+  timePeriods?: Partial<Record<MetricKey, MetricTimePeriod>>
 ): Promise<Record<MetricKey, number>> {
   const results = await Promise.all(
     keys.map(async (key) => {
       try {
-        const value = await getMetricValue(companyId, key);
+        const value = await getMetricValue(companyId, key, timePeriods?.[key]);
         return [key, value] as const;
       } catch {
         return [key, 0] as const;

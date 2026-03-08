@@ -5,13 +5,18 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Skeleton from '@mui/material/Skeleton';
 import Divider from '@mui/material/Divider';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import ToggleButton from '@mui/material/ToggleButton';
 import MetricPickerModal from './MetricPickerModal';
 import {
   type MetricKey,
+  type MetricTimePeriod,
   AVAILABLE_METRICS,
   getPinnedMetricKeys,
   setPinnedMetricKeys,
   getPinnedMetricValues,
+  getMetricTimePeriods,
+  setMetricTimePeriod,
 } from '@/utils/dashboardAccess';
 
 interface PinnedMetricsProps {
@@ -33,23 +38,40 @@ function formatValue(value: number, format: 'number' | 'currency'): string {
 export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const [pinnedKeys, setPinnedKeys] = useState<MetricKey[]>([]);
   const [values, setValues] = useState<Record<string, number>>({});
+  const [globalPeriod, setGlobalPeriod] = useState<MetricTimePeriod>('this_week');
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  const buildTimePeriods = useCallback((period: MetricTimePeriod): Partial<Record<MetricKey, MetricTimePeriod>> => {
+    const periods: Partial<Record<MetricKey, MetricTimePeriod>> = {};
+    for (const m of AVAILABLE_METRICS) {
+      if (m.supportsTimePeriod) {
+        periods[m.key] = period;
+      }
+    }
+    return periods;
+  }, []);
 
   const loadMetrics = useCallback(async () => {
     if (!companyId) return;
     try {
       setLoading(true);
-      const keys = await getPinnedMetricKeys();
+      const [keys, storedPeriods] = await Promise.all([
+        getPinnedMetricKeys(),
+        getMetricTimePeriods(),
+      ]);
       setPinnedKeys(keys);
-      const vals = await getPinnedMetricValues(companyId, keys);
+      const firstPeriod = Object.values(storedPeriods)[0] as MetricTimePeriod | undefined;
+      const period = firstPeriod ?? 'this_week';
+      setGlobalPeriod(period);
+      const vals = await getPinnedMetricValues(companyId, keys, buildTimePeriods(period));
       setValues(vals);
     } catch (err) {
       console.error('Error loading pinned metrics:', err);
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, buildTimePeriods]);
 
   useEffect(() => {
     loadMetrics();
@@ -58,14 +80,29 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const handleSave = async (keys: MetricKey[]) => {
     setPinnedKeys(keys);
     setPickerOpen(false);
-    // Fetch values for any newly added metrics
     try {
-      const vals = await getPinnedMetricValues(companyId, keys);
+      const vals = await getPinnedMetricValues(companyId, keys, buildTimePeriods(globalPeriod));
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
     }
     await setPinnedMetricKeys(keys);
+  };
+
+  const handleGlobalPeriodChange = async (_: React.MouseEvent<HTMLElement>, newPeriod: MetricTimePeriod | null) => {
+    if (!newPeriod) return;
+    setGlobalPeriod(newPeriod);
+    try {
+      const vals = await getPinnedMetricValues(companyId, pinnedKeys, buildTimePeriods(newPeriod));
+      setValues(vals);
+    } catch (err) {
+      console.error('Error fetching metric values:', err);
+    }
+    for (const m of AVAILABLE_METRICS) {
+      if (m.supportsTimePeriod) {
+        setMetricTimePeriod(m.key, newPeriod).catch(() => {});
+      }
+    }
   };
 
   return (
@@ -110,8 +147,8 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
           );
         })}
       </Box>
-      {/* Edit/Add link */}
-      <Box sx={{ mt: 1.5, display: 'flex', gap: 2 }}>
+      {/* Controls row: Edit link + time period toggle */}
+      <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
         <Typography
           variant="caption"
           color="primary"
@@ -120,6 +157,27 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
         >
           {pinnedKeys.length < 4 ? '+ Add metric' : 'Edit metrics'}
         </Typography>
+        <Box sx={{ ml: 'auto' }}>
+          <ToggleButtonGroup
+            value={globalPeriod}
+            exclusive
+            onChange={handleGlobalPeriodChange}
+            size="small"
+          >
+            <ToggleButton
+              value="today"
+              sx={{ px: 1.5, py: 0.25, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              Today
+            </ToggleButton>
+            <ToggleButton
+              value="this_week"
+              sx={{ px: 1.5, py: 0.25, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              This Week
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
       </Box>
 
       <MetricPickerModal

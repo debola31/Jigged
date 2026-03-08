@@ -29,7 +29,7 @@ export default function DashboardPage() {
     Promise.all([
       getMetricValue(companyId, 'open_quotes'),
       getMetricValue(companyId, 'active_jobs'),
-      getMetricValue(companyId, 'weekly_revenue'),
+      getMetricValue(companyId, 'revenue'),
     ]).then(([quotes, jobs, revenue]) => {
       setIsEmpty(quotes === 0 && jobs === 0 && revenue === 0);
     }).catch(() => {});

@@ -23,8 +23,41 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
-import { Box, Button, Typography, Alert, CircularProgress, Chip } from '@mui/material';
+import {
+  Box,
+  Button,
+  Typography,
+  Alert,
+  CircularProgress,
+  Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  TextField,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  InputAdornment,
+  IconButton,
+} from '@mui/material';
+import Popover from '@mui/material/Popover';
+import Tooltip from '@mui/material/Tooltip';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import AddIcon from '@mui/icons-material/Add';
+import CloseIcon from '@mui/icons-material/Close';
+import SearchIcon from '@mui/icons-material/Search';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import BuildIcon from '@mui/icons-material/Build';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import LinkIcon from '@mui/icons-material/Link';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import MouseIcon from '@mui/icons-material/Mouse';
+import OpenWithIcon from '@mui/icons-material/OpenWith';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import OperationNode from './OperationNode';
 import OperationsSidebar from './OperationsSidebar';
 import NodeEditModal from './NodeEditModal';
@@ -36,6 +69,7 @@ import {
   createRoutingEdge,
   deleteRoutingEdge,
 } from '@/utils/routingsAccess';
+import { getOperationsGrouped } from '@/utils/operationsAccess';
 import type {
   RoutingWithGraph,
   OperationNodeData,
@@ -46,6 +80,7 @@ import {
   calculateRoutingTime as calcTime,
   formatTime as fmtTime,
 } from '@/types/routings';
+import type { OperationsGroupedResponse } from '@/types/operations';
 
 /**
  * Pending node data for memory mode.
@@ -152,6 +187,172 @@ function getLayoutedElements(
   return { nodes: layoutedNodes, edges };
 }
 
+// --- Add Operation Dialog ---
+interface AddOperationDialogProps {
+  open: boolean;
+  onClose: () => void;
+  companyId: string;
+  onSelect: (operation: {
+    id: string;
+    name: string;
+    laborRate: number | null;
+    resourceGroupName: string | null;
+  }) => void;
+}
+
+function AddOperationDialog({ open, onClose, companyId, onSelect }: AddOperationDialogProps) {
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [data, setData] = useState<OperationsGroupedResponse>({ groups: [], ungrouped: [] });
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    setSearch('');
+    getOperationsGrouped(companyId)
+      .then((result) => {
+        setData(result);
+        const allIds = new Set(result.groups.map((g) => g.id));
+        if (result.ungrouped.length > 0) allIds.add('ungrouped');
+        setExpandedGroups(allIds);
+      })
+      .catch((err) => console.error('Failed to load operations:', err))
+      .finally(() => setLoading(false));
+  }, [open, companyId]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return data;
+    const s = search.toLowerCase();
+    return {
+      groups: data.groups
+        .map((g) => ({ ...g, operations: g.operations.filter((op) => op.name.toLowerCase().includes(s)) }))
+        .filter((g) => g.operations.length > 0),
+      ungrouped: data.ungrouped.filter((op) => op.name.toLowerCase().includes(s)),
+    };
+  }, [data, search]);
+
+  const total = filtered.groups.reduce((sum, g) => sum + g.operations.length, 0) + filtered.ungrouped.length;
+
+  const handleSelect = (opId: string, opName: string, laborRate: number | null, resourceGroupName: string | null) => {
+    onSelect({ id: opId, name: opName, laborRate, resourceGroupName });
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth PaperProps={{ sx: { bgcolor: 'rgba(17, 20, 57, 0.98)', maxHeight: '70vh' } }}>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
+        <Typography variant="h6">Add Operation</Typography>
+        <IconButton size="small" onClick={onClose}><CloseIcon /></IconButton>
+      </DialogTitle>
+      <DialogContent sx={{ px: 2, pb: 2 }}>
+        <TextField
+          size="small"
+          placeholder="Search operations..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          fullWidth
+          autoFocus
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ mb: 1.5, '& .MuiOutlinedInput-root': { bgcolor: 'rgba(255, 255, 255, 0.05)' } }}
+        />
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={24} /></Box>
+        ) : total === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <BuildIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+            <Typography color="text.secondary" variant="body2">
+              {search ? 'No matching operations' : 'No operations defined'}
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            {filtered.groups.map((group) => (
+              <Accordion
+                key={group.id}
+                expanded={expandedGroups.has(group.id)}
+                onChange={() => setExpandedGroups((prev) => { const next = new Set(prev); next.has(group.id) ? next.delete(group.id) : next.add(group.id); return next; })}
+                disableGutters
+                elevation={0}
+                sx={{ bgcolor: 'transparent', '&:before': { display: 'none' }, '& .MuiAccordionSummary-root': { minHeight: 40, px: 1 } }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{group.name}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>({group.operations.length})</Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 0 }}>
+                  <List dense disablePadding>
+                    {group.operations.map((op) => (
+                      <ListItem
+                        key={op.id}
+                        component="div"
+                        onClick={() => handleSelect(op.id, op.name, op.labor_rate, group.name)}
+                        sx={{ cursor: 'pointer', borderRadius: 1, mx: 0.5, mb: 0.5, bgcolor: 'rgba(255, 255, 255, 0.05)', '&:hover': { bgcolor: 'rgba(70, 130, 180, 0.2)' } }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 28 }}>
+                          <AddIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={op.name}
+                          secondary={op.labor_rate ? `$${op.labor_rate.toFixed(2)}/hr` : null}
+                          primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                          secondaryTypographyProps={{ variant: 'caption' }}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </AccordionDetails>
+              </Accordion>
+            ))}
+            {filtered.ungrouped.length > 0 && (
+              <Accordion
+                expanded={expandedGroups.has('ungrouped')}
+                onChange={() => setExpandedGroups((prev) => { const next = new Set(prev); next.has('ungrouped') ? next.delete('ungrouped') : next.add('ungrouped'); return next; })}
+                disableGutters
+                elevation={0}
+                sx={{ bgcolor: 'transparent', '&:before': { display: 'none' }, '& .MuiAccordionSummary-root': { minHeight: 40, px: 1 } }}
+              >
+                <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}>
+                  <Typography variant="body2" sx={{ fontWeight: 500, fontStyle: 'italic' }}>Ungrouped</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>({filtered.ungrouped.length})</Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ p: 0 }}>
+                  <List dense disablePadding>
+                    {filtered.ungrouped.map((op) => (
+                      <ListItem
+                        key={op.id}
+                        component="div"
+                        onClick={() => handleSelect(op.id, op.name, op.labor_rate, null)}
+                        sx={{ cursor: 'pointer', borderRadius: 1, mx: 0.5, mb: 0.5, bgcolor: 'rgba(255, 255, 255, 0.05)', '&:hover': { bgcolor: 'rgba(70, 130, 180, 0.2)' } }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 28 }}>
+                          <AddIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={op.name}
+                          secondary={op.labor_rate ? `$${op.labor_rate.toFixed(2)}/hr` : null}
+                          primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                          secondaryTypographyProps={{ variant: 'caption' }}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </AccordionDetails>
+              </Accordion>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 interface RoutingWorkflowBuilderProps {
   routingId: string;
   companyId: string;
@@ -197,6 +398,32 @@ export default function RoutingWorkflowBuilder({
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingNode, setEditingNode] = useState<OperationNodeData | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+
+  // Add Operation dialog state
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+
+  // Edge selection state (for delete hint)
+  const [edgeSelected, setEdgeSelected] = useState(false);
+
+  // Help popover state
+  const [helpAnchorEl, setHelpAnchorEl] = useState<HTMLElement | null>(null);
+  const helpOpen = Boolean(helpAnchorEl);
+
+  // Auto-show help on first visit
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const key = 'jigged_hasSeenRoutingHelp';
+    if (typeof window !== 'undefined' && !localStorage.getItem(key)) {
+      // Small delay so the toolbar renders first
+      const timer = setTimeout(() => {
+        if (helpButtonRef.current) {
+          setHelpAnchorEl(helpButtonRef.current);
+          localStorage.setItem(key, 'true');
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // Miro-style navigation: spacebar + drag to pan
   const [spacebarPressed, setSpacebarPressed] = useState(false);
@@ -351,33 +578,15 @@ export default function RoutingWorkflowBuilder({
     [routingId, setEdges, isMemoryMode, externalPendingEdges, onPendingEdgesChange]
   );
 
-  // Handle dropping new operation from sidebar
-  const onDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
-
-  const onDrop = useCallback(
-    async (event: React.DragEvent) => {
-      event.preventDefault();
-
-      const type = event.dataTransfer.getData('application/reactflow');
-      if (type !== 'operation') return;
-
-      const operationTypeId = event.dataTransfer.getData('operationTypeId');
-      const operationName = event.dataTransfer.getData('operationName');
-      const laborRateStr = event.dataTransfer.getData('laborRate');
-      const laborRate = laborRateStr ? parseFloat(laborRateStr) : null;
-      const resourceGroupName = event.dataTransfer.getData('resourceGroupName') || null;
-
-      if (!operationTypeId || !reactFlowInstance || !reactFlowWrapper.current) return;
-
-      // Calculate drop position - screenToFlowPosition expects raw screen coordinates
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
-
+  // Shared helper: add an operation node at a given position
+  const addOperationNode = useCallback(
+    async (
+      operationTypeId: string,
+      operationName: string,
+      laborRate: number | null,
+      resourceGroupName: string | null,
+      position: { x: number; y: number }
+    ) => {
       if (isMemoryMode) {
         const newNodeId = generateTempId('node');
         const newPendingNode: PendingNode = {
@@ -428,7 +637,6 @@ export default function RoutingWorkflowBuilder({
           materials: [],
         });
 
-        // Add to React Flow
         const flowNode: Node = {
           id: newNode.id,
           type: 'operation',
@@ -447,7 +655,6 @@ export default function RoutingWorkflowBuilder({
 
         setNodes((nds) => [...nds, flowNode]);
 
-        // Update routing data for time calculations
         if (routing) {
           setRouting({
             ...routing,
@@ -466,7 +673,6 @@ export default function RoutingWorkflowBuilder({
           });
         }
 
-        // Auto-open edit modal for the new node
         setTimeout(() => {
           setEditingNode(flowNode.data as OperationNodeData);
           setEditingNodeId(newNode.id);
@@ -477,7 +683,59 @@ export default function RoutingWorkflowBuilder({
         setError('Failed to add operation');
       }
     },
-    [reactFlowInstance, routingId, routing, setNodes, isMemoryMode, externalPendingNodes, onPendingNodesChange]
+    [routingId, routing, setNodes, isMemoryMode, externalPendingNodes, onPendingNodesChange]
+  );
+
+  // Handle "Add Operation" dialog selection
+  const handleAddOperationSelect = useCallback(
+    (operation: { id: string; name: string; laborRate: number | null; resourceGroupName: string | null }) => {
+      // Position at center of current viewport
+      if (reactFlowInstance && reactFlowWrapper.current) {
+        const { width, height } = reactFlowWrapper.current.getBoundingClientRect();
+        const center = reactFlowInstance.screenToFlowPosition({
+          x: width / 2,
+          y: height / 2,
+        });
+        // Offset slightly so multiple adds don't stack exactly
+        const offset = nodes.length * 20;
+        addOperationNode(operation.id, operation.name, operation.laborRate, operation.resourceGroupName, {
+          x: center.x + offset,
+          y: center.y + offset,
+        });
+      }
+    },
+    [reactFlowInstance, nodes.length, addOperationNode]
+  );
+
+  // Handle dropping new operation from sidebar
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    async (event: React.DragEvent) => {
+      event.preventDefault();
+
+      const type = event.dataTransfer.getData('application/reactflow');
+      if (type !== 'operation') return;
+
+      const operationTypeId = event.dataTransfer.getData('operationTypeId');
+      const operationName = event.dataTransfer.getData('operationName');
+      const laborRateStr = event.dataTransfer.getData('laborRate');
+      const laborRate = laborRateStr ? parseFloat(laborRateStr) : null;
+      const resourceGroupName = event.dataTransfer.getData('resourceGroupName') || null;
+
+      if (!operationTypeId || !reactFlowInstance || !reactFlowWrapper.current) return;
+
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      addOperationNode(operationTypeId, operationName, laborRate, resourceGroupName, position);
+    },
+    [reactFlowInstance, addOperationNode]
   );
 
   // Handle node edit
@@ -701,6 +959,15 @@ export default function RoutingWorkflowBuilder({
           }}
         >
           <Button
+            variant="contained"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setAddDialogOpen(true)}
+          >
+            Add Operation
+          </Button>
+
+          <Button
             variant="outlined"
             size="small"
             startIcon={<AutoFixHighIcon />}
@@ -709,7 +976,57 @@ export default function RoutingWorkflowBuilder({
             Auto Layout
           </Button>
 
+          <Tooltip title="How to use this editor">
+            <IconButton
+              ref={helpButtonRef}
+              size="small"
+              onClick={(e) => setHelpAnchorEl(e.currentTarget)}
+              sx={{ color: 'text.secondary' }}
+            >
+              <InfoOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
+          <Popover
+            open={helpOpen}
+            anchorEl={helpAnchorEl}
+            onClose={() => setHelpAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            PaperProps={{ sx: { bgcolor: 'rgba(17, 20, 57, 0.98)', border: '1px solid rgba(255, 255, 255, 0.1)', p: 2, maxWidth: 320 } }}
+          >
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
+              Workflow Editor Guide
+            </Typography>
+            {[
+              { icon: <AddIcon sx={{ fontSize: 18 }} />, text: 'Click "Add Operation" or drag from sidebar' },
+              { icon: <LinkIcon sx={{ fontSize: 18 }} />, text: 'Drag from a dot handle to another to connect' },
+              { icon: <DeleteOutlineIcon sx={{ fontSize: 18 }} />, text: 'Click a connection, then press Delete' },
+              { icon: <MouseIcon sx={{ fontSize: 18 }} />, text: 'Double-click an operation to edit details' },
+              { icon: <OpenWithIcon sx={{ fontSize: 18 }} />, text: 'Hold Space + drag to pan the canvas' },
+              { icon: <ZoomInIcon sx={{ fontSize: 18 }} />, text: 'Pinch or scroll to zoom in/out' },
+              { icon: <AutoFixHighIcon sx={{ fontSize: 18 }} />, text: 'Click "Auto Layout" to rearrange neatly' },
+            ].map((item, i) => (
+              <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: i < 6 ? 1 : 0 }}>
+                <Box sx={{ color: 'primary.main', display: 'flex' }}>{item.icon}</Box>
+                <Typography variant="body2" color="text.secondary">{item.text}</Typography>
+              </Box>
+            ))}
+          </Popover>
+
           <Box sx={{ flex: 1 }} />
+
+          {/* Edge delete hint */}
+          {edgeSelected && (
+            <Chip
+              icon={<DeleteOutlineIcon sx={{ fontSize: 16 }} />}
+              label="Press Delete to remove connection"
+              size="small"
+              color="error"
+              variant="outlined"
+              sx={{ animation: 'fadeIn 0.2s ease-in' }}
+            />
+          )}
 
           {/* Time Summary */}
           {timeTotals && (
@@ -753,15 +1070,23 @@ export default function RoutingWorkflowBuilder({
                 fill: '#fff',
               },
             },
-            // Edge selection and hover styles
-            '& .react-flow__edge.selected .react-flow__edge-path': {
-              stroke: '#ef4444',
-              strokeWidth: 3,
-            },
+            // Edge hover: blue glow to signal interactivity
             '& .react-flow__edge:hover .react-flow__edge-path': {
               stroke: '#6ba3d1',
-              strokeWidth: 3,
+              strokeWidth: 4,
               cursor: 'pointer',
+              filter: 'drop-shadow(0 0 4px rgba(70, 130, 180, 0.6))',
+            },
+            // Edge selected: red with animated dash + glow
+            '& .react-flow__edge.selected .react-flow__edge-path': {
+              stroke: '#ef4444',
+              strokeWidth: 4,
+              strokeDasharray: '8 4',
+              filter: 'drop-shadow(0 0 6px rgba(239, 68, 68, 0.5))',
+              animation: 'edgeDashFlow 0.6s linear infinite',
+            },
+            '@keyframes edgeDashFlow': {
+              to: { strokeDashoffset: '-12' },
             },
             // Selection box styling
             '& .react-flow__selection': {
@@ -777,6 +1102,9 @@ export default function RoutingWorkflowBuilder({
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgesDelete={onEdgesDelete}
+            onSelectionChange={({ edges: selectedEdges }) => {
+              setEdgeSelected(selectedEdges.length > 0);
+            }}
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -830,15 +1158,21 @@ export default function RoutingWorkflowBuilder({
               left: '50%',
               transform: 'translate(-50%, -50%)',
               textAlign: 'center',
-              pointerEvents: 'none',
             }}
           >
             <Typography variant="h6" color="text.secondary" gutterBottom>
               No operations yet
             </Typography>
-            <Typography variant="body2" color="text.disabled">
-              Drag operations from the sidebar to build your workflow
+            <Typography variant="body2" color="text.disabled" sx={{ mb: 2 }}>
+              Add operations to build your workflow
             </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setAddDialogOpen(true)}
+            >
+              Add Operation
+            </Button>
           </Box>
         )}
       </Box>
@@ -854,6 +1188,14 @@ export default function RoutingWorkflowBuilder({
         onSave={handleNodeSave}
         nodeData={editingNode}
         companyId={companyId}
+      />
+
+      {/* Add Operation Dialog */}
+      <AddOperationDialog
+        open={addDialogOpen}
+        onClose={() => setAddDialogOpen(false)}
+        companyId={companyId}
+        onSelect={handleAddOperationSelect}
       />
     </Box>
   );

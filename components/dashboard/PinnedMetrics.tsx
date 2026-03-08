@@ -17,7 +17,6 @@ import {
   getPinnedMetricValues,
   getMetricTimePeriods,
   setMetricTimePeriod,
-  getMetricValue,
 } from '@/utils/dashboardAccess';
 
 interface PinnedMetricsProps {
@@ -39,28 +38,40 @@ function formatValue(value: number, format: 'number' | 'currency'): string {
 export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const [pinnedKeys, setPinnedKeys] = useState<MetricKey[]>([]);
   const [values, setValues] = useState<Record<string, number>>({});
-  const [timePeriods, setTimePeriods] = useState<Partial<Record<MetricKey, MetricTimePeriod>>>({});
+  const [globalPeriod, setGlobalPeriod] = useState<MetricTimePeriod>('this_week');
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  const buildTimePeriods = useCallback((period: MetricTimePeriod): Partial<Record<MetricKey, MetricTimePeriod>> => {
+    const periods: Partial<Record<MetricKey, MetricTimePeriod>> = {};
+    for (const m of AVAILABLE_METRICS) {
+      if (m.supportsTimePeriod) {
+        periods[m.key] = period;
+      }
+    }
+    return periods;
+  }, []);
 
   const loadMetrics = useCallback(async () => {
     if (!companyId) return;
     try {
       setLoading(true);
-      const [keys, periods] = await Promise.all([
+      const [keys, storedPeriods] = await Promise.all([
         getPinnedMetricKeys(),
         getMetricTimePeriods(),
       ]);
       setPinnedKeys(keys);
-      setTimePeriods(periods);
-      const vals = await getPinnedMetricValues(companyId, keys, periods);
+      const firstPeriod = Object.values(storedPeriods)[0] as MetricTimePeriod | undefined;
+      const period = firstPeriod ?? 'this_week';
+      setGlobalPeriod(period);
+      const vals = await getPinnedMetricValues(companyId, keys, buildTimePeriods(period));
       setValues(vals);
     } catch (err) {
       console.error('Error loading pinned metrics:', err);
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, buildTimePeriods]);
 
   useEffect(() => {
     loadMetrics();
@@ -70,7 +81,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
     setPinnedKeys(keys);
     setPickerOpen(false);
     try {
-      const vals = await getPinnedMetricValues(companyId, keys, timePeriods);
+      const vals = await getPinnedMetricValues(companyId, keys, buildTimePeriods(globalPeriod));
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
@@ -78,18 +89,20 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
     await setPinnedMetricKeys(keys);
   };
 
-  const handleTimePeriodChange = async (key: MetricKey, newPeriod: MetricTimePeriod | null) => {
-    if (!newPeriod) return; // Don't allow deselection
-    setTimePeriods((prev) => ({ ...prev, [key]: newPeriod }));
-    // Refetch only this metric
+  const handleGlobalPeriodChange = async (_: React.MouseEvent<HTMLElement>, newPeriod: MetricTimePeriod | null) => {
+    if (!newPeriod) return;
+    setGlobalPeriod(newPeriod);
     try {
-      const val = await getMetricValue(companyId, key, newPeriod);
-      setValues((prev) => ({ ...prev, [key]: val }));
+      const vals = await getPinnedMetricValues(companyId, pinnedKeys, buildTimePeriods(newPeriod));
+      setValues(vals);
     } catch (err) {
-      console.error('Error fetching metric value:', err);
+      console.error('Error fetching metric values:', err);
     }
-    // Persist in background
-    setMetricTimePeriod(key, newPeriod).catch(() => {});
+    for (const m of AVAILABLE_METRICS) {
+      if (m.supportsTimePeriod) {
+        setMetricTimePeriod(m.key, newPeriod).catch(() => {});
+      }
+    }
   };
 
   return (
@@ -105,7 +118,6 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
         {pinnedKeys.map((key, index) => {
           const def = AVAILABLE_METRICS.find((m) => m.key === key);
           if (!def) return null;
-          const period = timePeriods[key] ?? 'this_week';
           return (
             <Box
               key={key}
@@ -113,7 +125,6 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
                 flex: { xs: '0 0 calc(50% - 8px)', md: 1 },
                 display: 'flex',
                 alignItems: 'center',
-                minHeight: 90,
               }}
             >
               {/* Divider between metrics (desktop only) */}
@@ -124,40 +135,6 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
                 <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 500, color: 'text.primary' }}>
                   {def.label}
                 </Typography>
-                {def.supportsTimePeriod && (
-                  <ToggleButtonGroup
-                    value={period}
-                    exclusive
-                    onChange={(_, val) => handleTimePeriodChange(key, val)}
-                    size="small"
-                    sx={{ mb: 0.5 }}
-                  >
-                    <ToggleButton
-                      value="today"
-                      sx={{
-                        px: 1.5,
-                        py: 0.25,
-                        fontSize: '0.7rem',
-                        textTransform: 'none',
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      Today
-                    </ToggleButton>
-                    <ToggleButton
-                      value="this_week"
-                      sx={{
-                        px: 1.5,
-                        py: 0.25,
-                        fontSize: '0.7rem',
-                        textTransform: 'none',
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      This Week
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                )}
                 {loading ? (
                   <Skeleton variant="text" width={60} height={36} />
                 ) : (
@@ -170,8 +147,8 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
           );
         })}
       </Box>
-      {/* Edit/Add link */}
-      <Box sx={{ mt: 1.5, display: 'flex', gap: 2 }}>
+      {/* Controls row: Edit link + time period toggle */}
+      <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
         <Typography
           variant="caption"
           color="primary"
@@ -180,6 +157,27 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
         >
           {pinnedKeys.length < 4 ? '+ Add metric' : 'Edit metrics'}
         </Typography>
+        <Box sx={{ ml: 'auto' }}>
+          <ToggleButtonGroup
+            value={globalPeriod}
+            exclusive
+            onChange={handleGlobalPeriodChange}
+            size="small"
+          >
+            <ToggleButton
+              value="today"
+              sx={{ px: 1.5, py: 0.25, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              Today
+            </ToggleButton>
+            <ToggleButton
+              value="this_week"
+              sx={{ px: 1.5, py: 0.25, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              This Week
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
       </Box>
 
       <MetricPickerModal

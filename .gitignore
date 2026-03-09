@@ -52,3 +52,6 @@ __pycache__/
 
 # API cache (dev only)
 api/.cache/
+
+# Sentry Config File
+.env.sentry-build-plugin

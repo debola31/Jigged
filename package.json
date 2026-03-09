@@ -19,6 +19,7 @@
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",
     "@mui/x-charts": "^7.28.0",
+    "@sentry/nextjs": "^10.42.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.89.0",
     "@xyflow/react": "^12.10.0",

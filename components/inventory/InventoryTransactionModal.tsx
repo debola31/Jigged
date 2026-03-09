@@ -26,7 +26,7 @@ import type {
   EMPTY_TRANSACTION_FORM,
 } from '@/types/inventory';
 import { addStock, removeStock, adjustStock } from '@/utils/inventoryAccess';
-import { convertToBaseUnit } from '@/lib/unitPresets';
+import { convertToBaseUnit, getStandardUnitsForUnit } from '@/lib/unitPresets';
 
 interface InventoryTransactionModalProps {
   open: boolean;
@@ -64,12 +64,30 @@ export default function InventoryTransactionModal({
     setError(null);
   };
 
-  // Available units for this item (primary + conversions)
+  // Available units for this item (primary + standard same-category + custom conversions)
   const availableUnits = useMemo(() => {
-    const units = [{ value: item.primary_unit, label: item.primary_unit, isPrimary: true }];
-    for (const conv of item.unit_conversions) {
-      units.push({ value: conv.from_unit, label: conv.from_unit, isPrimary: false });
+    const units: { value: string; label: string; isPrimary: boolean; group: 'primary' | 'standard' | 'custom' }[] = [
+      { value: item.primary_unit, label: item.primary_unit, isPrimary: true, group: 'primary' },
+    ];
+    const addedUnits = new Set([item.primary_unit]);
+
+    // Auto-include all standard units from the same category
+    const standardUnits = getStandardUnitsForUnit(item.primary_unit);
+    for (const unit of standardUnits) {
+      if (!addedUnits.has(unit)) {
+        units.push({ value: unit, label: unit, isPrimary: false, group: 'standard' });
+        addedUnits.add(unit);
+      }
     }
+
+    // Include custom (cross-category) conversions
+    for (const conv of item.unit_conversions) {
+      if (!addedUnits.has(conv.from_unit)) {
+        units.push({ value: conv.from_unit, label: conv.from_unit, isPrimary: false, group: 'custom' });
+        addedUnits.add(conv.from_unit);
+      }
+    }
+
     return units;
   }, [item.primary_unit, item.unit_conversions]);
 
@@ -251,6 +269,13 @@ export default function InventoryTransactionModal({
                 )}
               </MenuItem>
             ))}
+            {availableUnits.length <= 1 && (
+              <MenuItem disabled>
+                <Typography variant="caption" color="text.secondary">
+                  No compatible units available
+                </Typography>
+              </MenuItem>
+            )}
           </TextField>
         </Box>
 

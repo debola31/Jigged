@@ -19,6 +19,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { getInventoryItemWithTransactionCount } from '@/utils/inventoryAccess';
 import { formatQuantityWithUnit } from '@/types/inventory';
+import { getStandardUnitsForUnit, getConversionFactor } from '@/lib/unitPresets';
 import type { InventoryItemWithRelations } from '@/types/inventory';
 import InventoryTransactionModal from '@/components/inventory/InventoryTransactionModal';
 import TransactionHistoryTable from '@/components/inventory/TransactionHistoryTable';
@@ -267,40 +268,77 @@ export default function InventoryDetailPage() {
           </Card>
 
           {/* Unit Conversions */}
-          {item.unit_conversions.length > 0 && (
-            <Card elevation={2}>
-              <CardContent>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-                  Unit Conversions
-                </Typography>
+          {(() => {
+            const standardUnits = getStandardUnitsForUnit(item.primary_unit);
+            const hasStandard = standardUnits.length > 0;
+            const hasCustom = item.unit_conversions.length > 0;
 
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {item.unit_conversions.map((conv) => (
-                    <Box
-                      key={conv.id}
-                      sx={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        p: 1,
-                        bgcolor: 'background.paper',
-                        borderRadius: 1,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                      }}
-                    >
-                      <Typography variant="body2">
-                        1 {conv.from_unit}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        = {conv.to_primary_factor} {item.primary_unit}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+            if (!hasStandard && !hasCustom) return null;
+
+            return (
+              <Card elevation={2}>
+                <CardContent>
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                    Available Units
+                  </Typography>
+
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {/* Standard same-category conversions */}
+                    {standardUnits.map((unit) => {
+                      const factor = getConversionFactor(unit, item.primary_unit);
+                      return (
+                        <Box
+                          key={`std-${unit}`}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            p: 1,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                          }}
+                        >
+                          <Typography variant="body2">
+                            1 {unit}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            = {factor !== undefined ? Number(factor.toPrecision(6)) : '?'} {item.primary_unit}
+                          </Typography>
+                        </Box>
+                      );
+                    })}
+
+                    {/* Custom conversions */}
+                    {hasStandard && hasCustom && (
+                      <Divider sx={{ my: 0.5 }} />
+                    )}
+                    {item.unit_conversions.map((conv) => (
+                      <Box
+                        key={conv.id}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          p: 1,
+                          borderRadius: 1,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                        }}
+                      >
+                        <Typography variant="body2">
+                          1 {conv.from_unit}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          = {conv.to_primary_factor} {item.primary_unit}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            );
+          })()}
         </Grid>
       </Grid>
 

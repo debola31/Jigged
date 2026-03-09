@@ -15,15 +15,12 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
 import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
 import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
+import Divider from '@mui/material/Divider';
+import ListItemIcon from '@mui/material/ListItemIcon';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import type {
@@ -31,14 +28,20 @@ import type {
   InventoryItemWithRelations,
   InventoryItemFormData,
   UnitConversionFormData,
+  CompanyCustomUnit,
 } from '@/types/inventory';
 import {
   createInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
   checkSkuExists,
+  getCompanyCustomUnits,
+  createCompanyCustomUnit,
 } from '@/utils/inventoryAccess';
-import { UNITS_BY_CATEGORY, getSuggestedConversionFactor } from '@/lib/unitPresets';
+import {
+  UNITS_BY_CATEGORY,
+  ALL_UNITS,
+} from '@/lib/unitPresets';
 
 interface InventoryFormProps {
   mode: 'create' | 'edit';
@@ -49,6 +52,9 @@ interface InventoryFormProps {
   onSuccess?: (item?: InventoryItem) => void;
   onCancel?: () => void;
 }
+
+// Sentinel value for the "Create Custom Unit" action in the dropdown
+const CREATE_CUSTOM_UNIT_ACTION = '__create_custom_unit__';
 
 export default function InventoryForm({
   mode,
@@ -72,21 +78,28 @@ export default function InventoryForm({
     severity: 'error',
   });
 
-  // Build unit options from presets
-  const unitOptions = UNITS_BY_CATEGORY.flatMap((category) =>
-    category.units.map((unit) => ({
-      value: unit,
-      label: unit,
-      category: category.category,
-    }))
-  );
+  // Company custom units
+  const [customUnits, setCustomUnits] = useState<CompanyCustomUnit[]>([]);
+  const [customUnitDialogOpen, setCustomUnitDialogOpen] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [newUnitError, setNewUnitError] = useState<string | null>(null);
+  const [creatingUnit, setCreatingUnit] = useState(false);
+
+  // Fetch company custom units on mount
+  useEffect(() => {
+    getCompanyCustomUnits(companyId)
+      .then(setCustomUnits)
+      .catch((err) => console.error('Error fetching custom units:', err));
+  }, [companyId]);
+
+  // All known unit names (for validation)
+  const allStandardUnits = new Set(ALL_UNITS);
 
   const handleChange =
     (field: keyof InventoryItemFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const value = e.target.value;
       if (field === 'quantity' || field === 'cost_per_unit') {
-        // Handle numeric fields
         setFormData((prev) => ({
           ...prev,
           [field]: value === '' ? (field === 'quantity' ? 0 : null) : parseFloat(value),
@@ -94,7 +107,6 @@ export default function InventoryForm({
       } else {
         setFormData((prev) => ({ ...prev, [field]: value }));
       }
-      // Clear field error
       if (fieldErrors[field]) {
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
       }
@@ -102,28 +114,61 @@ export default function InventoryForm({
 
   const handleUnitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newUnit = e.target.value;
+
+    // Intercept the "Create Custom Unit" action
+    if (newUnit === CREATE_CUSTOM_UNIT_ACTION) {
+      setCustomUnitDialogOpen(true);
+      return;
+    }
+
     setFormData((prev) => ({ ...prev, primary_unit: newUnit }));
-    // Clear field error
     if (fieldErrors.primary_unit) {
       setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
     }
   };
 
+  // Custom unit creation
+  const handleCreateCustomUnit = async () => {
+    const trimmed = newUnitName.trim().toLowerCase();
+
+    if (!trimmed) {
+      setNewUnitError('Unit name is required');
+      return;
+    }
+
+    if (allStandardUnits.has(trimmed)) {
+      setNewUnitError('This is already a standard unit');
+      return;
+    }
+
+    if (customUnits.some((cu) => cu.unit_name === trimmed)) {
+      setNewUnitError('This custom unit already exists');
+      return;
+    }
+
+    setCreatingUnit(true);
+    setNewUnitError(null);
+
+    try {
+      const created = await createCompanyCustomUnit(companyId, trimmed);
+      setCustomUnits((prev) => [...prev, created].sort((a, b) => a.unit_name.localeCompare(b.unit_name)));
+      setFormData((prev) => ({ ...prev, primary_unit: created.unit_name }));
+      setCustomUnitDialogOpen(false);
+      setNewUnitName('');
+    } catch (err) {
+      setNewUnitError(err instanceof Error ? err.message : 'Error creating unit');
+    } finally {
+      setCreatingUnit(false);
+    }
+  };
+
   // Unit conversion handlers
   const handleAddConversion = () => {
-    // Find a unit that isn't already used
-    const usedUnits = new Set([formData.primary_unit, ...formData.unit_conversions.map((c) => c.from_unit)]);
-    const availableUnit = unitOptions.find((u) => !usedUnits.has(u.value))?.value || '';
-
-    const suggestedFactor = availableUnit
-      ? getSuggestedConversionFactor(availableUnit, formData.primary_unit)
-      : 1;
-
     setFormData((prev) => ({
       ...prev,
       unit_conversions: [
         ...prev.unit_conversions,
-        { from_unit: availableUnit, to_primary_factor: suggestedFactor },
+        { from_unit: '', to_primary_factor: 1 },
       ],
     }));
   };
@@ -144,11 +189,8 @@ export default function InventoryForm({
       ...prev,
       unit_conversions: prev.unit_conversions.map((conv, i) => {
         if (i !== index) return conv;
-
         if (field === 'from_unit') {
-          // When changing the unit, suggest a conversion factor
-          const suggestedFactor = getSuggestedConversionFactor(value, formData.primary_unit);
-          return { ...conv, from_unit: value, to_primary_factor: suggestedFactor };
+          return { ...conv, from_unit: value };
         } else {
           return { ...conv, to_primary_factor: parseFloat(value) || 1 };
         }
@@ -159,27 +201,22 @@ export default function InventoryForm({
   const validateForm = async (): Promise<boolean> => {
     const errors: Record<string, string> = {};
 
-    // Name required
     if (!formData.name.trim()) {
       errors.name = 'Item name is required';
     }
 
-    // Primary unit required
     if (!formData.primary_unit.trim()) {
       errors.primary_unit = 'Primary unit is required';
     }
 
-    // Quantity must be non-negative
     if (formData.quantity < 0) {
       errors.quantity = 'Quantity cannot be negative';
     }
 
-    // Cost must be non-negative if provided
     if (formData.cost_per_unit !== null && formData.cost_per_unit < 0) {
       errors.cost_per_unit = 'Cost cannot be negative';
     }
 
-    // Check SKU uniqueness if provided
     if (formData.sku.trim()) {
       try {
         const exists = await checkSkuExists(companyId, formData.sku, mode === 'edit' ? itemId : undefined);
@@ -279,15 +316,6 @@ export default function InventoryForm({
     }
   };
 
-  // Get available units for conversion (exclude primary and already-used units)
-  const getAvailableUnitsForConversion = (currentIndex: number) => {
-    const usedUnits = new Set([
-      formData.primary_unit,
-      ...formData.unit_conversions.filter((_, i) => i !== currentIndex).map((c) => c.from_unit),
-    ]);
-    return unitOptions.filter((u) => !usedUnits.has(u.value));
-  };
-
   return (
     <Box component="form" onSubmit={handleSubmit}>
       {error && (
@@ -361,6 +389,7 @@ export default function InventoryForm({
                 helperText={fieldErrors.primary_unit || 'Base unit for this item'}
                 disabled={loading || (mode === 'edit' && (item?.transaction_count || 0) > 0)}
               >
+                {/* Standard unit categories */}
                 {UNITS_BY_CATEGORY.map((category) => [
                   <MenuItem key={`header-${category.category}`} disabled sx={{ fontWeight: 600, opacity: 1 }}>
                     {category.category}
@@ -371,6 +400,28 @@ export default function InventoryForm({
                     </MenuItem>
                   )),
                 ])}
+
+                {/* Company custom units */}
+                {customUnits.length > 0 && [
+                  <Divider key="custom-divider" />,
+                  <MenuItem key="header-custom" disabled sx={{ fontWeight: 600, opacity: 1 }}>
+                    Custom
+                  </MenuItem>,
+                  ...customUnits.map((cu) => (
+                    <MenuItem key={`custom-${cu.id}`} value={cu.unit_name} sx={{ pl: 4 }}>
+                      {cu.unit_name}
+                    </MenuItem>
+                  )),
+                ]}
+
+                {/* Create custom unit action */}
+                <Divider />
+                <MenuItem value={CREATE_CUSTOM_UNIT_ACTION} sx={{ color: 'primary.main' }}>
+                  <ListItemIcon sx={{ color: 'primary.main', minWidth: 32 }}>
+                    <AddIcon fontSize="small" />
+                  </ListItemIcon>
+                  Create Custom Unit
+                </MenuItem>
               </TextField>
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
@@ -408,94 +459,77 @@ export default function InventoryForm({
               />
             </Grid>
           </Grid>
-        </CardContent>
-      </Card>
 
-      {/* Unit Conversions */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Unit Conversions
-            </Typography>
-            <Button startIcon={<AddIcon />} onClick={handleAddConversion} disabled={loading} size="small">
-              Add Conversion
+          {/* Custom unit conversions — inline, inside Units & Quantity card */}
+          <Box sx={{ mt: 2 }}>
+            {formData.unit_conversions.length > 0 && (
+              <>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  Custom Unit Conversions
+                </Typography>
+                {formData.unit_conversions.map((conv, index) => (
+                  <Box
+                    key={index}
+                    sx={{
+                      display: 'flex',
+                      gap: 1.5,
+                      alignItems: 'center',
+                      mb: 1.5,
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                      1
+                    </Typography>
+                    <TextField
+                      size="small"
+                      label="Unit"
+                      value={conv.from_unit}
+                      onChange={(e) => handleConversionChange(index, 'from_unit', e.target.value)}
+                      disabled={loading}
+                      error={!!fieldErrors[`conversion_${index}_unit`]}
+                      helperText={fieldErrors[`conversion_${index}_unit`]}
+                      sx={{ width: 140 }}
+                    />
+                    <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                      =
+                    </Typography>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label="Factor"
+                      value={conv.to_primary_factor}
+                      onChange={(e) => handleConversionChange(index, 'to_primary_factor', e.target.value)}
+                      disabled={loading}
+                      error={!!fieldErrors[`conversion_${index}_factor`]}
+                      helperText={fieldErrors[`conversion_${index}_factor`]}
+                      inputProps={{ min: 0.0001, step: 0.0001 }}
+                      sx={{ width: 120 }}
+                    />
+                    <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {formData.primary_unit || '?'}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleRemoveConversion(index)}
+                      disabled={loading}
+                      color="error"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+              </>
+            )}
+
+            <Button
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={handleAddConversion}
+              disabled={loading}
+            >
+              Add Custom Conversion
             </Button>
           </Box>
-
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Define how other units convert to your primary unit ({formData.primary_unit || '...'})
-          </Typography>
-
-          {formData.unit_conversions.length > 0 ? (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>From Unit</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Conversion Factor</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Preview</TableCell>
-                  <TableCell width={60}></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {formData.unit_conversions.map((conv, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <TextField
-                        select
-                        size="small"
-                        value={conv.from_unit}
-                        onChange={(e) => handleConversionChange(index, 'from_unit', e.target.value)}
-                        disabled={loading}
-                        error={!!fieldErrors[`conversion_${index}_unit`]}
-                        sx={{ minWidth: 120 }}
-                      >
-                        {conv.from_unit && (
-                          <MenuItem value={conv.from_unit}>{conv.from_unit}</MenuItem>
-                        )}
-                        {getAvailableUnitsForConversion(index).map((u) => (
-                          <MenuItem key={u.value} value={u.value}>
-                            {u.label}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    </TableCell>
-                    <TableCell>
-                      <TextField
-                        type="number"
-                        size="small"
-                        value={conv.to_primary_factor}
-                        onChange={(e) => handleConversionChange(index, 'to_primary_factor', e.target.value)}
-                        disabled={loading}
-                        error={!!fieldErrors[`conversion_${index}_factor`]}
-                        inputProps={{ min: 0.0001, step: 0.0001 }}
-                        sx={{ width: 140 }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        1 {conv.from_unit || '?'} = {conv.to_primary_factor} {formData.primary_unit || '?'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={() => handleRemoveConversion(index)}
-                        disabled={loading}
-                        color="error"
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-              No additional unit conversions defined. Click &quot;Add Conversion&quot; to define secondary units.
-            </Typography>
-          )}
         </CardContent>
       </Card>
 
@@ -547,6 +581,68 @@ export default function InventoryForm({
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleDelete} color="error" variant="contained">
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Create Custom Unit Dialog */}
+      <Dialog
+        open={customUnitDialogOpen}
+        onClose={() => {
+          setCustomUnitDialogOpen(false);
+          setNewUnitName('');
+          setNewUnitError(null);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Create Custom Unit</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Create a unit of measurement for your company. It will be available for all inventory items.
+          </Typography>
+          {newUnitError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {newUnitError}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            fullWidth
+            label="Unit Name"
+            value={newUnitName}
+            onChange={(e) => {
+              setNewUnitName(e.target.value);
+              setNewUnitError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleCreateCustomUnit();
+              }
+            }}
+            placeholder='e.g., "bar", "sheet", "roll", "spool"'
+            disabled={creatingUnit}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setCustomUnitDialogOpen(false);
+              setNewUnitName('');
+              setNewUnitError(null);
+            }}
+            disabled={creatingUnit}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateCustomUnit}
+            disabled={creatingUnit || !newUnitName.trim()}
+            startIcon={creatingUnit ? <CircularProgress size={16} /> : null}
+          >
+            {creatingUnit ? 'Creating...' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>

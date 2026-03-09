@@ -7,6 +7,7 @@ import type {
   InventoryTransactionWithRelations,
   InventoryItemFormData,
   InventoryTransactionType,
+  CompanyCustomUnit,
 } from '@/types/inventory';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
@@ -757,4 +758,59 @@ export async function getInventoryForExport(
   companyId: string
 ): Promise<InventoryItem[]> {
   return getAllInventoryItems(companyId, '', 'name', 'asc');
+}
+
+// ============================================================
+// Company Custom Units
+// ============================================================
+
+/**
+ * Get all company-wide custom units
+ */
+export async function getCompanyCustomUnits(
+  companyId: string
+): Promise<CompanyCustomUnit[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('company_custom_units')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('unit_name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching company custom units:', error);
+    throw error;
+  }
+
+  return data || [];
+}
+
+/**
+ * Create a new company-wide custom unit
+ */
+export async function createCompanyCustomUnit(
+  companyId: string,
+  unitName: string
+): Promise<CompanyCustomUnit> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('company_custom_units')
+    .insert({
+      company_id: companyId,
+      unit_name: unitName.trim().toLowerCase(),
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error(`Unit "${unitName}" already exists`);
+    }
+    console.error('Error creating company custom unit:', error);
+    throw error;
+  }
+
+  return data;
 }

@@ -25,6 +25,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import type { RoutingNodeFormData, OperationNodeData, RoutingNodeMaterial } from '@/types/routings';
 import type { InventoryItem } from '@/types/inventory';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
+import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 
 interface NodeEditModalProps {
   open: boolean;
@@ -157,8 +158,9 @@ export default function NodeEditModal({
   const getAvailableUnits = (itemId: string): string[] => {
     const item = inventoryItems.find((inv) => inv.id === itemId);
     if (!item) return [];
-    // Primary unit is always available
-    return [item.primary_unit];
+    // Primary unit + all standard same-category units
+    const standardUnits = getStandardUnitsForUnit(item.primary_unit);
+    return [item.primary_unit, ...standardUnits];
   };
 
   if (!nodeData) return null;

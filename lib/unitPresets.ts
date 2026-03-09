@@ -21,60 +21,57 @@ export interface UnitCategory {
 export const UNIT_CATEGORIES: Record<string, UnitCategory> = {
   weight: {
     name: 'Weight',
-    units: ['lbs', 'kg', 'oz', 'g'],
+    units: ['pounds', 'kilograms', 'ounces', 'grams'],
     conversions: {
-      // All conversions TO lbs (base unit)
-      lbs: 1,
-      kg: 2.20462,  // 1 kg = 2.20462 lbs
-      oz: 0.0625,   // 1 oz = 0.0625 lbs
-      g: 0.00220462 // 1 g = 0.00220462 lbs
+      // All conversions TO pounds (base unit)
+      pounds: 1,
+      kilograms: 2.20462,  // 1 kg = 2.20462 lbs
+      ounces: 0.0625,      // 1 oz = 0.0625 lbs
+      grams: 0.00220462,   // 1 g = 0.00220462 lbs
     }
   },
   length: {
     name: 'Length',
-    units: ['in', 'ft', 'mm', 'cm', 'm'],
+    units: ['inches', 'feet', 'millimeters', 'centimeters', 'meters'],
     conversions: {
       // All conversions TO inches (base unit)
-      in: 1,
-      ft: 12,       // 1 ft = 12 in
-      mm: 0.03937,  // 1 mm = 0.03937 in
-      cm: 0.3937,   // 1 cm = 0.3937 in
-      m: 39.37      // 1 m = 39.37 in
+      inches: 1,
+      feet: 12,             // 1 ft = 12 in
+      millimeters: 0.03937, // 1 mm = 0.03937 in
+      centimeters: 0.3937,  // 1 cm = 0.3937 in
+      meters: 39.37,        // 1 m = 39.37 in
     }
   },
   volume: {
     name: 'Volume',
-    units: ['gal', 'L', 'qt', 'mL', 'fl oz'],
+    units: ['gallons', 'liters', 'quarts', 'milliliters', 'fluid ounces'],
     conversions: {
       // All conversions TO gallons (base unit)
-      gal: 1,
-      L: 0.264172,    // 1 L = 0.264172 gal
-      qt: 0.25,       // 1 qt = 0.25 gal
-      mL: 0.000264172,// 1 mL = 0.000264172 gal
-      'fl oz': 0.0078125 // 1 fl oz = 0.0078125 gal
+      gallons: 1,
+      liters: 0.264172,         // 1 L = 0.264172 gal
+      quarts: 0.25,             // 1 qt = 0.25 gal
+      milliliters: 0.000264172, // 1 mL = 0.000264172 gal
+      'fluid ounces': 0.0078125, // 1 fl oz = 0.0078125 gal
     }
   },
   count: {
     name: 'Count',
-    units: ['pcs', 'ea', 'box', 'case', 'dozen'],
+    units: ['pieces', 'each', 'dozen'],
     conversions: {
-      // User-defined per item, but we provide standard ones
-      pcs: 1,
-      ea: 1,
-      box: 1,   // User should configure
-      case: 1,  // User should configure
-      dozen: 12
+      pieces: 1,
+      each: 1,
+      dozen: 12,
     }
   },
   area: {
     name: 'Area',
-    units: ['sq in', 'sq ft', 'sq cm', 'sq m'],
+    units: ['square inches', 'square feet', 'square centimeters', 'square meters'],
     conversions: {
-      // All conversions TO sq inches (base unit)
-      'sq in': 1,
-      'sq ft': 144,     // 1 sq ft = 144 sq in
-      'sq cm': 0.155,   // 1 sq cm = 0.155 sq in
-      'sq m': 1550      // 1 sq m = 1550 sq in
+      // All conversions TO square inches (base unit)
+      'square inches': 1,
+      'square feet': 144,          // 1 sq ft = 144 sq in
+      'square centimeters': 0.155, // 1 sq cm = 0.155 sq in
+      'square meters': 1550,       // 1 sq m = 1550 sq in
     }
   }
 };
@@ -100,15 +97,68 @@ export const UNITS_BY_CATEGORY = Object.entries(UNIT_CATEGORIES).map(
 );
 
 // ============================================================
+// Backward-Compatible Aliases
+// ============================================================
+
+/**
+ * Maps abbreviated or deprecated unit names to their canonical full names.
+ * Existing data using old names will still convert correctly.
+ */
+const UNIT_ALIASES: Record<string, string> = {
+  // Count
+  ea: 'each',
+  pcs: 'pieces',
+  pc: 'pieces',
+  dz: 'dozen',
+
+  // Weight
+  lb: 'pounds',
+  lbs: 'pounds',
+  kg: 'kilograms',
+  kgs: 'kilograms',
+  oz: 'ounces',
+  g: 'grams',
+
+  // Length
+  in: 'inches',
+  ft: 'feet',
+  mm: 'millimeters',
+  cm: 'centimeters',
+  m: 'meters',
+
+  // Volume
+  gal: 'gallons',
+  L: 'liters',
+  qt: 'quarts',
+  mL: 'milliliters',
+  'fl oz': 'fluid ounces',
+
+  // Area
+  'sq in': 'square inches',
+  'sq ft': 'square feet',
+  'sq cm': 'square centimeters',
+  'sq m': 'square meters',
+};
+
+/**
+ * Resolve a unit name, applying aliases for backward compatibility.
+ */
+export function resolveUnitAlias(unit: string): string {
+  return UNIT_ALIASES[unit] || unit;
+}
+
+// ============================================================
 // Conversion Helpers
 // ============================================================
 
 /**
- * Find which category a unit belongs to
+ * Find which category a unit belongs to.
+ * Handles deprecated unit aliases (e.g., 'ea' → 'each').
  */
 export function getUnitCategory(unit: string): UnitCategory | undefined {
+  const resolved = resolveUnitAlias(unit);
   return Object.values(UNIT_CATEGORIES).find((category) =>
-    category.units.includes(unit)
+    category.units.includes(resolved)
   );
 }
 
@@ -121,20 +171,24 @@ export function getBaseUnit(unit: string): string | undefined {
 }
 
 /**
- * Get conversion factor from one unit to another within the same category
- * Returns undefined if units are not in the same category
+ * Get conversion factor from one unit to another within the same category.
+ * Handles deprecated unit aliases automatically.
+ * Returns undefined if units are not in the same category.
  */
 export function getConversionFactor(
   fromUnit: string,
   toUnit: string
 ): number | undefined {
-  const category = getUnitCategory(fromUnit);
-  if (!category || !category.units.includes(toUnit)) {
+  const resolvedFrom = resolveUnitAlias(fromUnit);
+  const resolvedTo = resolveUnitAlias(toUnit);
+
+  const category = getUnitCategory(resolvedFrom);
+  if (!category || !category.units.includes(resolvedTo)) {
     return undefined;
   }
 
-  const fromFactor = category.conversions[fromUnit];
-  const toFactor = category.conversions[toUnit];
+  const fromFactor = category.conversions[resolvedFrom];
+  const toFactor = category.conversions[resolvedTo];
 
   if (fromFactor === undefined || toFactor === undefined) {
     return undefined;
@@ -155,7 +209,10 @@ export function convertUnits(
   fromUnit: string,
   toUnit: string
 ): number | undefined {
-  if (fromUnit === toUnit) {
+  const resolvedFrom = resolveUnitAlias(fromUnit);
+  const resolvedTo = resolveUnitAlias(toUnit);
+
+  if (resolvedFrom === resolvedTo) {
     return quantity;
   }
 
@@ -225,6 +282,23 @@ export function areUnitsCompatible(unit1: string, unit2: string): boolean {
   if (!category1 || !category2) return false;
 
   return category1 === category2;
+}
+
+// ============================================================
+// Standard Unit Discovery
+// ============================================================
+
+/**
+ * Get all standard units that can automatically convert to/from the given unit.
+ * Returns other units in the same category (all have known conversion factors).
+ * Handles deprecated aliases automatically.
+ */
+export function getStandardUnitsForUnit(primaryUnit: string): string[] {
+  const resolved = resolveUnitAlias(primaryUnit);
+  const category = getUnitCategory(resolved);
+  if (!category) return [];
+
+  return category.units.filter((u) => u !== resolved);
 }
 
 // ============================================================

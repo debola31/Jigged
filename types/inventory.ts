@@ -87,6 +87,20 @@ export interface InventoryTransactionWithRelations extends InventoryTransaction 
 }
 
 // ============================================================
+// Company Custom Units
+// ============================================================
+
+/**
+ * Company-wide custom unit of measurement (e.g., "bar", "sheet", "roll")
+ */
+export interface CompanyCustomUnit {
+  id: string;
+  company_id: string;
+  unit_name: string;
+  created_at: string;
+}
+
+// ============================================================
 // Form Data Types
 // ============================================================
 
@@ -119,7 +133,7 @@ export const EMPTY_INVENTORY_FORM: InventoryItemFormData = {
   name: '',
   description: '',
   sku: '',
-  primary_unit: 'pcs',
+  primary_unit: 'pieces',
   quantity: 0,
   cost_per_unit: null,
   unit_conversions: [],

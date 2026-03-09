@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "Sentry": {
+      "url": "https://mcp.sentry.dev/mcp/jigged/javascript-nextjs",
+      "type": "http"
+    }
+  }
+}

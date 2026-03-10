@@ -583,6 +583,7 @@ export default function JobDetailPage() {
           routingId={routingInfo.id}
           routingName={`Routing (${routingInfo.nodeCount} operation${routingInfo.nodeCount !== 1 ? 's' : ''})`}
           companyId={companyId}
+          partId={job.part_id || ''}
         />
       )}
     </Box>

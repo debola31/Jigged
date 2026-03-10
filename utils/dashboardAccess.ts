@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 
 // ============== Types ==============
@@ -83,7 +84,7 @@ export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
     // Persist migration if keys changed
     const changed = migrated.length !== pinned.length || migrated.some((k, i) => k !== pinned[i]);
     if (changed) {
-      setPinnedMetricKeys(migrated).catch(() => {});
+      setPinnedMetricKeys(migrated).catch((err) => Sentry.captureException(err, { level: 'warning' }));
     }
 
     return migrated.length > 0 ? migrated : DEFAULT_PINNED_METRICS;

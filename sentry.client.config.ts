@@ -1,6 +1,5 @@
-// This file configures the initialization of Sentry for edge features (middleware, edge routes, and so on).
-// The config you add here will be used whenever one of the edge features is loaded.
-// Note that this config is unrelated to the Vercel Edge Runtime and is also required when running locally.
+// This file configures the initialization of Sentry on the client.
+// The config you add here will be used whenever a user loads a page in their browser.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
@@ -11,10 +10,15 @@ Sentry.init({
   // Performance monitoring: sample 10% of transactions to stay within free tier limits
   tracesSampleRate: 0.1,
 
+  // Session Replay: capture 100% of sessions with errors, 0% otherwise
+  replaysSessionSampleRate: 0,
+  replaysOnErrorSampleRate: 1.0,
+
+  integrations: [Sentry.replayIntegration()],
+
   // Enable logs to be sent to Sentry
   enableLogs: true,
 
   // Enable sending user PII (Personally Identifiable Information)
-  // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
   sendDefaultPii: true,
 });

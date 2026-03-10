@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -68,6 +69,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       setValues(vals);
     } catch (err) {
       console.error('Error loading pinned metrics:', err);
+      Sentry.captureException(err);
     } finally {
       setLoading(false);
     }
@@ -85,6 +87,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
+      Sentry.captureException(err);
     }
     await setPinnedMetricKeys(keys);
   };
@@ -97,10 +100,11 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
+      Sentry.captureException(err);
     }
     for (const m of AVAILABLE_METRICS) {
       if (m.supportsTimePeriod) {
-        setMetricTimePeriod(m.key, newPeriod).catch(() => {});
+        setMetricTimePeriod(m.key, newPeriod).catch((err) => Sentry.captureException(err, { level: 'warning' }));
       }
     }
   };

@@ -15,6 +15,8 @@ import json
 import logging
 import os
 import time
+
+import sentry_sdk
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -94,9 +96,10 @@ async def get_dashboard_insights(company_id: str):
         return DashboardInsightsResponse(insights=insights)
     except Exception as e:
         logger.error(f"Error getting dashboard insights: {e}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to compute dashboard insights: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -112,9 +115,10 @@ async def refresh_insights(company_id: str):
         return DashboardInsightsResponse(insights=insights)
     except Exception as e:
         logger.error(f"Error refreshing insights: {e}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to refresh insights: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -199,12 +203,14 @@ async def chat(company_id: str, request: ChatRequest):
     except HTTPException:
         raise
     except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=501, detail="Not implemented")
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to process chat query: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -282,7 +288,8 @@ async def get_chat_history(company_id: str):
 
     except Exception as e:
         logger.error(f"Error fetching chat history: {e}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch chat history: {str(e)}",
+            detail="Internal server error",
         )

@@ -15,6 +15,9 @@ anthropic>=0.18.0
 openai>=1.0.0
 google-genai>=0.3.0
 
+# Error monitoring
+sentry-sdk[fastapi]>=2.0.0
+
 # Database
 psycopg2-binary>=2.9.0
 asyncpg>=0.29.0

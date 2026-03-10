@@ -15,6 +15,8 @@ import logging
 import os
 from uuid import uuid4
 
+import sentry_sdk
+
 from fastapi import APIRouter, HTTPException, Depends
 from supabase import create_client, Client
 
@@ -169,7 +171,8 @@ async def create_operator(request: OperatorCreateRequest):
         raise
     except Exception as e:
         logger.error(f"Error creating operator: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create operator: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -226,7 +229,8 @@ async def list_operators(company_id: str):
         raise
     except Exception as e:
         logger.error(f"Error listing operators: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list operators: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @admin_router.get("/{operator_id}", response_model=OperatorResponse)
@@ -275,7 +279,8 @@ async def get_operator(operator_id: str):
         raise
     except Exception as e:
         logger.error(f"Error getting operator: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get operator: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -331,4 +336,5 @@ async def reset_operator_password(operator_id: str, request: PasswordResetReques
         raise
     except Exception as e:
         logger.error(f"Error resetting operator password: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to reset password: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")

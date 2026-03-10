@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from '@sentry/nextjs';
 import { useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -41,6 +42,7 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
     } catch (err) {
       setStatus('error');
       setMessage(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      Sentry.captureException(err, { level: 'warning' });
     }
   };
 

@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -45,6 +46,7 @@ export default function Login() {
       }
     } catch (err) {
       console.error('Login error:', err);
+      Sentry.captureException(err);
       setError(err instanceof Error ? err.message : 'An error occurred during sign in');
     } finally {
       setLoading(false);

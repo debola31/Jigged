@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import os
+
+import sentry_sdk
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -210,12 +212,14 @@ async def analyze_csv(
 
     except ValueError as e:
         # AI provider configuration error
+        sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         # Unexpected error
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Error analyzing CSV: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -357,9 +361,10 @@ async def validate_import(
         )
 
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Error validating data: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -454,9 +459,10 @@ async def execute_import(
                             detail="Import failed: Duplicate values detected. Please ensure all customer names are unique.",
                         )
                 # Generic database error with sanitized message
+                sentry_sdk.capture_exception(e)
                 raise HTTPException(
                     status_code=500,
-                    detail="Database error occurred during import. Please try again or contact support if the problem persists.",
+                    detail="Internal server error",
                 )
 
         return ExecuteResponse(
@@ -471,7 +477,8 @@ async def execute_import(
     except Exception as e:
         # Log the actual error for debugging
         logger.error(f"Import execution error: {str(e)}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred during import: {str(e)}",
+            detail="Internal server error",
         )

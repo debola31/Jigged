@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import sentry_sdk
 
 # Add api directory to path for Vercel serverless functions
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# Initialize Sentry for error monitoring
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    traces_sample_rate=0.1,
+    environment=os.getenv("ENVIRONMENT", "development"),
+    send_default_pii=True,
+)
 
 # Initialize Supabase client
 supabase_url = os.getenv("SUPABASE_URL")
@@ -114,8 +123,9 @@ def get_users():
 
         return {"data": response.data, "count": len(response.data)}
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
-            status_code=500, detail=f"Error fetching users from Supabase: {str(e)}"
+            status_code=500, detail="Internal server error"
         )
 
 

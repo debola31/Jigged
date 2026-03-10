@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
@@ -50,6 +51,7 @@ export default function AuthGuard({
         }
       } catch (err) {
         console.error('Error checking access:', err);
+        Sentry.captureException(err);
         setHasAccess(false);
       } finally {
         setLoading(false);

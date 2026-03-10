@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -15,6 +16,7 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error('Page error:', error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import os
+
+import sentry_sdk
 from pathlib import Path
 from typing import Optional
 
@@ -178,9 +180,11 @@ async def analyze_csv(
         return response
 
     except ValueError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error analyzing CSV: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================
@@ -377,7 +381,8 @@ async def validate_import(
 
     except Exception as e:
         logger.error(f"Error validating data: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error validating data: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================
@@ -470,9 +475,10 @@ async def execute_import(
                         status_code=400,
                         detail="Import failed: Duplicate values detected.",
                     )
+                sentry_sdk.capture_exception(e)
                 raise HTTPException(
                     status_code=500,
-                    detail="Database error occurred during import.",
+                    detail="Internal server error",
                 )
 
         return InventoryExecuteResponse(
@@ -486,4 +492,5 @@ async def execute_import(
         raise
     except Exception as e:
         logger.error(f"Import execution error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")

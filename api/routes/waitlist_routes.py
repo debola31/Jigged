@@ -1,5 +1,6 @@
 import logging
 
+import sentry_sdk
 from fastapi import APIRouter, HTTPException
 
 from models.waitlist_models import WaitlistRequest, WaitlistResponse
@@ -36,4 +37,5 @@ async def join_waitlist(request: WaitlistRequest):
         )
     except Exception as e:
         logger.error(f"Waitlist error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to join waitlist")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")

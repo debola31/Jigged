@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import type {
   Quote,
@@ -399,6 +400,7 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
         await deleteFileFromStorage(attachment.file_path);
       } catch (storageError) {
         console.warn('Failed to delete storage file:', attachment.file_path, storageError);
+        Sentry.captureException(storageError, { level: 'warning' });
         // Continue with deletion even if storage cleanup fails
       }
     }
@@ -442,6 +444,7 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
         await deleteFileFromStorage(attachment.file_path);
       } catch (storageError) {
         console.warn('Failed to delete storage file:', attachment.file_path, storageError);
+        Sentry.captureException(storageError, { level: 'warning' });
       }
     }
   }
@@ -825,7 +828,7 @@ export async function uploadQuoteAttachment(
 
   if (insertError) {
     // Cleanup: try to delete uploaded file
-    await deleteFileFromStorage(filePath).catch(console.error);
+    await deleteFileFromStorage(filePath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     console.error('Error creating attachment record:', insertError);
     throw new Error('Failed to save attachment');
   }
@@ -947,14 +950,14 @@ export async function replaceQuoteAttachment(
 
   if (updateError) {
     // Cleanup: delete newly uploaded file
-    await deleteFileFromStorage(newPath).catch(console.error);
+    await deleteFileFromStorage(newPath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     throw new Error('Failed to update attachment');
   }
 
   // 6. Delete old file from storage (best effort - orphaned files can be cleaned up later)
   if (oldFilePath) {
     await deleteFileFromStorage(oldFilePath)
-      .catch(err => console.warn('Failed to delete old file:', err));
+      .catch(err => { console.warn('Failed to delete old file:', err); Sentry.captureException(err, { level: 'warning' }); });
   }
 
   return updated;
@@ -1093,7 +1096,7 @@ async function copyAttachmentToJob(
   if (insertError) {
     console.error('Failed to create job attachment record:', insertError);
     // Cleanup: delete uploaded file
-    await deleteFileFromStorage(newPath).catch(console.error);
+    await deleteFileFromStorage(newPath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     throw new Error('Failed to copy attachment to job');
   }
 

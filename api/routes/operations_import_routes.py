@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import os
+
+import sentry_sdk
 from pathlib import Path
 from typing import Optional
 
@@ -200,12 +202,14 @@ async def analyze_csv(
 
     except ValueError as e:
         # AI provider configuration error
-        raise HTTPException(status_code=500, detail=str(e))
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         # Unexpected error
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Error analyzing CSV: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -388,9 +392,10 @@ async def validate_import(
     except HTTPException:
         raise
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"Error validating data: {str(e)}",
+            detail="Internal server error",
         )
 
 
@@ -539,9 +544,10 @@ async def execute_import(
                         status_code=400,
                         detail="Import failed: An operation with this name already exists. Please check your CSV for duplicate names.",
                     )
+                sentry_sdk.capture_exception(e)
                 raise HTTPException(
                     status_code=500,
-                    detail="Database error occurred during import. Please try again.",
+                    detail="Internal server error",
                 )
 
         return OperationExecuteResponse(
@@ -556,7 +562,8 @@ async def execute_import(
         raise
     except Exception as e:
         logger.error(f"Operations import execution error: {str(e)}", exc_info=True)
+        sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
-            detail=f"An unexpected error occurred during import: {str(e)}",
+            detail="Internal server error",
         )

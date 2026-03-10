@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -96,6 +97,7 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
         chart_config: response.chart_config,
       });
     } catch (err) {
+      Sentry.captureException(err);
       const errorMessage =
         err instanceof Error ? err.message : 'Failed to process your question. Please try again.';
       setError(errorMessage);
@@ -132,6 +134,7 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
         setSaved(false);
       }, 1500);
     } catch (err) {
+      Sentry.captureException(err);
       const msg = err instanceof Error ? err.message : 'Failed to save';
       setError(msg);
     } finally {

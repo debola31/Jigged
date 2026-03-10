@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import type {
   Job,
@@ -265,6 +266,7 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
         await deleteFileFromStorage(attachment.file_path);
       } catch (storageError) {
         console.warn('Failed to delete storage file:', attachment.file_path, storageError);
+        Sentry.captureException(storageError, { level: 'warning' });
       }
     }
   }
@@ -307,6 +309,7 @@ export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promi
         await deleteFileFromStorage(attachment.file_path);
       } catch (storageError) {
         console.warn('Failed to delete storage file:', attachment.file_path, storageError);
+        Sentry.captureException(storageError, { level: 'warning' });
       }
     }
   }

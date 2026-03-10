@@ -1,5 +1,6 @@
 'use client';
 
+import * as Sentry from "@sentry/nextjs";
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Card from '@mui/material/Card';
@@ -38,6 +39,7 @@ export default function CompanySelector() {
         }
       } catch (err) {
         console.error('Error fetching companies:', err);
+        Sentry.captureException(err);
         setError('Failed to load companies. Please try again.');
       } finally {
         setLoading(false);
@@ -55,6 +57,7 @@ export default function CompanySelector() {
       router.push(`/dashboard/${companyId}`);
     } catch (err) {
       console.error('Error setting last company:', err);
+      Sentry.captureException(err);
       setError('Failed to select company. Please try again.');
     }
   };

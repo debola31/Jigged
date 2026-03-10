@@ -107,8 +107,6 @@ SCHEMA_CONTEXT = """
 - estimated_run_hours_per_unit: NUMERIC(8,4) (default 0)
 - actual_setup_hours: NUMERIC(8,2)
 - actual_run_hours: NUMERIC(8,2)
-- quantity_completed: INTEGER (default 0)
-- quantity_scrapped: INTEGER (default 0)
 - status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
 - started_at: TIMESTAMPTZ
 - completed_at: TIMESTAMPTZ

@@ -93,8 +93,6 @@ class JobStopRequest(BaseModel):
 class JobCompleteRequest(BaseModel):
     """Request body for completing a job operation."""
     notes: Optional[str] = None
-    quantity_completed: Optional[int] = None
-    quantity_scrapped: Optional[int] = None
 
 
 # ============================================================================
@@ -141,7 +139,6 @@ class OperatorJobResponse(BaseModel):
     due_date: Optional[datetime]
     status: str
     quantity_ordered: Optional[int]
-    quantity_completed: Optional[int]
     # Current operation for this station
     operation_id: Optional[str]
     operation_name: Optional[str]
@@ -160,7 +157,6 @@ class OperatorJobDetailResponse(BaseModel):
     due_date: Optional[datetime]
     status: str
     quantity_ordered: Optional[int]
-    quantity_completed: Optional[int]
     # Operation details
     operation_id: Optional[str]
     operation_name: Optional[str]

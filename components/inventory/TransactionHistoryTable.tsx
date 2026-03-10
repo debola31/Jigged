@@ -14,10 +14,13 @@ import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
+import TextField from '@mui/material/TextField';
+import IconButton from '@mui/material/IconButton';
+import EditIcon from '@mui/icons-material/Edit';
 import NextLink from 'next/link';
 import type { InventoryTransactionWithRelations } from '@/types/inventory';
 import { getTransactionTypeDisplay, formatTransactionDate, formatQuantityWithUnit } from '@/types/inventory';
-import { getItemTransactions } from '@/utils/inventoryAccess';
+import { getItemTransactions, updateTransactionNotes } from '@/utils/inventoryAccess';
 
 interface TransactionHistoryTableProps {
   itemId: string;
@@ -36,6 +39,11 @@ export default function TransactionHistoryTable({
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Inline notes editing state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingNotes, setEditingNotes] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -65,6 +73,44 @@ export default function TransactionHistoryTable({
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
+  };
+
+  const handleStartEdit = (transaction: InventoryTransactionWithRelations) => {
+    setEditingId(transaction.id);
+    setEditingNotes(transaction.notes || '');
+  };
+
+  const handleSaveNotes = async () => {
+    if (!editingId) return;
+
+    setSavingNotes(true);
+    try {
+      await updateTransactionNotes(editingId, editingNotes);
+      // Update local state
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === editingId ? { ...t, notes: editingNotes || null } : t
+        )
+      );
+      setEditingId(null);
+    } catch (err) {
+      console.error('Error saving notes:', err);
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+  };
+
+  const handleNotesKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSaveNotes();
+    } else if (e.key === 'Escape') {
+      handleCancelEdit();
+    }
   };
 
   if (loading && transactions.length === 0) {
@@ -111,12 +157,22 @@ export default function TransactionHistoryTable({
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      label={typeDisplay.label}
-                      size="small"
-                      color={typeDisplay.color}
-                      variant="outlined"
-                    />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Chip
+                        label={typeDisplay.label}
+                        size="small"
+                        color={typeDisplay.color}
+                        variant="outlined"
+                      />
+                      {transaction.has_discrepancy && (
+                        <Chip
+                          label="Discrepancy"
+                          size="small"
+                          color="warning"
+                          variant="filled"
+                        />
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell align="right">
                     <Typography
@@ -162,19 +218,44 @@ export default function TransactionHistoryTable({
                     )}
                   </TableCell>
                   <TableCell>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{
-                        maxWidth: 200,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={transaction.notes || undefined}
-                    >
-                      {transaction.notes || '—'}
-                    </Typography>
+                    {editingId === transaction.id ? (
+                      <TextField
+                        value={editingNotes}
+                        onChange={(e) => setEditingNotes(e.target.value)}
+                        onBlur={handleSaveNotes}
+                        onKeyDown={handleNotesKeyDown}
+                        size="small"
+                        multiline
+                        maxRows={3}
+                        autoFocus
+                        disabled={savingNotes}
+                        sx={{ minWidth: 180 }}
+                        placeholder="Add notes..."
+                      />
+                    ) : (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{
+                            maxWidth: 200,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={transaction.notes || undefined}
+                        >
+                          {transaction.notes || '—'}
+                        </Typography>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleStartEdit(transaction)}
+                          sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}
+                        >
+                          <EditIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Box>
+                    )}
                   </TableCell>
                 </TableRow>
               );

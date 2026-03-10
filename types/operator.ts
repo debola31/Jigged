@@ -152,12 +152,25 @@ export interface JobStopRequest {
 }
 
 /**
+ * Material confirmation data for job completion.
+ * Pre-filled from routing, operator confirms or adjusts.
+ */
+export interface MaterialConfirmation {
+  inventory_item_id: string;
+  item_name: string;
+  expected_quantity: number;
+  confirmed_quantity: number;
+  unit: string;
+  current_stock: number;
+  primary_unit: string;
+}
+
+/**
  * Request body for completing a job operation.
  */
 export interface JobCompleteRequest {
   notes?: string;
-  quantity_completed?: number;
-  quantity_scrapped?: number;
+  materials?: MaterialConfirmation[];
 }
 
 /**

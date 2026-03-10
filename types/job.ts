@@ -33,8 +33,6 @@ export interface JobOperation {
   estimated_run_hours_per_unit: number;
   actual_setup_hours: number | null;
   actual_run_hours: number | null;
-  quantity_completed: number;
-  quantity_scrapped: number;
   status: 'pending' | 'in_progress' | 'completed' | 'skipped';
   started_at: string | null;
   completed_at: string | null;

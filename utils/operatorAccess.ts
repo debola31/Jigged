@@ -24,7 +24,11 @@ import type {
   JobStopRequest,
   JobCompleteRequest,
   JobCompleteResponse,
+  MaterialConfirmation,
 } from '@/types/operator';
+import type { RoutingNodeMaterial } from '@/types/routings';
+import type { InventoryItemWithRelations } from '@/types/inventory';
+import { removeStockGraceful } from '@/utils/inventoryAccess';
 
 // Operator type from user_company_access
 interface OperatorAccess {
@@ -451,6 +455,75 @@ export async function stopJob(
 }
 
 /**
+ * Get expected materials for a job operation from its routing node.
+ * Also fetches current inventory levels for each material.
+ */
+export async function getOperationMaterials(
+  jobOperationId: string
+): Promise<MaterialConfirmation[]> {
+  const supabase = getSupabase();
+
+  // 1. Get the routing_node_id from job_operations
+  const { data: jobOp, error: opError } = await supabase
+    .from('job_operations')
+    .select('routing_node_id')
+    .eq('id', jobOperationId)
+    .single();
+
+  if (opError || !jobOp?.routing_node_id) {
+    return []; // No routing linked
+  }
+
+  // 2. Get materials from the routing node
+  const { data: routingNode, error: rnError } = await supabase
+    .from('routing_nodes')
+    .select('materials')
+    .eq('id', jobOp.routing_node_id)
+    .single();
+
+  if (rnError || !routingNode?.materials) {
+    return [];
+  }
+
+  const materials = routingNode.materials as RoutingNodeMaterial[];
+  if (materials.length === 0) {
+    return [];
+  }
+
+  // 3. Batch-fetch inventory items for current stock and names
+  const itemIds = materials.map((m) => m.inventory_item_id);
+  const { data: items } = await supabase
+    .from('inventory_items')
+    .select('id, name, primary_unit, quantity')
+    .in('id', itemIds);
+
+  const itemMap = new Map<string, { name: string; primary_unit: string; quantity: number }>();
+  for (const item of items || []) {
+    itemMap.set(item.id, {
+      name: item.name,
+      primary_unit: item.primary_unit,
+      quantity: item.quantity,
+    });
+  }
+
+  // 4. Build MaterialConfirmation array
+  return materials
+    .filter((m) => itemMap.has(m.inventory_item_id))
+    .map((m) => {
+      const item = itemMap.get(m.inventory_item_id)!;
+      return {
+        inventory_item_id: m.inventory_item_id,
+        item_name: item.name,
+        expected_quantity: m.quantity,
+        confirmed_quantity: m.quantity, // Pre-filled with expected
+        unit: m.unit,
+        current_stock: item.quantity,
+        primary_unit: item.primary_unit,
+      };
+    });
+}
+
+/**
  * Mark a job operation as complete.
  */
 export async function completeJob(
@@ -491,8 +564,6 @@ export async function completeJob(
       .update({
         status: 'completed',
         completed_at: now,
-        quantity_completed: request.quantity_completed || 1,
-        quantity_scrapped: request.quantity_scrapped || 0,
       })
       .eq('id', session.job_operation_id);
   }
@@ -511,6 +582,24 @@ export async function completeJob(
       .from('jobs')
       .update({ status: 'completed' })
       .eq('id', jobId);
+  }
+
+  // 4. Deplete inventory for confirmed materials
+  if (request.materials && request.materials.length > 0) {
+    for (const material of request.materials) {
+      if (material.confirmed_quantity > 0) {
+        await removeStockGraceful(
+          material.inventory_item_id,
+          material.confirmed_quantity,
+          material.unit,
+          `Operation completion`,
+          jobId,
+          session.job_operation_id || undefined,
+          operatorId,
+          operatorId
+        );
+      }
+    }
   }
 
   // Calculate duration

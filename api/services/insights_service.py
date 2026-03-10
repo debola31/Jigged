@@ -581,7 +581,7 @@ def get_at_risk_jobs(company_id: str) -> dict:
             "id, job_number, description, status, created_at, "
             "customers!left(name), "
             "quotes!jobs_quote_id_fkey(quantity, total_price), "
-            "job_operations(id, status, quantity_completed, estimated_setup_hours, estimated_run_hours_per_unit)"
+            "job_operations(id, status, estimated_setup_hours, estimated_run_hours_per_unit)"
         )
         .eq("company_id", company_id)
         .in_("status", ["pending", "in_progress"])

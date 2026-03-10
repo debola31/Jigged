@@ -380,6 +380,8 @@ export default function OperatorJobDetailPage() {
         jobId={jobId}
         operatorId={currentOperatorId}
         sessionStartedAt={job.session_started_at}
+        jobOperationId={job.operation_id}
+        companyId={companyId}
       />
     </Box>
   );

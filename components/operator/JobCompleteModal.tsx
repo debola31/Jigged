@@ -9,10 +9,19 @@ import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import { completeJob } from '@/utils/operatorAccess';
+import Card from '@mui/material/Card';
+import IconButton from '@mui/material/IconButton';
+import Autocomplete from '@mui/material/Autocomplete';
+import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
+import { completeJob, getOperationMaterials } from '@/utils/operatorAccess';
+import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import { formatDuration } from '@/types/operator';
+import type { MaterialConfirmation } from '@/types/operator';
+import type { InventoryItem } from '@/types/inventory';
 
 interface JobCompleteModalProps {
   open: boolean;
@@ -21,6 +30,8 @@ interface JobCompleteModalProps {
   jobId: string;
   operatorId: string | null;
   sessionStartedAt: string | null;
+  jobOperationId: string | null;
+  companyId: string;
 }
 
 /**
@@ -28,8 +39,8 @@ interface JobCompleteModalProps {
  *
  * Shows:
  * - Time spent summary
- * - Quantity completed input
- * - Quantity scrapped input
+ * - Material confirmation from routing (pre-filled, editable)
+ * - Option to add additional materials
  * - Notes field
  */
 export default function JobCompleteModal({
@@ -39,13 +50,20 @@ export default function JobCompleteModal({
   jobId,
   operatorId,
   sessionStartedAt,
+  jobOperationId,
+  companyId,
 }: JobCompleteModalProps) {
-  const [quantityCompleted, setQuantityCompleted] = useState<number>(1);
-  const [quantityScrapped, setQuantityScrapped] = useState<number>(0);
+  const [materials, setMaterials] = useState<MaterialConfirmation[]>([]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+
+  // For adding extra materials
+  const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
 
   // Update elapsed time while modal is open
   useEffect(() => {
@@ -63,15 +81,72 @@ export default function JobCompleteModal({
     return () => clearInterval(interval);
   }, [open, sessionStartedAt]);
 
-  // Reset form when opening
+  // Fetch materials on open
   useEffect(() => {
-    if (open) {
-      setQuantityCompleted(1);
-      setQuantityScrapped(0);
-      setNotes('');
-      setError(null);
+    if (!open) return;
+
+    setNotes('');
+    setError(null);
+    setShowAddMaterial(false);
+
+    if (jobOperationId) {
+      setLoadingMaterials(true);
+      getOperationMaterials(jobOperationId)
+        .then((mats) => setMaterials(mats))
+        .catch(() => setMaterials([]))
+        .finally(() => setLoadingMaterials(false));
+    } else {
+      setMaterials([]);
     }
-  }, [open]);
+  }, [open, jobOperationId]);
+
+  const handleConfirmedQtyChange = (index: number, value: number) => {
+    setMaterials((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], confirmed_quantity: Math.max(0, value) };
+      return updated;
+    });
+  };
+
+  const handleRemoveMaterial = (index: number) => {
+    setMaterials((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddMaterial = async () => {
+    if (inventoryItems.length === 0) {
+      setLoadingItems(true);
+      try {
+        const items = await getAllInventoryItems(companyId);
+        setInventoryItems(items);
+      } catch {
+        // Silently fail — user can retry
+      } finally {
+        setLoadingItems(false);
+      }
+    }
+    setShowAddMaterial(true);
+  };
+
+  const handleSelectNewMaterial = (item: InventoryItem | null) => {
+    if (!item) return;
+
+    // Don't add duplicates
+    if (materials.some((m) => m.inventory_item_id === item.id)) return;
+
+    setMaterials((prev) => [
+      ...prev,
+      {
+        inventory_item_id: item.id,
+        item_name: item.name,
+        expected_quantity: 0,
+        confirmed_quantity: 0,
+        unit: item.primary_unit,
+        current_stock: item.quantity,
+        primary_unit: item.primary_unit,
+      },
+    ]);
+    setShowAddMaterial(false);
+  };
 
   const handleConfirm = async () => {
     if (!operatorId) {
@@ -83,10 +158,12 @@ export default function JobCompleteModal({
     setError(null);
 
     try {
+      // Only send materials with confirmed_quantity > 0
+      const materialsToSend = materials.filter((m) => m.confirmed_quantity > 0);
+
       await completeJob(jobId, operatorId, {
-        quantity_completed: quantityCompleted,
-        quantity_scrapped: quantityScrapped,
         notes: notes.trim() || undefined,
+        materials: materialsToSend.length > 0 ? materialsToSend : undefined,
       });
       onConfirm();
     } catch (err) {
@@ -145,31 +222,131 @@ export default function JobCompleteModal({
           </Alert>
         )}
 
-        {/* Quantity Completed */}
-        <TextField
-          label="Quantity Completed"
-          type="number"
-          fullWidth
-          value={quantityCompleted}
-          onChange={(e) =>
-            setQuantityCompleted(Math.max(0, parseInt(e.target.value) || 0))
-          }
-          inputProps={{ min: 0 }}
-          sx={{ mb: 2 }}
-        />
+        {/* Materials Section */}
+        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+          Material Consumption
+        </Typography>
 
-        {/* Quantity Scrapped */}
-        <TextField
-          label="Quantity Scrapped"
-          type="number"
-          fullWidth
-          value={quantityScrapped}
-          onChange={(e) =>
-            setQuantityScrapped(Math.max(0, parseInt(e.target.value) || 0))
-          }
-          inputProps={{ min: 0 }}
-          sx={{ mb: 2 }}
-        />
+        {loadingMaterials ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : materials.length === 0 && !showAddMaterial ? (
+          <Box sx={{ textAlign: 'center', py: 2, mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              No materials required for this operation.
+            </Typography>
+            <Button
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={handleAddMaterial}
+            >
+              Add Material
+            </Button>
+          </Box>
+        ) : (
+          <Stack spacing={1.5} sx={{ mb: 2 }}>
+            {materials.map((material, index) => {
+              const isOverStock =
+                material.confirmed_quantity > 0 &&
+                material.unit === material.primary_unit &&
+                material.confirmed_quantity > material.current_stock;
+
+              return (
+                <Card
+                  key={`${material.inventory_item_id}-${index}`}
+                  elevation={1}
+                  sx={{ p: 2 }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box>
+                      <Typography variant="body1" fontWeight={600}>
+                        {material.item_name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        In stock: {material.current_stock} {material.primary_unit}
+                        {material.expected_quantity > 0 && (
+                          <> &middot; Expected: {material.expected_quantity} {material.unit}</>
+                        )}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleRemoveMaterial(index)}
+                      sx={{ ml: 1 }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TextField
+                      label="Qty Used"
+                      type="number"
+                      size="small"
+                      value={material.confirmed_quantity}
+                      onChange={(e) =>
+                        handleConfirmedQtyChange(index, parseFloat(e.target.value) || 0)
+                      }
+                      inputProps={{ min: 0, step: 'any' }}
+                      sx={{ width: 120 }}
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {material.unit}
+                    </Typography>
+                  </Box>
+
+                  {isOverStock && (
+                    <Alert severity="warning" sx={{ mt: 1 }} variant="outlined">
+                      Stock short by {(material.confirmed_quantity - material.current_stock).toFixed(2)} {material.primary_unit}.
+                      Inventory will be set to zero and flagged for review.
+                    </Alert>
+                  )}
+                </Card>
+              );
+            })}
+
+            {/* Add Material */}
+            {showAddMaterial ? (
+              <Card elevation={1} sx={{ p: 2 }}>
+                <Autocomplete
+                  options={inventoryItems.filter(
+                    (item) => !materials.some((m) => m.inventory_item_id === item.id)
+                  )}
+                  getOptionLabel={(option) =>
+                    `${option.name}${option.sku ? ` (${option.sku})` : ''}`
+                  }
+                  loading={loadingItems}
+                  onChange={(_, value) => handleSelectNewMaterial(value)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Search inventory items"
+                      size="small"
+                      autoFocus
+                    />
+                  )}
+                  size="small"
+                />
+                <Button
+                  size="small"
+                  onClick={() => setShowAddMaterial(false)}
+                  sx={{ mt: 1 }}
+                >
+                  Cancel
+                </Button>
+              </Card>
+            ) : (
+              <Button
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={handleAddMaterial}
+              >
+                Add Material
+              </Button>
+            )}
+          </Stack>
+        )}
 
         {/* Notes */}
         <TextField

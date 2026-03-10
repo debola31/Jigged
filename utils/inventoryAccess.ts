@@ -503,7 +503,8 @@ async function createInventoryTransaction(
   jobId?: string,
   jobOperationId?: string,
   operatorId?: string,
-  createdBy?: string
+  createdBy?: string,
+  hasDiscrepancy: boolean = false
 ): Promise<InventoryTransaction> {
   const supabase = getSupabase();
 
@@ -522,6 +523,7 @@ async function createInventoryTransaction(
       operator_id: operatorId || null,
       notes,
       created_by: createdBy || null,
+      has_discrepancy: hasDiscrepancy,
     })
     .select()
     .single();
@@ -745,6 +747,120 @@ export async function adjustStock(
   );
 
   return { item: updatedItem, transaction };
+}
+
+/**
+ * Remove stock gracefully — never blocks, handles over-depletion.
+ *
+ * When confirmed usage exceeds available inventory:
+ * - Depletes inventory to zero (preserves DB constraint)
+ * - Records the FULL amount the operator confirmed using
+ * - Flags the transaction with has_discrepancy = true
+ * - Auto-appends shortfall info to notes
+ */
+export async function removeStockGraceful(
+  itemId: string,
+  quantity: number,
+  unit: string,
+  notes: string = '',
+  jobId?: string,
+  jobOperationId?: string,
+  operatorId?: string,
+  createdBy?: string
+): Promise<{
+  item: InventoryItem;
+  transaction: InventoryTransaction;
+  hasDiscrepancy: boolean;
+  shortfall: number;
+}> {
+  if (quantity <= 0) {
+    throw new Error('Quantity must be positive');
+  }
+
+  const supabase = getSupabase();
+
+  const item = await getInventoryItem(itemId);
+  if (!item) {
+    throw new Error('Inventory item not found');
+  }
+
+  const convertedQuantity = convertToBaseUnit(
+    quantity,
+    unit,
+    item.primary_unit,
+    item.unit_conversions
+  );
+
+  let newQuantity = item.quantity - convertedQuantity;
+  let hasDiscrepancy = false;
+  let shortfall = 0;
+  let finalNotes = notes || null;
+
+  if (newQuantity < 0) {
+    hasDiscrepancy = true;
+    shortfall = Math.abs(newQuantity);
+    newQuantity = 0;
+
+    const discrepancyNote = `[DISCREPANCY: Confirmed ${convertedQuantity} ${item.primary_unit}, but only ${item.quantity} ${item.primary_unit} was available. Shortfall: ${shortfall} ${item.primary_unit}]`;
+    finalNotes = finalNotes
+      ? `${finalNotes} ${discrepancyNote}`
+      : discrepancyNote;
+  }
+
+  const { data: updatedItem, error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      quantity: newQuantity,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', itemId)
+    .select()
+    .single();
+
+  if (updateError) {
+    console.error('Error updating quantity:', updateError);
+    throw updateError;
+  }
+
+  // Record the FULL confirmed amount (not the clamped amount)
+  const transaction = await createInventoryTransaction(
+    item.company_id,
+    itemId,
+    item.name,
+    'depletion',
+    quantity,
+    unit,
+    convertedQuantity,
+    finalNotes,
+    jobId,
+    jobOperationId,
+    operatorId,
+    createdBy,
+    hasDiscrepancy
+  );
+
+  return { item: updatedItem, transaction, hasDiscrepancy, shortfall };
+}
+
+/**
+ * Update the notes field on an existing inventory transaction.
+ * All other fields remain immutable (enforced by DB trigger).
+ */
+export async function updateTransactionNotes(
+  transactionId: string,
+  notes: string
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error } = await supabase
+    .from('inventory_transactions')
+    .update({ notes })
+    .eq('id', transactionId);
+
+  if (error) {
+    console.error('Error updating transaction notes:', error);
+    throw error;
+  }
 }
 
 // ============================================================

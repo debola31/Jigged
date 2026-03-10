@@ -505,8 +505,6 @@ export async function updateJobOperation(
     status?: JobOperation['status'];
     actual_setup_hours?: number;
     actual_run_hours?: number;
-    quantity_completed?: number;
-    quantity_scrapped?: number;
     notes?: string;
   }
 ): Promise<JobOperation> {

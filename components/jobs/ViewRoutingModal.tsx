@@ -20,6 +20,7 @@ interface ViewRoutingModalProps {
   routingId: string;
   routingName: string;
   companyId: string;
+  partId: string;
 }
 
 /**
@@ -32,6 +33,7 @@ export default function ViewRoutingModal({
   routingId,
   routingName,
   companyId,
+  partId,
 }: ViewRoutingModalProps) {
   return (
     <Dialog
@@ -91,7 +93,7 @@ export default function ViewRoutingModal({
       >
         <Button
           component={Link}
-          href={`/dashboard/${companyId}/routings/${routingId}/edit`}
+          href={`/dashboard/${companyId}/parts/${partId}/routing/edit`}
           startIcon={<EditIcon />}
           variant="outlined"
           size="small"

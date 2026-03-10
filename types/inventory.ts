@@ -63,6 +63,7 @@ export interface InventoryTransaction {
   job_operation_id: string | null;
   operator_id: string | null;
   notes: string | null;
+  has_discrepancy: boolean;
   created_at: string;
   created_by: string | null;
 }

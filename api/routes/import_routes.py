@@ -213,7 +213,7 @@ async def analyze_csv(
     except ValueError as e:
         # AI provider configuration error
         sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         # Unexpected error
         sentry_sdk.capture_exception(e)

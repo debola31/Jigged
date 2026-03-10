@@ -25,6 +25,8 @@ import { getItemTransactions, updateTransactionNotes } from '@/utils/inventoryAc
 interface TransactionHistoryTableProps {
   itemId: string;
   companyId: string;
+  /** The item's primary unit of measurement */
+  primaryUnit: string;
   /** Trigger a refresh from parent */
   refreshKey?: number;
 }
@@ -32,6 +34,7 @@ interface TransactionHistoryTableProps {
 export default function TransactionHistoryTable({
   itemId,
   companyId,
+  primaryUnit,
   refreshKey = 0,
 }: TransactionHistoryTableProps) {
   const [transactions, setTransactions] = useState<InventoryTransactionWithRelations[]>([]);
@@ -140,7 +143,6 @@ export default function TransactionHistoryTable({
               <TableCell sx={{ fontWeight: 600 }}>Date & Time</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
               <TableCell sx={{ fontWeight: 600 }} align="right">Quantity</TableCell>
-              <TableCell sx={{ fontWeight: 600 }}>Converted</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Related Job</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Notes</TableCell>
             </TableRow>
@@ -190,11 +192,9 @@ export default function TransactionHistoryTable({
                       {typeDisplay.sign}
                       {formatQuantityWithUnit(transaction.quantity, transaction.unit)}
                     </Typography>
-                  </TableCell>
-                  <TableCell>
-                    {transaction.unit !== transaction.item_name && (
-                      <Typography variant="body2" color="text.secondary">
-                        {formatQuantityWithUnit(transaction.converted_quantity, '')} base
+                    {transaction.unit !== primaryUnit && (
+                      <Typography variant="caption" color="text.secondary">
+                        = {formatQuantityWithUnit(transaction.converted_quantity, primaryUnit)}
                       </Typography>
                     )}
                   </TableCell>

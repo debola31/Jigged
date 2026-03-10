@@ -191,6 +191,7 @@ export default function InventoryDetailPage() {
               <TransactionHistoryTable
                 itemId={itemId}
                 companyId={companyId}
+                primaryUnit={item.primary_unit}
                 refreshKey={refreshKey}
               />
             </CardContent>

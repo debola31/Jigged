@@ -15,6 +15,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import AdminGuard from '@/components/auth/AdminGuard';
 
 export default function SettingsPage() {
   const {
@@ -35,6 +36,7 @@ export default function SettingsPage() {
   };
 
   return (
+    <AdminGuard message="You don't have permission to access settings.">
     <Box>
       {/* Demo Mode Section */}
       <Card elevation={2}>
@@ -113,5 +115,6 @@ export default function SettingsPage() {
         </DialogActions>
       </Dialog>
     </Box>
+    </AdminGuard>
   );
 }

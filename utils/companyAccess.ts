@@ -115,11 +115,12 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
       return '/no-access';
     }
 
-    // Single company - go directly to dashboard
+    // Single company - go directly to dashboard (or operator view)
     if (companies.length === 1) {
       const companyId = companies[0].company_id;
       await setLastCompany(userId, companyId);
-      return `/dashboard/${companyId}`;
+      const prefix = companies[0].role === 'operator' ? 'operator' : 'dashboard';
+      return `/${prefix}/${companyId}`;
     }
 
     // Multiple companies - check for last accessed
@@ -127,9 +128,10 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
 
     if (lastCompanyId) {
       // Verify they still have access to last company
-      const hasAccess = companies.some((c) => c.company_id === lastCompanyId);
-      if (hasAccess) {
-        return `/dashboard/${lastCompanyId}`;
+      const match = companies.find((c) => c.company_id === lastCompanyId);
+      if (match) {
+        const prefix = match.role === 'operator' ? 'operator' : 'dashboard';
+        return `/${prefix}/${lastCompanyId}`;
       }
     }
 

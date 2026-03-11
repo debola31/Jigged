@@ -8,7 +8,7 @@ import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { verifyCompanyAccess, setLastCompany } from '@/utils/companyAccess';
+import { verifyCompanyAccess, setLastCompany, getUserRole } from '@/utils/companyAccess';
 import { consumeSessionExpiry } from '@/lib/supabaseErrors';
 
 interface AuthGuardProps {
@@ -58,6 +58,12 @@ export default function AuthGuard({
         setHasAccess(access);
 
         if (access) {
+          // Redirect operators to their dedicated view
+          const role = await getUserRole(user!.id, companyId!);
+          if (role === 'operator') {
+            router.replace(`/operator/${companyId}`);
+            return;
+          }
           await setLastCompany(user!.id, companyId!);
         }
       } catch (err) {

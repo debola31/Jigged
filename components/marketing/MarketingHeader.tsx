@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
@@ -73,15 +72,6 @@ export default function MarketingHeader() {
               {item.label}
             </MuiLink>
           ))}
-          <Button
-            component={Link}
-            href="/signup"
-            variant="outlined"
-            size="small"
-            sx={{ ml: 1 }}
-          >
-            Sign Up
-          </Button>
         </Box>
 
         {/* Mobile Hamburger */}
@@ -120,14 +110,6 @@ export default function MarketingHeader() {
               <ListItemText primary={item.label} />
             </ListItemButton>
           ))}
-          <ListItemButton
-            component={Link}
-            href="/signup"
-            onClick={() => setDrawerOpen(false)}
-            sx={{ borderRadius: 2 }}
-          >
-            <ListItemText primary="Sign Up" />
-          </ListItemButton>
         </List>
       </Drawer>
     </>

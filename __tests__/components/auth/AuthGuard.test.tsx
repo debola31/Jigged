@@ -16,6 +16,12 @@ vi.mock('@/utils/companyAccess', () => ({
   setLastCompany: (...args: unknown[]) => mockSetLastCompany(...args),
 }));
 
+// Mock consumeSessionExpiry
+const mockConsumeSessionExpiry = vi.fn();
+vi.mock('@/lib/supabaseErrors', () => ({
+  consumeSessionExpiry: () => mockConsumeSessionExpiry(),
+}));
+
 describe('AuthGuard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -23,6 +29,8 @@ describe('AuthGuard', () => {
     mockVerifyCompanyAccess.mockReset();
     mockSetLastCompany.mockReset();
     mockUseAuth.mockReset();
+    mockConsumeSessionExpiry.mockReset();
+    mockConsumeSessionExpiry.mockReturnValue(null);
   });
 
   // ============== Loading States ==============
@@ -254,6 +262,51 @@ describe('AuthGuard', () => {
       });
 
       expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+    });
+  });
+
+  // ============== Session Expiry ==============
+
+  describe('session expiry', () => {
+    it('redirects to /login with expiry params when sessionStorage has expiry info', async () => {
+      mockUseAuth.mockReturnValue({
+        user: null,
+        loading: false,
+      });
+      mockConsumeSessionExpiry.mockReturnValue({
+        expired: true,
+        returnTo: '/dashboard/company-1/parts',
+      });
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(routerMocks.replace).toHaveBeenCalledWith(
+          '/login?expired=true&returnTo=%2Fdashboard%2Fcompany-1%2Fparts'
+        );
+      });
+    });
+
+    it('redirects to plain /login when no expiry info in sessionStorage', async () => {
+      mockUseAuth.mockReturnValue({
+        user: null,
+        loading: false,
+      });
+      mockConsumeSessionExpiry.mockReturnValue(null);
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(routerMocks.replace).toHaveBeenCalledWith('/login');
+      });
     });
   });
 });

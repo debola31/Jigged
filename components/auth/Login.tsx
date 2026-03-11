@@ -16,7 +16,25 @@ import MuiLink from '@mui/material/Link';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 
-export default function Login() {
+interface LoginProps {
+  expired?: boolean;
+  returnTo?: string | null;
+}
+
+/**
+ * Validate returnTo path using an allowlist approach.
+ * Must start with /dashboard and normalize to prevent open redirects.
+ */
+function isValidReturnTo(path: string): boolean {
+  try {
+    const normalized = new URL(path, window.location.origin);
+    return normalized.pathname.startsWith('/dashboard') && normalized.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+export default function Login({ expired, returnTo }: LoginProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,7 +58,13 @@ export default function Login() {
       }
 
       if (data.user) {
-        // Determine where to redirect based on company access
+        // If we have a valid returnTo path (e.g., from session expiry), go there
+        if (returnTo && isValidReturnTo(returnTo)) {
+          router.push(returnTo);
+          return;
+        }
+
+        // Otherwise determine redirect based on company access
         const redirectRoute = await getPostLoginRoute(data.user.id);
         router.push(redirectRoute);
       }
@@ -62,6 +86,12 @@ export default function Login() {
         <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 3 }}>
           Welcome back! Enter your credentials to continue.
         </Typography>
+
+        {expired && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Your session expired. Please sign in again.
+          </Alert>
+        )}
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>

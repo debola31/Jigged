@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-11T22:29:11Z
+-- Generated: 2026-03-11T23:09:19Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -2482,7 +2482,7 @@ DROP TRIGGER IF EXISTS "user_preferences_updated_at" ON "public"."user_preferenc
 CREATE TRIGGER user_preferences_updated_at BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "waitlist" ON "public"."waitlist";
-CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://mayuquvexmqjvwkfasxg.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1heXVxdXZleG1xanZ3a2Zhc3hnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjM3Mjc5NiwiZXhwIjoyMDgxOTQ4Nzk2fQ.Lbe8wLFajwUmIU3H0_kvx6UYf02miq5u2QZwjCQYMEM"}', '{}', '5000');
+CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://mayuquvexmqjvwkfasxg.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer [REDACTED]"}', '{}', '5000');
 
 
 -- ============================================================

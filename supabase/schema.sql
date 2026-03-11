@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-05T19:42:35Z
+-- Generated: 2026-03-11T22:28:18Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -10,19 +10,6 @@ BEGIN;
 -- ============================================================
 -- 2. TABLES (ordered by foreign key dependencies)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS "public"."demo_data_templates"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "name" character varying(100) NOT NULL,
-    "version" integer NOT NULL DEFAULT 1,
-    "is_active" boolean DEFAULT false,
-    "template_data" jsonb NOT NULL,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "created_by" uuid,
-    CONSTRAINT "demo_templates_pkey" PRIMARY KEY (id),
-    CONSTRAINT "demo_templates_name_version_key" UNIQUE (name, version)
-);
-
 CREATE TABLE IF NOT EXISTS "public"."companies"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -32,7 +19,6 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "is_demo" boolean DEFAULT false,
-    "demo_template_id" uuid,
     "demo_company_id" uuid,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
@@ -42,7 +28,7 @@ CREATE TABLE IF NOT EXISTS "public"."ai_chat_queries"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "user_id" uuid NOT NULL,
+    "user_id" uuid,
     "question" text NOT NULL,
     "tool_calls" jsonb NOT NULL DEFAULT '[]'::jsonb,
     "response" text NOT NULL,
@@ -83,16 +69,14 @@ CREATE TABLE IF NOT EXISTS "public"."ai_insight_cache"
     CONSTRAINT "ai_insight_cache_company_id_insight_type_key" UNIQUE (company_id, insight_type)
 );
 
-CREATE TABLE IF NOT EXISTS "public"."saved_insights"
+CREATE TABLE IF NOT EXISTS "public"."company_custom_units"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "user_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
-    "question" text NOT NULL,
-    "answer" text NOT NULL,
-    "chart_config" jsonb,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "saved_insights_pkey" PRIMARY KEY (id)
+    "unit_name" text NOT NULL,
+    "created_at" timestamp with time zone DEFAULT now(),
+    CONSTRAINT "company_custom_units_pkey" PRIMARY KEY (id),
+    CONSTRAINT "company_custom_units_company_id_unit_name_key" UNIQUE (company_id, unit_name)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."customers"
@@ -114,6 +98,19 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
     CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."demo_data_templates"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "name" character varying(100) NOT NULL,
+    "version" integer NOT NULL DEFAULT 1,
+    "is_active" boolean DEFAULT false,
+    "template_data" jsonb NOT NULL,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "created_by" uuid,
+    CONSTRAINT "demo_templates_pkey" PRIMARY KEY (id),
+    CONSTRAINT "demo_templates_name_version_key" UNIQUE (name, version)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."inventory_items"
@@ -226,6 +223,18 @@ CREATE TABLE IF NOT EXISTS "public"."routing_edges"
     CONSTRAINT "routing_edges_no_self_loop" CHECK ((source_node_id <> target_node_id))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."saved_insights"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "question" text NOT NULL,
+    "answer" text NOT NULL,
+    "chart_config" jsonb,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "saved_insights_pkey" PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."system_admins"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -263,6 +272,20 @@ CREATE TABLE IF NOT EXISTS "public"."user_preferences"
     CONSTRAINT "user_preferences_user_id_key" UNIQUE (user_id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."waitlist"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "email" text NOT NULL,
+    "name" text,
+    "company_name" text,
+    "shop_size" text,
+    "status" text NOT NULL DEFAULT 'pending'::text,
+    "source" text DEFAULT 'landing_page'::text,
+    "created_at" timestamp with time zone DEFAULT now(),
+    CONSTRAINT "waitlist_pkey" PRIMARY KEY (id),
+    CONSTRAINT "waitlist_email_unique" UNIQUE (email)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -279,6 +302,7 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
     "notes" text,
     "created_at" timestamp with time zone DEFAULT now(),
     "created_by" uuid,
+    "has_discrepancy" boolean NOT NULL DEFAULT false,
     CONSTRAINT "inventory_transactions_pkey" PRIMARY KEY (id),
     CONSTRAINT "inventory_transactions_quantity_positive" CHECK ((quantity >= (0)::numeric)),
     CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
@@ -310,8 +334,6 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "estimated_run_hours_per_unit" numeric(8,4) DEFAULT 0,
     "actual_setup_hours" numeric(8,2),
     "actual_run_hours" numeric(8,2),
-    "quantity_completed" integer DEFAULT 0,
-    "quantity_scrapped" integer DEFAULT 0,
     "status" text NOT NULL DEFAULT 'pending'::text,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -409,8 +431,8 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
 ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_insight_cache" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."saved_insights" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
@@ -428,9 +450,11 @@ ALTER TABLE "public"."resource_groups" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_edges" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_nodes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routings" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."saved_insights" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."system_admins" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_company_access" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."waitlist" ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- 4. RLS POLICIES
@@ -450,26 +474,6 @@ CREATE POLICY "Users can read own company chat history"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
-
-DROP POLICY IF EXISTS "Users can read own saved insights" ON "public"."saved_insights";
-CREATE POLICY "Users can read own saved insights"
-    ON "public"."saved_insights"
-    FOR SELECT
-    USING ((user_id = auth.uid()));
-
-DROP POLICY IF EXISTS "Users can insert own saved insights" ON "public"."saved_insights";
-CREATE POLICY "Users can insert own saved insights"
-    ON "public"."saved_insights"
-    FOR INSERT
-    WITH CHECK ((user_id = auth.uid() AND company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
-
-DROP POLICY IF EXISTS "Users can delete own saved insights" ON "public"."saved_insights";
-CREATE POLICY "Users can delete own saved insights"
-    ON "public"."saved_insights"
-    FOR DELETE
-    USING ((user_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Admins can delete AI config" ON "public"."ai_config";
 CREATE POLICY "Admins can delete AI config"
@@ -503,7 +507,7 @@ CREATE POLICY "Users can read own company insights"
     FOR SELECT
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+  WHERE (user_company_access.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "Admins can update companies" ON "public"."companies";
 CREATE POLICY "Admins can update companies"
@@ -522,6 +526,31 @@ CREATE POLICY "Users can view their companies"
     ON "public"."companies"
     FOR SELECT
     USING ((id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."companies";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."companies"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "Users can delete company_custom_units" ON "public"."company_custom_units";
+CREATE POLICY "Users can delete company_custom_units"
+    ON "public"."company_custom_units"
+    FOR DELETE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can insert company_custom_units" ON "public"."company_custom_units";
+CREATE POLICY "Users can insert company_custom_units"
+    ON "public"."company_custom_units"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view company_custom_units" ON "public"."company_custom_units";
+CREATE POLICY "Users can view company_custom_units"
+    ON "public"."company_custom_units"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "Users can delete customers" ON "public"."customers";
 CREATE POLICY "Users can delete customers"
@@ -546,6 +575,13 @@ CREATE POLICY "Users can view customers"
     ON "public"."customers"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."customers";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."customers"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_data_templates";
 CREATE POLICY "All authenticated users can read active templates"
@@ -583,17 +619,37 @@ CREATE POLICY "Users can view inventory_items"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."inventory_items";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."inventory_items"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
 DROP POLICY IF EXISTS "Users can insert inventory_transactions" ON "public"."inventory_transactions";
 CREATE POLICY "Users can insert inventory_transactions"
     ON "public"."inventory_transactions"
     FOR INSERT
     WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "Users can update inventory_transaction_notes" ON "public"."inventory_transactions";
+CREATE POLICY "Users can update inventory_transaction_notes"
+    ON "public"."inventory_transactions"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can view inventory_transactions" ON "public"."inventory_transactions";
 CREATE POLICY "Users can view inventory_transactions"
     ON "public"."inventory_transactions"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."inventory_transactions";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."inventory_transactions"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "Users can delete inventory_unit_conversions" ON "public"."inventory_unit_conversions";
 CREATE POLICY "Users can delete inventory_unit_conversions"
@@ -626,6 +682,20 @@ CREATE POLICY "Users can view inventory_unit_conversions"
     USING ((inventory_item_id IN ( SELECT inventory_items.id
    FROM inventory_items
   WHERE (inventory_items.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."inventory_unit_conversions";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."inventory_unit_conversions"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_attachments";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."job_attachments"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "job_attachments_delete" ON "public"."job_attachments";
 CREATE POLICY "job_attachments_delete"
@@ -691,6 +761,13 @@ CREATE POLICY "Users can view job_operations"
    FROM jobs
   WHERE (jobs.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_operations";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."job_operations"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
 DROP POLICY IF EXISTS "Users can delete jobs" ON "public"."jobs";
 CREATE POLICY "Users can delete jobs"
     ON "public"."jobs"
@@ -714,6 +791,20 @@ CREATE POLICY "Users can view jobs"
     ON "public"."jobs"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."jobs";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."jobs"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operation_types";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."operation_types"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "operation_types_delete" ON "public"."operation_types";
 CREATE POLICY "operation_types_delete"
@@ -778,6 +869,13 @@ CREATE POLICY "Operators can update own sessions"
     USING ((operator_id = get_operator_access_id(company_id)))
     WITH CHECK ((operator_id = get_operator_access_id(company_id)));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operator_sessions";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."operator_sessions"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
     ON "public"."parts"
@@ -809,6 +907,20 @@ CREATE POLICY "Users can view parts for their companies"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."parts";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."parts"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_attachments";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."quote_attachments"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "quote_attachments_delete" ON "public"."quote_attachments";
 CREATE POLICY "quote_attachments_delete"
@@ -865,6 +977,20 @@ CREATE POLICY "Users can view quotes"
     ON "public"."quotes"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quotes";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."quotes"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."resource_groups";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."resource_groups"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
 
 DROP POLICY IF EXISTS "resource_groups_delete" ON "public"."resource_groups";
 CREATE POLICY "resource_groups_delete"
@@ -930,6 +1056,13 @@ CREATE POLICY "Users can view routing_edges"
    FROM routings
   WHERE (routings.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."routing_edges";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."routing_edges"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
 DROP POLICY IF EXISTS "Users can delete routing_nodes" ON "public"."routing_nodes";
 CREATE POLICY "Users can delete routing_nodes"
     ON "public"."routing_nodes"
@@ -962,6 +1095,13 @@ CREATE POLICY "Users can view routing_nodes"
    FROM routings
   WHERE (routings.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."routing_nodes";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."routing_nodes"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
 DROP POLICY IF EXISTS "Users can delete routings" ON "public"."routings";
 CREATE POLICY "Users can delete routings"
     ON "public"."routings"
@@ -985,6 +1125,31 @@ CREATE POLICY "Users can view routings"
     ON "public"."routings"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."routings";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."routings"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING (true);
+
+DROP POLICY IF EXISTS "Users can delete own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can delete own saved insights"
+    ON "public"."saved_insights"
+    FOR DELETE
+    USING ((user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can insert own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can insert own saved insights"
+    ON "public"."saved_insights"
+    FOR INSERT
+    WITH CHECK ((user_id = auth.uid()));
+
+DROP POLICY IF EXISTS "Users can read own saved insights" ON "public"."saved_insights";
+CREATE POLICY "Users can read own saved insights"
+    ON "public"."saved_insights"
+    FOR SELECT
+    USING ((user_id = auth.uid()));
 
 DROP POLICY IF EXISTS "System admins can insert system_admins" ON "public"."system_admins";
 CREATE POLICY "System admins can insert system_admins"
@@ -1065,6 +1230,13 @@ CREATE POLICY "Users can view own preferences"
     FOR SELECT
     USING ((user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "anon_insert_waitlist" ON "public"."waitlist";
+CREATE POLICY "anon_insert_waitlist"
+    ON "public"."waitlist"
+    FOR INSERT
+    TO anon
+    WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Users can delete files from their company folder" ON "storage"."objects";
 CREATE POLICY "Users can delete files from their company folder"
     ON "storage"."objects"
@@ -1110,8 +1282,8 @@ ALTER TABLE "public"."ai_insight_cache"
 ALTER TABLE "public"."companies"
     ADD CONSTRAINT "companies_demo_company_id_fkey" FOREIGN KEY (demo_company_id) REFERENCES companies(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."companies"
-    ADD CONSTRAINT "companies_demo_template_id_fkey" FOREIGN KEY (demo_template_id) REFERENCES demo_data_templates(id);
+ALTER TABLE "public"."company_custom_units"
+    ADD CONSTRAINT "company_custom_units_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."customers"
     ADD CONSTRAINT "customers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1245,6 +1417,12 @@ ALTER TABLE "public"."routings"
 ALTER TABLE "public"."routings"
     ADD CONSTRAINT "routings_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."saved_insights"
+    ADD CONSTRAINT "saved_insights_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."saved_insights"
+    ADD CONSTRAINT "saved_insights_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."system_admins"
     ADD CONSTRAINT "system_admins_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
@@ -1277,6 +1455,7 @@ CREATE INDEX IF NOT EXISTS inventory_items_company_id_idx ON public.inventory_it
 CREATE INDEX IF NOT EXISTS inventory_items_company_id_name_idx ON public.inventory_items USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS inventory_items_company_id_sku_idx ON public.inventory_items USING btree (company_id, sku) WHERE (sku IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_company_id_created_at_idx ON public.inventory_transactions USING btree (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS inventory_transactions_discrepancy_idx ON public.inventory_transactions USING btree (company_id, created_at DESC) WHERE (has_discrepancy = true);
 CREATE INDEX IF NOT EXISTS inventory_transactions_item_id_created_at_idx ON public.inventory_transactions USING btree (inventory_item_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_id_idx ON public.inventory_transactions USING btree (job_id) WHERE (job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_operation_id_idx ON public.inventory_transactions USING btree (job_operation_id) WHERE (job_operation_id IS NOT NULL);
@@ -1319,10 +1498,13 @@ CREATE INDEX IF NOT EXISTS idx_routing_nodes_operation_type ON public.routing_no
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_routing ON public.routing_nodes USING btree (routing_id);
 CREATE INDEX IF NOT EXISTS idx_routings_company ON public.routings USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_routings_part ON public.routings USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_saved_insights_user_company ON public.saved_insights USING btree (user_id, company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_company_id ON public.user_company_access USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_name ON public.user_company_access USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_user_id ON public.user_company_access USING btree (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON public.user_preferences USING btree (user_id);
+CREATE INDEX IF NOT EXISTS waitlist_created_at_idx ON public.waitlist USING btree (created_at);
+CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (email);
 
 -- ============================================================
 -- 7. FUNCTIONS
@@ -1422,6 +1604,16 @@ BEGIN
     -- Auth check: caller must be the requesting user
     IF p_user_id != auth.uid() THEN
         RAISE EXCEPTION 'Access denied: cannot create demo company for another user';
+    END IF;
+
+    -- Role check: caller must be owner or admin of source company
+    IF NOT EXISTS (
+        SELECT 1 FROM user_company_access
+        WHERE user_id = p_user_id
+          AND company_id = p_source_company_id
+          AND role IN ('owner', 'admin')
+    ) THEN
+        RAISE EXCEPTION 'Access denied: must be owner or admin of source company';
     END IF;
 
     -- Idempotency: return existing demo company if one exists
@@ -1733,6 +1925,33 @@ BEGIN
 
     -- Re-seed from template
     PERFORM seed_demo_data(v_demo_company_id, p_user_id);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.restrict_transaction_update_to_notes()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF OLD.company_id IS DISTINCT FROM NEW.company_id
+       OR OLD.inventory_item_id IS DISTINCT FROM NEW.inventory_item_id
+       OR OLD.item_name IS DISTINCT FROM NEW.item_name
+       OR OLD.type IS DISTINCT FROM NEW.type
+       OR OLD.quantity IS DISTINCT FROM NEW.quantity
+       OR OLD.unit IS DISTINCT FROM NEW.unit
+       OR OLD.converted_quantity IS DISTINCT FROM NEW.converted_quantity
+       OR OLD.job_id IS DISTINCT FROM NEW.job_id
+       OR OLD.job_operation_id IS DISTINCT FROM NEW.job_operation_id
+       OR OLD.operator_id IS DISTINCT FROM NEW.operator_id
+       OR OLD.created_at IS DISTINCT FROM NEW.created_at
+       OR OLD.created_by IS DISTINCT FROM NEW.created_by
+       OR OLD.has_discrepancy IS DISTINCT FROM NEW.has_discrepancy
+    THEN
+        RAISE EXCEPTION 'Only the notes field can be updated on inventory transactions';
+    END IF;
+    RETURN NEW;
 END;
 $function$
 
@@ -2206,6 +2425,9 @@ CREATE TRIGGER customers_updated_at BEFORE UPDATE ON public.customers FOR EACH R
 DROP TRIGGER IF EXISTS "inventory_items_updated_at" ON "public"."inventory_items";
 CREATE TRIGGER inventory_items_updated_at BEFORE UPDATE ON public.inventory_items FOR EACH ROW EXECUTE FUNCTION update_inventory_items_updated_at();
 
+DROP TRIGGER IF EXISTS "enforce_transaction_notes_only_update" ON "public"."inventory_transactions";
+CREATE TRIGGER enforce_transaction_notes_only_update BEFORE UPDATE ON public.inventory_transactions FOR EACH ROW EXECUTE FUNCTION restrict_transaction_update_to_notes();
+
 DROP TRIGGER IF EXISTS "job_operations_updated_at" ON "public"."job_operations";
 CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -2250,6 +2472,9 @@ CREATE TRIGGER routings_updated_at BEFORE UPDATE ON public.routings FOR EACH ROW
 
 DROP TRIGGER IF EXISTS "user_preferences_updated_at" ON "public"."user_preferences";
 CREATE TRIGGER user_preferences_updated_at BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "waitlist" ON "public"."waitlist";
+CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://mayuquvexmqjvwkfasxg.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1heXVxdXZleG1xanZ3a2Zhc3hnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjM3Mjc5NiwiZXhwIjoyMDgxOTQ4Nzk2fQ.Lbe8wLFajwUmIU3H0_kvx6UYf02miq5u2QZwjCQYMEM"}', '{}', '5000');
 
 
 -- ============================================================
@@ -2423,6 +2648,9 @@ COMMENT ON COLUMN "public"."inventory_transactions"."type"
 COMMENT ON COLUMN "public"."inventory_transactions"."converted_quantity"
     IS 'Quantity converted to primary unit';
 
+COMMENT ON COLUMN "public"."inventory_transactions"."has_discrepancy"
+    IS 'True when confirmed usage exceeded available stock. Transaction records full operator-confirmed amount, but inventory was only depleted to zero.';
+
 COMMENT ON COLUMN "public"."inventory_unit_conversions"."to_primary_factor"
     IS 'Multiply quantity in from_unit by this factor to get quantity in primary unit';
 
@@ -2482,12 +2710,6 @@ COMMENT ON COLUMN "public"."job_operations"."actual_setup_hours"
 
 COMMENT ON COLUMN "public"."job_operations"."actual_run_hours"
     IS 'Actual total run hours recorded by operator.';
-
-COMMENT ON COLUMN "public"."job_operations"."quantity_completed"
-    IS 'Units completed at this operation. May differ from previous operation due to scrap.';
-
-COMMENT ON COLUMN "public"."job_operations"."quantity_scrapped"
-    IS 'Units scrapped at this operation.';
 
 COMMENT ON COLUMN "public"."job_operations"."status"
     IS 'Operation status. Values: pending, in_progress, completed, skipped. Default: pending';

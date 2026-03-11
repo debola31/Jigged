@@ -12,10 +12,12 @@ export default function Hero() {
       sx={{
         position: 'relative',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         minHeight: 'calc(100vh - 64px - 48px)',
-        py: { xs: 4, md: 6 },
+        pt: { xs: 8, md: 12 },
+        pb: { xs: 4, md: 6 },
+        overflow: 'hidden',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -31,7 +33,7 @@ export default function Hero() {
         },
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 1 }}>
         <Box
           sx={{
             display: 'flex',
@@ -89,6 +91,28 @@ export default function Hero() {
           </Box>
         </Box>
       </Container>
+
+      {/* Wireframe manufacturing scene background */}
+      <Box
+        component="img"
+        src="/wireframe-scene-perspective.png"
+        alt=""
+        sx={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          width: '100%',
+          height: { xs: '40%', md: '60%' },
+          objectFit: 'cover',
+          objectPosition: 'center bottom',
+          opacity: 0.15,
+          mixBlendMode: 'screen',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 30%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 30%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
     </Box>
   );
 }

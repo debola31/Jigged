@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-11T22:28:18Z
+-- Generated: 2026-03-11T22:29:11Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -1235,6 +1235,14 @@ CREATE POLICY "anon_insert_waitlist"
     ON "public"."waitlist"
     FOR INSERT
     TO anon
+    WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_update_waitlist" ON "public"."waitlist";
+CREATE POLICY "anon_update_waitlist"
+    ON "public"."waitlist"
+    FOR UPDATE
+    TO anon
+    USING (true)
     WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Users can delete files from their company folder" ON "storage"."objects";

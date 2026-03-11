@@ -15,7 +15,8 @@ export default function Hero() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: 'calc(100vh - 64px - 48px)',
-        py: { xs: 4, md: 6 },
+        pt: { xs: 4, md: 6 },
+        pb: { xs: 10, md: 14 },
         overflow: 'hidden',
         '&::before': {
           content: '""',
@@ -34,7 +35,7 @@ export default function Hero() {
           content: '""',
           position: 'absolute',
           inset: 0,
-          background: 'radial-gradient(ellipse at 50% 45%, rgba(17,20,57,0.4) 0%, transparent 60%)',
+          background: 'radial-gradient(ellipse at 50% 43%, rgba(17,20,57,0.4) 0%, transparent 60%)',
           pointerEvents: 'none',
           zIndex: 0,
         },
@@ -103,7 +104,7 @@ export default function Hero() {
       {/* Wireframe manufacturing scene background */}
       <Box
         component="img"
-        src="/wireframe-scene-perspective5.png"
+        src="/wireframe-scene.png"
         alt=""
         sx={{
           position: 'absolute',
@@ -115,8 +116,8 @@ export default function Hero() {
           objectPosition: 'center bottom',
           opacity: 0.22,
           mixBlendMode: 'screen',
-          maskImage: 'radial-gradient(ellipse 50% 40% at 50% 45%, transparent 0%, black 100%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 50% 40% at 50% 45%, transparent 0%, black 100%)',
+          maskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
           pointerEvents: 'none',
           zIndex: 0,
         }}

@@ -9,6 +9,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { verifyCompanyAccess, setLastCompany } from '@/utils/companyAccess';
+import { consumeSessionExpiry } from '@/lib/supabaseErrors';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -30,7 +31,17 @@ export default function AuthGuard({
     if (authLoading) return;
 
     if (!user) {
-      router.replace('/login');
+      // Check if this is an unexpected session expiry (vs. first visit)
+      const expiry = consumeSessionExpiry();
+      if (expiry) {
+        const params = new URLSearchParams({
+          expired: 'true',
+          returnTo: expiry.returnTo,
+        });
+        router.replace(`/login?${params.toString()}`);
+      } else {
+        router.replace('/login');
+      }
       return;
     }
 

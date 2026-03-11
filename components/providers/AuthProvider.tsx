@@ -1,9 +1,10 @@
 'use client';
 
 import * as Sentry from "@sentry/nextjs";
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
+import { redirectToSessionExpiry } from '@/lib/supabaseErrors';
 
 interface AuthContextType {
   session: Session | null;
@@ -35,6 +36,8 @@ export default function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const intentionalSignOut = useRef(false);
+  const hadSession = useRef(false);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -44,6 +47,9 @@ export default function AuthProvider({ children }: AuthProviderProps) {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
       setUser(data.session?.user ?? null);
+      if (data.session) {
+        hadSession.current = true;
+      }
       setLoading(false);
     };
 
@@ -53,10 +59,26 @@ export default function AuthProvider({ children }: AuthProviderProps) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, newSession: Session | null) => {
+      (event: AuthChangeEvent, newSession: Session | null) => {
         setSession(newSession);
         setUser(newSession?.user ?? null);
         setLoading(false);
+
+        if (newSession) {
+          hadSession.current = true;
+        }
+
+        // Detect unexpected session loss (token refresh failure).
+        // Store expiry info in sessionStorage so AuthGuard can include
+        // it in its redirect to /login.
+        if (event === 'SIGNED_OUT' && !intentionalSignOut.current && hadSession.current) {
+          hadSession.current = false;
+          redirectToSessionExpiry();
+        }
+
+        if (event === 'SIGNED_OUT') {
+          intentionalSignOut.current = false;
+        }
       }
     );
 
@@ -75,6 +97,7 @@ export default function AuthProvider({ children }: AuthProviderProps) {
   }, [user]);
 
   const signOut = async () => {
+    intentionalSignOut.current = true;
     const supabase = getSupabase();
     await supabase.auth.signOut();
   };

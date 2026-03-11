@@ -12,11 +12,10 @@ export default function Hero() {
       sx={{
         position: 'relative',
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'center',
         minHeight: 'calc(100vh - 64px - 48px)',
-        pt: { xs: 8, md: 12 },
-        pb: { xs: 4, md: 6 },
+        py: { xs: 4, md: 6 },
         overflow: 'hidden',
         '&::before': {
           content: '""',
@@ -30,6 +29,14 @@ export default function Hero() {
           maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
           WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
           pointerEvents: 'none',
+        },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          background: 'radial-gradient(ellipse at 50% 45%, rgba(17,20,57,0.4) 0%, transparent 60%)',
+          pointerEvents: 'none',
+          zIndex: 0,
         },
       }}
     >
@@ -63,6 +70,7 @@ export default function Hero() {
                 mb: 2,
                 fontSize: { xs: '2.25rem', sm: '3rem', md: '3.75rem' },
                 lineHeight: 1.1,
+                textShadow: '0 2px 20px rgba(0,0,0,0.5)',
               }}
             >
               Your Shop Floor,
@@ -95,20 +103,20 @@ export default function Hero() {
       {/* Wireframe manufacturing scene background */}
       <Box
         component="img"
-        src="/wireframe-scene-perspective.png"
+        src="/wireframe-scene-perspective5.png"
         alt=""
         sx={{
           position: 'absolute',
           bottom: 0,
           left: 0,
           width: '100%',
-          height: { xs: '40%', md: '60%' },
+          height: '100%',
           objectFit: 'cover',
           objectPosition: 'center bottom',
-          opacity: 0.15,
+          opacity: 0.22,
           mixBlendMode: 'screen',
-          maskImage: 'linear-gradient(to bottom, transparent 0%, black 30%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 30%)',
+          maskImage: 'radial-gradient(ellipse 50% 40% at 50% 45%, transparent 0%, black 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 50% 40% at 50% 45%, transparent 0%, black 100%)',
           pointerEvents: 'none',
           zIndex: 0,
         }}

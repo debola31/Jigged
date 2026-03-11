@@ -15,7 +15,9 @@ export default function Hero() {
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: 'calc(100vh - 64px - 48px)',
-        py: { xs: 4, md: 6 },
+        pt: { xs: 4, md: 6 },
+        pb: { xs: 10, md: 14 },
+        overflow: 'hidden',
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -29,9 +31,17 @@ export default function Hero() {
           WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
           pointerEvents: 'none',
         },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          background: 'radial-gradient(ellipse at 50% 43%, rgba(17,20,57,0.4) 0%, transparent 60%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        },
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 1 }}>
         <Box
           sx={{
             display: 'flex',
@@ -61,6 +71,7 @@ export default function Hero() {
                 mb: 2,
                 fontSize: { xs: '2.25rem', sm: '3rem', md: '3.75rem' },
                 lineHeight: 1.1,
+                textShadow: '0 2px 20px rgba(0,0,0,0.5)',
               }}
             >
               Your Shop Floor,
@@ -89,6 +100,28 @@ export default function Hero() {
           </Box>
         </Box>
       </Container>
+
+      {/* Wireframe manufacturing scene background */}
+      <Box
+        component="img"
+        src="/wireframe-scene.png"
+        alt=""
+        sx={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          objectPosition: 'center bottom',
+          opacity: 0.22,
+          mixBlendMode: 'screen',
+          maskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      />
     </Box>
   );
 }

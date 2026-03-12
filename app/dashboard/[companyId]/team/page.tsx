@@ -42,6 +42,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import AdminGuard from '@/components/auth/AdminGuard';
 import type { TeamMember } from '@/types/team';
 
 /**
@@ -468,6 +469,7 @@ export default function TeamPage() {
   };
 
   return (
+    <AdminGuard message="You don't have permission to manage team members.">
     <Box>
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 0, mt: -2 }}>
@@ -936,5 +938,6 @@ export default function TeamPage() {
         </Alert>
       </Snackbar>
     </Box>
+    </AdminGuard>
   );
 }

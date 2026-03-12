@@ -18,8 +18,16 @@ import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
 import CompanySwitcher from './CompanySwitcher';
+import { useUserRole } from '@/hooks/useUserRole';
 
-const menuItems = [
+interface MenuItem {
+  name: string;
+  path: string;
+  icon: typeof DashboardIcon;
+  adminOnly?: boolean;
+}
+
+const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
@@ -27,8 +35,8 @@ const menuItems = [
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
-  { name: 'Team', path: '/team', icon: GroupIcon },
-  { name: 'Settings', path: '/settings', icon: SettingsIcon },
+  { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
+  { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },
 ];
 
 export default function Sidebar() {
@@ -36,6 +44,7 @@ export default function Sidebar() {
   const params = useParams();
   const companyId = params.companyId as string;
   const basePath = `/dashboard/${companyId}`;
+  const { isAdmin } = useUserRole();
 
   return (
     <Box
@@ -62,7 +71,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <Box sx={{ flex: 1, py: 2, px: 1.5 }}>
         <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-          {menuItems.map((item) => {
+          {menuItems.filter((item) => !item.adminOnly || isAdmin).map((item) => {
             const fullPath = `${basePath}${item.path}`;
             // For root path (Dashboard), check exact match; for others, check if pathname starts with the path
             const isActive = item.path === ''

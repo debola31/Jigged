@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import argparse
 from datetime import datetime, timezone
@@ -526,7 +527,15 @@ class SchemaExporter:
 
             # Drop first since triggers don't support IF NOT EXISTS
             lines.append(f"DROP TRIGGER IF EXISTS {trig_name} ON {full_name};")
-            lines.append(f"{trig['definition']};")
+
+            # Sanitize secrets from trigger definitions (e.g. webhook Authorization headers)
+            defn = trig["definition"]
+            # Redact Bearer tokens (JWTs and other bearer auth)
+            defn = re.sub(r'Bearer\s+[A-Za-z0-9_\-\.]+', 'Bearer [REDACTED]', defn)
+            # Redact any remaining JWT-like patterns (three base64 segments separated by dots)
+            defn = re.sub(r'eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+', '[REDACTED_JWT]', defn)
+
+            lines.append(f"{defn};")
             lines.append("")
 
         return "\n".join(lines)

@@ -63,7 +63,6 @@ from routes.parts_import_routes import router as parts_import_router
 from routes.operations_import_routes import router as operations_import_router
 from routes.operators_routes import admin_router as operators_admin_router
 from routes.inventory_routes import router as inventory_router
-from routes.waitlist_routes import router as waitlist_router
 from routes.insights_routes import router as insights_router
 
 app.include_router(import_router)
@@ -71,7 +70,6 @@ app.include_router(parts_import_router)
 app.include_router(operations_import_router)
 app.include_router(operators_admin_router)
 app.include_router(inventory_router)
-app.include_router(waitlist_router)
 app.include_router(insights_router)
 
 

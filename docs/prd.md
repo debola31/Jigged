@@ -101,6 +101,13 @@ Jigged uses a simplified 3-role permission model. Each role inherits all capabil
 
 > 💡 Note: This REPLACES the previous role list (owner/admin/operator/salesperson/bookkeeper/quality). "Owner" is consolidated into Admin. Salesperson, Bookkeeper, and Quality roles are replaced with "User" access.
 
+### Enforcement
+
+Role restrictions are enforced at **two levels**:
+
+1. **Database (RLS):** The `is_company_admin()` function gates write access to team management and company settings to `owner`/`admin` only. Operators are isolated to their own sessions via `get_operator_access_id()`.
+2. **UI:** The sidebar hides Team and Settings from non-admin users. Page-level `AdminGuard` components block direct URL access. Operators accessing `/dashboard/*` are redirected to `/operator/{companyId}` by `AuthGuard`.
+
 ---
 
 ### 4.1 Functional Requirements Table

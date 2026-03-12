@@ -403,6 +403,106 @@ describe('companyAccess utilities', () => {
 
       expect(result).toBe('/select-company');
     });
+
+    it('returns /operator/ for single-company operator', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
+        if (table === 'user_company_access') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                data: [
+                  {
+                    company_id: 'company-1',
+                    role: 'operator',
+                    companies: { id: 'company-1', name: 'Acme Corp' },
+                  },
+                ],
+                error: null,
+              }),
+            }),
+          };
+        }
+        if (table === 'companies') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                single: vi.fn().mockReturnValue({
+                  data: { is_demo: false },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'user_preferences') {
+          return {
+            ...mockQueryBuilder,
+            upsert: vi.fn().mockReturnValue({
+              data: null,
+              error: null,
+            }),
+          };
+        }
+        return mockQueryBuilder;
+      });
+
+      const result = await getPostLoginRoute('operator-1');
+
+      expect(result).toBe('/operator/company-1');
+    });
+
+    it('returns /operator/ for multi-company operator with valid last company', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
+        if (table === 'user_company_access') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                data: [
+                  {
+                    company_id: 'company-1',
+                    role: 'operator',
+                    companies: { id: 'company-1', name: 'Acme Corp' },
+                  },
+                  {
+                    company_id: 'company-2',
+                    role: 'operator',
+                    companies: { id: 'company-2', name: 'Widget Inc' },
+                  },
+                ],
+                error: null,
+              }),
+            }),
+          };
+        }
+        if (table === 'user_preferences') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                single: vi.fn().mockReturnValue({
+                  data: { last_company_id: 'company-2' },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return mockQueryBuilder;
+      });
+
+      const result = await getPostLoginRoute('operator-1');
+
+      expect(result).toBe('/operator/company-2');
+    });
   });
 
   // ============== verifyCompanyAccess Tests ==============

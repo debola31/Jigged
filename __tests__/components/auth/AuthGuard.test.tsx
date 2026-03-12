@@ -11,9 +11,11 @@ vi.mock('@/components/providers/AuthProvider', () => ({
 // Mock the company access utilities
 const mockVerifyCompanyAccess = vi.fn();
 const mockSetLastCompany = vi.fn();
+const mockGetUserRole = vi.fn();
 vi.mock('@/utils/companyAccess', () => ({
   verifyCompanyAccess: (...args: unknown[]) => mockVerifyCompanyAccess(...args),
   setLastCompany: (...args: unknown[]) => mockSetLastCompany(...args),
+  getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
 }));
 
 // Mock consumeSessionExpiry
@@ -28,6 +30,7 @@ describe('AuthGuard', () => {
     resetRouterMocks();
     mockVerifyCompanyAccess.mockReset();
     mockSetLastCompany.mockReset();
+    mockGetUserRole.mockReset();
     mockUseAuth.mockReset();
     mockConsumeSessionExpiry.mockReset();
     mockConsumeSessionExpiry.mockReturnValue(null);
@@ -144,6 +147,7 @@ describe('AuthGuard', () => {
         loading: false,
       });
       mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('admin');
       mockSetLastCompany.mockResolvedValue(undefined);
 
       render(
@@ -165,6 +169,7 @@ describe('AuthGuard', () => {
         loading: false,
       });
       mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('admin');
       mockSetLastCompany.mockResolvedValue(undefined);
 
       render(
@@ -176,6 +181,98 @@ describe('AuthGuard', () => {
       await waitFor(() => {
         expect(mockSetLastCompany).toHaveBeenCalledWith('user-1', 'company-1');
       });
+    });
+  });
+
+  // ============== Operator Redirect ==============
+
+  describe('operator redirect', () => {
+    it('redirects operator to /operator/{companyId}', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'operator@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('operator');
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(routerMocks.replace).toHaveBeenCalledWith('/operator/company-1');
+      });
+    });
+
+    it('does not redirect admin to operator view', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'admin@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('admin');
+      mockSetLastCompany.mockResolvedValue(undefined);
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Protected Content')).toBeInTheDocument();
+      });
+
+      expect(routerMocks.replace).not.toHaveBeenCalledWith(
+        expect.stringContaining('/operator/')
+      );
+    });
+
+    it('does not redirect user role to operator view', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'user@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('user');
+      mockSetLastCompany.mockResolvedValue(undefined);
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Protected Content')).toBeInTheDocument();
+      });
+
+      expect(routerMocks.replace).not.toHaveBeenCalledWith(
+        expect.stringContaining('/operator/')
+      );
+    });
+
+    it('does not call setLastCompany for operators', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'operator@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('operator');
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(routerMocks.replace).toHaveBeenCalledWith('/operator/company-1');
+      });
+
+      expect(mockSetLastCompany).not.toHaveBeenCalled();
     });
   });
 

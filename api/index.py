@@ -64,6 +64,7 @@ from routes.operations_import_routes import router as operations_import_router
 from routes.operators_routes import admin_router as operators_admin_router
 from routes.inventory_routes import router as inventory_router
 from routes.insights_routes import router as insights_router
+from routes.admin_routes import router as system_admin_router
 
 app.include_router(import_router)
 app.include_router(parts_import_router)
@@ -71,6 +72,7 @@ app.include_router(operations_import_router)
 app.include_router(operators_admin_router)
 app.include_router(inventory_router)
 app.include_router(insights_router)
+app.include_router(system_admin_router)
 
 
 @app.get("/api/example_name")

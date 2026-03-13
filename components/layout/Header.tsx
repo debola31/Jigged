@@ -120,7 +120,8 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
   const pathname = usePathname();
   const params = useParams();
   const companyId = params.companyId as string | undefined;
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
+  const firstName = user?.user_metadata?.first_name;
   const { isDemoMode } = useDemoMode();
   const pageTitle = getPageTitle(pathname);
 
@@ -170,6 +171,14 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
         )}
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {!isMobile && firstName && (
+          <Typography
+            variant="body2"
+            sx={{ color: 'rgba(255, 255, 255, 0.7)', mr: 1 }}
+          >
+            Welcome, {firstName}
+          </Typography>
+        )}
         {companyId && <AlertBadge companyId={companyId} />}
         {isMobile ? (
           <IconButton

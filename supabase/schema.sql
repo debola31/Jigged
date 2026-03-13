@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-11T23:09:19Z
+-- Generated: 2026-03-13T20:27:03Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -2211,7 +2211,7 @@ BEGIN
                                                 operation_type_id, estimated_setup_hours,
                                                 estimated_run_hours_per_unit,
                                                 actual_setup_hours, actual_run_hours,
-                                                quantity_completed, quantity_scrapped, status,
+                                                status,
                                                 routing_node_id, instructions,
                                                 started_at, completed_at, created_at)
                     VALUES (v_new_id,
@@ -2225,8 +2225,6 @@ BEGIN
                             COALESCE((v_op->>'estimated_run_hours_per_unit')::NUMERIC, 0),
                             (v_op->>'actual_setup_hours')::NUMERIC,
                             (v_op->>'actual_run_hours')::NUMERIC,
-                            COALESCE((v_op->>'quantity_completed')::INTEGER, 0),
-                            COALESCE((v_op->>'quantity_scrapped')::INTEGER, 0),
                             COALESCE(v_op->>'status', 'pending'),
                             CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
                                  THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID

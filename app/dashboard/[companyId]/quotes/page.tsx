@@ -446,6 +446,7 @@ export default function QuotesPage() {
                 sortable: true,
                 resizable: true,
               }}
+              selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
                 checkboxes: true,

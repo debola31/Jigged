@@ -197,7 +197,8 @@ export default function InventoryPage() {
     {
       field: 'sku',
       headerName: 'SKU',
-      width: 150,
+      flex: 1,
+      minWidth: 150,
       valueFormatter: (params) => params.value ?? '—',
     },
     {
@@ -353,6 +354,7 @@ export default function InventoryPage() {
                 sortable: true,
                 resizable: true,
               }}
+              selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
                 checkboxes: true,

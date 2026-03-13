@@ -386,6 +386,7 @@ export default function CustomersPage() {
                 resizable: true,
               }}
               // Row selection
+              selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
                 checkboxes: true,

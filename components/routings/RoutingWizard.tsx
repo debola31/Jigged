@@ -9,6 +9,8 @@ import {
   CircularProgress,
   Card,
 } from '@mui/material';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import RoutingWorkflowBuilder, { type PendingNode, type PendingEdge } from './RoutingWorkflowBuilder';
@@ -28,6 +30,8 @@ interface RoutingWizardProps {
  */
 export default function RoutingWizard({ companyId, partId, mode, returnTo }: RoutingWizardProps) {
   const router = useRouter();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isEditMode = mode === 'edit';
 
   // Workflow state
@@ -167,7 +171,7 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: isMobile ? 'calc(100vh - 80px)' : 'calc(100vh - 120px)' }}>
       {/* Header with Back button and action buttons */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
         <Button
@@ -181,10 +185,11 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
         {/* Spacer */}
         <Box sx={{ flex: 1 }} />
 
-        {/* Action buttons */}
-        <Button variant="outlined" onClick={handleCancel} disabled={saving}>
-          Cancel
-        </Button>
+        {!isMobile && (
+          <Button variant="outlined" onClick={handleCancel} disabled={saving}>
+            Cancel
+          </Button>
+        )}
 
         <Button
           variant="contained"
@@ -192,7 +197,7 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
           disabled={saving}
           startIcon={saving ? <CircularProgress size={16} /> : <SaveIcon />}
         >
-          {saving ? 'Saving...' : 'Save Routing'}
+          {saving ? 'Saving...' : isMobile ? 'Save' : 'Save Routing'}
         </Button>
       </Box>
 

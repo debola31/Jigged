@@ -46,6 +46,8 @@ import {
 } from '@mui/material';
 import Popover from '@mui/material/Popover';
 import Tooltip from '@mui/material/Tooltip';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
@@ -383,6 +385,8 @@ export default function RoutingWorkflowBuilder({
   onPendingNodesChange,
   onPendingEdgesChange,
 }: RoutingWorkflowBuilderProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isMemoryMode = mode === 'memory';
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -937,11 +941,12 @@ export default function RoutingWorkflowBuilder({
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 500 }}>
-      {/* Operations Sidebar */}
-      <OperationsSidebar
-        companyId={companyId}
-        onDragStart={() => {}}
-      />
+      {!isMobile && (
+        <OperationsSidebar
+          companyId={companyId}
+          onDragStart={() => {}}
+        />
+      )}
 
       {/* Workflow Canvas */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -976,14 +981,26 @@ export default function RoutingWorkflowBuilder({
             Add Operation
           </Button>
 
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<AutoFixHighIcon />}
-            onClick={handleAutoLayout}
-          >
-            Auto Layout
-          </Button>
+          {isMobile ? (
+            <Tooltip title="Auto Layout">
+              <IconButton
+                size="small"
+                onClick={handleAutoLayout}
+                sx={{ color: 'text.secondary', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: 1 }}
+              >
+                <AutoFixHighIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<AutoFixHighIcon />}
+              onClick={handleAutoLayout}
+            >
+              Auto Layout
+            </Button>
+          )}
 
           <Tooltip title="How to use this editor">
             <IconButton
@@ -1008,11 +1025,11 @@ export default function RoutingWorkflowBuilder({
               Workflow Editor Guide
             </Typography>
             {[
-              { icon: <AddIcon sx={{ fontSize: 18 }} />, text: 'Click "Add Operation" or drag from sidebar' },
+              { icon: <AddIcon sx={{ fontSize: 18 }} />, text: isMobile ? 'Tap "Add Operation" to add' : 'Click "Add Operation" or drag from sidebar' },
               { icon: <LinkIcon sx={{ fontSize: 18 }} />, text: 'Drag from a dot handle to another to connect' },
               { icon: <DeleteOutlineIcon sx={{ fontSize: 18 }} />, text: 'Click a connection, then press Delete' },
-              { icon: <MouseIcon sx={{ fontSize: 18 }} />, text: 'Double-click an operation to edit details' },
-              { icon: <OpenWithIcon sx={{ fontSize: 18 }} />, text: 'Hold Space + drag to pan the canvas' },
+              { icon: <MouseIcon sx={{ fontSize: 18 }} />, text: isMobile ? 'Tap an operation to edit details' : 'Double-click an operation to edit details' },
+              { icon: <OpenWithIcon sx={{ fontSize: 18 }} />, text: isMobile ? 'Drag to pan the canvas' : 'Hold Space + drag to pan the canvas' },
               { icon: <ZoomInIcon sx={{ fontSize: 18 }} />, text: 'Pinch or scroll to zoom in/out' },
               { icon: <AutoFixHighIcon sx={{ fontSize: 18 }} />, text: 'Click "Auto Layout" to rearrange neatly' },
             ].map((item, i) => (
@@ -1042,8 +1059,7 @@ export default function RoutingWorkflowBuilder({
             />
           )}
 
-          {/* Time Summary */}
-          {timeTotals && (
+          {!isMobile && timeTotals && (
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Chip
                 label={`Run: ${fmtTime(timeTotals.runTime)}/unit`}
@@ -1053,9 +1069,11 @@ export default function RoutingWorkflowBuilder({
             </Box>
           )}
 
-          <Typography variant="body2" color="text.secondary">
-            {nodes.length} operation{nodes.length !== 1 ? 's' : ''}
-          </Typography>
+          {!isMobile && (
+            <Typography variant="body2" color="text.secondary">
+              {nodes.length} operation{nodes.length !== 1 ? 's' : ''}
+            </Typography>
+          )}
         </Box>
 
         {/* React Flow Canvas */}
@@ -1107,6 +1125,12 @@ export default function RoutingWorkflowBuilder({
               backgroundColor: 'rgba(70, 130, 180, 0.15)',
               border: '1px dashed #4682B4',
             },
+            '@media (max-width: 600px)': {
+              '& .react-flow__handle': {
+                width: 24,
+                height: 24,
+              },
+            },
           }}
         >
           <ReactFlow
@@ -1122,11 +1146,11 @@ export default function RoutingWorkflowBuilder({
             onDragOver={onDragOver}
             nodeTypes={nodeTypes}
             onNodeDoubleClick={(_, node) => handleNodeEdit(node.id)}
+            onNodeClick={isMobile ? (_, node) => handleNodeEdit(node.id) : undefined}
             fitView
             fitViewOptions={{ padding: 0.2 }}
-            // Miro-style navigation: spacebar + drag to pan, otherwise drag to select
-            panOnDrag={spacebarPressed}
-            selectionOnDrag={!spacebarPressed}
+            panOnDrag={isMobile ? true : spacebarPressed}
+            selectionOnDrag={isMobile ? false : !spacebarPressed}
             selectionMode={SelectionMode.Partial}
             selectNodesOnDrag={true}
             // Trackpad support: two-finger scroll pans, pinch zooms
@@ -1150,13 +1174,15 @@ export default function RoutingWorkflowBuilder({
             proOptions={{ hideAttribution: true }}
           >
             <Controls />
-            <MiniMap
-              style={{
-                backgroundColor: 'rgba(17, 20, 57, 0.9)',
-              }}
-              nodeColor="#4682B4"
-              maskColor="rgba(0, 0, 0, 0.5)"
-            />
+            {!isMobile && (
+              <MiniMap
+                style={{
+                  backgroundColor: 'rgba(17, 20, 57, 0.9)',
+                }}
+                nodeColor="#4682B4"
+                maskColor="rgba(0, 0, 0, 0.5)"
+              />
+            )}
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#333" />
           </ReactFlow>
         </Box>

@@ -16,6 +16,8 @@ import {
   Select,
   MenuItem,
 } from '@mui/material';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import CloseIcon from '@mui/icons-material/Close';
@@ -46,6 +48,9 @@ export default function NodeEditModal({
   nodeData,
   companyId,
 }: NodeEditModalProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   const [formData, setFormData] = useState<RoutingNodeFormData>({
     operation_type_id: '',
     run_time_per_unit: '',
@@ -171,6 +176,7 @@ export default function NodeEditModal({
       onClose={onClose}
       maxWidth="sm"
       fullWidth
+      fullScreen={isMobile}
       PaperProps={{
         sx: {
           bgcolor: 'background.paper',
@@ -309,11 +315,12 @@ export default function NodeEditModal({
                   gap: 1,
                   mb: 1.5,
                   alignItems: 'flex-start',
+                  flexWrap: 'wrap',
                 }}
               >
                 <Autocomplete
                   size="small"
-                  sx={{ flex: 2 }}
+                  sx={{ flex: isMobile ? '1 1 100%' : 2 }}
                   options={inventoryItems}
                   getOptionLabel={(option) => option.name}
                   value={inventoryItems.find((inv) => inv.id === material.inventory_item_id) || null}
@@ -392,7 +399,18 @@ export default function NodeEditModal({
         </Box>
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, pb: 3 }}>
+      <DialogActions sx={{
+        px: 3,
+        pb: isMobile ? 2 : 3,
+        ...(isMobile && {
+          position: 'sticky',
+          bottom: 0,
+          bgcolor: 'background.paper',
+          borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+          zIndex: 1,
+          pt: 2,
+        }),
+      }}>
         <Button onClick={onClose} disabled={saving}>
           Cancel
         </Button>

@@ -149,12 +149,13 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "part_number" text NOT NULL,
     "description" text,
     "category_id" uuid,
-    "pricing" jsonb DEFAULT '[]'::jsonb,
+    "manual_cost" numeric(12,4),
+    "cost_source" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
-    CONSTRAINT "parts_valid_pricing" CHECK (validate_pricing_json(pricing))
+    CONSTRAINT "parts_cost_source_check" CHECK (cost_source IS NULL OR cost_source IN ('routing','manual','estimate'))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_categories"
@@ -425,6 +426,11 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "part_id" uuid,
     "description" text,
     "quantity" integer NOT NULL DEFAULT 1,
+    "base_cost" numeric(12,4),
+    "cost_source" text,
+    "markup_percent" numeric(5,2),
+    "estimated_labor_cost" numeric(12,4),
+    "estimated_material_cost" numeric(12,4),
     "unit_price" numeric(12,4),
     "total_price" numeric(12,4),
     "status" text NOT NULL DEFAULT 'draft'::text,
@@ -1545,7 +1551,6 @@ CREATE INDEX IF NOT EXISTS idx_part_categories_company ON public.part_categories
 CREATE INDEX IF NOT EXISTS idx_parts_category ON public.parts USING btree (category_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_number ON public.parts USING btree (company_id, part_number);
-CREATE INDEX IF NOT EXISTS idx_parts_pricing ON public.parts USING gin (pricing);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_company ON public.quote_attachments USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_quote ON public.quote_attachments USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (company_id);
@@ -1807,20 +1812,6 @@ AS $function$
   SELECT id FROM user_company_access
   WHERE user_id = auth.uid()
     AND company_id = check_company_id
-  LIMIT 1;
-$function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.get_part_price(p_pricing jsonb, p_quantity integer)
- RETURNS numeric
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  SELECT (elem->>'price')::numeric
-  FROM jsonb_array_elements(p_pricing) elem
-  WHERE (elem->>'qty')::int <= p_quantity
-  ORDER BY (elem->>'qty')::int DESC
   LIMIT 1;
 $function$
 
@@ -2109,11 +2100,12 @@ BEGIN
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-            INSERT INTO parts (id, company_id, part_number, description, pricing, created_at)
+            INSERT INTO parts (id, company_id, part_number, description, manual_cost, cost_source, created_at)
             VALUES (v_new_id, p_company_id,
                     v_item->>'part_number',
                     v_item->>'description',
-                    COALESCE(v_item->'pricing', '[]'::JSONB),
+                    (v_item->>'manual_cost')::NUMERIC,
+                    v_item->>'cost_source',
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
@@ -2432,44 +2424,6 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.validate_pricing_json(pricing jsonb)
- RETURNS boolean
- LANGUAGE plpgsql
- IMMUTABLE
-AS $function$
-BEGIN
-  -- NULL is valid (no pricing set yet)
-  IF pricing IS NULL THEN
-    RETURN TRUE;
-  END IF;
-
-  -- Must be an array
-  IF jsonb_typeof(pricing) != 'array' THEN
-    RETURN FALSE;
-  END IF;
-  
-  -- Empty array is valid (no pricing tiers)
-  IF jsonb_array_length(pricing) = 0 THEN
-    RETURN TRUE;
-  END IF;
-
-  -- Each element must have exactly qty (integer >= 1) and price (number), no other fields
-  RETURN NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements(pricing) elem
-    WHERE NOT (
-      elem ? 'qty' AND 
-      elem ? 'price' AND
-      jsonb_typeof(elem->'qty') = 'number' AND
-      jsonb_typeof(elem->'price') = 'number' AND
-      (elem->>'qty')::numeric >= 1 AND
-      (elem->>'qty')::numeric = floor((elem->>'qty')::numeric) AND
-      (SELECT count(*) FROM jsonb_object_keys(elem)) = 2
-    )
-  );
-END;
-$function$
-
-;
 
 -- ============================================================
 -- 8. TRIGGERS
@@ -2575,13 +2529,13 @@ COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
 COMMENT ON TABLE "public"."parts"
-    IS 'Parts catalog. Each part has a company-unique part number, description, and flexible volume-based pricing stored as JSONB. Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
+    IS 'Parts catalog. Each part has a company-unique part number, optional category, and cost data (manual or routing-calculated). Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
 
 COMMENT ON TABLE "public"."quote_attachments"
     IS 'PDF attachments for quotes. Phase 0 limits to one attachment per quote (enforced in UI). When quote converts to job, attachment is COPIED to job_attachments.';
 
 COMMENT ON TABLE "public"."quotes"
-    IS 'Sales quotes/estimates sent to customers before work begins. Contains pricing, lead time estimates, and can be converted to jobs. Tracks quote status (draft, sent, accepted, rejected, expired) and links to the job if converted.';
+    IS 'Sales quotes/estimates sent to customers before work begins. Contains cost-plus pricing (base cost + markup), lead time estimates, and can be converted to jobs. Tracks quote status and links to the job if converted.';
 
 COMMENT ON TABLE "public"."resource_groups"
     IS 'Categories for organizing operation types (e.g., CNC, LATHE&MILL, Hone, EDM). Matches terminology from legacy system.';
@@ -2898,8 +2852,11 @@ COMMENT ON COLUMN "public"."parts"."part_number"
 COMMENT ON COLUMN "public"."parts"."description"
     IS 'Human-readable description of what the part is. Example: "Recess Tool Bit", "Aluminum Bracket Assembly"';
 
-COMMENT ON COLUMN "public"."parts"."pricing"
-    IS 'Volume-based pricing tiers as JSONB array. Format: [{"qty": 1, "price": 50.00}, {"qty": 10, "price": 45.00}]. Validated by CHECK constraint to ensure correct structure.';
+COMMENT ON COLUMN "public"."parts"."manual_cost"
+    IS 'Base cost per unit when cost_source is manual or estimate. Ignored when routing exists.';
+
+COMMENT ON COLUMN "public"."parts"."cost_source"
+    IS 'How base cost is determined: routing (auto-calculated), manual (user entered), estimate (rough), or null.';
 
 COMMENT ON COLUMN "public"."parts"."created_at"
     IS 'Timestamp when part was created.';

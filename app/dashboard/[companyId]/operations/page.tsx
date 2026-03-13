@@ -355,6 +355,7 @@ export default function OperationsPage() {
       headerName: 'Name',
       flex: 2,
       minWidth: 200,
+      pinned: 'left' as const,
     },
     {
       colId: 'resource_group',
@@ -373,7 +374,7 @@ export default function OperationsPage() {
 
   // Groups columns
   const groupsColumnDefs: ColDef<ResourceGroupWithCount>[] = [
-    { field: 'name', headerName: 'Name', flex: 2, minWidth: 200 },
+    { field: 'name', headerName: 'Name', flex: 2, minWidth: 200, pinned: 'left' as const },
     { field: 'description', headerName: 'Description', flex: 2, minWidth: 200, valueFormatter: (p) => p.value ?? '—' },
     { field: 'operation_count', headerName: 'Operations', width: 120 },
     {
@@ -445,7 +446,7 @@ export default function OperationsPage() {
             value={operationsSearch}
             onChange={(e) => setOperationsSearch(e.target.value)}
             size="small"
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -577,7 +578,7 @@ export default function OperationsPage() {
             value={groupsSearch}
             onChange={(e) => setGroupsSearch(e.target.value)}
             size="small"
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (

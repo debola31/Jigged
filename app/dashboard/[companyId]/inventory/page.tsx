@@ -192,6 +192,7 @@ export default function InventoryPage() {
       headerName: 'Name',
       flex: 2,
       minWidth: 200,
+      pinned: 'left' as const,
     },
     {
       field: 'sku',
@@ -246,7 +247,7 @@ export default function InventoryPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
-          sx={{ width: 300 }}
+          sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{
             input: {
               startAdornment: (

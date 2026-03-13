@@ -211,7 +211,7 @@ export default function JobDetailPage() {
         }}
       >
         <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
+          <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
             {job.job_number}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -357,7 +357,7 @@ export default function JobDetailPage() {
               </Typography>
               <Divider sx={{ mb: 2 }} />
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">Customer</Typography>
                   {job.customers ? (
@@ -493,6 +493,7 @@ export default function JobDetailPage() {
                     sx={{
                       display: 'flex',
                       alignItems: 'center',
+                      flexWrap: 'wrap',
                       gap: 2,
                       p: 2,
                       bgcolor: 'rgba(255, 255, 255, 0.05)',

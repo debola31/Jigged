@@ -483,6 +483,7 @@ export default function JobsPage() {
                 sortable: true,
                 resizable: true,
               }}
+              selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
                 checkboxes: true,

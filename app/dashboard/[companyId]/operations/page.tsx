@@ -547,6 +547,7 @@ export default function OperationsPage() {
                 columnDefs={operationsColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={{ sortable: true, resizable: true }}
+                selectionColumnDef={{ pinned: 'left' }}
                 rowSelection={{ mode: 'multiRow', checkboxes: true, headerCheckbox: true, enableClickSelection: false, selectAll: 'all' }}
                 onSelectionChanged={handleOperationsSelectionChanged}
                 onRowClicked={handleRowClicked}
@@ -653,6 +654,7 @@ export default function OperationsPage() {
                 columnDefs={groupsColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={{ sortable: true, resizable: true }}
+                selectionColumnDef={{ pinned: 'left' }}
                 rowSelection={{ mode: 'multiRow', checkboxes: true, headerCheckbox: true, enableClickSelection: false, selectAll: 'all' }}
                 onSelectionChanged={handleGroupsSelectionChanged}
                 pagination={true}

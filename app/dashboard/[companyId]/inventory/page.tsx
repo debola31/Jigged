@@ -353,6 +353,7 @@ export default function InventoryPage() {
                 sortable: true,
                 resizable: true,
               }}
+              selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
                 checkboxes: true,

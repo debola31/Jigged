@@ -586,6 +586,7 @@ export default function TeamPage() {
                 columnDefs={teamMemberColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
+                selectionColumnDef={{ pinned: 'left' }}
                 rowSelection={{
                   mode: 'multiRow',
                   checkboxes: true,
@@ -717,6 +718,7 @@ export default function TeamPage() {
                 columnDefs={teamMemberColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
+                selectionColumnDef={{ pinned: 'left' }}
                 rowSelection={{
                   mode: 'multiRow',
                   checkboxes: true,
@@ -848,6 +850,7 @@ export default function TeamPage() {
                 columnDefs={operatorColumnDefs}
                 theme={jiggedAgGridTheme}
                 defaultColDef={defaultColDef}
+                selectionColumnDef={{ pinned: 'left' }}
                 rowSelection={{
                   mode: 'multiRow',
                   checkboxes: true,

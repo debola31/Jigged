@@ -212,6 +212,7 @@ export default function PartsPage() {
       field: 'part_number',
       headerName: 'Part Number',
       width: 180,
+      pinned: 'left' as const,
     },
     {
       field: 'description',
@@ -286,7 +287,7 @@ export default function PartsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
-          sx={{ width: 300 }}
+          sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{
             input: {
               startAdornment: (

@@ -197,7 +197,7 @@ export default function QuoteDetailPage() {
         }}
       >
         <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
+          <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
             {quote.quote_number || 'Quote'}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -398,6 +398,7 @@ export default function QuoteDetailPage() {
                     sx={{
                       display: 'flex',
                       alignItems: 'center',
+                      flexWrap: 'wrap',
                       gap: 2,
                       p: 2,
                       bgcolor: 'rgba(255, 255, 255, 0.05)',

@@ -235,6 +235,7 @@ export default function JobsPage() {
       field: 'job_number',
       headerName: 'Job #',
       width: 120,
+      pinned: 'left' as const,
     },
     {
       colId: 'customer',
@@ -362,7 +363,7 @@ export default function JobsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
-          sx={{ width: 250 }}
+          sx={{ width: { xs: '100%', sm: 250 } }}
           slotProps={{
             input: {
               startAdornment: (

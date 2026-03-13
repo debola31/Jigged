@@ -410,6 +410,7 @@ export default function TeamPage() {
         headerName: 'Name',
         flex: 1,
         minWidth: 150,
+        pinned: 'left' as const,
         valueFormatter: (params) => params.value || '—',
       },
       {
@@ -437,6 +438,7 @@ export default function TeamPage() {
         headerName: 'Name',
         flex: 1,
         minWidth: 150,
+        pinned: 'left' as const,
         valueFormatter: (params) => params.value || '—',
       },
       {
@@ -464,8 +466,9 @@ export default function TeamPage() {
     []
   );
 
-  const onGridReady = (params: GridReadyEvent) => {
-    params.api.sizeColumnsToFit();
+  const onGridReady = (_params: GridReadyEvent) => {
+    // Let flex + minWidth handle column sizing naturally.
+    // sizeColumnsToFit() was preventing horizontal scroll on mobile.
   };
 
   return (
@@ -497,7 +500,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -628,7 +631,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -759,7 +762,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (

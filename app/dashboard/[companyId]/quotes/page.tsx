@@ -240,6 +240,7 @@ export default function QuotesPage() {
       field: 'quote_number',
       headerName: 'Quote #',
       width: 120,
+      pinned: 'left' as const,
     },
     {
       colId: 'customer',
@@ -325,7 +326,7 @@ export default function QuotesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
-          sx={{ width: 250 }}
+          sx={{ width: { xs: '100%', sm: 250 } }}
           slotProps={{
             input: {
               startAdornment: (

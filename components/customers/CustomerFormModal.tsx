@@ -6,6 +6,8 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import CustomerForm from './CustomerForm';
 import { EMPTY_CUSTOMER_FORM } from '@/types/customer';
 import type { Customer } from '@/types/customer';
@@ -27,6 +29,8 @@ export default function CustomerFormModal({
   onCreated,
   companyId,
 }: CustomerFormModalProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   // Key to force re-render of form when modal opens
   const [formKey, setFormKey] = useState(0);
 
@@ -48,6 +52,7 @@ export default function CustomerFormModal({
       onClose={onClose}
       maxWidth="md"
       fullWidth
+      fullScreen={isMobile}
       scroll="paper"
       PaperProps={{
         sx: {

@@ -4,8 +4,10 @@ import { useRouter, usePathname, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
 import LogoutIcon from '@mui/icons-material/Logout';
+import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AlertBadge from './AlertBadge';
@@ -108,7 +110,12 @@ function getPageTitle(pathname: string): string {
   return 'Dashboard';
 }
 
-export default function Header() {
+interface HeaderProps {
+  isMobile?: boolean;
+  onMenuClick?: () => void;
+}
+
+export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useParams();
@@ -141,6 +148,15 @@ export default function Header() {
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {isMobile && (
+          <IconButton
+            onClick={onMenuClick}
+            sx={{ color: 'white', mr: 0.5 }}
+            aria-label="Open navigation menu"
+          >
+            <MenuIcon />
+          </IconButton>
+        )}
         <Typography variant="h5" component="h1" sx={{ fontWeight: 600, color: 'white' }}>
           {pageTitle}
         </Typography>
@@ -155,20 +171,36 @@ export default function Header() {
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         {companyId && <AlertBadge companyId={companyId} />}
-        <Button
-          onClick={handleSignOut}
-          startIcon={<LogoutIcon />}
-          sx={{
-            color: 'rgba(255, 255, 255, 0.7)',
-            textTransform: 'none',
-            '&:hover': {
-              bgcolor: 'rgba(239, 68, 68, 0.1)',
-              color: 'error.main',
-            },
-          }}
-        >
-          Sign Out
-        </Button>
+        {isMobile ? (
+          <IconButton
+            onClick={handleSignOut}
+            aria-label="Sign out"
+            sx={{
+              color: 'rgba(255, 255, 255, 0.7)',
+              '&:hover': {
+                bgcolor: 'rgba(239, 68, 68, 0.1)',
+                color: 'error.main',
+              },
+            }}
+          >
+            <LogoutIcon />
+          </IconButton>
+        ) : (
+          <Button
+            onClick={handleSignOut}
+            startIcon={<LogoutIcon />}
+            sx={{
+              color: 'rgba(255, 255, 255, 0.7)',
+              textTransform: 'none',
+              '&:hover': {
+                bgcolor: 'rgba(239, 68, 68, 0.1)',
+                color: 'error.main',
+              },
+            }}
+          >
+            Sign Out
+          </Button>
+        )}
       </Box>
     </Box>
   );

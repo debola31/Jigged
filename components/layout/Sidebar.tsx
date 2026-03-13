@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
+import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -19,6 +20,8 @@ import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
 import CompanySwitcher from './CompanySwitcher';
 import { useUserRole } from '@/hooks/useUserRole';
+
+const SIDEBAR_WIDTH = 240;
 
 interface MenuItem {
   name: string;
@@ -39,30 +42,21 @@ const menuItems: MenuItem[] = [
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isMobile: boolean;
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function Sidebar({ isMobile, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const params = useParams();
   const companyId = params.companyId as string;
   const basePath = `/dashboard/${companyId}`;
   const { isAdmin } = useUserRole();
 
-  return (
-    <Box
-      component="nav"
-      sx={{
-        position: 'fixed',
-        left: 0,
-        top: 0,
-        width: 240,
-        height: '100vh',
-        zIndex: 1200,
-        bgcolor: 'rgba(17, 20, 57, 0.8)',
-        backdropFilter: 'blur(10px)',
-        borderRight: '1px solid rgba(255, 255, 255, 0.1)',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
+  const drawerContent = (
+    <>
       {/* Company Switcher */}
       <Box sx={{ pt: 1 }}>
         <CompanySwitcher />
@@ -84,6 +78,7 @@ export default function Sidebar() {
                 <ListItemButton
                   component={Link}
                   href={fullPath}
+                  onClick={isMobile ? onClose : undefined}
                   sx={{
                     borderRadius: 2,
                     py: 1.5,
@@ -122,7 +117,47 @@ export default function Sidebar() {
           })}
         </List>
       </Box>
+    </>
+  );
 
-    </Box>
+  const paperSx = {
+    width: SIDEBAR_WIDTH,
+    bgcolor: 'rgba(17, 20, 57, 0.8)',
+    backdropFilter: 'blur(10px)',
+    borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+    display: 'flex',
+    flexDirection: 'column',
+  };
+
+  if (isMobile) {
+    return (
+      <Drawer
+        variant="temporary"
+        open={open}
+        onClose={onClose}
+        ModalProps={{ keepMounted: true }}
+        sx={{
+          '& .MuiDrawer-paper': paperSx,
+        }}
+      >
+        {drawerContent}
+      </Drawer>
+    );
+  }
+
+  return (
+    <Drawer
+      variant="permanent"
+      sx={{
+        '& .MuiDrawer-paper': {
+          ...paperSx,
+          position: 'fixed',
+          height: '100vh',
+          zIndex: 1200,
+        },
+      }}
+    >
+      {drawerContent}
+    </Drawer>
   );
 }

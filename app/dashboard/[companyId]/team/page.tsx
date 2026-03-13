@@ -410,6 +410,7 @@ export default function TeamPage() {
         headerName: 'Name',
         flex: 1,
         minWidth: 150,
+        pinned: 'left' as const,
         valueFormatter: (params) => params.value || '—',
       },
       {
@@ -437,6 +438,7 @@ export default function TeamPage() {
         headerName: 'Name',
         flex: 1,
         minWidth: 150,
+        pinned: 'left' as const,
         valueFormatter: (params) => params.value || '—',
       },
       {
@@ -497,7 +499,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -628,7 +630,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -759,7 +761,7 @@ export default function TeamPage() {
             size="small"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300 }}
+            sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
                 startAdornment: (

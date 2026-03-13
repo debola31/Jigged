@@ -15,6 +15,8 @@ import MuiLink from '@mui/material/Link';
 import { getSupabase } from '@/lib/supabase';
 
 export default function SignUp() {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,6 +28,13 @@ export default function SignUp() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    // Validate names
+    if (!firstName.trim() || !lastName.trim()) {
+      setError('First name and last name are required');
+      setLoading(false);
+      return;
+    }
 
     // Validate passwords match
     if (password !== confirmPassword) {
@@ -46,6 +55,13 @@ export default function SignUp() {
       const { error: signUpError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            display_name: `${firstName.trim()} ${lastName.trim()}`,
+          },
+        },
       });
 
       if (signUpError) {
@@ -103,6 +119,29 @@ export default function SignUp() {
         )}
 
         <Box component="form" onSubmit={handleSubmit}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              label="First Name"
+              fullWidth
+              required
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              disabled={loading}
+              autoComplete="given-name"
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              label="Last Name"
+              fullWidth
+              required
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              disabled={loading}
+              autoComplete="family-name"
+              sx={{ flex: 1 }}
+            />
+          </Box>
+
           <TextField
             label="Email"
             type="email"

@@ -466,8 +466,9 @@ export default function TeamPage() {
     []
   );
 
-  const onGridReady = (params: GridReadyEvent) => {
-    params.api.sizeColumnsToFit();
+  const onGridReady = (_params: GridReadyEvent) => {
+    // Let flex + minWidth handle column sizing naturally.
+    // sizeColumnsToFit() was preventing horizontal scroll on mobile.
   };
 
   return (

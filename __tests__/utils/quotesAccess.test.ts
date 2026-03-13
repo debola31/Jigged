@@ -86,7 +86,8 @@ import {
   markQuoteAsApproved,
   markQuoteAsRejected,
   convertQuoteToJob,
-  getPartWithPricing,
+  getPartWithCostInfo,
+  refreshQuoteCost,
   getQuoteAttachments,
   getQuoteAttachmentCount,
   uploadQuoteAttachment,
@@ -1125,18 +1126,21 @@ describe('quotesAccess utilities', () => {
 
   // ============== Helper Function Tests ==============
 
-  describe('getPartWithPricing', () => {
-    it('returns part with pricing tiers', async () => {
+  describe('getPartWithCostInfo', () => {
+    it('returns part with cost info and category', async () => {
       const mockPart = {
         id: 'part-1',
         part_number: 'PART001',
         description: 'Test Part',
-        pricing: [{ qty: 1, price: 10 }, { qty: 10, price: 8 }],
+        category_id: 'cat-1',
+        manual_cost: 10.0,
+        cost_source: 'manual',
+        part_categories: { id: 'cat-1', name: 'Machined', default_markup_percent: 35 },
       };
       mockQueryBuilder.data = mockPart;
       mockQueryBuilder.error = null;
 
-      const result = await getPartWithPricing('part-1');
+      const result = await getPartWithCostInfo('part-1');
 
       expect(result).toEqual(mockPart);
     });
@@ -1145,7 +1149,7 @@ describe('quotesAccess utilities', () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { code: 'PGRST116', message: 'Not found' };
 
-      const result = await getPartWithPricing('nonexistent');
+      const result = await getPartWithCostInfo('nonexistent');
 
       expect(result).toBeNull();
     });
@@ -1438,6 +1442,37 @@ describe('quotesAccess utilities', () => {
 
       expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith(
         'company-1/temp/session-123/file.pdf'
+      );
+    });
+  });
+
+  // ============== Cost Refresh Tests ==============
+
+  describe('refreshQuoteCost', () => {
+    it('rejects non-draft/rejected quotes', async () => {
+      // First call: fetch quote (approved)
+      mockQueryBuilder.data = {
+        id: 'quote-1',
+        status: 'approved',
+        part_id: 'part-1',
+        parts: { id: 'part-1', manual_cost: 100 },
+      };
+
+      await expect(refreshQuoteCost('quote-1', 'co-1')).rejects.toThrow(
+        /only draft or rejected/i
+      );
+    });
+
+    it('rejects quotes with no part', async () => {
+      mockQueryBuilder.data = {
+        id: 'quote-1',
+        status: 'draft',
+        part_id: null,
+        parts: null,
+      };
+
+      await expect(refreshQuoteCost('quote-1', 'co-1')).rejects.toThrow(
+        /no part assigned/i
       );
     });
   });

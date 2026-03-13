@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -15,18 +15,13 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
-import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
+import Autocomplete from '@mui/material/Autocomplete';
+import InputAdornment from '@mui/material/InputAdornment';
+import Chip from '@mui/material/Chip';
 import type { Part, PartFormData } from '@/types/part';
-import { validatePricingTiers } from '@/types/part';
 import { createPart, updatePart, deletePart, checkPartNumberExists } from '@/utils/partsAccess';
+import { getPartCategoriesForSelect } from '@/utils/partCategoriesAccess';
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -52,8 +47,8 @@ export default function PartForm({
   const [formData, setFormData] = useState<PartFormData>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; default_markup_percent: number | null }>>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [pricingWarnings, setPricingWarnings] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({
     open: false,
@@ -61,51 +56,29 @@ export default function PartForm({
     severity: 'error',
   });
 
+  // Fetch categories for dropdown
+  useEffect(() => {
+    getPartCategoriesForSelect(companyId).then(setCategories).catch(console.error);
+  }, [companyId]);
+
   const handleChange =
     (field: keyof PartFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
-      // Clear field error when user starts typing
       if (fieldErrors[field]) {
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
       }
     };
 
-  // Pricing tier handlers
-  const handleAddTier = () => {
-    const maxQty = formData.pricing.length > 0 ? Math.max(...formData.pricing.map((t) => t.qty)) : 0;
-    setFormData((prev) => ({
-      ...prev,
-      pricing: [...prev.pricing, { qty: maxQty + 10, price: 0 }],
-    }));
-  };
-
-  const handleRemoveTier = (index: number) => {
-    // Cannot remove if only one tier
-    if (formData.pricing.length <= 1) return;
-    setFormData((prev) => ({
-      ...prev,
-      pricing: prev.pricing.filter((_, i) => i !== index),
-    }));
-  };
-
-  const handleTierChange = (index: number, field: 'qty' | 'price', value: string) => {
-    const numValue = field === 'qty' ? parseInt(value) || 0 : parseFloat(value) || 0;
-    setFormData((prev) => ({
-      ...prev,
-      pricing: prev.pricing.map((tier, i) => (i === index ? { ...tier, [field]: numValue } : tier)),
-    }));
-  };
+  const hasRouting = part?.routing != null;
 
   const validateForm = async (): Promise<boolean> => {
     const errors: Record<string, string> = {};
 
-    // Part number required
     if (!formData.part_number.trim()) {
       errors.part_number = 'Part number is required';
     }
 
-    // Check uniqueness of part number
     if (formData.part_number.trim() && !errors.part_number) {
       try {
         const exists = await checkPartNumberExists(
@@ -122,12 +95,13 @@ export default function PartForm({
       }
     }
 
-    // Validate pricing tiers
-    const { errors: pricingErrors, warnings } = validatePricingTiers(formData.pricing);
-    if (pricingErrors.length > 0) {
-      errors.pricing = pricingErrors.join('; ');
+    // Validate manual cost if provided
+    if (formData.manual_cost.trim()) {
+      const cost = parseFloat(formData.manual_cost);
+      if (isNaN(cost) || cost < 0) {
+        errors.manual_cost = 'Cost must be a positive number';
+      }
     }
-    setPricingWarnings(warnings);
 
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
@@ -135,7 +109,7 @@ export default function PartForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    e.stopPropagation(); // Prevent bubbling to parent forms (e.g., QuoteForm)
+    e.stopPropagation();
     setError(null);
 
     const isValid = await validateForm();
@@ -178,7 +152,6 @@ export default function PartForm({
         router.push(`/dashboard/${companyId}/parts`);
       }
     } catch (err) {
-      // Show snackbar with error message
       setSnackbar({
         open: true,
         message: err instanceof Error ? err.message : 'An error occurred',
@@ -243,83 +216,78 @@ export default function PartForm({
         </CardContent>
       </Card>
 
-      {/* Pricing Tiers */}
+      {/* Category */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+            Category
+          </Typography>
+          <Autocomplete
+            options={categories}
+            getOptionLabel={(option) => {
+              const markup = option.default_markup_percent !== null ? ` (${option.default_markup_percent}% markup)` : '';
+              return `${option.name}${markup}`;
+            }}
+            value={categories.find((c) => c.id === formData.category_id) || null}
+            onChange={(_, newValue) => {
+              setFormData((prev) => ({ ...prev, category_id: newValue?.id || '' }));
+            }}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Part Category"
+                placeholder="Select a category"
+                helperText="Optional — categories set default markup for quoting"
+                disabled={loading}
+              />
+            )}
+            disabled={loading}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Cost Information */}
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Pricing Tiers
+              Cost Information
             </Typography>
-            <Button startIcon={<AddIcon />} onClick={handleAddTier} disabled={loading} size="small">
-              Add Tier
-            </Button>
+            {part?.cost_source && (
+              <Chip
+                label={part.cost_source === 'routing' ? 'From Routing' : part.cost_source === 'manual' ? 'Manual' : 'Estimate'}
+                size="small"
+                color={part.cost_source === 'routing' ? 'primary' : 'default'}
+                variant="outlined"
+              />
+            )}
           </Box>
-
-          {fieldErrors.pricing && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {fieldErrors.pricing}
-            </Alert>
-          )}
-
-          {pricingWarnings.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              {pricingWarnings.join('; ')}
-            </Alert>
-          )}
-
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Min Quantity</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Unit Price ($)</TableCell>
-                <TableCell width={60}></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {formData.pricing.map((tier, index) => (
-                <TableRow key={index}>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      size="small"
-                      value={tier.qty || ''}
-                      onChange={(e) => handleTierChange(index, 'qty', e.target.value)}
-                      disabled={loading}
-                      inputProps={{ min: 1, step: 1 }}
-                      sx={{ width: 120 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="number"
-                      size="small"
-                      value={tier.price || ''}
-                      onChange={(e) => handleTierChange(index, 'price', e.target.value)}
-                      disabled={loading}
-                      inputProps={{ min: 0, step: 0.01 }}
-                      sx={{ width: 140 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleRemoveTier(index)}
-                      disabled={loading || formData.pricing.length <= 1}
-                      color="error"
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {formData.pricing.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-              {`No pricing tiers defined. Click "Add Tier" to add one.`}
-            </Typography>
-          )}
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Manual Cost"
+                type="number"
+                value={formData.manual_cost}
+                onChange={handleChange('manual_cost')}
+                error={!!fieldErrors.manual_cost}
+                helperText={
+                  fieldErrors.manual_cost ||
+                  (hasRouting
+                    ? 'Routing cost takes priority — manual cost is used as fallback'
+                    : 'Cost per unit for quoting')
+                }
+                disabled={loading}
+                slotProps={{
+                  input: {
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  },
+                  htmlInput: { min: 0, step: 0.01 },
+                }}
+              />
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 

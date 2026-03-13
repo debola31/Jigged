@@ -32,12 +32,11 @@ import ErrorIcon from '@mui/icons-material/Error';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { MappingReviewTable, PricingTierCard, ConflictDialog } from '@/components/import';
+import { MappingReviewTable, ConflictDialog } from '@/components/import';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import type { FieldDefinition, ColumnMapping } from '@/components/import';
 import type {
   CustomerMatchMode,
-  PricingColumnPair,
   PartAnalyzeResponse,
   PartValidateResponse,
   PartExecuteResponse,
@@ -72,7 +71,7 @@ export default function ImportPartsPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
-  const [pricingColumns, setPricingColumns] = useState<PricingColumnPair[]>([]);
+  const [pricingColumns, setPricingColumns] = useState<Array<{ qty_column: string; price_column: string }>>([]);
   const [unmappedRequired, setUnmappedRequired] = useState<string[]>([]);
   const [discardedColumns, setDiscardedColumns] = useState<string[]>([]);
   const [unmappedOptional, setUnmappedOptional] = useState<string[]>([]);
@@ -205,7 +204,8 @@ export default function ImportPartsPage() {
 
       const data: PartAnalyzeResponse = await response.json();
       setMappings(data.mappings);
-      setPricingColumns(data.pricing_columns);
+      // pricing_columns removed — cost-plus model replaces pricing tiers
+      setPricingColumns([]);
       setUnmappedRequired(data.unmapped_required);
       setDiscardedColumns(data.discarded_columns);
 
@@ -538,7 +538,7 @@ export default function ImportPartsPage() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 3 }}>
                 <AutoAwesomeIcon sx={{ color: 'primary.main', fontSize: 20 }} />
                 <Typography variant="body2" color="primary.main">
-                  AI will automatically map your columns and detect pricing tiers
+                  AI will automatically map your columns to part fields
                 </Typography>
               </Box>
               <Button variant="contained" component="label">
@@ -641,7 +641,7 @@ export default function ImportPartsPage() {
 
       {/* Step: Analyzing */}
       {currentStep === 'analyzing' && (
-        <AIAnalysisLoading description="AI is mapping your columns to part fields and detecting pricing tiers..." />
+        <AIAnalysisLoading description="AI is mapping your columns to part fields..." />
       )}
 
       {/* Step: Review Mappings */}
@@ -665,15 +665,6 @@ export default function ImportPartsPage() {
             onMappingChange={handleMappingChange}
           />
 
-          <Box sx={{ mt: 3 }}>
-            <PricingTierCard
-              pricingTiers={pricingColumns}
-              csvHeaders={headers}
-              onPricingTierChange={handlePricingPairChange}
-              onPricingTierAdd={handleAddPricingPair}
-              onPricingTierRemove={handleRemovePricingPair}
-            />
-          </Box>
         </>
       )}
 

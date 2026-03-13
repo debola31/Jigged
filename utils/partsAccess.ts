@@ -1,19 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
-import type { Part, PartFormData, PricingTier } from '@/types/part';
-import { sortPricingTiers } from '@/types/part';
-
-/**
- * Interface for part data as returned from Supabase.
- */
-interface PartRow {
-  id: string;
-  company_id: string;
-  part_number: string;
-  description: string | null;
-  pricing: PricingTier[];
-  created_at: string;
-  updated_at: string;
-}
+import type { Part, PartFormData } from '@/types/part';
 
 /**
  * Get all parts for a company with optional filters.
@@ -27,14 +13,14 @@ export async function getAllParts(
 ): Promise<Part[]> {
   const supabase = getSupabase();
   const BATCH_SIZE = 1000;
-  let allData: PartRow[] = [];
+  let allData: Record<string, unknown>[] = [];
   let offset = 0;
   let hasMore = true;
 
   while (hasMore) {
     let query = supabase
       .from('parts')
-      .select('*, routings(id)')
+      .select('*, part_categories(id, name, default_markup_percent), routings(id)')
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -56,16 +42,20 @@ export async function getAllParts(
   }
 
   return allData.map((part) => {
-    const routings = (part as unknown as Record<string, unknown>).routings as Array<{ id: string }> | { id: string } | null;
+    const routings = part.routings as Array<{ id: string }> | { id: string } | null;
     const routingRecord = Array.isArray(routings) ? routings[0] : routings;
+    const partCategory = part.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
     return {
-      id: part.id,
-      company_id: part.company_id,
-      part_number: part.part_number,
-      description: part.description,
-      pricing: sortPricingTiers(part.pricing || []),
-      created_at: part.created_at,
-      updated_at: part.updated_at,
+      id: part.id as string,
+      company_id: part.company_id as string,
+      part_number: part.part_number as string,
+      description: part.description as string | null,
+      category_id: part.category_id as string | null,
+      manual_cost: part.manual_cost as number | null,
+      cost_source: part.cost_source as Part['cost_source'],
+      created_at: part.created_at as string,
+      updated_at: part.updated_at as string,
+      part_category: partCategory || null,
       routing: routingRecord
         ? { id: routingRecord.id, nodes_count: 0, total_run_time_per_unit: null }
         : undefined,
@@ -88,7 +78,7 @@ export async function getPartsPaginated(
 
   let query = supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('company_id', companyId)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
@@ -104,10 +94,21 @@ export async function getPartsPaginated(
     throw error;
   }
 
-  return (data || []).map((part: PartRow) => ({
-    ...part,
-    pricing: sortPricingTiers(part.pricing || []),
-  }));
+  return (data || []).map((part: Record<string, unknown>) => {
+    const partCategory = part.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+    return {
+      id: part.id as string,
+      company_id: part.company_id as string,
+      part_number: part.part_number as string,
+      description: part.description as string | null,
+      category_id: part.category_id as string | null,
+      manual_cost: part.manual_cost as number | null,
+      cost_source: part.cost_source as Part['cost_source'],
+      created_at: part.created_at as string,
+      updated_at: part.updated_at as string,
+      part_category: partCategory || null,
+    };
+  });
 }
 
 /**
@@ -146,7 +147,7 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   const { data, error } = await supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -157,9 +158,11 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   if (!data) return null;
 
+  const raw = data as Record<string, unknown>;
+  const partCategory = raw.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
   return {
     ...data,
-    pricing: sortPricingTiers(data.pricing || []),
+    part_category: partCategory || null,
   };
 }
 
@@ -169,10 +172,10 @@ export async function getPart(partId: string): Promise<Part | null> {
 export async function getPartWithRelations(partId: string): Promise<Part | null> {
   const supabase = getSupabase();
 
-  // Get part
+  // Get part with category
   const { data: part, error: partError } = await supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -228,9 +231,12 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     };
   }
 
+  const rawPart = part as Record<string, unknown>;
+  const partCategory = rawPart.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+
   return {
     ...part,
-    pricing: sortPricingTiers(part.pricing || []),
+    part_category: partCategory || null,
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
     routing: routingInfo,
@@ -239,11 +245,20 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 
 /**
  * Lightweight parts query for dropdowns.
- * Returns id, part_number, description, and whether the part has a routing.
+ * Returns id, part_number, description, category info, and whether the part has a routing.
  */
 export async function getPartsForSelect(
   companyId: string
-): Promise<Array<{ id: string; part_number: string; description: string | null; pricing: PricingTier[]; has_routing: boolean }>> {
+): Promise<Array<{
+  id: string;
+  part_number: string;
+  description: string | null;
+  category_id: string | null;
+  manual_cost: number | null;
+  cost_source: string | null;
+  has_routing: boolean;
+  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
+}>> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
@@ -252,7 +267,10 @@ export async function getPartsForSelect(
       id,
       part_number,
       description,
-      pricing,
+      category_id,
+      manual_cost,
+      cost_source,
+      part_categories(id, name, default_markup_percent),
       routings(id)
     `)
     .eq('company_id', companyId)
@@ -263,13 +281,20 @@ export async function getPartsForSelect(
     throw error;
   }
 
-  return (data || []).map((p: { id: string; part_number: string; description: string | null; pricing: PricingTier[]; routings: Array<{ id: string }> | { id: string } | null }) => ({
-    id: p.id,
-    part_number: p.part_number,
-    description: p.description,
-    pricing: p.pricing || [],
-    has_routing: Array.isArray(p.routings) ? p.routings.length > 0 : !!p.routings,
-  }));
+  return (data || []).map((p: Record<string, unknown>) => {
+    const routings = p.routings as Array<{ id: string }> | { id: string } | null;
+    const partCategory = p.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+    return {
+      id: p.id as string,
+      part_number: p.part_number as string,
+      description: p.description as string | null,
+      category_id: p.category_id as string | null,
+      manual_cost: p.manual_cost as number | null,
+      cost_source: p.cost_source as string | null,
+      has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
+      part_category: partCategory || null,
+    };
+  });
 }
 
 /**
@@ -307,7 +332,8 @@ export async function checkPartNumberExists(
  */
 export async function createPart(companyId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
-  const sortedPricing = sortPricingTiers(formData.pricing);
+
+  const manualCost = formData.manual_cost.trim() ? parseFloat(formData.manual_cost) : null;
 
   const { data, error } = await supabase
     .from('parts')
@@ -315,7 +341,9 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
       company_id: companyId,
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
-      pricing: sortedPricing,
+      category_id: formData.category_id || null,
+      manual_cost: manualCost,
+      cost_source: formData.cost_source || (manualCost !== null ? 'manual' : null),
     })
     .select()
     .single();
@@ -325,10 +353,7 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     throw error;
   }
 
-  return {
-    ...data,
-    pricing: sortPricingTiers(data.pricing || []),
-  };
+  return data;
 }
 
 /**
@@ -336,14 +361,17 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
  */
 export async function updatePart(partId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
-  const sortedPricing = sortPricingTiers(formData.pricing);
+
+  const manualCost = formData.manual_cost.trim() ? parseFloat(formData.manual_cost) : null;
 
   const { data, error } = await supabase
     .from('parts')
     .update({
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
-      pricing: sortedPricing,
+      category_id: formData.category_id || null,
+      manual_cost: manualCost,
+      cost_source: formData.cost_source || (manualCost !== null ? 'manual' : null),
       updated_at: new Date().toISOString(),
     })
     .eq('id', partId)
@@ -355,10 +383,7 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
     throw error;
   }
 
-  return {
-    ...data,
-    pricing: sortPricingTiers(data.pricing || []),
-  };
+  return data;
 }
 
 /**

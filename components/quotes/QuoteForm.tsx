@@ -13,12 +13,14 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
+import Chip from '@mui/material/Chip';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
-import { calculateUnitPrice, calculateTotalPrice } from '@/types/quote';
-import type { PricingTier } from '@/types/part';
+import { calculateTotalPrice, calculateUnitPriceFromMarkup, calculateMarkupFromUnitPrice } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
+import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
@@ -48,7 +50,11 @@ interface PartOption {
   id: string;
   part_number: string;
   description: string | null;
-  pricing: PricingTier[];
+  category_id: string | null;
+  manual_cost: number | null;
+  cost_source: string | null;
+  has_routing: boolean;
+  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
   isCreateNew?: boolean;
 }
 
@@ -63,7 +69,11 @@ const CREATE_NEW_PART: PartOption = {
   id: '__create_new__',
   part_number: 'Create New Part',
   description: null,
-  pricing: [],
+  category_id: null,
+  manual_cost: null,
+  cost_source: null,
+  has_routing: false,
+  part_category: null,
   isCreateNew: true,
 };
 
@@ -175,23 +185,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     };
   }, [mode, tempAttachments]);
 
-  // Track whether the user manually edited the unit price
-  const isPriceManuallyEdited = useRef(false);
+  // Cost breakdown from routing (if available)
+  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  const [loadingCost, setLoadingCost] = useState(false);
 
-  // Auto-fill price when part or quantity changes
-  useEffect(() => {
-    if (formData.part_type === 'existing' && selectedPart?.pricing?.length) {
-      const qty = parseInt(formData.quantity, 10) || 1;
-      const suggestedPrice = calculateUnitPrice(selectedPart.pricing, qty);
-      if (suggestedPrice !== null) {
-        isPriceManuallyEdited.current = false;
-        setFormData((prev) => ({
-          ...prev,
-          unit_price: String(suggestedPrice),
-        }));
-      }
-    }
-  }, [selectedPart, formData.quantity, formData.part_type]);
+  // Track which field was last edited for bidirectional sync
+  const lastEditedField = useRef<'markup' | 'unit_price' | null>(null);
 
   // NOTE: Description is NOT auto-filled from part. Quote description is separate.
 
@@ -220,19 +219,76 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
   };
 
-  const handlePartChange = (_: unknown, value: PartOption | null) => {
+  const handlePartChange = async (_: unknown, value: PartOption | null) => {
     // Check if "Create New" was selected
     if (value?.isCreateNew) {
       setPartModalOpen(true);
       return;
     }
     setSelectedPart(value);
+    setCostBreakdown(null);
+
+    if (!value) {
+      setFormData((prev) => ({
+        ...prev,
+        part_id: '',
+        base_cost: '',
+        cost_source: '',
+        markup_percent: '',
+        unit_price: '',
+      }));
+      return;
+    }
+
+    // Default markup from category
+    const defaultMarkup = value.part_category?.default_markup_percent;
+    const markupStr = defaultMarkup !== null && defaultMarkup !== undefined ? String(defaultMarkup) : '';
+
     setFormData((prev) => ({
       ...prev,
-      part_id: value?.id || '',
+      part_id: value.id,
+      markup_percent: markupStr,
     }));
+
     if (fieldErrors.part_id) {
       setFieldErrors((prev) => ({ ...prev, part_id: '' }));
+    }
+
+    // Try to get routing cost (only in create mode or if user explicitly refreshes)
+    if (value.has_routing && mode === 'create') {
+      setLoadingCost(true);
+      try {
+        const breakdown = await calculateRoutingCost(value.id);
+        if (breakdown) {
+          setCostBreakdown(breakdown);
+          const baseCostStr = String(breakdown.total_cost);
+          const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
+            ? calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup)
+            : null;
+          setFormData((prev) => ({
+            ...prev,
+            base_cost: baseCostStr,
+            cost_source: 'routing',
+            unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+          }));
+        }
+      } catch (err) {
+        console.error('Error calculating routing cost:', err);
+      } finally {
+        setLoadingCost(false);
+      }
+    } else if (value.manual_cost !== null) {
+      // Fallback to manual cost
+      const baseCostStr = String(value.manual_cost);
+      const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
+        ? calculateUnitPriceFromMarkup(value.manual_cost, defaultMarkup)
+        : null;
+      setFormData((prev) => ({
+        ...prev,
+        base_cost: baseCostStr,
+        cost_source: value.cost_source || 'manual',
+        unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+      }));
     }
   };
 
@@ -258,7 +314,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       id: part.id,
       part_number: part.part_number,
       description: part.description,
-      pricing: part.pricing || [],
+      category_id: part.category_id || null,
+      manual_cost: part.manual_cost || null,
+      cost_source: part.cost_source || null,
+      has_routing: !!part.routing,
+      part_category: part.part_category || null,
     };
     setParts((prev) => [...prev, newOption]);
     setSelectedPart(newOption);
@@ -489,65 +549,134 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         </CardContent>
       </Card>
 
-      {/* Pricing — combined tiers + inputs */}
+      {/* Cost & Pricing */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Pricing
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Cost & Pricing
+            </Typography>
+            {formData.cost_source && (
+              <Chip
+                label={formData.cost_source === 'routing' ? 'From Routing' : formData.cost_source === 'manual' ? 'Manual Cost' : 'Estimate'}
+                size="small"
+                color={formData.cost_source === 'routing' ? 'primary' : 'default'}
+                variant="outlined"
+              />
+            )}
+            {loadingCost && <CircularProgress size={16} />}
+          </Box>
 
-          {/* Pricing tiers from selected part */}
-          {selectedPart?.pricing && selectedPart.pricing.length > 0 && (() => {
-            const sortedTiers = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
-            const qty = parseInt(formData.quantity, 10) || 1;
-            // Find active tier: highest tier where qty <= order quantity
-            let activeTierQty: number | null = null;
-            for (let i = sortedTiers.length - 1; i >= 0; i--) {
-              if (sortedTiers[i].qty <= qty) {
-                activeTierQty = sortedTiers[i].qty;
-                break;
-              }
-            }
-            if (activeTierQty === null && sortedTiers.length > 0) {
-              activeTierQty = sortedTiers[0].qty;
-            }
+          {/* Cost breakdown warnings */}
+          {costBreakdown && costBreakdown.warnings.length > 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              Cost may be incomplete — {costBreakdown.warnings.length} item{costBreakdown.warnings.length !== 1 ? 's' : ''} missing data
+            </Alert>
+          )}
 
-            return (
-              <Box
-                sx={{
-                  mb: 3,
-                  p: 2,
-                  bgcolor: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: 1,
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+          <Grid container spacing={3}>
+            {/* Base Cost */}
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <TextField
+                fullWidth
+                label="Base Cost"
+                type="number"
+                value={formData.base_cost}
+                onChange={(e) => {
+                  const newCost = e.target.value;
+                  const costNum = parseFloat(newCost);
+                  const markupNum = parseFloat(formData.markup_percent);
+                  const newUnitPrice = !isNaN(costNum) && !isNaN(markupNum)
+                    ? calculateUnitPriceFromMarkup(costNum, markupNum)
+                    : null;
+                  setFormData((prev) => ({
+                    ...prev,
+                    base_cost: newCost,
+                    unit_price: newUnitPrice !== null ? String(newUnitPrice) : prev.unit_price,
+                  }));
                 }}
-              >
-                <Typography variant="subtitle2" gutterBottom>
-                  Part Pricing Tiers
-                </Typography>
-                {sortedTiers.map((tier, i) => {
-                  const isActive = tier.qty === activeTierQty;
-                  return (
-                    <Typography
-                      key={i}
-                      variant="body2"
-                      sx={{
-                        color: isActive ? 'primary.main' : 'text.secondary',
-                        fontWeight: isActive ? 600 : 400,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                      }}
-                    >
-                      {isActive ? '▸' : '\u2003'} {tier.qty}+ units: {formatCurrency(tier.price)}/ea
-                    </Typography>
-                  );
-                })}
-              </Box>
-            );
-          })()}
+                disabled={loading || formData.cost_source === 'routing'}
+                helperText={formData.cost_source === 'routing' ? 'Calculated from routing' : 'Cost per unit'}
+                slotProps={{
+                  input: {
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  },
+                  htmlInput: { min: 0, step: 0.01 },
+                }}
+              />
+            </Grid>
 
-          <Grid container spacing={3} alignItems="flex-end">
+            {/* Markup % */}
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <TextField
+                fullWidth
+                label="Markup %"
+                type="number"
+                value={formData.markup_percent}
+                onChange={(e) => {
+                  lastEditedField.current = 'markup';
+                  const newMarkup = e.target.value;
+                  const costNum = parseFloat(formData.base_cost);
+                  const markupNum = parseFloat(newMarkup);
+                  const newUnitPrice = !isNaN(costNum) && !isNaN(markupNum)
+                    ? calculateUnitPriceFromMarkup(costNum, markupNum)
+                    : null;
+                  setFormData((prev) => ({
+                    ...prev,
+                    markup_percent: newMarkup,
+                    unit_price: newUnitPrice !== null ? String(newUnitPrice) : prev.unit_price,
+                  }));
+                }}
+                disabled={loading}
+                helperText={
+                  selectedPart?.part_category?.default_markup_percent !== null &&
+                  selectedPart?.part_category?.default_markup_percent !== undefined
+                    ? `Default: ${selectedPart.part_category.default_markup_percent}% (${selectedPart.part_category.name})`
+                    : undefined
+                }
+                slotProps={{
+                  input: {
+                    endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                  },
+                  htmlInput: { step: 0.1 },
+                }}
+              />
+            </Grid>
+
+            {/* Unit Price */}
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <TextField
+                fullWidth
+                label="Unit Price"
+                type="number"
+                value={formData.unit_price}
+                onChange={(e) => {
+                  lastEditedField.current = 'unit_price';
+                  const newPrice = e.target.value;
+                  const costNum = parseFloat(formData.base_cost);
+                  const priceNum = parseFloat(newPrice);
+                  const newMarkup = !isNaN(costNum) && costNum > 0 && !isNaN(priceNum)
+                    ? calculateMarkupFromUnitPrice(costNum, priceNum)
+                    : null;
+                  setFormData((prev) => ({
+                    ...prev,
+                    unit_price: newPrice,
+                    markup_percent: newMarkup !== null ? String(newMarkup) : prev.markup_percent,
+                  }));
+                }}
+                error={!!fieldErrors.unit_price}
+                helperText={fieldErrors.unit_price}
+                disabled={loading}
+                slotProps={{
+                  input: {
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  },
+                  htmlInput: { min: 0, step: 0.01 },
+                }}
+              />
+            </Grid>
+
+            {/* Quantity */}
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
@@ -564,29 +693,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 }}
               />
             </Grid>
+
+            {/* Total */}
             <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                label="Unit Price"
-                type="number"
-                value={formData.unit_price}
-                onChange={(e) => {
-                  isPriceManuallyEdited.current = true;
-                  handleChange('unit_price')(e);
-                }}
-                error={!!fieldErrors.unit_price}
-                helperText={fieldErrors.unit_price}
-                disabled={loading}
-                slotProps={{
-                  input: {
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  },
-                  htmlInput: { min: 0, step: 0.01 },
-                }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <Box sx={{ textAlign: 'center' }}>
+              <Box sx={{ textAlign: 'center', pt: 1 }}>
                 <Typography variant="body2" color="text.secondary">
                   Total
                 </Typography>
@@ -596,25 +706,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Box>
             </Grid>
           </Grid>
-
-          {/* Auto-fill status helper text */}
-          {selectedPart?.pricing && selectedPart.pricing.length > 0 && formData.unit_price && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
-              {isPriceManuallyEdited.current
-                ? 'Custom price'
-                : (() => {
-                    const qty = parseInt(formData.quantity, 10) || 1;
-                    const sorted = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
-                    for (let i = sorted.length - 1; i >= 0; i--) {
-                      if (sorted[i].qty <= qty) {
-                        return `Auto-filled from ${sorted[i].qty}+ tier. Edit to override.`;
-                      }
-                    }
-                    return `Auto-filled from ${sorted[0]?.qty}+ tier. Edit to override.`;
-                  })()
-              }
-            </Typography>
-          )}
         </CardContent>
       </Card>
 

@@ -82,10 +82,9 @@ describe('partsAccess utilities', () => {
     company_id: 'company-1',
     part_number: 'PART001',
     description: 'Test Part',
-    pricing: [
-      { qty: 1, price: 10.0 },
-      { qty: 10, price: 8.5 },
-    ],
+    category_id: null,
+    manual_cost: 10.0,
+    cost_source: 'manual',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -270,10 +269,9 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_number: 'NEW001',
       description: 'New Part',
-      pricing: [
-        { qty: 1, price: 15.0 },
-        { qty: 50, price: 12.0 },
-      ],
+      category_id: '',
+      manual_cost: '15.00',
+      cost_source: 'manual',
     };
 
     it('inserts part and returns data', async () => {
@@ -282,10 +280,9 @@ describe('partsAccess utilities', () => {
         company_id: 'company-1',
         part_number: 'NEW001',
         description: 'New Part',
-        pricing: [
-          { qty: 1, price: 15.0 },
-          { qty: 50, price: 12.0 },
-        ],
+        category_id: null,
+        manual_cost: 15.0,
+        cost_source: 'manual',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -317,14 +314,16 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_number: 'PART001',
       description: 'Updated Part',
-      pricing: [{ qty: 1, price: 20.0 }],
+      category_id: '',
+      manual_cost: '20.00',
+      cost_source: 'manual',
     };
 
     it('updates part and returns data', async () => {
       const mockUpdatedPart: Part = {
         ...mockPart,
         description: 'Updated Part',
-        pricing: [{ qty: 1, price: 20.0 }],
+        manual_cost: 20.0,
       };
 
       mockQueryBuilder.data = mockUpdatedPart;

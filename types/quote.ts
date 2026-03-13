@@ -1,5 +1,3 @@
-import { PricingTier, getUnitPrice } from './part';
-
 /**
  * Quote status values
  */
@@ -16,6 +14,11 @@ export interface Quote {
   part_id: string | null;
   description: string | null;
   quantity: number;
+  base_cost: number | null;
+  cost_source: string | null;
+  markup_percent: number | null;
+  estimated_labor_cost: number | null;
+  estimated_material_cost: number | null;
   unit_price: number | null;
   total_price: number | null;
   status: QuoteStatus;
@@ -42,7 +45,14 @@ export interface QuoteWithRelations extends Quote {
     id: string;
     part_number: string;
     description: string | null;
-    pricing: PricingTier[];
+    category_id: string | null;
+    manual_cost: number | null;
+    cost_source: string | null;
+    part_categories?: {
+      id: string;
+      name: string;
+      default_markup_percent: number | null;
+    } | null;
   } | null;
   // Joined job data (if converted)
   jobs?: {
@@ -62,9 +72,12 @@ export interface QuoteFormData {
   part_type: 'existing' | 'adhoc';
   part_id: string;
   description: string;
-  quantity: string; // String for form input
-  unit_price: string; // String for form input
-  status?: QuoteStatus; // For edit mode to check permissions
+  quantity: string;
+  base_cost: string;
+  cost_source: string;
+  markup_percent: string;
+  unit_price: string;
+  status?: QuoteStatus;
 }
 
 /**
@@ -85,6 +98,9 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   part_id: '',
   description: '',
   quantity: '1',
+  base_cost: '',
+  cost_source: '',
+  markup_percent: '',
   unit_price: '',
 };
 
@@ -98,17 +114,32 @@ export function quoteToFormData(quote: Quote): QuoteFormData {
     part_id: quote.part_id || '',
     description: quote.description || '',
     quantity: String(quote.quantity),
+    base_cost: quote.base_cost !== null ? String(quote.base_cost) : '',
+    cost_source: quote.cost_source || '',
+    markup_percent: quote.markup_percent !== null ? String(quote.markup_percent) : '',
     unit_price: quote.unit_price !== null ? String(quote.unit_price) : '',
     status: quote.status,
   };
 }
 
 /**
- * Calculate unit price from part pricing tiers based on quantity.
- * Re-exports getUnitPrice from part.ts for convenience.
+ * Calculate unit price from base cost and markup percentage.
+ * Markup on cost: unit_price = base_cost × (1 + markup_percent / 100)
  */
-export function calculateUnitPrice(pricing: PricingTier[], orderQty: number): number | null {
-  return getUnitPrice(pricing, orderQty);
+export function calculateUnitPriceFromMarkup(baseCost: number, markupPercent: number): number | null {
+  if (isNaN(baseCost) || baseCost < 0) return null;
+  if (isNaN(markupPercent)) return null;
+  return Math.round(baseCost * (1 + markupPercent / 100) * 10000) / 10000;
+}
+
+/**
+ * Back-calculate markup percentage from base cost and unit price.
+ * markup = ((unit_price - base_cost) / base_cost) × 100
+ */
+export function calculateMarkupFromUnitPrice(baseCost: number, unitPrice: number): number | null {
+  if (isNaN(baseCost) || baseCost <= 0) return null;
+  if (isNaN(unitPrice) || unitPrice < 0) return null;
+  return Math.round(((unitPrice - baseCost) / baseCost) * 100 * 100) / 100;
 }
 
 /**
@@ -166,4 +197,3 @@ export interface TempAttachment {
   file_size: number;
   mime_type: string;
 }
-

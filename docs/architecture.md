@@ -186,7 +186,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - parts - Part definitions with category and cost data (company-wide, no customer_id)
 
-- part_categories - Part classifications with default margin percentages
+- part_categories - Part classifications with default markup percentages
 
 - operation_types - Available operations
 

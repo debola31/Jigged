@@ -26,14 +26,6 @@ export interface FieldDefinition {
 }
 
 /**
- * Pricing tier column pair (for parts import).
- */
-export interface PricingColumnPair {
-  qty_column: string;
-  price_column: string;
-}
-
-/**
  * Props for the ConfidenceChip component.
  */
 export interface ConfidenceChipProps {
@@ -83,17 +75,6 @@ export interface MappingReviewTableProps {
 
   // Callbacks
   onMappingChange: (csvColumn: string, dbField: string | null) => void;
-}
-
-/**
- * Props for the PricingTierCard component.
- */
-export interface PricingTierCardProps {
-  pricingTiers: PricingColumnPair[];
-  csvHeaders: string[];
-  onPricingTierChange: (index: number, field: 'qty_column' | 'price_column', value: string) => void;
-  onPricingTierAdd: () => void;
-  onPricingTierRemove: (index: number) => void;
 }
 
 /**

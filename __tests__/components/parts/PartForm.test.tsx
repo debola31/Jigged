@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, routerMocks, resetRouterMocks } from '../../test-utils';
 import PartForm from '@/components/parts/PartForm';
@@ -17,6 +17,10 @@ vi.mock('@/utils/partsAccess', () => ({
   updatePart: (...args: unknown[]) => mockUpdatePart(...args),
   deletePart: (...args: unknown[]) => mockDeletePart(...args),
   checkPartNumberExists: (...args: unknown[]) => mockCheckPartNumberExists(...args),
+}));
+
+vi.mock('@/utils/partCategoriesAccess', () => ({
+  getPartCategoriesForSelect: vi.fn().mockResolvedValue([]),
 }));
 
 describe('PartForm', () => {
@@ -55,8 +59,8 @@ describe('PartForm', () => {
     });
   });
 
-  describe('Pricing Tiers', () => {
-    it('renders default pricing tier (qty=1) for new parts', async () => {
+  describe('Cost Information', () => {
+    it('renders cost information card', async () => {
       render(
         <PartForm
           mode="create"
@@ -65,73 +69,47 @@ describe('PartForm', () => {
         />
       );
 
-      // Wait for render
       await waitFor(() => {
-        expect(screen.getByText(/pricing tiers/i)).toBeInTheDocument();
+        expect(screen.getByText(/cost information/i)).toBeInTheDocument();
       });
 
-      // Find the pricing tiers table
-      const table = screen.getByRole('table');
-      const rows = within(table).getAllByRole('row');
-
-      // Should have header row + 1 data row (default tier)
-      expect(rows.length).toBeGreaterThanOrEqual(2);
+      // Manual cost field should exist
+      expect(screen.getByLabelText(/manual cost/i)).toBeInTheDocument();
     });
 
-    it('can add and remove pricing tiers', async () => {
+    it('shows cost source chip in edit mode', async () => {
+      const partWithRouting: Part = {
+        id: 'part-1',
+        company_id: 'test-company-id',
+        part_number: 'P001',
+        description: null,
+        category_id: null,
+        manual_cost: 50,
+        cost_source: 'routing',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        routing: { id: 'r-1' },
+      };
+
       render(
         <PartForm
-          mode="create"
+          mode="edit"
           companyId="test-company-id"
-          initialData={EMPTY_PART_FORM}
+          initialData={{
+            part_number: 'P001',
+            description: '',
+            category_id: '',
+            manual_cost: '50',
+            cost_source: 'routing',
+          }}
+          partId="part-1"
+          part={partWithRouting}
         />
       );
 
-      // Click "Add Tier" button
-      const addTierButton = screen.getByRole('button', { name: /add tier/i });
-      await user.click(addTierButton);
-
-      // Find the pricing tiers table
-      const table = screen.getByRole('table');
-      const rows = within(table).getAllByRole('row');
-
-      // Should have header row + 2 data rows now
-      expect(rows.length).toBeGreaterThanOrEqual(3);
-
-      // Find and click delete button on the second row
-      const deleteButtons = screen.getAllByTestId ?
-        screen.getAllByRole('button').filter(btn => btn.querySelector('[data-testid="DeleteIcon"]')) :
-        Array.from(document.querySelectorAll('button')).filter(btn =>
-          btn.innerHTML.includes('DeleteIcon') || btn.querySelector('svg')
-        );
-
-      // Should have delete buttons
-      expect(deleteButtons.length).toBeGreaterThan(0);
-    });
-
-    it('prevents removing the last pricing tier', async () => {
-      render(
-        <PartForm
-          mode="create"
-          companyId="test-company-id"
-          initialData={EMPTY_PART_FORM}
-        />
-      );
-
-      // Wait for render
       await waitFor(() => {
-        expect(screen.getByText(/pricing tiers/i)).toBeInTheDocument();
+        expect(screen.getByText(/from routing/i)).toBeInTheDocument();
       });
-
-      // Find delete buttons in the pricing table
-      const table = screen.getByRole('table');
-      const deleteButtons = within(table).getAllByRole('button');
-
-      // The delete button should be disabled when there's only one tier
-      const deleteButton = deleteButtons.find(btn => btn.getAttribute('disabled') !== null);
-      if (deleteButton) {
-        expect(deleteButton).toBeDisabled();
-      }
     });
   });
 
@@ -148,7 +126,9 @@ describe('PartForm', () => {
         company_id: 'test-company-id',
         part_number: 'NEW-PART-001',
         description: 'Test Part Description',
-        pricing: [{ qty: 1, price: 0 }],
+        category_id: null,
+        manual_cost: null,
+        cost_source: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -223,10 +203,9 @@ describe('PartForm', () => {
     const existingPartData: PartFormData = {
       part_number: 'EXIST-001',
       description: 'Existing Part',
-      pricing: [
-        { qty: 1, price: 10.0 },
-        { qty: 50, price: 8.0 },
-      ],
+      category_id: '',
+      manual_cost: '10.00',
+      cost_source: 'manual',
     };
 
     const existingPart: Part = {
@@ -234,10 +213,9 @@ describe('PartForm', () => {
       company_id: 'test-company-id',
       part_number: 'EXIST-001',
       description: 'Existing Part',
-      pricing: [
-        { qty: 1, price: 10.0 },
-        { qty: 50, price: 8.0 },
-      ],
+      category_id: null,
+      manual_cost: 10.0,
+      cost_source: 'manual',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
       quotes_count: 2,

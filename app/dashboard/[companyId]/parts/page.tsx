@@ -222,6 +222,13 @@ export default function PartsPage() {
       valueFormatter: (params) => params.value ?? '—',
     },
     {
+      colId: 'category',
+      headerName: 'Category',
+      width: 160,
+      sortable: false,
+      valueGetter: (params) => params.data?.part_category?.name ?? '—',
+    },
+    {
       colId: 'routing',
       headerName: 'Routing',
       width: 100,
@@ -236,36 +243,15 @@ export default function PartsPage() {
       },
     },
     {
-      colId: 'pricing',
-      headerName: 'Qty/Price',
-      flex: 1,
-      minWidth: 200,
+      colId: 'cost',
+      headerName: 'Cost',
+      flex: 0.8,
+      minWidth: 120,
       sortable: false,
       cellRenderer: (params: ICellRendererParams<Part>) => {
-        const pricing = params.data?.pricing;
-        if (!pricing || pricing.length === 0) return '—';
-
-        return (
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.75,
-              overflow: 'hidden',
-              fontSize: '0.875rem',
-            }}
-          >
-            {pricing.map((tier, idx) => (
-              <Box key={idx} component="span" sx={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
-                {idx > 0 && (
-                  <Box component="span" sx={{ color: 'text.disabled', mx: 0.5 }}>•</Box>
-                )}
-                <Box component="span" sx={{ color: 'text.secondary', mr: 0.5 }}>×{tier.qty}</Box>
-                <Box component="span" sx={{ fontWeight: 500 }}>${tier.price.toFixed(2)}</Box>
-              </Box>
-            ))}
-          </Box>
-        );
+        const cost = params.data?.manual_cost;
+        if (cost === null || cost === undefined) return '—';
+        return `$${cost.toFixed(2)}`;
       },
     },
   ];

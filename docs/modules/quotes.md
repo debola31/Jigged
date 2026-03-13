@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Quotes module handles the sales quoting process - the entry point for work into the shop. Quotes capture what a customer wants, at what price, and track whether the customer & the shop owner accepts or declines. Approved quotes convert into Jobs.
+The Quotes module handles the sales quoting process - the entry point for work into the shop. Quotes capture what a customer wants, at what price, and track whether the customer & the shop owner accepts or declines. Approved quotes convert into Jobs. Quotes use a **cost-plus pricing model** where the quoted price is derived from base cost plus a margin percentage.
 
 **Priority:** Must Have (Build Third)
 
@@ -52,7 +52,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | As a... | I want to... | So that... |
 |---|---|---|
 | Salesperson | Create a quote for a customer | I can respond to customer inquiries |
-| Salesperson | Select an existing part with pre-set pricing | I can quickly quote repeat orders |
+| Salesperson | Select an existing part and see its cost with a default margin | I can quickly quote repeat orders |
 | Salesperson | Enter an ad-hoc part for one-off jobs | I can quote new work without creating a part first |
 | Salesperson | Mark a quote as sent for approval | I can track that the customer has received it |
 | Salesperson | Mark a quote as Approved or Rejected | I can track the outcome |
@@ -74,7 +74,12 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | part_number_text | Text | No | Ad-hoc part number (when part_id is null) |
 | description | Text | No | Part/job description |
 | quantity | Integer | Yes | Number of units quoted |
-| unit_price | Decimal | No | Price per unit |
+| base_cost | Decimal(12,4) | No | Cost per unit (from routing calculation or manual entry) |
+| cost_source | Text | No | How base_cost was determined: 'routing', 'manual', 'estimate' |
+| margin_percent | Decimal(5,2) | No | Margin percentage (pre-filled from part category, overridable) |
+| estimated_labor_cost | Decimal(12,4) | No | Labor cost breakdown from routing (for display) |
+| estimated_material_cost | Decimal(12,4) | No | Material cost breakdown from routing (for display) |
+| unit_price | Decimal | No | Price per unit (derived: `base_cost / (1 - margin_percent / 100)`, or directly entered) |
 | total_price | Decimal | No | Total quoted price (quantity × unit_price) |
 | estimated_lead_time_days | Integer | No | Estimated days to complete |
 | valid_until | Date | No | Quote expiration date |
@@ -82,6 +87,8 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | converted_to_job_id | UUID (FK) | No | Link to job when converted |
 | converted_at | Timestamp | No | When quote was converted to job |
 | notes | Text | No | Internal notes |
+
+**Snapshot Behavior:** `base_cost`, `cost_source`, `margin_percent`, `estimated_labor_cost`, and `estimated_material_cost` are **snapshot fields** — copied from the part/routing at quote creation time. They do NOT auto-update if the part's routing changes later. Draft quotes for affected parts may show a "cost may be outdated" indicator, but the stored values remain frozen until the user explicitly refreshes them.
 
 ---
 
@@ -159,13 +166,28 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
   - Description text field
 
-▸ **Pricing**
+▸ **Cost & Pricing**
 
 - Quantity (required, number input)
 
-- Unit Price (auto-calculated from part pricing tiers, editable)
+- Base Cost per Unit
+  - If part has routing: auto-populated, read-only, shows "Calculated from routing" label
+  - If no routing: editable field for manual entry
+  - Expandable cost breakdown when cost_source is 'routing': Labor by operation + Materials subtotal
+
+- Cost Source (read-only indicator: "From routing" / "Manual" / "Estimate")
+
+- Margin % (pre-filled from part's category default, editable)
+  - Hint: "Default: 35% (Precision Machined)" showing source category
+
+- Unit Price (calculated from cost + margin, editable for bidirectional editing)
 
 - Total Price (calculated: quantity × unit_price, display only)
+
+**Bidirectional Editing:**
+- User edits Margin % → Unit Price recalculates
+- User edits Unit Price → Margin % back-calculates
+- Base Cost stays anchored (only changes if routing changes or user edits manual cost)
 
 ▸ **Timeline**
 
@@ -201,7 +223,12 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 - Part info (link to part if exists)
 
-- Quantity, Unit Price, Total
+- **Cost & Pricing:**
+  - Base Cost per Unit with cost source indicator ("From routing" / "Manual" / "Estimate")
+  - Cost breakdown (expandable: labor by operation + materials) when cost_source is 'routing'
+  - Margin % with source hint ("Category default" or "Custom override")
+  - Unit Price, Quantity, Total Price
+  - If part's routing has changed since quote creation: subtle "Cost may be outdated" indicator with "Refresh cost" action (available on draft/rejected quotes only)
 
 - Lead time, Valid until
 
@@ -333,8 +360,11 @@ To streamline the quoting workflow, users can create new customers and parts dir
 │  Part Number *      [____________]          │
 │  Description        [____________]          │
 │                                             │
-│  ─────── Pricing (Optional) ───────         │
-│  Base Price (1+)    [$__________]           │
+│  ─────── Category ───────                   │
+│  Category           [Dropdown    ▼]         │
+│                                             │
+│  ─────── Cost (Optional) ───────            │
+│  Manual Cost/Unit   [$__________]           │
 │                                             │
 │           [Cancel]  [Create Part]           │
 └─────────────────────────────────────────────┘
@@ -351,7 +381,9 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
   - New part auto-selected in dropdown
 
-  - If base price entered, it auto-fills unit price
+  - If category selected, margin pre-fills from category default
+
+  - If manual cost entered, it populates the quote's base_cost field (cost_source = 'manual')
 
   - Toast: "Part created successfully"
 
@@ -365,9 +397,11 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 - Description
 
-- Base Price (creates single pricing tier: qty=1)
+- Category (dropdown of existing part_categories)
 
-> **Note:** Additional pricing tiers and full part details can be added later by editing the part record.
+- Manual Cost per Unit (sets base cost for the quote)
+
+> **Note:** Full part details, routing, and category assignment can be added later by editing the part record.
 
 ### Updated Quote Form Layout
 
@@ -409,11 +443,13 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 - [ ] "+ New Part" button visible when "Existing Part" is selected
 
-- [ ] Quick Create Part modal opens without customer dependency
+- [ ] Quick Create Part modal opens with category dropdown and manual cost field
 
 - [ ] New part auto-selected after creation
 
-- [ ] Base price from quick create flows to unit price field
+- [ ] Manual cost from quick create flows to quote base_cost
+
+- [ ] Category from quick create pre-fills quote margin
 
 - [ ] Validation errors display inline in modals
 
@@ -421,27 +457,58 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 ---
 
-## Auto-Pricing Logic
+## Cost-Plus Pricing Logic
 
-When user selects an existing part and enters quantity:
+When a user selects an existing part and enters quantity:
 
-1. Look up part's pricing tiers
+1. **Determine base cost:**
+   - If part has a routing: auto-calculate from routing operations (see [Routings — Cost Calculation](routings.md#cost-calculation-from-routing))
+   - If part has `manual_cost`: use that value
+   - If neither: leave blank for user to enter manually
 
-2. Find applicable tier based on quantity
+2. **Apply margin default:**
+   - Look up part's category → `default_margin_percent`
+   - Pre-fill `margin_percent` field
+   - If part has no category, margin is blank (user must enter)
 
-3. Auto-fill unit_price field
+3. **Calculate unit price:**
+   ```
+   unit_price = base_cost / (1 - margin_percent / 100)
+   ```
 
-4. User can override if needed
+4. **Calculate total price:**
+   ```
+   total_price = quantity × unit_price
+   ```
 
-Example:
+### Bidirectional Editing
 
-- Part has: Tier 1 (1+) = $50, Tier 2 (100+) = $45
+Users can edit pricing from two directions — the system keeps cost, margin, and price in sync:
 
-- User enters quantity: 150
+- **Edit margin_percent** → `unit_price` recalculates, `total_price` recalculates
+- **Edit unit_price** → `margin_percent` back-calculates: `margin = (unit_price - base_cost) / unit_price × 100`
+- **base_cost stays anchored** — it only changes if the routing changes or the user explicitly edits it (manual/estimate cost source)
 
-- System auto-fills unit_price: $45
+### Cost Source Display
 
-- Total calculates: $6,750
+| cost_source | UI Display | Editable? |
+|---|---|---|
+| `routing` | "Calculated from routing" with expandable breakdown | Base cost read-only |
+| `manual` | "Manual entry" | Base cost editable |
+| `estimate` | "Estimate" with warning indicator | Base cost editable |
+| `null` | "No cost data — enter base cost to continue" | Base cost editable |
+
+### Example
+
+- Part "AE36589E-RT" has a routing with total cost = $103.25
+- Part category "Precision Machined" has default margin = 35%
+- User enters quantity: 50
+
+System auto-fills:
+- Base Cost: $103.25 (from routing)
+- Margin: 35% (from category)
+- Unit Price: $103.25 / (1 - 0.35) = $158.85
+- Total Price: 50 × $158.85 = $7,942.31
 
 ---
 
@@ -536,7 +603,21 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Can create new quote with ad-hoc part
 
-- [ ] Unit price auto-fills from part pricing tiers
+- [ ] Base cost auto-populates from routing when part has a routing
+
+- [ ] Base cost uses manual_cost when part has no routing
+
+- [ ] Margin pre-fills from part's category default_margin_percent
+
+- [ ] Editing margin recalculates unit price (bidirectional)
+
+- [ ] Editing unit price back-calculates margin (bidirectional)
+
+- [ ] Base cost is read-only when cost_source is 'routing'
+
+- [ ] Cost breakdown (labor + materials) shown for routing-based costs
+
+- [ ] Cost source indicator displayed on quote form
 
 - [ ] Total price calculates automatically
 
@@ -568,7 +649,9 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] New part auto-selected in dropdown after creation
 
-- [ ] Base price from quick create flows to unit price field
+- [ ] Manual cost from quick create flows to quote base_cost field
+
+- [ ] Category from quick create pre-fills margin on quote
 
 - [ ] Validation errors display inline in modals
 
@@ -576,60 +659,52 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 ---
 
-## Phase 1 Enhancement: Routing-Based Cost Estimation
+## Routing-Based Cost Calculation
 
-> **Note:** This section documents planned enhancements for Phase 1, after the Resources and Routings modules are complete.
+When a part has a routing, the base cost is automatically calculated. See [Routings Module — Cost Calculation](routings.md#cost-calculation-from-routing) for the detailed formula.
 
-In Phase 1, quotes will support **routing-based cost estimation**:
+### Summary
 
-### How It Works
-
-1. When creating a quote for a part that has a **routing** defined (1:1 with part):
-  - System calculates estimated cost from the part's routing operations
-
-  - Each operation: `estimated_hours × resource.labor_rate`
-
-  - Total: `Σ (operation costs) + material_cost`
-
-1. **Auto-fill pricing** from routing:
-
-```javascript
-function calculateQuoteCost(routing: Routing): number {
-  const laborCost = routing.operations.reduce((sum, op) => {
-    return sum + (op.estimated_hours * op.resource.labor_rate);
-  }, 0);
-  
-  const materialCost = routing.material_cost ?? 0;
-  
-  return laborCost + materialCost;
-}
+```
+base_cost = labor_cost + material_cost
+labor_cost = Σ (node.run_time_per_unit / 60 × operation_type.labor_rate)
+material_cost = Σ (node.materials[].quantity × inventory_item.cost_per_unit)
 ```
 
-1. **Quote form additions:**
-  - Show calculated cost breakdown (labor by operation + materials)
+### Cost Breakdown Display
 
-  - User can override suggested price
+The quote form shows an expandable cost breakdown when cost_source is 'routing':
 
-  - Margin calculator: `(quoted_price - estimated_cost) / quoted_price`
+| Operation | Time/Unit | Rate | Cost |
+|---|---|---|---|
+| CNC Mill | 0.5 hr | $135/hr | $67.50 |
+| Deburr | 0.25 hr | $90/hr | $22.50 |
+| Inspect | 0.1 hr | $95/hr | $9.50 |
+| **Labor Subtotal** | | | **$99.50** |
+| 6061 Aluminum (0.5 lbs) | | | $3.75 |
+| **Material Subtotal** | | | **$3.75** |
+| **Total Base Cost** | | | **$103.25** |
 
-### Data Model Addition (Phase 1)
+### When Routing Changes After Quote Creation
 
-| Field | Type | Description |
-|---|---|---|
-| estimated_labor_cost | Decimal | Calculated from routing operations |
-| estimated_material_cost | Decimal | From part or routing |
-| estimated_total_cost | Decimal | Labor + materials |
-| margin_percent | Decimal | Calculated: (price - cost) / price |
+Quote cost fields are snapshots (frozen at creation time). If a part's routing is updated after a quote was created:
 
-### Acceptance Criteria (Phase 1)
+- **Draft/Rejected quotes:** Show a subtle "Cost may be outdated" indicator with a "Refresh cost" button that re-fetches the routing cost and updates the snapshot fields
+- **Pending Approval/Approved/Converted quotes:** No indicator — the quoted price stands as agreed
 
-- [ ] Quotes for parts with routings show estimated cost breakdown
+### Acceptance Criteria (Routing Cost)
 
-- [ ] Labor cost calculated from routing operations × resource rates
+- [ ] Quotes for parts with routings show cost breakdown (labor by operation + materials)
 
-- [ ] User can see and override suggested pricing
+- [ ] Labor cost calculated from routing node run times × operation type labor rates
 
-- [ ] Margin percentage displayed when cost and price both entered
+- [ ] Material cost calculated from routing node materials × inventory item costs
+
+- [ ] Quote detail page displays margin %, base cost, cost source, and cost breakdown
+
+- [ ] Quote detail page shows "cost may be outdated" when part routing has changed since quote creation
+
+- [ ] "Refresh cost" button updates draft/rejected quote cost from current routing
 
 ---
 
@@ -715,6 +790,10 @@ While creating/editing a quote, users can create new entities without leaving th
 
 **Quantity:** Integer, 1 to 1,000,000
 
+**Base Cost:** Decimal, 0 to 999,999.9999 (optional, but required before leaving draft)
+
+**Margin Percent:** Decimal, -100 to 100 (negative margins allowed for loss-leader quotes)
+
 **Unit Price:** Decimal, 0 to 999,999.99 (optional)
 
 **Description:** Max 5,000 characters
@@ -725,11 +804,15 @@ While creating/editing a quote, users can create new entities without leaving th
 
 When selecting an existing part:
 
-- All pricing tiers are displayed below the part field
+- Base cost auto-populates from routing calculation or manual_cost
 
-- Unit price auto-fills based on quantity and applicable tier
+- Margin pre-fills from the part's category `default_margin_percent`
 
-- Total price is calculated as: quantity × unit_price
+- Unit price calculated: `base_cost / (1 - margin_percent / 100)`
+
+- Total price calculated: `quantity × unit_price`
+
+- Cost breakdown (labor + materials) shown if cost_source is 'routing'
 
 ---
 

@@ -205,3 +205,74 @@ When editing a routing node, add a "Materials" section:
 ### User Story Addition
 
 - As a routing designer, I want to specify expected materials for each operation so that operators know what materials to log when completing work
+
+---
+
+## Cost Calculation from Routing
+
+Routings serve as the source of truth for part costing when available. The routing's cost rolls up from individual node costs into a total that feeds directly into the quoting system.
+
+### Per-Node Cost Calculation
+
+Each routing node contributes to cost through labor and materials:
+
+**Labor cost per node:**
+```
+node_labor_cost = (run_time_per_unit / 60) × operation_type.labor_rate
+```
+
+Where:
+- `run_time_per_unit` is in minutes (from `routing_nodes.cycle_time`)
+- `operation_type.labor_rate` is the hourly rate in dollars (from `operation_types.labor_rate`)
+
+**Material cost per node:**
+```
+node_material_cost = Σ (material.quantity × inventory_item.cost_per_unit)
+```
+
+Where materials are defined in the node's `materials` JSONB array, each referencing an `inventory_item_id`.
+
+### Total Routing Cost
+
+```
+total_labor_cost = Σ all node labor costs
+total_material_cost = Σ all node material costs
+total_routing_cost = total_labor_cost + total_material_cost
+```
+
+**Note on parallel operations:** All node costs are summed regardless of whether operations run in parallel or series. Parallel execution affects *time* (critical path calculation), not *cost*. Every operation must be performed and paid for.
+
+### Integration with Parts
+
+When a routing exists for a part:
+- The part's `cost_source` is set to `'routing'`
+- The part's effective base cost = `total_routing_cost` (calculated on demand from the routing, not stored redundantly on the parts table)
+- The part's `manual_cost` field is ignored in favor of the routing calculation
+
+### Integration with Quotes
+
+When creating a quote for a part with a routing:
+1. Fetch the routing and its nodes
+2. For each node, join to `operation_types` for `labor_rate`
+3. For each node's materials, join to `inventory_items` for `cost_per_unit`
+4. Calculate `total_labor_cost` and `total_material_cost`
+5. Set `quote.base_cost = total_routing_cost`
+6. Set `quote.estimated_labor_cost = total_labor_cost`
+7. Set `quote.estimated_material_cost = total_material_cost`
+8. Set `quote.cost_source = 'routing'`
+9. Pre-fill `quote.margin_percent` from part's category `default_margin_percent`
+
+These values are **snapshots** — frozen at quote creation time. See [Quotes Module — Snapshot Behavior](quotes.md#data-model).
+
+### Edge Cases
+
+| Scenario | Behavior |
+|---|---|
+| Node has no `run_time_per_unit` (cycle_time) | Skip labor for that node. Show ⚠️ "Missing run time" warning on cost breakdown. |
+| Operation type has no `labor_rate` | Skip labor for that node. Show ⚠️ "Missing labor rate for {operation_name}" warning. |
+| Node has no materials defined | $0 material cost for that node. Normal — no warning needed. |
+| Material has no `cost_per_unit` in inventory | Skip that material's cost. Show ⚠️ "Missing cost for {material_name}" warning. |
+| Routing has 0 nodes | Cost = $0. Show ⚠️ "Routing has no operations" warning on quote form. |
+| Any warnings present | Quote form shows yellow banner: "Cost may be incomplete — {N} items missing data" with expandable details listing each warning. |
+
+Warnings are informational — they do **not** block quote creation. The user can proceed with incomplete cost data and enter a manual override.

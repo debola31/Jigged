@@ -148,12 +148,26 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "company_id" uuid NOT NULL,
     "part_number" text NOT NULL,
     "description" text,
+    "category_id" uuid,
     "pricing" jsonb DEFAULT '[]'::jsonb,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
     CONSTRAINT "parts_valid_pricing" CHECK (validate_pricing_json(pricing))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."part_categories"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "name" text NOT NULL,
+    "default_markup_percent" numeric(5,2),
+    "description" text,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "part_categories_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_categories_company_id_name_key" UNIQUE (company_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."resource_groups"
@@ -443,6 +457,7 @@ ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operation_types" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_categories" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quotes" ENABLE ROW LEVEL SECURITY;
@@ -992,6 +1007,38 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING (true);
 
+DROP POLICY IF EXISTS "part_categories_delete" ON "public"."part_categories";
+CREATE POLICY "part_categories_delete"
+    ON "public"."part_categories"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_insert" ON "public"."part_categories";
+CREATE POLICY "part_categories_insert"
+    ON "public"."part_categories"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_select" ON "public"."part_categories";
+CREATE POLICY "part_categories_select"
+    ON "public"."part_categories"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_update" ON "public"."part_categories";
+CREATE POLICY "part_categories_update"
+    ON "public"."part_categories"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
 DROP POLICY IF EXISTS "resource_groups_delete" ON "public"."resource_groups";
 CREATE POLICY "resource_groups_delete"
     ON "public"."resource_groups"
@@ -1374,8 +1421,14 @@ ALTER TABLE "public"."operator_sessions"
 ALTER TABLE "public"."operator_sessions"
     ADD CONSTRAINT "operator_sessions_operation_type_id_fkey" FOREIGN KEY (operation_type_id) REFERENCES operation_types(id) ON DELETE RESTRICT;
 
+ALTER TABLE "public"."part_categories"
+    ADD CONSTRAINT "part_categories_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."parts"
+    ADD CONSTRAINT "parts_category_id_fkey" FOREIGN KEY (category_id) REFERENCES part_categories(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quote_attachments"
     ADD CONSTRAINT "quote_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1488,6 +1541,8 @@ CREATE INDEX IF NOT EXISTS idx_operator_sessions_company ON public.operator_sess
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
+CREATE INDEX IF NOT EXISTS idx_part_categories_company ON public.part_categories USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_parts_category ON public.parts USING btree (category_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_number ON public.parts USING btree (company_id, part_number);
 CREATE INDEX IF NOT EXISTS idx_parts_pricing ON public.parts USING gin (pricing);

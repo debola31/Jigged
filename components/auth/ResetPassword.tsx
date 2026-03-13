@@ -31,6 +31,7 @@ export default function ResetPassword() {
   useEffect(() => {
     const supabase = getSupabase();
 
+    // Listen for the PASSWORD_RECOVERY event (fires if we arrive before AuthProvider processes it)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsValidRecovery(true);
@@ -38,14 +39,28 @@ export default function ResetPassword() {
       }
     });
 
-    // If no PASSWORD_RECOVERY event fires within 3 seconds, the link is invalid/expired
-    const timeout = setTimeout(() => {
-      setChecking(false);
-    }, 3000);
+    // Also check if there's already an active session (the PASSWORD_RECOVERY event
+    // may have already fired in AuthProvider before this component mounted)
+    const checkExistingSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        setIsValidRecovery(true);
+        setChecking(false);
+      } else {
+        // No session and event hasn't fired — give it a moment, then mark invalid
+        setTimeout(() => {
+          setChecking((prev) => {
+            // Only update if still checking (event may have fired in the meantime)
+            return prev ? false : prev;
+          });
+        }, 3000);
+      }
+    };
+
+    checkExistingSession();
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(timeout);
     };
   }, []);
 

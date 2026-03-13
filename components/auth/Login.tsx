@@ -120,9 +120,15 @@ export default function Login({ expired, returnTo }: LoginProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
-            sx={{ mb: 3 }}
+            sx={{ mb: 1 }}
             autoComplete="current-password"
           />
+
+          <Box sx={{ textAlign: 'right', mb: 2 }}>
+            <MuiLink component={Link} href="/forgot-password" underline="hover" variant="body2">
+              Forgot password?
+            </MuiLink>
+          </Box>
 
           <Button
             type="submit"

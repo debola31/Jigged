@@ -14,9 +14,16 @@ export interface Part {
   company_id: string;
   part_number: string;
   description: string | null;
+  category_id: string | null;
   pricing: PricingTier[];
   created_at: string;
   updated_at: string;
+  // Optional relation (populated by queries that join part_categories)
+  part_category?: {
+    id: string;
+    name: string;
+    default_markup_percent: number | null;
+  } | null;
   // Optional relation counts (populated by getPartWithRelations)
   quotes_count?: number;
   jobs_count?: number;
@@ -34,6 +41,7 @@ export interface Part {
 export interface PartFormData {
   part_number: string;
   description: string;
+  category_id: string;
   pricing: PricingTier[];
 }
 
@@ -43,6 +51,7 @@ export interface PartFormData {
 export const EMPTY_PART_FORM: PartFormData = {
   part_number: '',
   description: '',
+  category_id: '',
   pricing: [{ qty: 1, price: 0 }],
 };
 
@@ -61,6 +70,7 @@ export function partToFormData(part: Part): PartFormData {
   return {
     part_number: part.part_number,
     description: part.description || '',
+    category_id: part.category_id || '',
     pricing: part.pricing.length > 0 ? sortPricingTiers(part.pricing) : [{ qty: 1, price: 0 }],
   };
 }

@@ -10,6 +10,7 @@ interface PartRow {
   company_id: string;
   part_number: string;
   description: string | null;
+  category_id: string | null;
   pricing: PricingTier[];
   created_at: string;
   updated_at: string;
@@ -34,7 +35,7 @@ export async function getAllParts(
   while (hasMore) {
     let query = supabase
       .from('parts')
-      .select('*, routings(id)')
+      .select('*, part_categories(id, name, default_markup_percent), routings(id)')
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -56,16 +57,20 @@ export async function getAllParts(
   }
 
   return allData.map((part) => {
-    const routings = (part as unknown as Record<string, unknown>).routings as Array<{ id: string }> | { id: string } | null;
+    const raw = part as unknown as Record<string, unknown>;
+    const routings = raw.routings as Array<{ id: string }> | { id: string } | null;
     const routingRecord = Array.isArray(routings) ? routings[0] : routings;
+    const partCategory = raw.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
     return {
       id: part.id,
       company_id: part.company_id,
       part_number: part.part_number,
       description: part.description,
+      category_id: part.category_id,
       pricing: sortPricingTiers(part.pricing || []),
       created_at: part.created_at,
       updated_at: part.updated_at,
+      part_category: partCategory || null,
       routing: routingRecord
         ? { id: routingRecord.id, nodes_count: 0, total_run_time_per_unit: null }
         : undefined,
@@ -88,7 +93,7 @@ export async function getPartsPaginated(
 
   let query = supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('company_id', companyId)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
@@ -104,10 +109,15 @@ export async function getPartsPaginated(
     throw error;
   }
 
-  return (data || []).map((part: PartRow) => ({
-    ...part,
-    pricing: sortPricingTiers(part.pricing || []),
-  }));
+  return (data || []).map((part: Record<string, unknown>) => {
+    const partCategory = part.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+    const row = part as unknown as PartRow;
+    return {
+      ...row,
+      pricing: sortPricingTiers(row.pricing || []),
+      part_category: partCategory || null,
+    };
+  });
 }
 
 /**
@@ -146,7 +156,7 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   const { data, error } = await supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -157,9 +167,12 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   if (!data) return null;
 
+  const raw = data as Record<string, unknown>;
+  const partCategory = raw.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
   return {
     ...data,
     pricing: sortPricingTiers(data.pricing || []),
+    part_category: partCategory || null,
   };
 }
 
@@ -169,10 +182,10 @@ export async function getPart(partId: string): Promise<Part | null> {
 export async function getPartWithRelations(partId: string): Promise<Part | null> {
   const supabase = getSupabase();
 
-  // Get part
+  // Get part with category
   const { data: part, error: partError } = await supabase
     .from('parts')
-    .select('*')
+    .select('*, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -228,9 +241,13 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     };
   }
 
+  const rawPart = part as Record<string, unknown>;
+  const partCategory = rawPart.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+
   return {
     ...part,
     pricing: sortPricingTiers(part.pricing || []),
+    part_category: partCategory || null,
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
     routing: routingInfo,
@@ -243,7 +260,15 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
  */
 export async function getPartsForSelect(
   companyId: string
-): Promise<Array<{ id: string; part_number: string; description: string | null; pricing: PricingTier[]; has_routing: boolean }>> {
+): Promise<Array<{
+  id: string;
+  part_number: string;
+  description: string | null;
+  category_id: string | null;
+  pricing: PricingTier[];
+  has_routing: boolean;
+  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
+}>> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
@@ -252,7 +277,9 @@ export async function getPartsForSelect(
       id,
       part_number,
       description,
+      category_id,
       pricing,
+      part_categories(id, name, default_markup_percent),
       routings(id)
     `)
     .eq('company_id', companyId)
@@ -263,13 +290,19 @@ export async function getPartsForSelect(
     throw error;
   }
 
-  return (data || []).map((p: { id: string; part_number: string; description: string | null; pricing: PricingTier[]; routings: Array<{ id: string }> | { id: string } | null }) => ({
-    id: p.id,
-    part_number: p.part_number,
-    description: p.description,
-    pricing: p.pricing || [],
-    has_routing: Array.isArray(p.routings) ? p.routings.length > 0 : !!p.routings,
-  }));
+  return (data || []).map((p: Record<string, unknown>) => {
+    const routings = p.routings as Array<{ id: string }> | { id: string } | null;
+    const partCategory = p.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
+    return {
+      id: p.id as string,
+      part_number: p.part_number as string,
+      description: p.description as string | null,
+      category_id: p.category_id as string | null,
+      pricing: (p.pricing as PricingTier[]) || [],
+      has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
+      part_category: partCategory || null,
+    };
+  });
 }
 
 /**
@@ -315,6 +348,7 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
       company_id: companyId,
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
+      category_id: formData.category_id || null,
       pricing: sortedPricing,
     })
     .select()
@@ -343,6 +377,7 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
     .update({
       part_number: formData.part_number.trim(),
       description: formData.description.trim() || null,
+      category_id: formData.category_id || null,
       pricing: sortedPricing,
       updated_at: new Date().toISOString(),
     })

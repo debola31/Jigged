@@ -52,6 +52,36 @@ class CompanyCreateResponse(BaseModel):
     message: str
 
 
+class CompanyUpdateRequest(BaseModel):
+    """Request body for updating a company."""
+    name: str
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError('Company name is required')
+        if len(v) > 100:
+            raise ValueError('Company name must be 100 characters or less')
+        return v
+
+
+class CompanyUpdateResponse(BaseModel):
+    """Response after updating a company."""
+    success: bool
+    company_id: str
+    name: str
+    slug: str
+    message: str
+
+
+class CompanyDeleteResponse(BaseModel):
+    """Response after deleting a company."""
+    success: bool
+    message: str
+
+
 class CompanyListItem(BaseModel):
     """Response model for a company in the list."""
     id: str

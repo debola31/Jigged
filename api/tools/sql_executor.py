@@ -137,6 +137,11 @@ async def execute_sql_query(
                 f"SET statement_timeout = '{STATEMENT_TIMEOUT_MS}'"
             )
 
+            # Set company context for RLS policies (defense-in-depth)
+            await conn.execute(
+                "SET LOCAL jigged.company_id = $1", company_id
+            )
+
             rows = await conn.fetch(cleaned_sql, company_id)
 
             if not rows:

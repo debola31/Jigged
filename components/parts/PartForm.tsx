@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -24,9 +24,11 @@ import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import Autocomplete from '@mui/material/Autocomplete';
 import type { Part, PartFormData } from '@/types/part';
 import { validatePricingTiers } from '@/types/part';
 import { createPart, updatePart, deletePart, checkPartNumberExists } from '@/utils/partsAccess';
+import { getPartCategoriesForSelect } from '@/utils/partCategoriesAccess';
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -52,6 +54,12 @@ export default function PartForm({
   const [formData, setFormData] = useState<PartFormData>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; default_markup_percent: number | null }>>([]);
+
+  // Fetch categories for dropdown
+  useEffect(() => {
+    getPartCategoriesForSelect(companyId).then(setCategories).catch(console.error);
+  }, [companyId]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pricingWarnings, setPricingWarnings] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -240,6 +248,37 @@ export default function PartForm({
               />
             </Grid>
           </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Category */}
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+            Category
+          </Typography>
+          <Autocomplete
+            options={categories}
+            getOptionLabel={(option) => {
+              const markup = option.default_markup_percent !== null ? ` (${option.default_markup_percent}% markup)` : '';
+              return `${option.name}${markup}`;
+            }}
+            value={categories.find((c) => c.id === formData.category_id) || null}
+            onChange={(_, newValue) => {
+              setFormData((prev) => ({ ...prev, category_id: newValue?.id || '' }));
+            }}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Part Category"
+                placeholder="Select a category"
+                helperText="Optional — categories set default markup for quoting"
+                disabled={loading}
+              />
+            )}
+            disabled={loading}
+          />
         </CardContent>
       </Card>
 

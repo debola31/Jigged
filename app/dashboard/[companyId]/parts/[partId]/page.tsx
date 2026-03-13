@@ -182,6 +182,16 @@ export default function PartDetailPage() {
                     {part.description || '—'}
                   </Typography>
                 </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Category
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {part.part_category
+                      ? `${part.part_category.name}${part.part_category.default_markup_percent !== null ? ` (${part.part_category.default_markup_percent}% markup)` : ''}`
+                      : '—'}
+                  </Typography>
+                </Box>
               </Box>
             </CardContent>
           </Card>

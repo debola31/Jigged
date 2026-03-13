@@ -222,6 +222,13 @@ export default function PartsPage() {
       valueFormatter: (params) => params.value ?? '—',
     },
     {
+      colId: 'category',
+      headerName: 'Category',
+      width: 160,
+      sortable: false,
+      valueGetter: (params) => params.data?.part_category?.name ?? '—',
+    },
+    {
       colId: 'routing',
       headerName: 'Routing',
       width: 100,

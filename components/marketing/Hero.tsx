@@ -7,6 +7,22 @@ import JiggedIcon from '@/components/branding/JiggedIcon';
 import EmailCapture from './EmailCapture';
 
 export default function Hero() {
+  const backgroundSx = {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    objectPosition: 'center bottom',
+    opacity: 0.22,
+    mixBlendMode: 'screen',
+    maskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+    WebkitMaskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+    pointerEvents: 'none',
+    zIndex: 0,
+  } as const;
+
   return (
     <Box
       sx={{
@@ -101,25 +117,36 @@ export default function Hero() {
         </Box>
       </Container>
 
-      {/* Wireframe manufacturing scene background */}
+      {/* Looping wireframe manufacturing scene background */}
+      <Box
+        component="video"
+        autoPlay
+        loop
+        muted
+        playsInline
+        poster="/wireframe-scene.png"
+        preload="none"
+        sx={{
+          ...backgroundSx,
+          '@media (prefers-reduced-motion: reduce)': {
+            display: 'none',
+          },
+        }}
+      >
+        <source src="/wireframe-scene.mp4" type="video/mp4" />
+      </Box>
+
+      {/* Static fallback for reduced-motion preference */}
       <Box
         component="img"
         src="/wireframe-scene.png"
         alt=""
         sx={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          objectPosition: 'center bottom',
-          opacity: 0.22,
-          mixBlendMode: 'screen',
-          maskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
-          pointerEvents: 'none',
-          zIndex: 0,
+          ...backgroundSx,
+          display: 'none',
+          '@media (prefers-reduced-motion: reduce)': {
+            display: 'block',
+          },
         }}
       />
     </Box>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default margin configuration and can have a routing defining their manufacturing process. Part cost is derived from the routing when one exists, or entered manually.
+The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default markup configuration and can have a routing defining their manufacturing process. Part cost is derived from the routing when one exists, or entered manually.
 
 **Priority:** Must Have (Build Second)
 
@@ -18,13 +18,13 @@ The Parts module manages the catalog of products/parts that a company manufactur
 |---|---|---|
 | Owner/Admin | View a list of all parts | I can see our product catalog |
 | Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
-| Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default margins |
+| Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default markups |
 | Owner/Admin | Edit part information | I can update descriptions or cost data |
-| Owner/Admin | Manage part categories with default margins | I can standardize margin expectations across similar parts |
+| Owner/Admin | Manage part categories with default markups | I can standardize markup expectations across similar parts |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
 | Owner/Admin | Create or edit a routing from the part detail page | I can define the manufacturing process for a part |
-| Salesperson | Look up part cost and category margin when creating quotes | I can quickly provide accurate quotes |
+| Salesperson | Look up part cost and category markup when creating quotes | I can quickly provide accurate quotes |
 
 ---
 
@@ -49,14 +49,14 @@ Part numbers must be unique within a company.
 
 ### Part Categories Table (`part_categories`)
 
-Part categories classify parts for default margin configuration during quoting. Each company defines its own categories (e.g., "Precision Machined", "Assemblies", "Tooling"). A typical shop has 5–10 categories.
+Part categories classify parts for default markup configuration during quoting. Each company defines its own categories (e.g., "Precision Machined", "Assemblies", "Tooling"). A typical shop has 5–10 categories.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | id | UUID | Yes | Primary key (auto-generated) |
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
 | name | Text | Yes | Category name (e.g., "Precision Machined", "Assemblies", "Tooling") |
-| default_margin_percent | Decimal(5,2) | No | Default margin % applied when quoting parts in this category |
+| default_markup_percent | Decimal(5,2) | No | Default markup % applied when quoting parts in this category |
 | description | Text | No | Optional description of the category |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
@@ -129,7 +129,7 @@ The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** b
 ▸ **Category**
 
 - Category dropdown (list of company's part_categories)
-  - Shows: category name (default margin %)
+  - Shows: category name (default markup %)
   - "+ New Category" quick-create link opens inline modal
   - Optional — parts can exist without a category
 
@@ -196,7 +196,7 @@ function getPartBaseCost(part: Part): number | null {
 }
 ```
 
-When creating a quote for a part, the base cost flows into the quote's `base_cost` field and the part category's `default_margin_percent` pre-fills the margin. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
+When creating a quote for a part, the base cost flows into the quote's `base_cost` field and the part category's `default_markup_percent` pre-fills the markup. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
 
 ---
 
@@ -222,7 +222,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 If the CSV contains a "Category" column, the import will:
 - Match existing categories by name (case-insensitive)
-- Auto-create new categories for unmatched values (with no default margin — admin sets margins later)
+- Auto-create new categories for unmatched values (with no default markup — admin sets markups later)
 
 ### Conflict Detection
 
@@ -260,7 +260,7 @@ If the CSV contains a "Category" column, the import will:
 
 - [ ] Can create a new part category from the part form (quick-create)
 
-- [ ] Category default margin displays on part detail
+- [ ] Category default markup displays on part detail
 
 - [ ] Parts with routings show calculated cost (read-only)
 

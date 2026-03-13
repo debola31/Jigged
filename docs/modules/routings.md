@@ -260,7 +260,7 @@ When creating a quote for a part with a routing:
 6. Set `quote.estimated_labor_cost = total_labor_cost`
 7. Set `quote.estimated_material_cost = total_material_cost`
 8. Set `quote.cost_source = 'routing'`
-9. Pre-fill `quote.margin_percent` from part's category `default_margin_percent`
+9. Pre-fill `quote.markup_percent` from part's category `default_markup_percent`
 
 These values are **snapshots** — frozen at quote creation time. See [Quotes Module — Snapshot Behavior](quotes.md#data-model).
 

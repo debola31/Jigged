@@ -87,6 +87,7 @@ import {
   markQuoteAsRejected,
   convertQuoteToJob,
   getPartWithCostInfo,
+  refreshQuoteCost,
   getQuoteAttachments,
   getQuoteAttachmentCount,
   uploadQuoteAttachment,
@@ -1441,6 +1442,37 @@ describe('quotesAccess utilities', () => {
 
       expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith(
         'company-1/temp/session-123/file.pdf'
+      );
+    });
+  });
+
+  // ============== Cost Refresh Tests ==============
+
+  describe('refreshQuoteCost', () => {
+    it('rejects non-draft/rejected quotes', async () => {
+      // First call: fetch quote (approved)
+      mockQueryBuilder.data = {
+        id: 'quote-1',
+        status: 'approved',
+        part_id: 'part-1',
+        parts: { id: 'part-1', manual_cost: 100 },
+      };
+
+      await expect(refreshQuoteCost('quote-1', 'co-1')).rejects.toThrow(
+        /only draft or rejected/i
+      );
+    });
+
+    it('rejects quotes with no part', async () => {
+      mockQueryBuilder.data = {
+        id: 'quote-1',
+        status: 'draft',
+        part_id: null,
+        parts: null,
+      };
+
+      await expect(refreshQuoteCost('quote-1', 'co-1')).rejects.toThrow(
+        /no part assigned/i
       );
     });
   });

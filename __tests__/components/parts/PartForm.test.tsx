@@ -76,6 +76,41 @@ describe('PartForm', () => {
       // Manual cost field should exist
       expect(screen.getByLabelText(/manual cost/i)).toBeInTheDocument();
     });
+
+    it('shows cost source chip in edit mode', async () => {
+      const partWithRouting: Part = {
+        id: 'part-1',
+        company_id: 'test-company-id',
+        part_number: 'P001',
+        description: null,
+        category_id: null,
+        manual_cost: 50,
+        cost_source: 'routing',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        routing: { id: 'r-1' },
+      };
+
+      render(
+        <PartForm
+          mode="edit"
+          companyId="test-company-id"
+          initialData={{
+            part_number: 'P001',
+            description: '',
+            category_id: '',
+            manual_cost: '50',
+            cost_source: 'routing',
+          }}
+          partId="part-1"
+          part={partWithRouting}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/from routing/i)).toBeInTheDocument();
+      });
+    });
   });
 
   describe('Create mode', () => {

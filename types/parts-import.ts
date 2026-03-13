@@ -8,14 +8,6 @@
 export type CustomerMatchMode = 'by_column' | 'all_to_one' | 'all_generic';
 
 /**
- * A pair of columns for quantity and price.
- */
-export interface PricingColumnPair {
-  qty_column: string;
-  price_column: string;
-}
-
-/**
  * A single column mapping suggestion from AI.
  */
 export interface PartColumnMapping {
@@ -41,7 +33,6 @@ export interface PartAnalyzeRequest {
  */
 export interface PartAnalyzeResponse {
   mappings: PartColumnMapping[];
-  pricing_columns: PricingColumnPair[];
   unmapped_required: string[]; // Required DB fields with no mapping
   discarded_columns: string[]; // CSV columns that won't be imported
   ai_provider: string; // Which AI was used
@@ -74,7 +65,6 @@ export interface PartValidationError {
 export interface PartValidateRequest {
   company_id: string;
   mappings: Record<string, string>; // csv_column -> db_field
-  pricing_columns: PricingColumnPair[];
   rows: Record<string, string>[]; // All parsed CSV rows
   customer_match_mode: CustomerMatchMode;
   selected_customer_id?: string; // For ALL_TO_ONE mode
@@ -108,7 +98,6 @@ export interface PartImportError {
 export interface PartExecuteRequest {
   company_id: string;
   mappings: Record<string, string>; // csv_column -> db_field
-  pricing_columns: PricingColumnPair[];
   rows: Record<string, string>[]; // CSV rows to import
   customer_match_mode: CustomerMatchMode;
   selected_customer_id?: string; // For ALL_TO_ONE mode
@@ -131,5 +120,7 @@ export interface PartExecuteResponse {
 export const PART_FIELDS: { key: string; label: string; required: boolean }[] = [
   { key: 'part_number', label: 'Part Number', required: true },
   { key: 'description', label: 'Description', required: false },
+  { key: 'category', label: 'Category', required: false },
+  { key: 'manual_cost', label: 'Manual Cost', required: false },
   { key: 'notes', label: 'Notes', required: false },
 ];

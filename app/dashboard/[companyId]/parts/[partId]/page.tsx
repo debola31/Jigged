@@ -11,11 +11,6 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -262,38 +257,32 @@ export default function PartDetailPage() {
           </Card>
         </Grid>
 
-        {/* Pricing Tiers Card */}
+        {/* Cost Information Card */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Pricing Tiers
+                Cost Information
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              {part.pricing && part.pricing.length > 0 ? (
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Min Quantity</TableCell>
-                      <TableCell align="right">Unit Price</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {part.pricing
-                      .sort((a, b) => a.qty - b.qty)
-                      .map((tier, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{tier.qty}</TableCell>
-                          <TableCell align="right">{formatCurrency(tier.price)}</TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <Typography variant="body1" color="text.secondary">
-                  No pricing tiers defined
-                </Typography>
-              )}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Cost Source
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {part.cost_source === 'routing' ? 'From Routing' : part.cost_source === 'manual' ? 'Manual' : part.cost_source === 'estimate' ? 'Estimate' : '—'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Manual Cost
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {formatCurrency(part.manual_cost)}
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

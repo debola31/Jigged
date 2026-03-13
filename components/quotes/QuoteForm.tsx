@@ -14,8 +14,7 @@ import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
-import { calculateUnitPrice, calculateTotalPrice } from '@/types/quote';
-import type { PricingTier } from '@/types/part';
+import { calculateTotalPrice } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
@@ -48,7 +47,11 @@ interface PartOption {
   id: string;
   part_number: string;
   description: string | null;
-  pricing: PricingTier[];
+  category_id: string | null;
+  manual_cost: number | null;
+  cost_source: string | null;
+  has_routing: boolean;
+  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
   isCreateNew?: boolean;
 }
 
@@ -63,7 +66,11 @@ const CREATE_NEW_PART: PartOption = {
   id: '__create_new__',
   part_number: 'Create New Part',
   description: null,
-  pricing: [],
+  category_id: null,
+  manual_cost: null,
+  cost_source: null,
+  has_routing: false,
+  part_category: null,
   isCreateNew: true,
 };
 
@@ -178,21 +185,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // Track whether the user manually edited the unit price
   const isPriceManuallyEdited = useRef(false);
 
-  // Auto-fill price when part or quantity changes
-  useEffect(() => {
-    if (formData.part_type === 'existing' && selectedPart?.pricing?.length) {
-      const qty = parseInt(formData.quantity, 10) || 1;
-      const suggestedPrice = calculateUnitPrice(selectedPart.pricing, qty);
-      if (suggestedPrice !== null) {
-        isPriceManuallyEdited.current = false;
-        setFormData((prev) => ({
-          ...prev,
-          unit_price: String(suggestedPrice),
-        }));
-      }
-    }
-  }, [selectedPart, formData.quantity, formData.part_type]);
-
   // NOTE: Description is NOT auto-filled from part. Quote description is separate.
 
   const handleChange =
@@ -258,7 +250,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       id: part.id,
       part_number: part.part_number,
       description: part.description,
-      pricing: part.pricing || [],
+      category_id: part.category_id || null,
+      manual_cost: part.manual_cost || null,
+      cost_source: part.cost_source || null,
+      has_routing: !!part.routing,
+      part_category: part.part_category || null,
     };
     setParts((prev) => [...prev, newOption]);
     setSelectedPart(newOption);
@@ -489,63 +485,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         </CardContent>
       </Card>
 
-      {/* Pricing — combined tiers + inputs */}
+      {/* Pricing */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
             Pricing
           </Typography>
-
-          {/* Pricing tiers from selected part */}
-          {selectedPart?.pricing && selectedPart.pricing.length > 0 && (() => {
-            const sortedTiers = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
-            const qty = parseInt(formData.quantity, 10) || 1;
-            // Find active tier: highest tier where qty <= order quantity
-            let activeTierQty: number | null = null;
-            for (let i = sortedTiers.length - 1; i >= 0; i--) {
-              if (sortedTiers[i].qty <= qty) {
-                activeTierQty = sortedTiers[i].qty;
-                break;
-              }
-            }
-            if (activeTierQty === null && sortedTiers.length > 0) {
-              activeTierQty = sortedTiers[0].qty;
-            }
-
-            return (
-              <Box
-                sx={{
-                  mb: 3,
-                  p: 2,
-                  bgcolor: 'rgba(255, 255, 255, 0.05)',
-                  borderRadius: 1,
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                }}
-              >
-                <Typography variant="subtitle2" gutterBottom>
-                  Part Pricing Tiers
-                </Typography>
-                {sortedTiers.map((tier, i) => {
-                  const isActive = tier.qty === activeTierQty;
-                  return (
-                    <Typography
-                      key={i}
-                      variant="body2"
-                      sx={{
-                        color: isActive ? 'primary.main' : 'text.secondary',
-                        fontWeight: isActive ? 600 : 400,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                      }}
-                    >
-                      {isActive ? '▸' : '\u2003'} {tier.qty}+ units: {formatCurrency(tier.price)}/ea
-                    </Typography>
-                  );
-                })}
-              </Box>
-            );
-          })()}
 
           <Grid container spacing={3} alignItems="flex-end">
             <Grid size={{ xs: 12, sm: 4 }}>
@@ -596,25 +541,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Box>
             </Grid>
           </Grid>
-
-          {/* Auto-fill status helper text */}
-          {selectedPart?.pricing && selectedPart.pricing.length > 0 && formData.unit_price && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: 'block' }}>
-              {isPriceManuallyEdited.current
-                ? 'Custom price'
-                : (() => {
-                    const qty = parseInt(formData.quantity, 10) || 1;
-                    const sorted = [...selectedPart.pricing].sort((a, b) => a.qty - b.qty);
-                    for (let i = sorted.length - 1; i >= 0; i--) {
-                      if (sorted[i].qty <= qty) {
-                        return `Auto-filled from ${sorted[i].qty}+ tier. Edit to override.`;
-                      }
-                    }
-                    return `Auto-filled from ${sorted[0]?.qty}+ tier. Edit to override.`;
-                  })()
-              }
-            </Typography>
-          )}
         </CardContent>
       </Card>
 

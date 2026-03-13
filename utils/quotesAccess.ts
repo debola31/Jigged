@@ -10,7 +10,6 @@ import type {
   TempAttachment,
 } from '@/types/quote';
 import { calculateTotalPrice } from '@/types/quote';
-import type { PricingTier } from '@/types/part';
 import type { JobAttachment } from '@/types/job';
 import {
   generateStoragePath,
@@ -62,7 +61,7 @@ export async function getQuotes(
       `
       *,
       customers!left(id, name),
-      parts!left(id, part_number, description, pricing),
+      parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
       jobs:converted_to_job_id!left(id, job_number, status)
     `,
       { count: 'exact' }
@@ -121,7 +120,7 @@ export async function getAllQuotes(
         `
         *,
         customers!left(id, name),
-        parts!left(id, part_number, description, pricing),
+        parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
         jobs:converted_to_job_id!left(id, job_number, status)
       `
       )
@@ -237,7 +236,7 @@ export async function getQuoteWithRelations(quoteId: string, companyId: string):
       `
       *,
       customers!left(id, name),
-      parts!left(id, part_number, description, pricing),
+      parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
       jobs:converted_to_job_id!left(id, job_number, status),
       quote_attachments(*)
     `
@@ -281,6 +280,9 @@ export async function createQuote(
 
   const totalPrice = calculateTotalPrice(quantity, unitPrice);
 
+  const baseCost = formData.base_cost ? parseFloat(formData.base_cost) : null;
+  const markupPercent = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
+
   const { data, error } = await supabase
     .from('quotes')
     .insert({
@@ -289,6 +291,9 @@ export async function createQuote(
       part_id: formData.part_type === 'existing' && formData.part_id ? formData.part_id : null,
       description: formData.description.trim() || null,
       quantity,
+      base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
+      cost_source: formData.cost_source || null,
+      markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
       status: 'draft',
@@ -357,6 +362,9 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
 
   const totalPrice = calculateTotalPrice(quantity, unitPrice);
 
+  const baseCost = formData.base_cost ? parseFloat(formData.base_cost) : null;
+  const markupPercent = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
+
   const { data, error } = await supabase
     .from('quotes')
     .update({
@@ -364,6 +372,9 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
       part_id: formData.part_type === 'existing' && formData.part_id ? formData.part_id : null,
       description: formData.description.trim() || null,
       quantity,
+      base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
+      cost_source: formData.cost_source || null,
+      markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
       updated_at: new Date().toISOString(),
@@ -685,21 +696,24 @@ export async function convertQuoteToJob(
 // ============== Helper Functions ==============
 
 /**
- * Get a single part with pricing
+ * Get a single part with cost info and category for quote form
  */
-export async function getPartWithPricing(
+export async function getPartWithCostInfo(
   partId: string
 ): Promise<{
   id: string;
   part_number: string;
   description: string | null;
-  pricing: PricingTier[];
+  category_id: string | null;
+  manual_cost: number | null;
+  cost_source: string | null;
+  part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
 } | null> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_number, description, pricing')
+    .select('id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -712,7 +726,10 @@ export async function getPartWithPricing(
     id: string;
     part_number: string;
     description: string | null;
-    pricing: PricingTier[];
+    category_id: string | null;
+    manual_cost: number | null;
+    cost_source: string | null;
+    part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
   } | null;
 }
 

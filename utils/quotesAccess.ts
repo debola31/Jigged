@@ -733,6 +733,86 @@ export async function getPartWithCostInfo(
   } | null;
 }
 
+// ============== Cost Refresh ==============
+
+/**
+ * Refresh a quote's cost from the current routing.
+ * Only allowed for draft or rejected quotes with a part that has a routing.
+ */
+export async function refreshQuoteCost(quoteId: string, companyId: string): Promise<Quote> {
+  const supabase = getSupabase();
+
+  // 1. Get the quote
+  const { data: quote, error: fetchError } = await supabase
+    .from('quotes')
+    .select('*, parts!left(id, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent))')
+    .eq('id', quoteId)
+    .eq('company_id', companyId)
+    .single();
+
+  if (fetchError || !quote) {
+    throw new Error('Quote not found');
+  }
+
+  if (quote.status !== 'draft' && quote.status !== 'rejected') {
+    throw new Error('Only draft or rejected quotes can have their cost refreshed');
+  }
+
+  if (!quote.part_id) {
+    throw new Error('Quote has no part assigned');
+  }
+
+  // 2. Calculate current routing cost
+  const { calculateRoutingCost } = await import('@/utils/routingCostCalculation');
+  const breakdown = await calculateRoutingCost(quote.part_id);
+
+  let baseCost: number | null = null;
+  let costSource: string | null = null;
+  let estimatedLaborCost: number | null = null;
+  let estimatedMaterialCost: number | null = null;
+
+  if (breakdown) {
+    baseCost = breakdown.total_cost;
+    costSource = 'routing';
+    estimatedLaborCost = breakdown.total_labor_cost;
+    estimatedMaterialCost = breakdown.total_material_cost;
+  } else if (quote.parts?.manual_cost != null) {
+    baseCost = quote.parts.manual_cost;
+    costSource = quote.parts.cost_source || 'manual';
+  }
+
+  // 3. Recalculate unit price if markup is set
+  let unitPrice = quote.unit_price;
+  if (baseCost !== null && quote.markup_percent !== null) {
+    unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 10000) / 10000;
+  }
+
+  const totalPrice = calculateTotalPrice(quote.quantity, unitPrice);
+
+  // 4. Update the quote
+  const { data: updated, error: updateError } = await supabase
+    .from('quotes')
+    .update({
+      base_cost: baseCost,
+      cost_source: costSource,
+      estimated_labor_cost: estimatedLaborCost,
+      estimated_material_cost: estimatedMaterialCost,
+      unit_price: unitPrice,
+      total_price: totalPrice,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', quoteId)
+    .select()
+    .single();
+
+  if (updateError) {
+    console.error('Error refreshing quote cost:', updateError);
+    throw updateError;
+  }
+
+  return updated;
+}
+
 // ============== Attachment Operations ==============
 
 /**

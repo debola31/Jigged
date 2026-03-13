@@ -29,6 +29,18 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 
+import Chip from '@mui/material/Chip';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+
 import {
   getQuoteWithRelations,
   markQuoteAsPendingApproval,
@@ -37,9 +49,12 @@ import {
   deleteQuote,
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
+  refreshQuoteCost,
 } from '@/utils/quotesAccess';
 import { quoteToFormData } from '@/types/quote';
 import type { QuoteWithRelations, QuoteAttachment } from '@/types/quote';
+import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
@@ -60,6 +75,9 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  const [costOutdated, setCostOutdated] = useState(false);
+  const [refreshingCost, setRefreshingCost] = useState(false);
 
   useEffect(() => {
     fetchQuote();
@@ -75,6 +93,40 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load quote');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Check if routing cost is outdated for draft/rejected quotes
+  useEffect(() => {
+    if (!quote || !quote.part_id || !quote.base_cost) return;
+    if (quote.status !== 'draft' && quote.status !== 'rejected') return;
+    if (quote.cost_source !== 'routing') return;
+
+    calculateRoutingCost(quote.part_id).then((breakdown) => {
+      setCostBreakdown(breakdown);
+      if (breakdown && Math.abs(breakdown.total_cost - (quote.base_cost ?? 0)) > 0.01) {
+        setCostOutdated(true);
+      } else {
+        setCostOutdated(false);
+      }
+    }).catch(() => {
+      setCostBreakdown(null);
+      setCostOutdated(false);
+    });
+  }, [quote]);
+
+  const handleRefreshCost = async () => {
+    if (!quote) return;
+    setRefreshingCost(true);
+    setError(null);
+    try {
+      await refreshQuoteCost(quoteId, companyId);
+      await fetchQuote();
+      setCostOutdated(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh cost');
+    } finally {
+      setRefreshingCost(false);
     }
   };
 
@@ -443,24 +495,65 @@ export default function QuoteDetailPage() {
           </Grid>
         )}
 
-        {/* Pricing */}
-        <Grid size={{ xs: 12, md: 6 }}>
+        {/* Cost & Pricing */}
+        <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Pricing
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Cost & Pricing
+                </Typography>
+                {quote.cost_source && (
+                  <Chip
+                    label={
+                      quote.cost_source === 'routing'
+                        ? 'From Routing'
+                        : quote.cost_source === 'manual'
+                          ? 'Manual Cost'
+                          : 'Estimate'
+                    }
+                    size="small"
+                    color={quote.cost_source === 'routing' ? 'primary' : 'default'}
+                    variant="outlined"
+                  />
+                )}
+                {(quote.status === 'draft' || quote.status === 'rejected') && quote.cost_source === 'routing' && (
+                  <Button
+                    size="small"
+                    startIcon={refreshingCost ? <CircularProgress size={14} /> : <RefreshIcon />}
+                    onClick={handleRefreshCost}
+                    disabled={refreshingCost}
+                  >
+                    Refresh Cost
+                  </Button>
+                )}
+              </Box>
               <Divider sx={{ mb: 2 }} />
+
+              {costOutdated && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  The routing for this part has changed since this quote was created. Click &quot;Refresh Cost&quot; to update.
+                </Alert>
+              )}
+
               <Grid container spacing={2}>
-                <Grid size={{ xs: 4 }}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Quantity
+                    Base Cost
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>
-                    {quote.quantity}
+                    {formatCurrency(quote.base_cost)}
                   </Typography>
                 </Grid>
-                <Grid size={{ xs: 4 }}>
+                <Grid size={{ xs: 6, sm: 3 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Markup
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {quote.markup_percent !== null ? `${quote.markup_percent}%` : '—'}
+                  </Typography>
+                </Grid>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="body2" color="text.secondary">
                     Unit Price
                   </Typography>
@@ -468,15 +561,97 @@ export default function QuoteDetailPage() {
                     {formatCurrency(quote.unit_price)}
                   </Typography>
                 </Grid>
-                <Grid size={{ xs: 4 }}>
+                <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Total
+                    Quantity
                   </Typography>
-                  <Typography variant="h6" color="primary" fontWeight={600}>
-                    {formatCurrency(quote.total_price)}
+                  <Typography variant="body1" fontWeight={500}>
+                    {quote.quantity}
                   </Typography>
                 </Grid>
               </Grid>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Total
+                </Typography>
+                <Typography variant="h5" color="primary" fontWeight={600}>
+                  {formatCurrency(quote.total_price)}
+                </Typography>
+              </Box>
+
+              {/* Cost Breakdown (if routing-based) */}
+              {costBreakdown && (costBreakdown.labor_items.length > 0 || costBreakdown.material_items.length > 0) && (
+                <Accordion sx={{ mt: 2, bgcolor: 'transparent', boxShadow: 'none', '&:before': { display: 'none' } }}>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
+                    <Typography variant="body2" fontWeight={500}>
+                      Cost Breakdown
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails sx={{ px: 0 }}>
+                    {costBreakdown.labor_items.length > 0 && (
+                      <>
+                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Labor</Typography>
+                        <Table size="small" sx={{ mb: 2 }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Operation</TableCell>
+                              <TableCell align="right">Time (min)</TableCell>
+                              <TableCell align="right">Rate ($/hr)</TableCell>
+                              <TableCell align="right">Cost</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {costBreakdown.labor_items.map((item, i) => (
+                              <TableRow key={i}>
+                                <TableCell>{item.operation_name}</TableCell>
+                                <TableCell align="right">{item.run_time_minutes}</TableCell>
+                                <TableCell align="right">{formatCurrency(item.labor_rate)}</TableCell>
+                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow>
+                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_labor_cost)}</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </>
+                    )}
+                    {costBreakdown.material_items.length > 0 && (
+                      <>
+                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Materials</Typography>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Item</TableCell>
+                              <TableCell align="right">Qty</TableCell>
+                              <TableCell align="right">Unit Cost</TableCell>
+                              <TableCell align="right">Cost</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {costBreakdown.material_items.map((item, i) => (
+                              <TableRow key={i}>
+                                <TableCell>{item.item_name}</TableCell>
+                                <TableCell align="right">{item.quantity} {item.unit}</TableCell>
+                                <TableCell align="right">{formatCurrency(item.cost_per_unit)}</TableCell>
+                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
+                              </TableRow>
+                            ))}
+                            <TableRow>
+                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_material_cost)}</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
+              )}
             </CardContent>
           </Card>
         </Grid>

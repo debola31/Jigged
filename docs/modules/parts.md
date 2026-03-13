@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include pricing information and can have a routing defining their manufacturing process.
+The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default margin configuration and can have a routing defining their manufacturing process. Part cost is derived from the routing when one exists, or entered manually.
 
 **Priority:** Must Have (Build Second)
 
@@ -18,12 +18,13 @@ The Parts module manages the catalog of products/parts that a company manufactur
 |---|---|---|
 | Owner/Admin | View a list of all parts | I can see our product catalog |
 | Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
-| Owner/Admin | Create a new part with pricing tiers | I can quote and track new products |
-| Owner/Admin | Edit part information | I can update pricing or descriptions |
+| Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default margins |
+| Owner/Admin | Edit part information | I can update descriptions or cost data |
+| Owner/Admin | Manage part categories with default margins | I can standardize margin expectations across similar parts |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
 | Owner/Admin | Create or edit a routing from the part detail page | I can define the manufacturing process for a part |
-| Salesperson | Look up part pricing when creating quotes | I can quickly provide accurate quotes |
+| Salesperson | Look up part cost and category margin when creating quotes | I can quickly provide accurate quotes |
 
 ---
 
@@ -35,7 +36,9 @@ The Parts module manages the catalog of products/parts that a company manufactur
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
 | part_number | Text | Yes | Part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
-| pricing | JSONB | No | Array of quantity-based price tiers (see below) |
+| category_id | UUID (FK) | No | Link to part_categories table |
+| manual_cost | Decimal(12,4) | No | Base cost per unit (used when no routing exists) |
+| cost_source | Text | No | How base cost is determined: 'routing', 'manual', 'estimate', or null |
 | notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
@@ -44,40 +47,48 @@ The Parts module manages the catalog of products/parts that a company manufactur
 
 Part numbers must be unique within a company.
 
-### Pricing JSONB Structure
+### Part Categories Table (`part_categories`)
 
-The `pricing` column stores an array of quantity/price tier objects:
+Part categories classify parts for default margin configuration during quoting. Each company defines its own categories (e.g., "Precision Machined", "Assemblies", "Tooling"). A typical shop has 5–10 categories.
 
-```javascript
-[
-  { "qty": 1, "price": 188.00 },
-  { "qty": 5, "price": 159.00 },
-  { "qty": 10, "price": 140.00 },
-  { "qty": 50, "price": 125.00 }
-]
-```
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | UUID | Yes | Primary key (auto-generated) |
+| company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
+| name | Text | Yes | Category name (e.g., "Precision Machined", "Assemblies", "Tooling") |
+| default_margin_percent | Decimal(5,2) | No | Default margin % applied when quoting parts in this category |
+| description | Text | No | Optional description of the category |
+| created_at | Timestamp | Yes | Auto-generated |
+| updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Schema Rules (enforced by database constraint):**
+**Unique Constraint:** `(company_id, name)`
 
-- Must be a JSON array
+### Cost Source
 
-- Each object must have exactly two fields: `qty` and `price`
+The `cost_source` field indicates how the part's base cost is determined:
 
-- `qty` must be an integer ≥ 1
+| Value | Description |
+|---|---|
+| `routing` | Auto-calculated from routing operations (sum of labor + materials). Read-only — updates when routing changes. |
+| `manual` | User entered the cost directly on the part or during quoting. |
+| `estimate` | A rough estimate, not yet backed by a routing or detailed cost analysis. |
+| `null` | No cost information available yet. |
 
-- `price` must be a number
+When a part has a routing, `cost_source` is automatically set to `'routing'` and the effective base cost is calculated from the routing (see [Routings Module — Cost Calculation](routings.md#cost-calculation-from-routing)). The `manual_cost` field is ignored when a routing exists.
 
-- No additional fields allowed
+### Pricing Tier Migration
 
-**Why JSONB instead of fixed columns:**
+The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** by the cost-plus model. This is a clean break with no deprecation period:
 
-- Legacy data has up to 8 price tiers (fixed columns only supported 3)
+**Migration steps (single migration):**
+1. For each part with pricing tiers: copy the qty=1 tier price to `manual_cost`, set `cost_source = 'estimate'`
+2. Drop the `pricing` column entirely
+3. Drop the `validate_pricing_json` function, `idx_parts_pricing` GIN index, and `parts_valid_pricing` CHECK constraint
 
-- ~450 parts in Shane's data have 4+ tiers
-
-- Flexible for future enhancements (seasonal pricing, date ranges)
-
-- Cleaner import mapping from variable-column CSVs
+**Code changes (same PR):**
+- Remove `getUnitPrice`, `calculateUnitPrice`, `sortPricingTiers`, `validatePricingTiers` from `types/part.ts`
+- Remove pricing tier rendering from PartForm and QuoteForm
+- Remove `PricingTier` interface
 
 ---
 
@@ -89,7 +100,7 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 **Features:**
 
-- Table showing: Part Number, Description, Base Price (qty=1)
+- Table showing: Part Number, Description, Category, Cost (routing-calculated or manual)
 
 - Search box (searches part number and description)
 
@@ -115,27 +126,25 @@ The `pricing` column stores an array of quantity/price tier objects:
 
 - Description
 
-▸ **Pricing Tiers** (dynamic rows)
+▸ **Category**
 
-|  | Min Quantity | Unit Price | Actions |
-|---|---|---|---|
-| Tier 1 | [1] (default) | [$___] | — |
-| Tier 2 | [___] | [$___] | [Remove] |
-| ... | ... | ... | ... |
+- Category dropdown (list of company's part_categories)
+  - Shows: category name (default margin %)
+  - "+ New Category" quick-create link opens inline modal
+  - Optional — parts can exist without a category
 
-[+ Add Tier] button to add more rows (no limit)
+▸ **Cost Information**
+
+- Cost Source (read-only indicator)
+  - If routing exists: "Calculated from routing" (read-only, with cost value)
+  - If no routing: shows current cost_source or "No cost data"
+- Manual Cost per Unit (editable only when cost_source is not 'routing')
+  - Disabled/greyed out if part has a routing
+  - Hint: "Auto-calculated from routing when a routing exists"
 
 **Validation:**
 
-- Quantities must be ascending (each tier > previous)
-
-- Prices must be valid numbers
-
-- At least one tier required if any pricing exists
-
-▸ **Cost Estimates**
-
-- Material Cost (per unit)
+- Manual cost must be a valid number ≥ 0 if provided
 
 ▸ **Other**
 
@@ -172,51 +181,22 @@ The part detail page includes a routing info card that shows:
 
 ---
 
-## Pricing Tier Logic
+## Cost Determination Logic
 
-When calculating the unit price for a given quantity, find the highest tier where `qty <= order_quantity`:
+A part's effective base cost is determined by its `cost_source`:
 
 ```javascript
-function getUnitPrice(pricing: Array<{qty: number, price: number}>, orderQty: number): number | null {
-  // Sort by qty descending, find first tier where qty <= orderQty
-  const sortedTiers = [...pricing].sort((a, b) => b.qty - a.qty);
-  const applicableTier = sortedTiers.find(tier => tier.qty <= orderQty);
-  return applicableTier?.price ?? null;
+function getPartBaseCost(part: Part): number | null {
+  if (part.cost_source === 'routing' && part.routing) {
+    // Calculated from routing — see routings.md for formula
+    return calculateRoutingCost(part.routing);
+  }
+  // For 'manual', 'estimate', or null — use manual_cost if set
+  return part.manual_cost ?? null;
 }
 ```
 
-**Example:**
-
-Pricing array:
-
-```javascript
-[
-  { "qty": 1, "price": 50.00 },
-  { "qty": 10, "price": 45.00 },
-  { "qty": 50, "price": 40.00 },
-  { "qty": 100, "price": 35.00 }
-]
-```
-
-| Order Quantity | Applicable Tier | Unit Price | Total |
-|---|---|---|---|
-| 5 | qty ≥ 1 | $50.00 | $250.00 |
-| 25 | qty ≥ 10 | $45.00 | $1,125.00 |
-| 75 | qty ≥ 50 | $40.00 | $3,000.00 |
-| 250 | qty ≥ 100 | $35.00 | $8,750.00 |
-
-**PostgreSQL Helper Function:**
-
-```sql
-CREATE FUNCTION get_part_price(p_pricing JSONB, p_quantity INT)
-RETURNS NUMERIC AS $$
-  SELECT (elem->>'price')::numeric
-  FROM jsonb_array_elements(p_pricing) elem
-  WHERE (elem->>'qty')::int <= p_quantity
-  ORDER BY (elem->>'qty')::int DESC
-  LIMIT 1;
-$$ LANGUAGE sql IMMUTABLE;
-```
+When creating a quote for a part, the base cost flows into the quote's `base_cost` field and the part category's `default_margin_percent` pre-fills the margin. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
 
 ---
 
@@ -237,6 +217,12 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 4. **Validate** - Check for duplicate part numbers within company
 
 5. **Execute** - Import with results summary
+
+### Category Mapping
+
+If the CSV contains a "Category" column, the import will:
+- Match existing categories by name (case-insensitive)
+- Auto-create new categories for unmatched values (with no default margin — admin sets margins later)
 
 ### Conflict Detection
 
@@ -270,9 +256,17 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 - [ ] Can edit existing part
 
-- [ ] Can add/remove unlimited pricing tiers
+- [ ] Can assign a part to a category
 
-- [ ] Pricing tiers enforce qty ascending order
+- [ ] Can create a new part category from the part form (quick-create)
+
+- [ ] Category default margin displays on part detail
+
+- [ ] Parts with routings show calculated cost (read-only)
+
+- [ ] Parts without routings allow manual cost entry
+
+- [ ] Cost source indicator shown on part detail and part list
 
 - [ ] Can delete a part (hard delete with confirmation)
 

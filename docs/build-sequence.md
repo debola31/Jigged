@@ -75,7 +75,7 @@ JOB (shipped)
 
 - [x] **Testing infrastructure** (Vitest, pytest, GitHub Actions CI)
 
-- [x] **Parts module** (CRUD + AI-powered CSV/Excel import + flexible pricing tiers)
+- [x] **Parts module** (CRUD + AI-powered CSV/Excel import)
 
 - [x] **Operations module** (Resource groups + operation types with labor rates + AI import)
 
@@ -113,6 +113,37 @@ JOB (shipped)
 | QuickBooks integration | Phase 3 |
 | Shipping label generation | Phase 3 |
 | Customer portal | Phase 3 |
+
+---
+
+## Phase 1: Cost-Plus Pricing
+
+**Goal:** Replace static pricing tiers with a cost-plus model. Parts get categories with default margins. Routing costs flow automatically into quotes. Users can set margins and see cost breakdowns.
+
+**GitHub Issue:** #62
+
+### Phase 1 Build Sequence
+
+| Order | Feature | Est. Days | Status | Dependencies |
+|---|---|---|---|---|
+| 1 | Part Categories (table, RLS, settings UI, category CRUD) | 1 | ⬜ Not Started | Parts module |
+| 2 | Pricing Tier Removal (data migration + drop column + remove code) | 1 | ⬜ Not Started | Part Categories |
+| 3 | Cost-Plus Quotes (new fields, bidirectional UI, margin defaults) | 2-3 | ⬜ Not Started | Part Categories, Routings |
+| 4 | Routing Cost Calculation (auto-populate cost from routing into quotes) | 1-2 | ⬜ Not Started | Routings, Operations |
+
+### Phase 1 Success Criteria
+
+Phase 1 (Cost-Plus) is complete when Shane can:
+
+- [ ] Create part categories with default margins
+- [ ] Assign parts to categories
+- [ ] See routing-calculated costs on parts with routings
+- [ ] Enter manual costs on parts without routings
+- [ ] Create a quote where margin pre-fills from category
+- [ ] Edit margin and see price recalculate (bidirectional)
+- [ ] Edit price and see margin back-calculate (bidirectional)
+- [ ] See cost breakdown (labor + materials) on quotes for routed parts
+- [ ] View margin, cost source, and cost breakdown on quote detail page
 
 ---
 

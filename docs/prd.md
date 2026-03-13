@@ -52,8 +52,9 @@ Success looks like:
 | Routing | A workflow diagram defining how a part is manufactured. Each part has exactly one routing (1:1). Managed from the part detail page. |
 | Operation | A single step in a routing (e.g., CNC Turning). |
 | Operation Type | A category of operation (e.g., Machining, QC). |
-| Part | A company-wide product with part number. Not tied to a specific customer. |
-| Quote | A price estimate. Approved quotes become jobs. |
+| Part | A company-wide product with part number and optional category. Cost derived from routing or manual entry. Not tied to a specific customer. |
+| Part Category | A classification for parts (e.g., "Precision Machined", "Tooling") that carries a default margin percentage for quoting. |
+| Quote | A cost-plus price estimate. Base cost + margin = quoted price. Approved quotes become jobs. |
 
 ### 2. Users and Use Cases
 
@@ -116,7 +117,7 @@ Role restrictions are enforced at **two levels**:
 |---|---|---|---|---|
 | FR-1 | Flexible Inventory Units | System must support multiple units of measurement per inventory item (e.g., a steel bar can be measured in both pounds and inches). When depleting inventory, users can specify the quantity in any supported unit and the system converts accordingly. | Must | Given a steel bar tracked in lbs, when an operator depletes 6 inches, then the system converts to lbs and decrements inventory correctly. |
 | FR-2 | Reorder Threshold Alerts | System must display visual alerts when inventory items fall below their configured reorder threshold. Alerts appear on the inventory dashboard and can trigger email notifications to designated users. | Must | Given an item with reorder threshold of 50 units, when quantity drops to 49, then a reorder alert is displayed and optional email sent. |
-| FR-3 | Work Order Creation from Quote | Salesperson can create a work order by selecting a customer, optionally choosing a template, entering estimated price, and attaching files. Work order enters "Requested" status and awaits owner approval. | Must | Given a new customer order, when salesperson creates work order with template, then it appears in Requested queue for owner approval. |
+| FR-3 | Work Order Creation from Quote | Salesperson can create a quote by selecting a customer and part, reviewing cost and margin (or entering them manually), and attaching files. Quote enters "Draft" status and proceeds through approval workflow. | Must | Given a new customer order, when salesperson creates quote with cost and margin, then it appears in the quotes pipeline for owner approval. |
 | FR-4 | Work Order Approval Workflow | Owner can view all Requested work orders and approve or reject them. Approved work orders move to "Approved" status and become visible to operators. Rejected work orders are archived with notes. | Must | Given a Requested work order, when owner clicks Approve, then status changes to Approved and operators can see it. |
 | FR-5 | Station QR Code Login | Operators scan a QR code at a station to log in. The QR code encodes the station ID. After scanning, operator enters their PIN or scans their personal QR badge to identify themselves. | Must | Given an operator at Station 3, when they scan station QR and enter PIN, then they are logged into Station 3 and can assign work orders. |
 | FR-6 | Work Order Assignment to Station | Logged-in operator can enter a work order number to begin working on it. System records start time, associates operator with the work order, and tracks time until operator logs out or assigns a different work order. | Must | Given an operator logged into Station 3, when they enter WO-1234, then time tracking begins and WO-1234 shows "In Progress at Station 3". |
@@ -258,7 +259,9 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 
-- **Part**: id, company_id, part_number, description, pricing, notes, created_at, updated_at (company-wide entity, no customer_id)
+- **Part**: id, company_id, part_number, description, category_id, manual_cost, cost_source, notes, created_at, updated_at (company-wide entity, no customer_id. Pricing is cost-plus: base cost from routing or manual entry, margin from category default with per-quote override.)
+
+- **Part Category**: id, company_id, name, default_margin_percent, description, created_at, updated_at
 
 - job: id, customer_id, part_id, created_by, status, estimated_price, actual_price, priority, due_date, created_at, updated_at (routing auto-resolved from part)
 
@@ -281,6 +284,8 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 **Key Relationships:**
 
 - Part → Routing (one-to-one; each part has exactly one routing)
+
+- Part → Part Category (many-to-one; optional category for margin defaults)
 
 - Part → Company (many-to-one; parts are company-wide, not customer-specific)
 

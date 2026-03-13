@@ -20,7 +20,10 @@ from supabase import create_client, Client
 from models.admin_models import (
     CompanyCreateRequest,
     CompanyCreateResponse,
+    CompanyDeleteResponse,
     CompanyListItem,
+    CompanyUpdateRequest,
+    CompanyUpdateResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -272,6 +275,107 @@ async def create_company(request: Request, body: CompanyCreateRequest):
         logger.error(f"Error creating company: {e}")
         sentry_sdk.capture_exception(e)
         _rollback(service_client, company_id, owner_user_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ============================================================================
+# UPDATE COMPANY
+# ============================================================================
+
+@router.put("/companies/{company_id}", response_model=CompanyUpdateResponse)
+async def update_company(request: Request, company_id: str, body: CompanyUpdateRequest):
+    """
+    Update a company's name (and auto-regenerate slug).
+    Requires system admin access.
+    """
+    await verify_system_admin(request)
+    service_client = get_supabase_service_role()
+
+    try:
+        # Verify company exists
+        existing = service_client.table("companies").select("id, name").eq("id", company_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Generate new slug with collision handling (exclude self)
+        base_slug = generate_slug(body.name)
+        slug = base_slug
+        suffix = 2
+        while True:
+            collision = service_client.table("companies") \
+                .select("id") \
+                .eq("slug", slug) \
+                .neq("id", company_id) \
+                .execute()
+            if not collision.data:
+                break
+            slug = f"{base_slug}-{suffix}"
+            suffix += 1
+
+        # Update company
+        result = service_client.table("companies").update({
+            "name": body.name,
+            "slug": slug,
+        }).eq("id", company_id).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update company")
+
+        logger.info(f"Updated company {company_id}: name='{body.name}', slug='{slug}'")
+
+        return CompanyUpdateResponse(
+            success=True,
+            company_id=company_id,
+            name=body.name,
+            slug=slug,
+            message="Company updated successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating company {company_id}: {e}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ============================================================================
+# DELETE COMPANY
+# ============================================================================
+
+@router.delete("/companies/{company_id}", response_model=CompanyDeleteResponse)
+async def delete_company(request: Request, company_id: str):
+    """
+    Delete a company and all associated data (cascades via FK constraints).
+    Does NOT delete auth users — they may belong to other companies.
+    Requires system admin access.
+    """
+    await verify_system_admin(request)
+    service_client = get_supabase_service_role()
+
+    try:
+        # Verify company exists
+        existing = service_client.table("companies").select("id, name").eq("id", company_id).execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        company_name = existing.data[0]["name"]
+
+        # Delete company — all child data cascades automatically
+        service_client.table("companies").delete().eq("id", company_id).execute()
+
+        logger.info(f"Deleted company {company_id} ({company_name})")
+
+        return CompanyDeleteResponse(
+            success=True,
+            message=f"Company '{company_name}' deleted successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting company {company_id}: {e}")
+        sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

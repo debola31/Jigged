@@ -2,7 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { submitWaitlist } from '@/app/actions/waitlist';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
@@ -63,24 +63,15 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
 
     setStatus('loading');
     try {
-      // Use a fresh anonymous client — the singleton from getSupabase() carries
-      // session state and a custom fetch wrapper that interferes with anon requests.
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      );
-      const { error } = await supabase.from('waitlist').upsert(
-        {
-          email,
-          name,
-          company_name: companyName,
-          shop_size: shopSize || null,
-          source,
-        },
-        { onConflict: 'email' },
-      );
+      const result = await submitWaitlist({
+        email,
+        name,
+        company_name: companyName,
+        shop_size: shopSize || null,
+        source,
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       setStatus('success');
       setMessage("Thanks! We'll reach out shortly to get your shop set up.");

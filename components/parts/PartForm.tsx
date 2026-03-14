@@ -171,7 +171,7 @@ export default function PartForm({
     }
   };
 
-  const canDelete = !part || (part.quotes_count === 0 && part.jobs_count === 0);
+  const canDelete = !part || ((part.quotes_count ?? 0) === 0 && (part.jobs_count ?? 0) === 0);
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
@@ -324,10 +324,10 @@ export default function PartForm({
           <Typography sx={{ mb: 2 }}>
             {`Are you sure you want to delete "${formData.part_number}"?`}
           </Typography>
-          {part && (part.quotes_count! > 0 || part.jobs_count! > 0) && (
+          {part && ((part.quotes_count ?? 0) > 0 || (part.jobs_count ?? 0) > 0) && (
             <Alert severity="error">
-              This part has {part.quotes_count} quote{part.quotes_count !== 1 ? 's' : ''} and{' '}
-              {part.jobs_count} job{part.jobs_count !== 1 ? 's' : ''}. You must remove these
+              This part has {part.quotes_count ?? 0} quote{(part.quotes_count ?? 0) !== 1 ? 's' : ''} and{' '}
+              {part.jobs_count ?? 0} job{(part.jobs_count ?? 0) !== 1 ? 's' : ''}. You must remove these
               references before deleting.
             </Alert>
           )}

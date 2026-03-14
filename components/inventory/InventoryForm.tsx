@@ -469,7 +469,7 @@ export default function InventoryForm({
                 </Typography>
                 {formData.unit_conversions.map((conv, index) => (
                   <Box
-                    key={index}
+                    key={`conv-${conv.from_unit}-${conv.to_primary_factor}-${index}`}
                     sx={{
                       display: 'flex',
                       gap: 1.5,

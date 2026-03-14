@@ -309,7 +309,7 @@ export default function NodeEditModal({
 
             {formData.materials.map((material, index) => (
               <Box
-                key={index}
+                key={`material-${material.inventory_item_id || index}`}
                 sx={{
                   display: 'flex',
                   gap: 1,

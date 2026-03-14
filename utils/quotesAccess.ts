@@ -620,7 +620,10 @@ export async function convertQuoteToJob(
   }
 
   // 4. Get current user
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    throw new Error('Authentication required. Please log in and try again.');
+  }
 
   // 5. Create job
   const { data: job, error: jobError } = await supabase
@@ -632,7 +635,7 @@ export async function convertQuoteToJob(
       part_id: quote.part_id,
       description: quote.description,
       status: 'pending',
-      created_by: user?.id || null,
+      created_by: user.id,
     })
     .select('id, job_number')
     .single();
@@ -644,17 +647,17 @@ export async function convertQuoteToJob(
 
   // 6. Copy operations from routing
   if (routingId) {
-    try {
-      await supabase.rpc('create_job_operations_from_routing', {
-        p_job_id: job.id,
-        p_routing_id: routingId,
-      });
-    } catch (opsError) {
-      console.error('Failed to copy operations from routing:', opsError);
+    const { error: rpcError } = await supabase.rpc('create_job_operations_from_routing', {
+      p_job_id: job.id,
+      p_routing_id: routingId,
+    });
+    if (rpcError) {
+      console.error('Failed to copy operations from routing:', rpcError);
+      throw new Error('Job created but failed to copy operations from routing. Please add operations manually.');
     }
   }
 
-  // 7. Copy attachment if exists
+  // 7. Copy attachment if exists (non-critical — log but don't block)
   const quoteAttachment = quote.quote_attachments?.[0];
   if (quoteAttachment) {
     try {
@@ -662,7 +665,7 @@ export async function convertQuoteToJob(
         quoteAttachment,
         job.id,
         quote.company_id,
-        user?.id || null
+        user.id
       );
     } catch (attachmentError) {
       console.error('Failed to copy attachment to job:', attachmentError);

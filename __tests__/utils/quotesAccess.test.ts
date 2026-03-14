@@ -35,6 +35,7 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
 
   const supabase = {
     from: vi.fn().mockImplementation(() => builder),
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
     auth: {
       getUser: vi.fn().mockResolvedValue({
         data: { user: { id: 'test-user-id' } },

@@ -771,14 +771,15 @@ export async function refreshQuoteCost(quoteId: string, companyId: string): Prom
   let estimatedLaborCost: number | null = null;
   let estimatedMaterialCost: number | null = null;
 
-  if (breakdown) {
+  // Manual cost takes priority over routing cost when set
+  if (quote.parts?.manual_cost != null) {
+    baseCost = quote.parts.manual_cost;
+    costSource = quote.parts.cost_source || 'manual';
+  } else if (breakdown) {
     baseCost = breakdown.total_cost;
     costSource = 'routing';
     estimatedLaborCost = breakdown.total_labor_cost;
     estimatedMaterialCost = breakdown.total_material_cost;
-  } else if (quote.parts?.manual_cost != null) {
-    baseCost = quote.parts.manual_cost;
-    costSource = quote.parts.cost_source || 'manual';
   }
 
   // 3. Recalculate unit price if markup is set

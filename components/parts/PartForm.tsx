@@ -275,7 +275,7 @@ export default function PartForm({
                 helperText={
                   fieldErrors.manual_cost ||
                   (hasRouting
-                    ? 'Routing cost takes priority — manual cost is used as fallback'
+                    ? 'Manual cost takes priority over routing cost when set'
                     : 'Cost per unit for quoting')
                 }
                 disabled={loading}

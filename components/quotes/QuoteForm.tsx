@@ -245,8 +245,19 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       setFieldErrors((prev) => ({ ...prev, part_id: '' }));
     }
 
-    // Try to get routing cost (only in create mode or if user explicitly refreshes)
-    if (value.has_routing && mode === 'create') {
+    // Manual cost takes priority over routing cost when set
+    if (value.manual_cost !== null) {
+      const baseCostStr = String(value.manual_cost);
+      const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
+        ? calculateUnitPriceFromMarkup(value.manual_cost, defaultMarkup)
+        : null;
+      setFormData((prev) => ({
+        ...prev,
+        base_cost: baseCostStr,
+        cost_source: value.cost_source || 'manual',
+        unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+      }));
+    } else if (value.has_routing && mode === 'create') {
       setLoadingCost(true);
       try {
         const breakdown = await calculateRoutingCost(value.id);
@@ -268,17 +279,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       } finally {
         setLoadingCost(false);
       }
-    } else if (value.manual_cost !== null) {
-      const baseCostStr = String(value.manual_cost);
-      const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-        ? calculateUnitPriceFromMarkup(value.manual_cost, defaultMarkup)
-        : null;
-      setFormData((prev) => ({
-        ...prev,
-        base_cost: baseCostStr,
-        cost_source: value.cost_source || 'manual',
-        unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
-      }));
     }
   };
 
@@ -600,10 +600,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
           {/* Cost source link */}
           {formData.cost_source && (
-            <Box sx={{ mt: 2 }}>
+            <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Cost basis:
+              </Typography>
               {formData.cost_source === 'routing' && selectedPart ? (
                 <Chip
-                  label="From Routing"
+                  label="Part Routing"
                   size="small"
                   color="primary"
                   variant="outlined"

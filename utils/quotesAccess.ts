@@ -784,7 +784,7 @@ export async function refreshQuoteCost(quoteId: string, companyId: string): Prom
   // 3. Recalculate unit price if markup is set
   let unitPrice = quote.unit_price;
   if (baseCost !== null && quote.markup_percent !== null) {
-    unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 10000) / 10000;
+    unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 100) / 100;
   }
 
   const totalPrice = calculateTotalPrice(quote.quantity, unitPrice);

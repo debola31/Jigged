@@ -118,7 +118,7 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
         operation_name: operationName,
         run_time_minutes: node.run_time_per_unit,
         labor_rate: node.operation_type.labor_rate,
-        cost: Math.round(laborCost * 10000) / 10000,
+        cost: Math.round(laborCost * 100) / 100,
       });
     }
 
@@ -149,20 +149,20 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
         quantity: mat.quantity,
         unit: mat.unit || invItem.primary_unit,
         cost_per_unit: invItem.cost_per_unit,
-        cost: Math.round(materialCost * 10000) / 10000,
+        cost: Math.round(materialCost * 100) / 100,
       });
     }
   }
 
-  const totalLaborCost = Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 10000) / 10000;
-  const totalMaterialCost = Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 10000) / 10000;
+  const totalLaborCost = Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
+  const totalMaterialCost = Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
 
   return {
     labor_items: laborItems,
     material_items: materialItems,
     total_labor_cost: totalLaborCost,
     total_material_cost: totalMaterialCost,
-    total_cost: Math.round((totalLaborCost + totalMaterialCost) * 10000) / 10000,
+    total_cost: Math.round((totalLaborCost + totalMaterialCost) * 100) / 100,
     warnings,
   };
 }

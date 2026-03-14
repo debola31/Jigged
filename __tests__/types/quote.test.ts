@@ -40,9 +40,9 @@ describe('calculateUnitPriceFromMarkup', () => {
     expect(calculateUnitPriceFromMarkup(0, 40)).toBe(0);
   });
 
-  it('rounds to 4 decimal places', () => {
-    // $103.25 at 35% markup = 103.25 * 1.35 = 139.3875
-    expect(calculateUnitPriceFromMarkup(103.25, 35)).toBe(139.3875);
+  it('rounds to 2 decimal places', () => {
+    // $103.25 at 35% markup = 103.25 * 1.35 = 139.3875 → 139.39
+    expect(calculateUnitPriceFromMarkup(103.25, 35)).toBe(139.39);
   });
 });
 

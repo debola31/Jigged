@@ -14,10 +14,8 @@ import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
 import Chip from '@mui/material/Chip';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import MuiLink from '@mui/material/Link';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
 import { calculateTotalPrice, calculateUnitPriceFromMarkup } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
@@ -390,8 +388,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
   };
 
-  const baseCostNum = formData.base_cost ? parseFloat(formData.base_cost) : null;
-
   return (
     <Box component="form" onSubmit={handleSubmit}>
       {error && (
@@ -602,73 +598,38 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             </Grid>
           </Grid>
 
-          {/* Collapsible Cost Details (read-only) */}
-          {(formData.base_cost || formData.cost_source) && (
-            <Accordion
-              sx={{
-                mt: 2,
-                bgcolor: 'transparent',
-                boxShadow: 'none',
-                '&:before': { display: 'none' },
-              }}
-            >
-              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
-                <Typography variant="body2" fontWeight={500}>
-                  Cost Details
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails sx={{ px: 0 }}>
-                <Grid container spacing={2}>
-                  <Grid size={{ xs: 6, sm: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Base Cost
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {formatCurrency(baseCostNum)}
-                    </Typography>
-                  </Grid>
-                  <Grid size={{ xs: 6, sm: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Markup
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {formData.markup_percent ? `${formData.markup_percent}%` : '—'}
-                    </Typography>
-                  </Grid>
-                  <Grid size={{ xs: 6, sm: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Cost Source
-                    </Typography>
-                    {formData.cost_source ? (
-                      <Chip
-                        label={
-                          formData.cost_source === 'routing'
-                            ? 'From Routing'
-                            : formData.cost_source === 'manual'
-                              ? 'Manual Cost'
-                              : 'Estimate'
-                        }
-                        size="small"
-                        color={formData.cost_source === 'routing' ? 'primary' : 'default'}
-                        variant="outlined"
-                        sx={{ mt: 0.5 }}
-                      />
-                    ) : (
-                      <Typography variant="body1" fontWeight={500}>—</Typography>
-                    )}
-                  </Grid>
-                </Grid>
+          {/* Cost source link */}
+          {formData.cost_source && (
+            <Box sx={{ mt: 2 }}>
+              {formData.cost_source === 'routing' && selectedPart ? (
+                <Chip
+                  label="From Routing"
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  icon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
+                  component={MuiLink}
+                  href={`/dashboard/${companyId}/parts/${selectedPart.id}`}
+                  target="_blank"
+                  clickable
+                />
+              ) : (
+                <Chip
+                  label={formData.cost_source === 'manual' ? 'Manual Cost' : 'Estimate'}
+                  size="small"
+                  variant="outlined"
+                />
+              )}
 
-                {/* Cost breakdown warnings */}
-                {costBreakdown && costBreakdown.warnings.length > 0 && (
-                  <Alert severity="warning" sx={{ mt: 2 }}>
-                    {costBreakdown.warnings.map((w, i) => (
-                      <Typography key={i} variant="body2">{w.message}</Typography>
-                    ))}
-                  </Alert>
-                )}
-              </AccordionDetails>
-            </Accordion>
+              {/* Cost breakdown warnings */}
+              {costBreakdown && costBreakdown.warnings.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {costBreakdown.warnings.map((w, i) => (
+                    <Typography key={i} variant="body2">{w.message}</Typography>
+                  ))}
+                </Alert>
+              )}
+            </Box>
           )}
         </CardContent>
       </Card>

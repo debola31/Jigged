@@ -129,7 +129,7 @@ export function quoteToFormData(quote: Quote): QuoteFormData {
 export function calculateUnitPriceFromMarkup(baseCost: number, markupPercent: number): number | null {
   if (isNaN(baseCost) || baseCost < 0) return null;
   if (isNaN(markupPercent)) return null;
-  return Math.round(baseCost * (1 + markupPercent / 100) * 10000) / 10000;
+  return Math.round(baseCost * (1 + markupPercent / 100) * 100) / 100;
 }
 
 /**
@@ -144,12 +144,12 @@ export function calculateMarkupFromUnitPrice(baseCost: number, unitPrice: number
 
 /**
  * Calculate total price from quantity and unit price.
- * Rounds to 4 decimal places (matches database precision).
+ * Rounds to 2 decimal places for currency display.
  */
 export function calculateTotalPrice(quantity: number, unitPrice: number | null): number | null {
   if (unitPrice === null || isNaN(unitPrice)) return null;
   if (isNaN(quantity) || quantity <= 0) return null;
-  return Math.round(quantity * unitPrice * 10000) / 10000;
+  return Math.round(quantity * unitPrice * 100) / 100;
 }
 
 /**

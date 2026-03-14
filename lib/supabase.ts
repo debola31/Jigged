@@ -55,15 +55,22 @@ export function createClient() {
         const isRetry = headers.has(RETRY_HEADER);
 
         if (response.status === 401 && !isAuthEndpoint && !isRetry) {
-          const newAccessToken = await deduplicatedRefresh();
-          if (newAccessToken) {
-            // Retry with the new token — we must manually set the
-            // Authorization header because Supabase's fetchWithAuth
-            // already set the (now-expired) token before calling us.
-            const retryHeaders = new Headers(init?.headers);
-            retryHeaders.set('Authorization', `Bearer ${newAccessToken}`);
-            retryHeaders.set(RETRY_HEADER, '1');
-            return fetch(input, { ...init, headers: retryHeaders });
+          // Only attempt refresh if user had a session (was previously authenticated).
+          // This prevents redirect-to-login for genuinely unauthenticated requests
+          // (e.g., landing page waitlist form).
+          const supabaseClient = getSupabase();
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          if (session) {
+            const newAccessToken = await deduplicatedRefresh();
+            if (newAccessToken) {
+              // Retry with the new token — we must manually set the
+              // Authorization header because Supabase's fetchWithAuth
+              // already set the (now-expired) token before calling us.
+              const retryHeaders = new Headers(init?.headers);
+              retryHeaders.set('Authorization', `Bearer ${newAccessToken}`);
+              retryHeaders.set(RETRY_HEADER, '1');
+              return fetch(input, { ...init, headers: retryHeaders });
+            }
           }
         }
 

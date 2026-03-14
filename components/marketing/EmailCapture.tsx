@@ -2,7 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useState } from 'react';
-import { getSupabase } from '@/lib/supabase';
+import { submitWaitlist } from '@/app/actions/waitlist';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
@@ -63,19 +63,15 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
 
     setStatus('loading');
     try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from('waitlist').upsert(
-        {
-          email,
-          name,
-          company_name: companyName,
-          shop_size: shopSize || null,
-          source,
-        },
-        { onConflict: 'email' },
-      );
+      const result = await submitWaitlist({
+        email,
+        name,
+        company_name: companyName,
+        shop_size: shopSize || null,
+        source,
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       setStatus('success');
       setMessage("Thanks! We'll reach out shortly to get your shop set up.");

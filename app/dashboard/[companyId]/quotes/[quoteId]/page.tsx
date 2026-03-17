@@ -548,7 +548,7 @@ export default function QuoteDetailPage() {
                       quote.cost_source === 'routing'
                         ? 'From Routing'
                         : quote.cost_source === 'manual'
-                          ? 'Manual Cost'
+                          ? 'Manual Estimate'
                           : 'Estimate'
                     }
                     size="small"

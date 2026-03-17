@@ -339,7 +339,7 @@ export default function PartDetailPage() {
 
                 <Box>
                   <Typography variant="body2" color="text.secondary">
-                    Manual Cost
+                    Manual Estimate
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>
                     {formatCurrency(part.manual_cost)}

@@ -14,8 +14,6 @@ import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
 import Chip from '@mui/material/Chip';
-import MuiLink from '@mui/material/Link';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
 import { calculateTotalPrice, calculateUnitPriceFromMarkup } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
@@ -26,6 +24,7 @@ import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
+import RoutingCostModal from '@/components/quotes/RoutingCostModal';
 import type { Customer } from '@/types/customer';
 import type { Part } from '@/types/part';
 import AddIcon from '@mui/icons-material/Add';
@@ -111,6 +110,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // Cost breakdown from routing (if available)
   const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
   const [loadingCost, setLoadingCost] = useState(false);
+  const [costModalOpen, setCostModalOpen] = useState(false);
 
   // Load customers on mount
   useEffect(() => {
@@ -245,17 +245,23 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       setFieldErrors((prev) => ({ ...prev, part_id: '' }));
     }
 
-    // Manual cost takes priority over routing cost when set
+    // Reset pricing fields before calculating new cost
+    setFormData((prev) => ({
+      ...prev,
+      base_cost: '',
+      cost_source: '',
+      unit_price: '',
+    }));
+
+    // Manual/estimate cost already includes markup — use directly as unit_price
     if (value.manual_cost !== null) {
       const baseCostStr = String(value.manual_cost);
-      const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-        ? calculateUnitPriceFromMarkup(value.manual_cost, defaultMarkup)
-        : null;
       setFormData((prev) => ({
         ...prev,
         base_cost: baseCostStr,
         cost_source: value.cost_source || 'manual',
-        unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+        unit_price: baseCostStr,
+        markup_percent: '',
       }));
     } else if (value.has_routing && mode === 'create') {
       setLoadingCost(true);
@@ -265,13 +271,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           setCostBreakdown(breakdown);
           const baseCostStr = String(breakdown.total_cost);
           const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-            ? calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup)
-            : null;
+            ? String(calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup))
+            : baseCostStr;
           setFormData((prev) => ({
             ...prev,
             base_cost: baseCostStr,
             cost_source: 'routing',
-            unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+            unit_price: unitPrice,
           }));
         }
       } catch (err) {
@@ -610,15 +616,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   size="small"
                   color="primary"
                   variant="outlined"
-                  icon={<OpenInNewIcon sx={{ fontSize: 14 }} />}
-                  component={MuiLink}
-                  href={`/dashboard/${companyId}/parts/${selectedPart.id}`}
-                  target="_blank"
+                  onClick={() => setCostModalOpen(true)}
                   clickable
                 />
               ) : (
                 <Chip
-                  label={formData.cost_source === 'manual' ? 'Manual Cost' : 'Estimate'}
+                  label={formData.cost_source === 'manual' ? 'Manual Estimate' : 'Estimate'}
                   size="small"
                   variant="outlined"
                 />
@@ -705,6 +708,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         onCreated={handlePartCreated}
         companyId={companyId}
       />
+
+      {/* Routing Cost Breakdown Modal */}
+      {selectedPart && (
+        <RoutingCostModal
+          open={costModalOpen}
+          onClose={() => setCostModalOpen(false)}
+          breakdown={costBreakdown}
+          partId={selectedPart.id}
+          companyId={companyId}
+        />
+      )}
     </Box>
   );
 }

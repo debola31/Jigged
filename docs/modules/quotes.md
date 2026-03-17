@@ -79,7 +79,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | markup_percent | Decimal(5,2) | No | Markup percentage (pre-filled from part category, overridable) |
 | estimated_labor_cost | Decimal(12,4) | No | Labor cost breakdown from routing (for display) |
 | estimated_material_cost | Decimal(12,4) | No | Material cost breakdown from routing (for display) |
-| unit_price | Decimal | No | Price per unit (derived: `base_cost × (1 + markup_percent / 100)`, or directly entered) |
+| unit_price | Decimal | No | Price per unit (for routing: `base_cost × (1 + markup_percent / 100)`, for manual/estimate: `base_cost` directly) |
 | total_price | Decimal | No | Total quoted price (quantity × unit_price) |
 | estimated_lead_time_days | Integer | No | Estimated days to complete |
 | valid_until | Date | No | Quote expiration date |
@@ -461,33 +461,29 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 When a user selects an existing part and enters quantity:
 
-1. **Determine base cost:**
-   - If part has a routing: auto-calculate from routing operations (see [Routings — Cost Calculation](routings.md#cost-calculation-from-routing))
-   - If part has `manual_cost`: use that value
+1. **Determine base cost (manual cost takes priority):**
+   - If part has `manual_cost`: use that value — this is the owner's intended price with markup already included
+   - Else if part has a routing: auto-calculate from routing operations (see [Routings — Cost Calculation](routings.md#cost-calculation-from-routing))
    - If neither: leave blank for user to enter manually
 
-2. **Apply markup default:**
-   - Look up part's category → `default_markup_percent`
-   - Pre-fill `markup_percent` field
+2. **Apply markup (routing cost only):**
+   - Markup is only applied when cost_source is `'routing'` — routing cost is raw manufacturing cost that needs markup
+   - Look up part's category → `default_markup_percent`, pre-fill `markup_percent` field
    - If part has no category, markup is blank (user must enter)
+   - Manual/estimate costs already include markup — `unit_price = manual_cost` directly, markup field is cleared
 
 3. **Calculate unit price:**
-   ```
-   unit_price = base_cost × (1 + markup_percent / 100)
-   ```
+   - **Routing cost:** `unit_price = base_cost × (1 + markup_percent / 100)`
+   - **Manual/estimate cost:** `unit_price = base_cost` (markup already included)
 
 4. **Calculate total price:**
    ```
    total_price = quantity × unit_price
    ```
 
-### Bidirectional Editing
+### Markup Editing
 
-Users can edit pricing from two directions — the system keeps cost, markup, and price in sync:
-
-- **Edit markup_percent** → `unit_price` recalculates, `total_price` recalculates
-- **Edit unit_price** → `markup_percent` back-calculates: `markup = ((unit_price - base_cost) / base_cost) × 100`
-- **base_cost stays anchored** — it only changes if the routing changes or the user explicitly edits it (manual/estimate cost source)
+Markup is only relevant for routing-based quotes. During quote creation, the salesperson sees the pre-calculated unit price but cannot edit markup directly. The owner/approver can adjust markup during the approval step (`pending_approval` status), which recalculates the unit price.
 
 ### Cost Source Display
 
@@ -505,10 +501,16 @@ Users can edit pricing from two directions — the system keeps cost, markup, an
 - User enters quantity: 50
 
 System auto-fills:
-- Base Cost: $103.25 (from routing)
-- Markup: 35% (from category)
+- Base Cost: $103.25 (from routing — raw manufacturing cost)
+- Markup: 35% (from category — applied because cost source is routing)
 - Unit Price: $103.25 × (1 + 0.35) = $139.39
 - Total Price: 50 × $139.39 = $6,969.50
+
+**Example (manual cost):**
+- Part "WIDGET-01" has manual_cost = $50.00 (owner's intended price, markup already included)
+- User enters quantity: 10
+- Unit Price: $50.00 (used directly, no markup applied)
+- Total Price: 10 × $50.00 = $500.00
 
 ---
 
@@ -808,7 +810,7 @@ When selecting an existing part:
 
 - Markup pre-fills from the part's category `default_markup_percent`
 
-- Unit price calculated: `base_cost × (1 + markup_percent / 100)`
+- Unit price calculated: for routing cost `base_cost × (1 + markup_percent / 100)`, for manual/estimate `base_cost` directly
 
 - Total price calculated: `quantity × unit_price`
 

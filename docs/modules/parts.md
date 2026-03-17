@@ -69,12 +69,12 @@ The `cost_source` field indicates how the part's base cost is determined:
 
 | Value | Description |
 |---|---|
-| `routing` | Auto-calculated from routing operations (sum of labor + materials). Read-only — updates when routing changes. |
-| `manual` | User entered the cost directly on the part or during quoting. |
-| `estimate` | A rough estimate, not yet backed by a routing or detailed cost analysis. |
+| `routing` | Auto-calculated from routing operations (sum of labor + materials). This is raw manufacturing cost — **markup is applied** during quoting. |
+| `manual` | User entered the cost directly. This is the owner's intended unit price — **markup is already included**. |
+| `estimate` | A rough estimate. Like manual, this is the owner's intended price — **markup is already included**. |
 | `null` | No cost information available yet. |
 
-When a part has a routing, `cost_source` is automatically set to `'routing'` and the effective base cost is calculated from the routing (see [Routings Module — Cost Calculation](routings.md#cost-calculation-from-routing)). The `manual_cost` field is ignored when a routing exists.
+**Cost priority for quoting:** When `manual_cost` is set, it takes priority over routing cost regardless of whether a routing exists. This allows the owner to override the calculated routing cost with an intentional price. When `manual_cost` is not set and a routing exists, the routing cost is used as the base with markup applied from the part category.
 
 ### Pricing Tier Migration
 

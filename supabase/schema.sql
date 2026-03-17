@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-13T20:27:03Z
+-- Generated: 2026-03-15T00:24:06Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -142,22 +142,6 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_unit_conversions"
     CONSTRAINT "inventory_unit_conversions_factor_positive" CHECK ((to_primary_factor > (0)::numeric))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."parts"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "part_number" text NOT NULL,
-    "description" text,
-    "category_id" uuid,
-    "manual_cost" numeric(12,4),
-    "cost_source" text,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "parts_pkey" PRIMARY KEY (id),
-    CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
-    CONSTRAINT "parts_cost_source_check" CHECK (cost_source IS NULL OR cost_source IN ('routing','manual','estimate'))
-);
-
 CREATE TABLE IF NOT EXISTS "public"."part_categories"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -169,6 +153,22 @@ CREATE TABLE IF NOT EXISTS "public"."part_categories"
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_categories_pkey" PRIMARY KEY (id),
     CONSTRAINT "part_categories_company_id_name_key" UNIQUE (company_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."parts"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_number" text NOT NULL,
+    "description" text,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "category_id" uuid,
+    "manual_cost" numeric(12,4),
+    "cost_source" text,
+    CONSTRAINT "parts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
+    CONSTRAINT "parts_cost_source_check" CHECK (((cost_source IS NULL) OR (cost_source = ANY (ARRAY['routing'::text, 'manual'::text, 'estimate'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."resource_groups"
@@ -426,11 +426,6 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "part_id" uuid,
     "description" text,
     "quantity" integer NOT NULL DEFAULT 1,
-    "base_cost" numeric(12,4),
-    "cost_source" text,
-    "markup_percent" numeric(5,2),
-    "estimated_labor_cost" numeric(12,4),
-    "estimated_material_cost" numeric(12,4),
     "unit_price" numeric(12,4),
     "total_price" numeric(12,4),
     "status" text NOT NULL DEFAULT 'draft'::text,
@@ -440,6 +435,11 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "created_by" uuid,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
+    "base_cost" numeric(12,4),
+    "cost_source" text,
+    "markup_percent" numeric(5,2),
+    "estimated_labor_cost" numeric(12,4),
+    "estimated_material_cost" numeric(12,4),
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['draft'::text, 'pending_approval'::text, 'approved'::text, 'rejected'::text, 'accepted'::text, 'expired'::text, 'converted'::text])))
@@ -553,7 +553,7 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."companies"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "Users can delete company_custom_units" ON "public"."company_custom_units";
 CREATE POLICY "Users can delete company_custom_units"
@@ -602,7 +602,7 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."customers"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_data_templates";
 CREATE POLICY "All authenticated users can read active templates"
@@ -645,7 +645,7 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."inventory_items"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "Users can insert inventory_transactions" ON "public"."inventory_transactions";
 CREATE POLICY "Users can insert inventory_transactions"
@@ -670,7 +670,7 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."inventory_transactions"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "Users can delete inventory_unit_conversions" ON "public"."inventory_unit_conversions";
 CREATE POLICY "Users can delete inventory_unit_conversions"
@@ -709,14 +709,16 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."inventory_unit_conversions"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((EXISTS ( SELECT 1
+   FROM inventory_items
+  WHERE ((inventory_items.id = inventory_unit_conversions.inventory_item_id) AND (inventory_items.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_attachments";
 CREATE POLICY "ai_readonly_select"
     ON "public"."job_attachments"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "job_attachments_delete" ON "public"."job_attachments";
 CREATE POLICY "job_attachments_delete"
@@ -787,7 +789,9 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."job_operations"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((EXISTS ( SELECT 1
+   FROM jobs
+  WHERE ((jobs.id = job_operations.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
 DROP POLICY IF EXISTS "Users can delete jobs" ON "public"."jobs";
 CREATE POLICY "Users can delete jobs"
@@ -818,14 +822,14 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."jobs"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operation_types";
 CREATE POLICY "ai_readonly_select"
     ON "public"."operation_types"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "operation_types_delete" ON "public"."operation_types";
 CREATE POLICY "operation_types_delete"
@@ -895,7 +899,39 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."operator_sessions"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "part_categories_delete" ON "public"."part_categories";
+CREATE POLICY "part_categories_delete"
+    ON "public"."part_categories"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_insert" ON "public"."part_categories";
+CREATE POLICY "part_categories_insert"
+    ON "public"."part_categories"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_select" ON "public"."part_categories";
+CREATE POLICY "part_categories_select"
+    ON "public"."part_categories"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_categories_update" ON "public"."part_categories";
+CREATE POLICY "part_categories_update"
+    ON "public"."part_categories"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
@@ -934,14 +970,14 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."parts"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_attachments";
 CREATE POLICY "ai_readonly_select"
     ON "public"."quote_attachments"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "quote_attachments_delete" ON "public"."quote_attachments";
 CREATE POLICY "quote_attachments_delete"
@@ -1004,46 +1040,14 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."quotes"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."resource_groups";
 CREATE POLICY "ai_readonly_select"
     ON "public"."resource_groups"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
-
-DROP POLICY IF EXISTS "part_categories_delete" ON "public"."part_categories";
-CREATE POLICY "part_categories_delete"
-    ON "public"."part_categories"
-    FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_insert" ON "public"."part_categories";
-CREATE POLICY "part_categories_insert"
-    ON "public"."part_categories"
-    FOR INSERT
-    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_select" ON "public"."part_categories";
-CREATE POLICY "part_categories_select"
-    ON "public"."part_categories"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_update" ON "public"."part_categories";
-CREATE POLICY "part_categories_update"
-    ON "public"."part_categories"
-    FOR UPDATE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "resource_groups_delete" ON "public"."resource_groups";
 CREATE POLICY "resource_groups_delete"
@@ -1114,7 +1118,9 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."routing_edges"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((EXISTS ( SELECT 1
+   FROM routings
+  WHERE ((routings.id = routing_edges.routing_id) AND (routings.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
 DROP POLICY IF EXISTS "Users can delete routing_nodes" ON "public"."routing_nodes";
 CREATE POLICY "Users can delete routing_nodes"
@@ -1153,7 +1159,9 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."routing_nodes"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((EXISTS ( SELECT 1
+   FROM routings
+  WHERE ((routings.id = routing_nodes.routing_id) AND (routings.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
 DROP POLICY IF EXISTS "Users can delete routings" ON "public"."routings";
 CREATE POLICY "Users can delete routings"
@@ -1184,7 +1192,7 @@ CREATE POLICY "ai_readonly_select"
     ON "public"."routings"
     FOR SELECT
     TO jigged_ai_readonly
-    USING (true);
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "Users can delete own saved insights" ON "public"."saved_insights";
 CREATE POLICY "Users can delete own saved insights"
@@ -1431,10 +1439,10 @@ ALTER TABLE "public"."part_categories"
     ADD CONSTRAINT "part_categories_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."parts"
-    ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+    ADD CONSTRAINT "parts_category_id_fkey" FOREIGN KEY (category_id) REFERENCES part_categories(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."parts"
-    ADD CONSTRAINT "parts_category_id_fkey" FOREIGN KEY (category_id) REFERENCES part_categories(id) ON DELETE SET NULL;
+    ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quote_attachments"
     ADD CONSTRAINT "quote_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1817,6 +1825,20 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.get_part_price(p_pricing jsonb, p_quantity integer)
+ RETURNS numeric
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  SELECT (elem->>'price')::numeric
+  FROM jsonb_array_elements(p_pricing) elem
+  WHERE (elem->>'qty')::int <= p_quantity
+  ORDER BY (elem->>'qty')::int DESC
+  LIMIT 1;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.get_ready_operations_batch(p_job_ids uuid[])
  RETURNS TABLE(job_id uuid, operation_name text, ready_count integer)
  LANGUAGE plpgsql
@@ -2100,12 +2122,11 @@ BEGIN
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-            INSERT INTO parts (id, company_id, part_number, description, manual_cost, cost_source, created_at)
+            INSERT INTO parts (id, company_id, part_number, description, pricing, created_at)
             VALUES (v_new_id, p_company_id,
                     v_item->>'part_number',
                     v_item->>'description',
-                    (v_item->>'manual_cost')::NUMERIC,
-                    v_item->>'cost_source',
+                    COALESCE(v_item->'pricing', '[]'::JSONB),
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
@@ -2424,7 +2445,6 @@ $function$
 
 ;
 
-
 -- ============================================================
 -- 8. TRIGGERS
 -- ============================================================
@@ -2529,13 +2549,13 @@ COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
 COMMENT ON TABLE "public"."parts"
-    IS 'Parts catalog. Each part has a company-unique part number, optional category, and cost data (manual or routing-calculated). Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
+    IS 'Parts catalog. Each part has a company-unique part number, description, and flexible volume-based pricing stored as JSONB. Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
 
 COMMENT ON TABLE "public"."quote_attachments"
     IS 'PDF attachments for quotes. Phase 0 limits to one attachment per quote (enforced in UI). When quote converts to job, attachment is COPIED to job_attachments.';
 
 COMMENT ON TABLE "public"."quotes"
-    IS 'Sales quotes/estimates sent to customers before work begins. Contains cost-plus pricing (base cost + markup), lead time estimates, and can be converted to jobs. Tracks quote status and links to the job if converted.';
+    IS 'Sales quotes/estimates sent to customers before work begins. Contains pricing, lead time estimates, and can be converted to jobs. Tracks quote status (draft, sent, accepted, rejected, expired) and links to the job if converted.';
 
 COMMENT ON TABLE "public"."resource_groups"
     IS 'Categories for organizing operation types (e.g., CNC, LATHE&MILL, Hone, EDM). Matches terminology from legacy system.';
@@ -2852,17 +2872,17 @@ COMMENT ON COLUMN "public"."parts"."part_number"
 COMMENT ON COLUMN "public"."parts"."description"
     IS 'Human-readable description of what the part is. Example: "Recess Tool Bit", "Aluminum Bracket Assembly"';
 
-COMMENT ON COLUMN "public"."parts"."manual_cost"
-    IS 'Base cost per unit when cost_source is manual or estimate. Ignored when routing exists.';
-
-COMMENT ON COLUMN "public"."parts"."cost_source"
-    IS 'How base cost is determined: routing (auto-calculated), manual (user entered), estimate (rough), or null.';
-
 COMMENT ON COLUMN "public"."parts"."created_at"
     IS 'Timestamp when part was created.';
 
 COMMENT ON COLUMN "public"."parts"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."parts"."manual_cost"
+    IS 'Base cost per unit when cost_source is manual or estimate. Ignored when routing exists.';
+
+COMMENT ON COLUMN "public"."parts"."cost_source"
+    IS 'How the cost was determined: routing, manual, or estimate.';
 
 COMMENT ON COLUMN "public"."quote_attachments"."id"
     IS 'Primary key. UUID auto-generated.';

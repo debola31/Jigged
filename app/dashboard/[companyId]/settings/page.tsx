@@ -14,14 +14,10 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
-import { useParams } from 'next/navigation';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
-import PartCategoriesSection from '@/components/settings/PartCategoriesSection';
 
 export default function SettingsPage() {
-  const params = useParams();
-  const companyId = params.companyId as string;
   const {
     isDemoMode,
     hasDemoCompany,
@@ -101,11 +97,6 @@ export default function SettingsPage() {
           </Box>
         </CardContent>
       </Card>
-
-      {/* Part Categories Section */}
-      <Box sx={{ mt: 3 }}>
-        <PartCategoriesSection companyId={companyId} />
-      </Box>
 
       {/* Reset Confirmation Dialog */}
       <Dialog open={resetDialogOpen} onClose={() => setResetDialogOpen(false)}>

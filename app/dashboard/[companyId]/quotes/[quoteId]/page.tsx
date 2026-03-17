@@ -41,6 +41,10 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import SaveIcon from '@mui/icons-material/Save';
+
 import {
   getQuoteWithRelations,
   markQuoteAsPendingApproval,
@@ -50,8 +54,9 @@ import {
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
   refreshQuoteCost,
+  updateQuote,
 } from '@/utils/quotesAccess';
-import { quoteToFormData } from '@/types/quote';
+import { quoteToFormData, calculateUnitPriceFromMarkup, calculateTotalPrice } from '@/types/quote';
 import type { QuoteWithRelations, QuoteAttachment } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
@@ -78,6 +83,11 @@ export default function QuoteDetailPage() {
   const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
   const [costOutdated, setCostOutdated] = useState(false);
   const [refreshingCost, setRefreshingCost] = useState(false);
+
+  // Markup editing state (for pending_approval status)
+  const [editingMarkup, setEditingMarkup] = useState(false);
+  const [markupDraft, setMarkupDraft] = useState('');
+  const [savingMarkup, setSavingMarkup] = useState(false);
 
   useEffect(() => {
     fetchQuote();
@@ -127,6 +137,35 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to refresh cost');
     } finally {
       setRefreshingCost(false);
+    }
+  };
+
+  const handleStartEditMarkup = () => {
+    if (!quote) return;
+    setMarkupDraft(quote.markup_percent !== null ? String(quote.markup_percent) : '');
+    setEditingMarkup(true);
+  };
+
+  const handleSaveMarkup = async () => {
+    if (!quote) return;
+    setSavingMarkup(true);
+    setError(null);
+    try {
+      const markupNum = parseFloat(markupDraft);
+      const baseCost = quote.base_cost ?? 0;
+      const newUnitPrice = !isNaN(markupNum) ? calculateUnitPriceFromMarkup(baseCost, markupNum) : quote.unit_price;
+      const newTotal = calculateTotalPrice(quote.quantity, newUnitPrice);
+
+      const formData = quoteToFormData(quote);
+      formData.markup_percent = markupDraft;
+      formData.unit_price = newUnitPrice !== null ? String(newUnitPrice) : '';
+      await updateQuote(quoteId, formData);
+      setEditingMarkup(false);
+      await fetchQuote();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update markup');
+    } finally {
+      setSavingMarkup(false);
     }
   };
 
@@ -509,7 +548,7 @@ export default function QuoteDetailPage() {
                       quote.cost_source === 'routing'
                         ? 'From Routing'
                         : quote.cost_source === 'manual'
-                          ? 'Manual Cost'
+                          ? 'Manual Estimate'
                           : 'Estimate'
                     }
                     size="small"
@@ -546,12 +585,64 @@ export default function QuoteDetailPage() {
                   </Typography>
                 </Grid>
                 <Grid size={{ xs: 6, sm: 3 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Markup
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {quote.markup_percent !== null ? `${quote.markup_percent}%` : '—'}
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Markup
+                    </Typography>
+                    {quote.status === 'pending_approval' && !editingMarkup && (
+                      <Tooltip title="Edit markup">
+                        <IconButton size="small" onClick={handleStartEditMarkup} sx={{ color: 'text.secondary' }}>
+                          <EditIcon sx={{ fontSize: 14 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                  {editingMarkup && quote.status === 'pending_approval' ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        size="small"
+                        type="number"
+                        value={markupDraft}
+                        onChange={(e) => setMarkupDraft(e.target.value)}
+                        disabled={savingMarkup}
+                        sx={{ width: 100 }}
+                        slotProps={{
+                          input: {
+                            endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                          },
+                          htmlInput: { step: 0.1 },
+                        }}
+                      />
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={handleSaveMarkup}
+                        disabled={savingMarkup}
+                        startIcon={savingMarkup ? <CircularProgress size={14} /> : <SaveIcon sx={{ fontSize: 14 }} />}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => setEditingMarkup(false)}
+                        disabled={savingMarkup}
+                      >
+                        Cancel
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Typography variant="body1" fontWeight={500}>
+                      {quote.markup_percent !== null ? `${quote.markup_percent}%` : '—'}
+                    </Typography>
+                  )}
+                  {/* Live preview of recalculated values when editing */}
+                  {editingMarkup && markupDraft && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                      Unit price: {formatCurrency(calculateUnitPriceFromMarkup(quote.base_cost ?? 0, parseFloat(markupDraft)))}
+                      {' · '}
+                      Total: {formatCurrency(calculateTotalPrice(quote.quantity, calculateUnitPriceFromMarkup(quote.base_cost ?? 0, parseFloat(markupDraft))))}
+                    </Typography>
+                  )}
                 </Grid>
                 <Grid size={{ xs: 6, sm: 3 }}>
                   <Typography variant="body2" color="text.secondary">

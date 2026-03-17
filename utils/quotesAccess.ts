@@ -774,20 +774,27 @@ export async function refreshQuoteCost(quoteId: string, companyId: string): Prom
   let estimatedLaborCost: number | null = null;
   let estimatedMaterialCost: number | null = null;
 
-  if (breakdown) {
+  // Manual cost takes priority over routing cost when set
+  if (quote.parts?.manual_cost != null) {
+    baseCost = quote.parts.manual_cost;
+    costSource = quote.parts.cost_source || 'manual';
+  } else if (breakdown) {
     baseCost = breakdown.total_cost;
     costSource = 'routing';
     estimatedLaborCost = breakdown.total_labor_cost;
     estimatedMaterialCost = breakdown.total_material_cost;
-  } else if (quote.parts?.manual_cost != null) {
-    baseCost = quote.parts.manual_cost;
-    costSource = quote.parts.cost_source || 'manual';
   }
 
-  // 3. Recalculate unit price if markup is set
+  // 3. Recalculate unit price
   let unitPrice = quote.unit_price;
-  if (baseCost !== null && quote.markup_percent !== null) {
-    unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 10000) / 10000;
+  if (baseCost !== null) {
+    if (costSource === 'routing' && quote.markup_percent !== null) {
+      // Routing cost is raw manufacturing cost — apply markup
+      unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 100) / 100;
+    } else {
+      // Manual/estimate cost already includes markup — use directly
+      unitPrice = baseCost;
+    }
   }
 
   const totalPrice = calculateTotalPrice(quote.quantity, unitPrice);

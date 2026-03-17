@@ -267,7 +267,7 @@ export default function PartForm({
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
-                label="Manual Cost"
+                label="Manual Estimate"
                 type="number"
                 value={formData.manual_cost}
                 onChange={handleChange('manual_cost')}
@@ -275,7 +275,7 @@ export default function PartForm({
                 helperText={
                   fieldErrors.manual_cost ||
                   (hasRouting
-                    ? 'Routing cost takes priority — manual cost is used as fallback'
+                    ? 'Manual cost takes priority over routing cost when set'
                     : 'Cost per unit for quoting')
                 }
                 disabled={loading}

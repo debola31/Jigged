@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -15,7 +15,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
 import Chip from '@mui/material/Chip';
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
-import { calculateTotalPrice, calculateUnitPriceFromMarkup, calculateMarkupFromUnitPrice } from '@/types/quote';
+import { calculateTotalPrice, calculateUnitPriceFromMarkup } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
@@ -24,6 +24,7 @@ import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
+import RoutingCostModal from '@/components/quotes/RoutingCostModal';
 import type { Customer } from '@/types/customer';
 import type { Part } from '@/types/part';
 import AddIcon from '@mui/icons-material/Add';
@@ -36,8 +37,8 @@ interface QuoteFormProps {
   mode: 'create' | 'edit';
   initialData: QuoteFormData;
   quoteId?: string;
-  onCancel?: () => void; // Optional callback for edit mode cancel
-  onSave?: () => void; // Optional callback for edit mode save success
+  onCancel?: () => void;
+  onSave?: () => void;
 }
 
 interface CustomerOption {
@@ -58,7 +59,6 @@ interface PartOption {
   isCreateNew?: boolean;
 }
 
-// Special option for "Create New" in dropdowns
 const CREATE_NEW_CUSTOMER: CustomerOption = {
   id: '__create_new__',
   name: 'Create New Customer',
@@ -105,7 +105,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
   const [tempAttachments, setTempAttachments] = useState<TempAttachment[]>([]);
-  const [sessionId] = useState(() => generateSessionId()); // Generate once on mount
+  const [sessionId] = useState(() => generateSessionId());
+
+  // Cost breakdown from routing (if available)
+  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  const [loadingCost, setLoadingCost] = useState(false);
+  const [costModalOpen, setCostModalOpen] = useState(false);
 
   // Load customers on mount
   useEffect(() => {
@@ -118,7 +123,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         }));
         setCustomers(customerOptions);
 
-        // If editing, find and set the selected customer
         if (initialData.customer_id) {
           const found = customerOptions.find((c) => c.id === initialData.customer_id);
           if (found) setSelectedCustomer(found);
@@ -132,7 +136,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     loadCustomers();
   }, [companyId, initialData.customer_id]);
 
-  // Load all parts on mount (parts are independent of customer)
+  // Load all parts on mount
   useEffect(() => {
     const loadParts = async () => {
       setLoadingParts(true);
@@ -140,7 +144,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         const data = await getPartsForSelect(companyId);
         setParts(data);
 
-        // If editing with existing part, find and set it
         if (initialData.part_id) {
           const found = data.find((p) => p.id === initialData.part_id);
           if (found) setSelectedPart(found);
@@ -173,26 +176,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     loadAttachments();
   }, [loadAttachments]);
 
-  // Cleanup temp attachments on unmount (if in create mode and quote wasn't saved)
+  // Cleanup temp attachments on unmount
   useEffect(() => {
     return () => {
       if (mode === 'create' && tempAttachments.length > 0) {
-        // Best effort cleanup - don't block unmount
         tempAttachments.forEach(attachment => {
           deleteTempQuoteAttachment(attachment.file_path).catch(console.error);
         });
       }
     };
   }, [mode, tempAttachments]);
-
-  // Cost breakdown from routing (if available)
-  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  const [loadingCost, setLoadingCost] = useState(false);
-
-  // Track which field was last edited for bidirectional sync
-  const lastEditedField = useRef<'markup' | 'unit_price' | null>(null);
-
-  // NOTE: Description is NOT auto-filled from part. Quote description is separate.
 
   const handleChange =
     (field: keyof QuoteFormData) =>
@@ -204,7 +197,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     };
 
   const handleCustomerChange = (_: unknown, value: CustomerOption | null) => {
-    // Check if "Create New" was selected
     if (value?.isCreateNew) {
       setCustomerModalOpen(true);
       return;
@@ -220,7 +212,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   };
 
   const handlePartChange = async (_: unknown, value: PartOption | null) => {
-    // Check if "Create New" was selected
     if (value?.isCreateNew) {
       setPartModalOpen(true);
       return;
@@ -254,8 +245,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       setFieldErrors((prev) => ({ ...prev, part_id: '' }));
     }
 
-    // Try to get routing cost (only in create mode or if user explicitly refreshes)
-    if (value.has_routing && mode === 'create') {
+    // Reset pricing fields before calculating new cost
+    setFormData((prev) => ({
+      ...prev,
+      base_cost: '',
+      cost_source: '',
+      unit_price: '',
+    }));
+
+    // Manual/estimate cost already includes markup — use directly as unit_price
+    if (value.manual_cost !== null) {
+      const baseCostStr = String(value.manual_cost);
+      setFormData((prev) => ({
+        ...prev,
+        base_cost: baseCostStr,
+        cost_source: value.cost_source || 'manual',
+        unit_price: baseCostStr,
+        markup_percent: '',
+      }));
+    } else if (value.has_routing && mode === 'create') {
       setLoadingCost(true);
       try {
         const breakdown = await calculateRoutingCost(value.id);
@@ -263,13 +271,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           setCostBreakdown(breakdown);
           const baseCostStr = String(breakdown.total_cost);
           const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-            ? calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup)
-            : null;
+            ? String(calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup))
+            : baseCostStr;
           setFormData((prev) => ({
             ...prev,
             base_cost: baseCostStr,
             cost_source: 'routing',
-            unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
+            unit_price: unitPrice,
           }));
         }
       } catch (err) {
@@ -277,22 +285,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       } finally {
         setLoadingCost(false);
       }
-    } else if (value.manual_cost !== null) {
-      // Fallback to manual cost
-      const baseCostStr = String(value.manual_cost);
-      const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-        ? calculateUnitPriceFromMarkup(value.manual_cost, defaultMarkup)
-        : null;
-      setFormData((prev) => ({
-        ...prev,
-        base_cost: baseCostStr,
-        cost_source: value.cost_source || 'manual',
-        unit_price: unitPrice !== null ? String(unitPrice) : prev.unit_price,
-      }));
     }
   };
 
-  // Handler for when a new customer is created via modal
   const handleCustomerCreated = async (customer: Customer) => {
     const newOption: CustomerOption = {
       id: customer.id,
@@ -304,11 +299,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       ...prev,
       customer_id: customer.id,
     }));
-    // Always clear the error when a customer is selected
     setFieldErrors((prev) => ({ ...prev, customer_id: '' }));
   };
 
-  // Handler for when a new part is created via modal
   const handlePartCreated = async (part: Part) => {
     const newOption: PartOption = {
       id: part.id,
@@ -326,7 +319,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       ...prev,
       part_id: part.id,
     }));
-    // Always clear the error when a part is selected
     setFieldErrors((prev) => ({ ...prev, part_id: '' }));
   };
 
@@ -353,7 +345,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    e.stopPropagation(); // Prevent event bubbling to parent forms
+    e.stopPropagation();
     setError(null);
 
     if (!validateForm()) return;
@@ -363,10 +355,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     try {
       if (mode === 'create') {
         const result = await createQuote(companyId, formData, tempAttachments);
-        // Show warning if some attachments failed
         if (result.attachmentErrors && result.attachmentErrors.length > 0) {
           console.warn('Some attachments failed to save:', result.attachmentErrors);
-          // Could show a snackbar warning here, but continue to the quote page
         }
         router.push(`/dashboard/${companyId}/quotes/${result.quote.id}`);
       } else if (quoteId) {
@@ -426,7 +416,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             loading={loadingCustomers}
             disabled={loading}
             filterOptions={(options, state) => {
-              // Always keep "Create New" at the top, then filter the rest
               const createNew = options.find((o) => o.isCreateNew);
               const filtered = options
                 .filter((o) => !o.isCreateNew)
@@ -496,7 +485,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 loading={loadingParts}
                 disabled={loading}
                 filterOptions={(options, state) => {
-                  // Always keep "Create New" at the top, then filter the rest
                   const createNew = options.find((o) => o.isCreateNew);
                   const filtered = options
                     .filter((o) => !o.isCreateNew)
@@ -549,100 +537,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         </CardContent>
       </Card>
 
-      {/* Cost & Pricing */}
+      {/* Pricing */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Cost & Pricing
+              Pricing
             </Typography>
-            {formData.cost_source && (
-              <Chip
-                label={formData.cost_source === 'routing' ? 'From Routing' : formData.cost_source === 'manual' ? 'Manual Cost' : 'Estimate'}
-                size="small"
-                color={formData.cost_source === 'routing' ? 'primary' : 'default'}
-                variant="outlined"
-              />
-            )}
             {loadingCost && <CircularProgress size={16} />}
           </Box>
 
-          {/* Cost breakdown warnings */}
-          {costBreakdown && costBreakdown.warnings.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              Cost may be incomplete — {costBreakdown.warnings.length} item{costBreakdown.warnings.length !== 1 ? 's' : ''} missing data
-            </Alert>
-          )}
-
           <Grid container spacing={3}>
-            {/* Base Cost */}
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                label="Base Cost"
-                type="number"
-                value={formData.base_cost}
-                onChange={(e) => {
-                  const newCost = e.target.value;
-                  const costNum = parseFloat(newCost);
-                  const markupNum = parseFloat(formData.markup_percent);
-                  const newUnitPrice = !isNaN(costNum) && !isNaN(markupNum)
-                    ? calculateUnitPriceFromMarkup(costNum, markupNum)
-                    : null;
-                  setFormData((prev) => ({
-                    ...prev,
-                    base_cost: newCost,
-                    unit_price: newUnitPrice !== null ? String(newUnitPrice) : prev.unit_price,
-                  }));
-                }}
-                disabled={loading || formData.cost_source === 'routing'}
-                helperText={formData.cost_source === 'routing' ? 'Calculated from routing' : 'Cost per unit'}
-                slotProps={{
-                  input: {
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  },
-                  htmlInput: { min: 0, step: 0.01 },
-                }}
-              />
-            </Grid>
-
-            {/* Markup % */}
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                label="Markup %"
-                type="number"
-                value={formData.markup_percent}
-                onChange={(e) => {
-                  lastEditedField.current = 'markup';
-                  const newMarkup = e.target.value;
-                  const costNum = parseFloat(formData.base_cost);
-                  const markupNum = parseFloat(newMarkup);
-                  const newUnitPrice = !isNaN(costNum) && !isNaN(markupNum)
-                    ? calculateUnitPriceFromMarkup(costNum, markupNum)
-                    : null;
-                  setFormData((prev) => ({
-                    ...prev,
-                    markup_percent: newMarkup,
-                    unit_price: newUnitPrice !== null ? String(newUnitPrice) : prev.unit_price,
-                  }));
-                }}
-                disabled={loading}
-                helperText={
-                  selectedPart?.part_category?.default_markup_percent !== null &&
-                  selectedPart?.part_category?.default_markup_percent !== undefined
-                    ? `Default: ${selectedPart.part_category.default_markup_percent}% (${selectedPart.part_category.name})`
-                    : undefined
-                }
-                slotProps={{
-                  input: {
-                    endAdornment: <InputAdornment position="end">%</InputAdornment>,
-                  },
-                  htmlInput: { step: 0.1 },
-                }}
-              />
-            </Grid>
-
             {/* Unit Price */}
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
@@ -651,17 +556,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 type="number"
                 value={formData.unit_price}
                 onChange={(e) => {
-                  lastEditedField.current = 'unit_price';
-                  const newPrice = e.target.value;
-                  const costNum = parseFloat(formData.base_cost);
-                  const priceNum = parseFloat(newPrice);
-                  const newMarkup = !isNaN(costNum) && costNum > 0 && !isNaN(priceNum)
-                    ? calculateMarkupFromUnitPrice(costNum, priceNum)
-                    : null;
                   setFormData((prev) => ({
                     ...prev,
-                    unit_price: newPrice,
-                    markup_percent: newMarkup !== null ? String(newMarkup) : prev.markup_percent,
+                    unit_price: e.target.value,
                   }));
                 }}
                 error={!!fieldErrors.unit_price}
@@ -706,6 +603,40 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Box>
             </Grid>
           </Grid>
+
+          {/* Cost source link */}
+          {formData.cost_source && (
+            <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Cost basis:
+              </Typography>
+              {formData.cost_source === 'routing' && selectedPart ? (
+                <Chip
+                  label="Part Routing"
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  onClick={() => setCostModalOpen(true)}
+                  clickable
+                />
+              ) : (
+                <Chip
+                  label={formData.cost_source === 'manual' ? 'Manual Estimate' : 'Estimate'}
+                  size="small"
+                  variant="outlined"
+                />
+              )}
+
+              {/* Cost breakdown warnings */}
+              {costBreakdown && costBreakdown.warnings.length > 0 && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {costBreakdown.warnings.map((w, i) => (
+                    <Typography key={i} variant="body2">{w.message}</Typography>
+                  ))}
+                </Alert>
+              )}
+            </Box>
+          )}
         </CardContent>
       </Card>
 
@@ -777,6 +708,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         onCreated={handlePartCreated}
         companyId={companyId}
       />
+
+      {/* Routing Cost Breakdown Modal */}
+      {selectedPart && (
+        <RoutingCostModal
+          open={costModalOpen}
+          onClose={() => setCostModalOpen(false)}
+          breakdown={costBreakdown}
+          partId={selectedPart.id}
+          companyId={companyId}
+        />
+      )}
     </Box>
   );
 }

@@ -73,8 +73,8 @@ describe('PartForm', () => {
         expect(screen.getByText(/cost information/i)).toBeInTheDocument();
       });
 
-      // Manual cost field should exist
-      expect(screen.getByLabelText(/manual cost/i)).toBeInTheDocument();
+      // Manual estimate field should exist
+      expect(screen.getByLabelText(/manual estimate/i)).toBeInTheDocument();
     });
 
     it('shows cost source chip in edit mode', async () => {

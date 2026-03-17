@@ -364,6 +364,21 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
 
   const manualCost = formData.manual_cost.trim() ? parseFloat(formData.manual_cost) : null;
 
+  // Determine cost_source based on manual cost and routing existence.
+  // If manual cost is set, use form's cost_source or default to 'manual'.
+  // If manual cost is cleared, check if part has a routing to revert to 'routing'.
+  let costSource: string | null;
+  if (manualCost !== null) {
+    costSource = formData.cost_source || 'manual';
+  } else {
+    const { data: routings } = await supabase
+      .from('routings')
+      .select('id')
+      .eq('part_id', partId)
+      .limit(1);
+    costSource = (routings && routings.length > 0) ? 'routing' : null;
+  }
+
   const { data, error } = await supabase
     .from('parts')
     .update({
@@ -371,7 +386,7 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
       description: formData.description.trim() || null,
       category_id: formData.category_id || null,
       manual_cost: manualCost,
-      cost_source: formData.cost_source || (manualCost !== null ? 'manual' : null),
+      cost_source: costSource,
       updated_at: new Date().toISOString(),
     })
     .eq('id', partId)

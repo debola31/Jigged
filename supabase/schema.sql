@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-15T00:24:06Z
+-- Generated: 2026-03-17T01:23:32Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -1585,7 +1585,7 @@ CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (em
 -- ============================================================
 -- 7. FUNCTIONS
 -- ============================================================
-CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_due_date date DEFAULT NULL::date, p_priority text DEFAULT 'normal'::text, p_notes text DEFAULT NULL::text)
+CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_notes text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1620,30 +1620,20 @@ BEGIN
     RAISE EXCEPTION 'No routing defined for part. Create a routing before converting to a job.';
   END IF;
 
-  -- Create the job
+  -- Create the job (only columns that exist on the jobs table)
   INSERT INTO jobs (
     company_id,
     quote_id,
     customer_id,
     part_id,
-    part_number_text,
     description,
-    quantity_ordered,
-    due_date,
-    priority,
-    notes,
     created_by
   ) VALUES (
     v_quote.company_id,
     v_quote.id,
     v_quote.customer_id,
     v_quote.part_id,
-    v_quote.part_number_text,
-    v_quote.description,
-    v_quote.quantity,
-    p_due_date,
-    p_priority,
-    COALESCE(p_notes, v_quote.notes),
+    COALESCE(p_notes, v_quote.description),
     v_quote.created_by
   )
   RETURNING id INTO v_job_id;
@@ -1657,7 +1647,9 @@ BEGIN
   UPDATE quotes
   SET
     converted_to_job_id = v_job_id,
-    converted_at = NOW()
+    converted_at = NOW(),
+    status = 'converted',
+    status_changed_at = NOW()
   WHERE id = p_quote_id;
 
   RETURN v_job_id;
@@ -1825,20 +1817,6 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.get_part_price(p_pricing jsonb, p_quantity integer)
- RETURNS numeric
- LANGUAGE sql
- IMMUTABLE
-AS $function$
-  SELECT (elem->>'price')::numeric
-  FROM jsonb_array_elements(p_pricing) elem
-  WHERE (elem->>'qty')::int <= p_quantity
-  ORDER BY (elem->>'qty')::int DESC
-  LIMIT 1;
-$function$
-
-;
-
 CREATE OR REPLACE FUNCTION public.get_ready_operations_batch(p_job_ids uuid[])
  RETURNS TABLE(job_id uuid, operation_name text, ready_count integer)
  LANGUAGE plpgsql
@@ -1990,6 +1968,7 @@ BEGIN
     );
     DELETE FROM routings WHERE company_id = v_demo_company_id;
     DELETE FROM parts WHERE company_id = v_demo_company_id;
+    DELETE FROM part_categories WHERE company_id = v_demo_company_id;  -- NEW: clean up categories
     DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
     DELETE FROM operation_types WHERE company_id = v_demo_company_id;
     DELETE FROM resource_groups WHERE company_id = v_demo_company_id;
@@ -2114,7 +2093,25 @@ BEGIN
     END IF;
 
     -- -----------------------------------------------------------------------
-    -- Insert parts (no customer_id — removed by simplify_operations)
+    -- Insert part_categories (NEW — supports cost-plus model)
+    -- -----------------------------------------------------------------------
+    IF v_template->'part_categories' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'part_categories')
+        LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+
+            INSERT INTO part_categories (id, company_id, name, default_markup_percent, description, created_at)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name',
+                    (v_item->>'default_markup_percent')::NUMERIC,
+                    v_item->>'description',
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+        END LOOP;
+    END IF;
+
+    -- -----------------------------------------------------------------------
+    -- Insert parts (pricing column removed — now uses category_id, manual_cost, cost_source)
     -- -----------------------------------------------------------------------
     IF v_template->'parts' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
@@ -2122,11 +2119,16 @@ BEGIN
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-            INSERT INTO parts (id, company_id, part_number, description, pricing, created_at)
+            INSERT INTO parts (id, company_id, part_number, description,
+                               category_id, manual_cost, cost_source, created_at)
             VALUES (v_new_id, p_company_id,
                     v_item->>'part_number',
                     v_item->>'description',
-                    COALESCE(v_item->'pricing', '[]'::JSONB),
+                    CASE WHEN v_item->>'category_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'category_ref'))::UUID
+                         ELSE NULL END,
+                    (v_item->>'manual_cost')::NUMERIC,
+                    v_item->>'cost_source',
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
@@ -2207,8 +2209,7 @@ BEGIN
 
     -- -----------------------------------------------------------------------
     -- Insert quotes (depends on customers, parts)
-    -- Note: converted_to_job_id is set in a post-jobs UPDATE pass below
-    -- No routing_id — removed by simplify_operations
+    -- Now includes cost-plus snapshot fields
     -- -----------------------------------------------------------------------
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
@@ -2218,7 +2219,9 @@ BEGIN
 
             INSERT INTO quotes (id, company_id, quote_number, customer_id, part_id,
                                 quantity, unit_price, total_price, status,
-                                description, created_by, created_at, status_changed_at)
+                                description, created_by, created_at, status_changed_at,
+                                base_cost, cost_source, markup_percent,
+                                estimated_labor_cost, estimated_material_cost)
             VALUES (v_new_id, p_company_id,
                     v_item->>'quote_number',
                     (v_ref_map->>(v_item->>'customer_ref'))::UUID,
@@ -2232,13 +2235,17 @@ BEGIN
                     v_item->>'description',
                     p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
-                    (v_item->>'status_changed_at')::TIMESTAMPTZ);
+                    (v_item->>'status_changed_at')::TIMESTAMPTZ,
+                    (v_item->>'base_cost')::NUMERIC,
+                    v_item->>'cost_source',
+                    (v_item->>'markup_percent')::NUMERIC,
+                    (v_item->>'estimated_labor_cost')::NUMERIC,
+                    (v_item->>'estimated_material_cost')::NUMERIC);
         END LOOP;
     END IF;
 
     -- -----------------------------------------------------------------------
     -- Insert jobs + job_operations (depends on customers, parts, quotes)
-    -- No routing_id — removed by simplify_operations
     -- -----------------------------------------------------------------------
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
@@ -2308,7 +2315,6 @@ BEGIN
 
     -- -----------------------------------------------------------------------
     -- Post-insert: link converted quotes to their jobs
-    -- (handles circular FK: quotes.converted_to_job_id -> jobs.id)
     -- -----------------------------------------------------------------------
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
@@ -2391,11 +2397,11 @@ AS $function$
 BEGIN
   IF OLD.status IS DISTINCT FROM NEW.status THEN
     NEW.status_changed_at := NOW();
-    
+
     -- Auto-set timestamps based on status
     IF NEW.status = 'in_progress' AND NEW.started_at IS NULL THEN
       NEW.started_at := NOW();
-    ELSIF NEW.status = 'complete' AND NEW.completed_at IS NULL THEN
+    ELSIF NEW.status = 'completed' AND NEW.completed_at IS NULL THEN
       NEW.completed_at := NOW();
     ELSIF NEW.status = 'shipped' AND NEW.shipped_at IS NULL THEN
       NEW.shipped_at := NOW();
@@ -2515,14 +2521,26 @@ CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUN
 -- ============================================================
 -- 10. COMMENTS
 -- ============================================================
+COMMENT ON TABLE "public"."ai_chat_queries"
+    IS 'Log of AI chat conversations. Stores every question a user asks the AI assistant along with the generated response, tool calls made, chart configs, and token usage metrics for cost tracking.';
+
 COMMENT ON TABLE "public"."ai_config"
     IS 'AI/LLM configuration per company per feature. Stores provider settings (e.g., Anthropic, OpenAI), model selection, and feature-specific parameters for AI-powered functionality like CSV import analysis.';
+
+COMMENT ON TABLE "public"."ai_insight_cache"
+    IS 'Cache for AI-generated dashboard insights. Stores precomputed metric summaries and AI narratives with TTL-based expiration (default 1 hour) to avoid redundant LLM calls. Keyed by company + insight_type.';
 
 COMMENT ON TABLE "public"."companies"
     IS 'Multi-tenant root table. Each company represents a separate manufacturing shop/business with isolated data. All other tables reference company_id for tenant isolation via RLS policies.';
 
+COMMENT ON TABLE "public"."company_custom_units"
+    IS 'Custom measurement units defined per company for inventory tracking. Supplements the standard built-in units. Each unit name must be unique within a company.';
+
 COMMENT ON TABLE "public"."customers"
     IS 'Customer records for each company. Customers place orders, receive quotes, and have jobs manufactured for them. Linked to parts (customer-specific parts), quotes, and jobs. Cannot be deleted if quotes or jobs exist (RESTRICT).';
+
+COMMENT ON TABLE "public"."demo_data_templates"
+    IS 'Templates for seeding demo/sample data into new company accounts. Contains versioned JSONB payloads of sample parts, customers, jobs, etc. Only one version per template name can be active at a time.';
 
 COMMENT ON TABLE "public"."inventory_items"
     IS 'Core inventory item records with primary unit tracking. Stores materials, supplies, and other trackable items.';
@@ -2547,6 +2565,9 @@ COMMENT ON TABLE "public"."operation_types"
 
 COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
+
+COMMENT ON TABLE "public"."part_categories"
+    IS 'Categories for organizing parts within a company. Each category can define a default markup percentage used in cost-plus pricing calculations. Category names must be unique per company.';
 
 COMMENT ON TABLE "public"."parts"
     IS 'Parts catalog. Each part has a company-unique part number, description, and flexible volume-based pricing stored as JSONB. Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
@@ -2575,11 +2596,56 @@ COMMENT ON TABLE "public"."routing_nodes"
 COMMENT ON TABLE "public"."routings"
     IS 'Manufacturing process definitions (one per part). Each routing is a DAG of operation nodes connected by edges defining execution dependencies. Deleting a part cascades to its routing.';
 
+COMMENT ON TABLE "public"."saved_insights"
+    IS 'User-saved AI chat Q&A pairs. When a user finds an AI-generated insight valuable, they can save it for future reference. Includes the original question, answer text, and any chart configuration.';
+
+COMMENT ON TABLE "public"."system_admins"
+    IS 'Platform-level administrator access. Users in this table have system-wide admin privileges that span across all companies. Separate from company-level roles in user_company_access.';
+
 COMMENT ON TABLE "public"."user_company_access"
     IS 'Junction table linking Supabase auth users to companies with role-based access. Enables multi-tenant access control. Users can belong to multiple companies with different roles (owner, admin, operator).';
 
 COMMENT ON TABLE "public"."user_preferences"
     IS 'Per-user preferences and settings. Stores last accessed company for quick switching, UI preferences, and other user-specific configuration as JSONB.';
+
+COMMENT ON TABLE "public"."waitlist"
+    IS 'Pre-launch waitlist signups from the landing page. Captures prospective customer info (email, name, company, shop size) and tracks signup status (pending, approved, invited) and acquisition source.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."company_id"
+    IS 'FK to companies. Isolates chat history per tenant.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."user_id"
+    IS 'FK to auth.users. The user who asked the question. Nullable for system-generated queries.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."question"
+    IS 'The natural-language question the user asked the AI assistant.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."tool_calls"
+    IS 'JSONB array of tool/function calls the AI made to answer the question (e.g., SQL queries, calculations). Default: empty array.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."response"
+    IS 'The AI-generated text response displayed to the user.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."chart_config"
+    IS 'Optional JSONB chart configuration if the AI generated a visualization (chart type, data series, labels).';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."provider"
+    IS 'AI provider used for this query. Examples: "anthropic", "openai".';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."model"
+    IS 'Specific model identifier used. Examples: "claude-sonnet-4-20250514", "gpt-4o".';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."tokens_used"
+    IS 'Total token count (input + output) consumed by this query. Used for cost monitoring.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."duration_ms"
+    IS 'Wall-clock time in milliseconds for the AI to generate the response.';
+
+COMMENT ON COLUMN "public"."ai_chat_queries"."created_at"
+    IS 'Timestamp when the query was made. Auto-set on insert.';
 
 COMMENT ON COLUMN "public"."ai_config"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -2605,6 +2671,30 @@ COMMENT ON COLUMN "public"."ai_config"."created_at"
 COMMENT ON COLUMN "public"."ai_config"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."ai_insight_cache"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."company_id"
+    IS 'FK to companies. Cascades on delete. Cache is per-company.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."insight_type"
+    IS 'Type of insight cached. Examples: "dashboard_summary", "job_efficiency", "inventory_alerts". Unique per company.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."metric_data"
+    IS 'JSONB payload of raw metric data used to generate the AI summary (e.g., counts, averages, trends).';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."ai_summary"
+    IS 'AI-generated natural language summary of the metrics. Displayed on dashboards.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."chart_config"
+    IS 'Optional JSONB chart configuration for visualizing the insight.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."computed_at"
+    IS 'Timestamp when this cache entry was computed. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."ai_insight_cache"."expires_at"
+    IS 'Timestamp when this cache entry expires. Default: 1 hour after computed_at. Entries past expiry should be recomputed.';
+
 COMMENT ON COLUMN "public"."companies"."id"
     IS 'Primary key. UUID auto-generated. Referenced by all other tables for multi-tenant isolation.';
 
@@ -2622,6 +2712,18 @@ COMMENT ON COLUMN "public"."companies"."created_at"
 
 COMMENT ON COLUMN "public"."companies"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."company_custom_units"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."company_custom_units"."company_id"
+    IS 'FK to companies. Cascades on delete. Custom units are per-company.';
+
+COMMENT ON COLUMN "public"."company_custom_units"."unit_name"
+    IS 'Display name of the custom unit. Example: "barrel", "spool". Must be unique within the company.';
+
+COMMENT ON COLUMN "public"."company_custom_units"."created_at"
+    IS 'Timestamp when the custom unit was created. Auto-set on insert.';
 
 COMMENT ON COLUMN "public"."customers"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -2667,6 +2769,27 @@ COMMENT ON COLUMN "public"."customers"."created_at"
 
 COMMENT ON COLUMN "public"."customers"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."name"
+    IS 'Template name identifier. Example: "precision_machining_shop". Unique per version.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."version"
+    IS 'Version number for this template. Allows iterating on demo data while keeping history. Default: 1.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."is_active"
+    IS 'Whether this template version is the active one used for new demo accounts. Default: false.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."template_data"
+    IS 'JSONB payload containing all demo data: parts, customers, jobs, operations, inventory, etc. Structured for the seed function to process.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."created_at"
+    IS 'Timestamp when the template was created. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."demo_data_templates"."created_by"
+    IS 'FK to auth.users. The admin who created this template. Nullable.';
 
 COMMENT ON COLUMN "public"."inventory_items"."primary_unit"
     IS 'Base unit of measure (e.g., lbs, kg, pcs)';
@@ -2860,6 +2983,27 @@ COMMENT ON COLUMN "public"."operator_sessions"."operation_type_id"
 COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
     IS 'NULL while session is active. Set when operator stops or completes work.';
 
+COMMENT ON COLUMN "public"."part_categories"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."part_categories"."company_id"
+    IS 'FK to companies. Cascades on delete. Categories are per-company.';
+
+COMMENT ON COLUMN "public"."part_categories"."name"
+    IS 'Category display name. Example: "CNC Turned Parts", "Sheet Metal". Must be unique within the company.';
+
+COMMENT ON COLUMN "public"."part_categories"."default_markup_percent"
+    IS 'Default markup percentage for parts in this category. Used in cost-plus pricing. Example: 25.00 means 25% markup. Nullable if no default.';
+
+COMMENT ON COLUMN "public"."part_categories"."description"
+    IS 'Optional description of this part category.';
+
+COMMENT ON COLUMN "public"."part_categories"."created_at"
+    IS 'Timestamp when the category was created. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."part_categories"."updated_at"
+    IS 'Timestamp of last update. Auto-updated via trigger.';
+
 COMMENT ON COLUMN "public"."parts"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -3049,6 +3193,39 @@ COMMENT ON COLUMN "public"."routings"."created_at"
 COMMENT ON COLUMN "public"."routings"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."saved_insights"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."saved_insights"."user_id"
+    IS 'FK to auth.users. The user who saved this insight.';
+
+COMMENT ON COLUMN "public"."saved_insights"."company_id"
+    IS 'FK to companies. Isolates saved insights per tenant.';
+
+COMMENT ON COLUMN "public"."saved_insights"."question"
+    IS 'The original question that was asked to generate this insight.';
+
+COMMENT ON COLUMN "public"."saved_insights"."answer"
+    IS 'The AI-generated answer text that the user saved.';
+
+COMMENT ON COLUMN "public"."saved_insights"."chart_config"
+    IS 'Optional JSONB chart configuration saved with the insight.';
+
+COMMENT ON COLUMN "public"."saved_insights"."created_at"
+    IS 'Timestamp when the insight was saved. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."system_admins"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."system_admins"."user_id"
+    IS 'FK to auth.users. The user granted system admin privileges. Must be unique.';
+
+COMMENT ON COLUMN "public"."system_admins"."created_at"
+    IS 'Timestamp when admin access was granted. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."system_admins"."created_by"
+    IS 'FK to auth.users. The admin who granted this access. Nullable for initial bootstrap.';
+
 COMMENT ON COLUMN "public"."user_company_access"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -3084,6 +3261,30 @@ COMMENT ON COLUMN "public"."user_preferences"."created_at"
 
 COMMENT ON COLUMN "public"."user_preferences"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."waitlist"."id"
+    IS 'Primary key. UUID auto-generated.';
+
+COMMENT ON COLUMN "public"."waitlist"."email"
+    IS 'Email address of the signup. Must be unique across the waitlist.';
+
+COMMENT ON COLUMN "public"."waitlist"."name"
+    IS 'Full name of the person signing up. Optional.';
+
+COMMENT ON COLUMN "public"."waitlist"."company_name"
+    IS 'Name of their manufacturing company/shop. Optional.';
+
+COMMENT ON COLUMN "public"."waitlist"."shop_size"
+    IS 'Self-reported shop size. Examples: "1-5 employees", "6-20 employees", "21-50 employees". Optional.';
+
+COMMENT ON COLUMN "public"."waitlist"."status"
+    IS 'Signup status. Values: "pending" (default), "approved", "invited", "converted". Tracks progression through the onboarding funnel.';
+
+COMMENT ON COLUMN "public"."waitlist"."source"
+    IS 'Acquisition source tracking. Default: "landing_page". Other examples: "referral", "demo_request".';
+
+COMMENT ON COLUMN "public"."waitlist"."created_at"
+    IS 'Timestamp when the signup occurred. Auto-set on insert.';
 
 -- ============================================================
 -- 11. STORAGE BUCKETS

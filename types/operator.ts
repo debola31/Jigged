@@ -36,7 +36,7 @@ export interface TeamMember {
   id: string;
   user_id: string;
   company_id: string;
-  role: 'owner' | 'admin' | 'user' | 'operator';
+  role: 'admin' | 'user' | 'operator';
   name: string | null;
   created_at: string;
 }

@@ -75,60 +75,6 @@ app.include_router(insights_router)
 app.include_router(system_admin_router)
 
 
-@app.get("/api/example_name")
-def get_example_name():
-    return {"data": {"name": "Adebola Akeredolu"}}
-
-
-@app.get("/api/data")
-def get_sample_data():
-    return {
-        "data": [
-            {"id": 1, "name": "Sample Item 1", "value": 100},
-            {"id": 2, "name": "Sample Item 2", "value": 200},
-            {"id": 3, "name": "Sample Item 3", "value": 300},
-        ],
-        "total": 3,
-        "timestamp": "2024-01-01T00:00:00Z",
-    }
-
-
-@app.get("/api/items/{item_id}")
-def get_item(item_id: int):
-    return {
-        "item": {
-            "id": item_id,
-            "name": "Sample Item " + str(item_id),
-            "value": item_id * 100,
-        },
-        "timestamp": "2024-01-01T00:00:00Z",
-    }
-
-
-@app.get("/api/users")
-def get_users():
-    """
-    Fetch all users from the Test.users table in Supabase
-    """
-    if not supabase:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase client not initialized. Check environment variables.",
-        )
-
-    try:
-        # Query the Test.users table
-
-        response = supabase.table("users").select("*").execute()
-
-        return {"data": response.data, "count": len(response.data)}
-    except Exception as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500, detail="Internal server error"
-        )
-
-
 # For local development
 if __name__ == "__main__":
     import uvicorn

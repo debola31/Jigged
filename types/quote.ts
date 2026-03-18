@@ -182,13 +182,6 @@ export interface QuoteAttachment {
 }
 
 /**
- * Quote with attachments included
- */
-export interface QuoteWithAttachments extends QuoteWithRelations {
-  quote_attachments?: QuoteAttachment[];
-}
-
-/**
  * Temporary attachment info (before quote is created)
  */
 export interface TempAttachment {

@@ -37,11 +37,6 @@ export interface CustomerWithRelations extends Customer {
   jobs_count: number;
 }
 
-export interface CustomerImportRow {
-  name: string;
-  [key: string]: string;
-}
-
 export interface ImportResult {
   imported: number;
   skipped: number;

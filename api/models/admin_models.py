@@ -10,12 +10,10 @@ import re
 
 
 class CompanyCreateRequest(BaseModel):
-    """Request body for creating a new company with its first owner."""
+    """Request body for creating a new company with its first admin."""
     company_name: str
     owner_name: str
     owner_email: str
-    owner_password: str
-    add_admin_access: bool = True  # Add system admin as company admin
 
     @field_validator('company_name')
     @classmethod
@@ -33,13 +31,6 @@ class CompanyCreateRequest(BaseModel):
         if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v):
             raise ValueError('Invalid email address')
         return v.lower()
-
-    @field_validator('owner_password')
-    @classmethod
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters')
-        return v
 
 
 class CompanyCreateResponse(BaseModel):

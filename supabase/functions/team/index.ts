@@ -74,8 +74,19 @@ Deno.serve(async (req) => {
         return jsonResponse([]);
       }
 
+      // Filter out system admins so they don't appear in team lists
+      const { data: sysAdmins } = await supabase
+        .from('system_admins')
+        .select('user_id');
+      const sysAdminIds = new Set(sysAdmins?.map((sa: { user_id: string }) => sa.user_id) || []);
+      const filteredRecords = accessRecords.filter((r) => !sysAdminIds.has(r.user_id));
+
+      if (filteredRecords.length === 0) {
+        return jsonResponse([]);
+      }
+
       // Build user info map from auth.users (for email and last_sign_in_at)
-      const userIds = accessRecords.map((r) => r.user_id).filter(Boolean);
+      const userIds = filteredRecords.map((r) => r.user_id).filter(Boolean);
       const userMap: Record<string, { email: string | null; last_sign_in_at: string | null }> = {};
 
       if (userIds.length > 0) {
@@ -93,7 +104,7 @@ Deno.serve(async (req) => {
       }
 
       // Combine data
-      const result: TeamMember[] = accessRecords.map((record) => ({
+      const result: TeamMember[] = filteredRecords.map((record) => ({
         id: record.id,
         user_id: record.user_id,
         company_id: record.company_id,

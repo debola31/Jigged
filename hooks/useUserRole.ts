@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getUserRole } from '@/utils/companyAccess';
 
-export type UserRole = 'owner' | 'admin' | 'user' | 'operator' | null;
+export type UserRole = 'admin' | 'user' | 'operator' | null;
 
 export function useUserRole() {
   const { user } = useAuth();
@@ -34,7 +34,7 @@ export function useUserRole() {
     fetchRole();
   }, [user, companyId]);
 
-  const isAdmin = role === 'owner' || role === 'admin';
+  const isAdmin = role === 'admin';
 
   return { role, isAdmin, loading };
 }

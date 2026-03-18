@@ -222,7 +222,8 @@ async def create_company(request: Request, body: CompanyCreateRequest):
             "email_confirm": True,  # Skip email verification
             "user_metadata": {
                 "needs_password_change": True,  # App-layer flag
-                "name": body.owner_name
+                "name": body.owner_name,
+                "company_name": body.company_name.strip()
             }
         })
 

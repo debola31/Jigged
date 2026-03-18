@@ -20,7 +20,7 @@
           You've been invited to Jigged
         </td></tr>
         <tr><td align="center" style="color:#B0B3B8; font-size:14px; line-height:1.5; padding-bottom:24px;">
-          You've been invited to join a team on Jigged. Click the button below to accept the invitation and set up your account.
+          {{ with .Data.name }}Hello {{ . }}, you've{{ else }}You've{{ end }} been invited to join {{ with .Data.company_name }}<strong style="color:#ffffff;">{{ . }}</strong>{{ else }}a team{{ end }} on Jigged. Click the button below to accept the invitation and set up your account.
         </td></tr>
         <tr><td align="center" style="padding-bottom:24px;">
           <a href="{{ .ConfirmationURL }}" style="display:inline-block; background-color:#4682B4; color:#ffffff; text-decoration:none; padding:14px 32px; border-radius:8px; font-size:16px; font-weight:500;">

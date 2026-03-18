@@ -9,38 +9,6 @@
  * The legacy 'operators' table is deprecated.
  */
 
-// ============================================================================
-// OPERATOR TYPES
-// ============================================================================
-
-/**
- * Operator record from the legacy operators table.
- * @deprecated Use user_company_access with role='operator' instead.
- */
-export interface Operator {
-  id: string;
-  company_id: string;
-  user_id: string;
-  name: string;
-  is_active: boolean;
-  last_login_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * Team member record from user_company_access.
- * This is the new unified approach for all team members including operators.
- */
-export interface TeamMember {
-  id: string;
-  user_id: string;
-  company_id: string;
-  role: 'owner' | 'admin' | 'user' | 'operator';
-  name: string | null;
-  created_at: string;
-}
-
 /**
  * Response from the operator creation API.
  */

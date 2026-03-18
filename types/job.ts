@@ -110,13 +110,6 @@ export interface JobWithRelations extends Job {
 }
 
 /**
- * Job with attachments included (legacy - use JobWithRelations)
- */
-export interface JobWithAttachments extends Job {
-  attachments: JobAttachment[];
-}
-
-/**
  * Form data for creating/editing jobs
  */
 export interface JobFormData {

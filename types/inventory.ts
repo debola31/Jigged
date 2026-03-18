@@ -239,25 +239,3 @@ export function formatTransactionDate(dateString: string): string {
 // Import/Export Types
 // ============================================================
 
-/**
- * CSV row for import
- */
-export interface InventoryImportRow {
-  name: string;
-  description?: string;
-  sku?: string;
-  primary_unit: string;
-  quantity: number;
-  cost_per_unit?: number;
-}
-
-/**
- * Import validation result
- */
-export interface InventoryImportValidation {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
-  row_number: number;
-  data: InventoryImportRow;
-}

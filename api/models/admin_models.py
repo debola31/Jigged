@@ -14,7 +14,6 @@ class CompanyCreateRequest(BaseModel):
     company_name: str
     owner_name: str
     owner_email: str
-    add_admin_access: bool = True  # Add system admin as company admin
 
     @field_validator('company_name')
     @classmethod

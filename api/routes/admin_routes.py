@@ -237,21 +237,19 @@ async def create_company(request: Request, body: CompanyCreateRequest):
             "email": body.owner_email,
         }).execute()
 
-        # 6. Optionally add system admin as company admin for support access
-        if body.add_admin_access:
-            # Check if admin already has access (shouldn't, but be safe)
-            existing_access = service_client.table("user_company_access") \
-                .select("id") \
-                .eq("user_id", admin_user_id) \
-                .eq("company_id", company_id) \
-                .execute()
+        # 6. Add system admin as company admin for support access
+        existing_access = service_client.table("user_company_access") \
+            .select("id") \
+            .eq("user_id", admin_user_id) \
+            .eq("company_id", company_id) \
+            .execute()
 
-            if not existing_access.data:
-                service_client.table("user_company_access").insert({
-                    "user_id": admin_user_id,
-                    "company_id": company_id,
-                    "role": "admin",
-                }).execute()
+        if not existing_access.data:
+            service_client.table("user_company_access").insert({
+                "user_id": admin_user_id,
+                "company_id": company_id,
+                "role": "admin",
+            }).execute()
 
         logger.info(f"Created company {company_id} ({body.company_name}) with owner {owner_user_id}")
 

@@ -215,16 +215,13 @@ async def create_company(request: Request, body: CompanyCreateRequest):
 
         company_id = company_result.data[0]["id"]
 
-        # 4. Create auth user — matches operators_routes.py:130-138
-        auth_response = service_client.auth.admin.create_user({
-            "email": body.owner_email,
-            "password": body.owner_password,
-            "email_confirm": True,  # Skip email verification
-            "user_metadata": {
-                "needs_password_change": True,  # App-layer flag
-                "name": body.owner_name
+        # 4. Create auth user via invite — sends magic link email
+        auth_response = service_client.auth.admin.invite_user_by_email(
+            body.owner_email,
+            options={
+                "data": {"name": body.owner_name}
             }
-        })
+        )
 
         if not auth_response.user:
             raise HTTPException(status_code=500, detail="Failed to create auth user")

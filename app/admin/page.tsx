@@ -22,8 +22,7 @@ import Divider from '@mui/material/Divider';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import EmailIcon from '@mui/icons-material/Email';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -74,7 +73,6 @@ export default function AdminCompaniesPage() {
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
   // Create form state
@@ -82,7 +80,6 @@ export default function AdminCompaniesPage() {
     company_name: '',
     owner_name: '',
     owner_email: '',
-    owner_password: '',
     add_admin_access: true,
   });
   const [formError, setFormError] = useState('');
@@ -339,11 +336,9 @@ export default function AdminCompaniesPage() {
       company_name: '',
       owner_name: '',
       owner_email: '',
-      owner_password: '',
       add_admin_access: true,
     });
     setFormError('');
-    setShowPassword(false);
   };
 
   const handleCreateOpen = () => {
@@ -369,11 +364,6 @@ export default function AdminCompaniesPage() {
       setFormError('Owner email is required');
       return;
     }
-    if (form.owner_password.length < 8) {
-      setFormError('Password must be at least 8 characters');
-      return;
-    }
-
     setCreating(true);
     setFormError('');
 
@@ -393,7 +383,7 @@ export default function AdminCompaniesPage() {
       const data = await response.json();
       setSnackbar({
         open: true,
-        message: `Created "${data.company_name}" successfully`,
+        message: `Created "${data.company_name}" — invite email sent`,
         severity: 'success',
       });
       handleCreateClose();
@@ -541,31 +531,9 @@ export default function AdminCompaniesPage() {
             onChange={(e) => setForm((f) => ({ ...f, owner_email: e.target.value }))}
             sx={{ mb: 2 }}
           />
-          <TextField
-            label="Temporary Password"
-            type={showPassword ? 'text' : 'password'}
-            fullWidth
-            required
-            value={form.owner_password}
-            onChange={(e) => setForm((f) => ({ ...f, owner_password: e.target.value }))}
-            helperText="Owner will be prompted to change on first login"
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                      size="small"
-                    >
-                      {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
-            sx={{ mb: 2 }}
-          />
+          <Alert icon={<EmailIcon />} severity="info" sx={{ mb: 2 }}>
+            An invite email will be sent to set up their account.
+          </Alert>
 
           <FormControlLabel
             control={

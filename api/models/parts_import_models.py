@@ -4,6 +4,8 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel
 
+from models.import_models import ColumnMapping  # noqa: F401
+
 
 class CustomerMatchMode(str, Enum):
     """How to assign customers to imported parts."""
@@ -18,16 +20,6 @@ class PricingColumnPair(BaseModel):
 
     qty_column: str
     price_column: str
-
-
-class ColumnMapping(BaseModel):
-    """A single column mapping suggestion from AI."""
-
-    csv_column: str
-    db_field: Optional[str]  # None means skip/discard
-    confidence: float  # 0.0 to 1.0
-    reasoning: str
-    needs_review: bool  # True if confidence < 0.7
 
 
 class PartAnalyzeRequest(BaseModel):

@@ -3,15 +3,7 @@
 from typing import Optional
 from pydantic import BaseModel
 
-
-class ColumnMapping(BaseModel):
-    """A single column mapping suggestion from AI."""
-
-    csv_column: str
-    db_field: Optional[str]  # None means skip/discard
-    confidence: float  # 0.0 to 1.0
-    reasoning: str
-    needs_review: bool  # True if confidence < 0.7
+from models.import_models import ColumnMapping  # noqa: F401
 
 
 class OperationAnalyzeRequest(BaseModel):

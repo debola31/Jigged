@@ -1,21 +1,14 @@
 """Pydantic models for Inventory API."""
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from models.import_models import ColumnMapping  # noqa: F401
 
 
 # ============================================================
 # Import Models
 # ============================================================
-
-class ColumnMapping(BaseModel):
-    """A single column mapping suggestion from AI."""
-
-    csv_column: str
-    db_field: Optional[str]  # None means skip/discard
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    reasoning: str
-    needs_review: bool  # True if confidence < 0.7
 
 
 class InventoryAnalyzeRequest(BaseModel):

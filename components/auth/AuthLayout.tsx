@@ -3,6 +3,7 @@
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import Link from 'next/link';
 import { JiggedLogo } from '@/components/branding';
 
 interface AuthLayoutProps {
@@ -64,7 +65,9 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
               gap: 1.5,
             }}
           >
-            <JiggedLogo size="xlarge" />
+            <Link href="/" style={{ textDecoration: 'none' }}>
+              <JiggedLogo size="xlarge" />
+            </Link>
 
             <Typography
               variant="h5"

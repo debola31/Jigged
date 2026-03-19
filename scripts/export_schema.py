@@ -6,9 +6,9 @@ Exports a complete database schema with deterministic ordering for git diffs.
 Includes RLS policies, functions, triggers, and all constraints.
 
 Usage:
-    SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py
-    SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --output custom_path.sql
-    SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --dry-run
+    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py
+    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --output custom_path.sql
+    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --dry-run
 """
 
 import os
@@ -18,6 +18,12 @@ import argparse
 from datetime import datetime, timezone
 from collections import defaultdict
 from typing import List, Dict, Any, Optional, Set, Tuple
+
+from dotenv import load_dotenv
+
+# Load .env.local from project root
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_project_root, ".env.local"))
 
 try:
     import psycopg2
@@ -734,17 +740,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Export using SUPABASE_DATABASE_URL environment variable
-    SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db python scripts/export_schema.py
+    # Export using PROD_SUPABASE_DATABASE_URL environment variable
+    PROD_SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db python scripts/export_schema.py
 
     # Export to custom output file
-    SUPABASE_DATABASE_URL=... python scripts/export_schema.py --output /path/to/schema.sql
+    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --output /path/to/schema.sql
 
     # Export specific schemas only
-    SUPABASE_DATABASE_URL=... python scripts/export_schema.py --schemas public
+    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --schemas public
 
     # Dry run - print to stdout
-    SUPABASE_DATABASE_URL=... python scripts/export_schema.py --dry-run
+    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --dry-run
         """,
     )
 
@@ -769,11 +775,11 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get database URL
-    SUPABASE_DATABASE_URL = os.environ.get("SUPABASE_DATABASE_URL")
+    # Get database URL (production is the schema source of truth)
+    SUPABASE_DATABASE_URL = os.environ.get("PROD_SUPABASE_DATABASE_URL")
     if not SUPABASE_DATABASE_URL:
-        print("Error: SUPABASE_DATABASE_URL environment variable is required", file=sys.stderr)
-        print("Example: SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db", file=sys.stderr)
+        print("Error: PROD_SUPABASE_DATABASE_URL environment variable is required", file=sys.stderr)
+        print("Example: PROD_SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db", file=sys.stderr)
         sys.exit(1)
 
     # Export schema

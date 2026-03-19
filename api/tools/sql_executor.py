@@ -8,6 +8,7 @@ Validates queries before execution and enforces row limits.
 import json
 import logging
 import os
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -99,6 +100,12 @@ async def execute_sql_query(
         Dict with keys: columns, rows, row_count, description.
         On error: Dict with keys: error, rows (empty list).
     """
+    # 0. Validate company_id is a proper UUID (required for safe SET LOCAL interpolation)
+    try:
+        uuid.UUID(company_id)
+    except (ValueError, AttributeError):
+        return {"error": "Invalid company_id format.", "rows": []}
+
     # 1. Validate
     is_valid, error_msg = validate_query(sql)
     if not is_valid:
@@ -137,13 +144,18 @@ async def execute_sql_query(
                 f"SET statement_timeout = '{STATEMENT_TIMEOUT_MS}'"
             )
 
-            # Set company context for RLS policies (defense-in-depth)
-            await conn.execute(
-                "SET LOCAL jigged.company_id = $1", company_id
-            )
+            # Wrap in transaction so SET LOCAL takes effect.
+            # SET LOCAL outside a transaction is a no-op and can corrupt
+            # connection state through Supabase's connection pooler.
+            async with conn.transaction(readonly=True):
+                # Set company context for RLS policies (defense-in-depth)
+                await conn.execute(
+                    f"SET LOCAL jigged.company_id = '{company_id}'"
+                )
 
-            rows = await conn.fetch(cleaned_sql, company_id)
+                rows = await conn.fetch(cleaned_sql, company_id)
 
+            # Process results outside the transaction
             if not rows:
                 return {
                     "columns": [],

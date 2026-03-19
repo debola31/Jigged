@@ -124,11 +124,11 @@ async def list_companies(request: Request):
             access_records = company.get("user_company_access", [])
             member_count = len(access_records)
 
-            # Find owner
+            # Find primary admin (first admin is the company creator)
             owner_name = None
             owner_email = None
             for record in access_records:
-                if record.get("role") == "owner":
+                if record.get("role") == "admin":
                     owner_name = record.get("name")
                     # Prefer auth email over stored email
                     owner_user_id = record.get("user_id")
@@ -215,47 +215,41 @@ async def create_company(request: Request, body: CompanyCreateRequest):
 
         company_id = company_result.data[0]["id"]
 
-        # 4. Create auth user — matches operators_routes.py:130-138
-        auth_response = service_client.auth.admin.create_user({
-            "email": body.owner_email,
-            "password": body.owner_password,
-            "email_confirm": True,  # Skip email verification
-            "user_metadata": {
-                "needs_password_change": True,  # App-layer flag
-                "name": body.owner_name,
-                "company_name": body.company_name.strip()
+        # 4. Create auth user via invite — sends magic link email
+        auth_response = service_client.auth.admin.invite_user_by_email(
+            body.owner_email,
+            options={
+                "data": {"name": body.owner_name}
             }
-        })
+        )
 
         if not auth_response.user:
             raise HTTPException(status_code=500, detail="Failed to create auth user")
 
         owner_user_id = auth_response.user.id
 
-        # 5. Create user_company_access for owner
+        # 5. Create user_company_access for company admin (first user)
         service_client.table("user_company_access").insert({
             "user_id": owner_user_id,
             "company_id": company_id,
-            "role": "owner",
+            "role": "admin",
             "name": body.owner_name,
             "email": body.owner_email,
         }).execute()
 
-        # 6. Optionally add system admin as company admin for support access
-        if body.add_admin_access:
-            # Check if admin already has access (shouldn't, but be safe)
-            existing_access = service_client.table("user_company_access") \
-                .select("id") \
-                .eq("user_id", admin_user_id) \
-                .eq("company_id", company_id) \
-                .execute()
+        # 6. Add system admin as company admin for support access
+        existing_access = service_client.table("user_company_access") \
+            .select("id") \
+            .eq("user_id", admin_user_id) \
+            .eq("company_id", company_id) \
+            .execute()
 
-            if not existing_access.data:
-                service_client.table("user_company_access").insert({
-                    "user_id": admin_user_id,
-                    "company_id": company_id,
-                    "role": "admin",
-                }).execute()
+        if not existing_access.data:
+            service_client.table("user_company_access").insert({
+                "user_id": admin_user_id,
+                "company_id": company_id,
+                "role": "admin",
+            }).execute()
 
         logger.info(f"Created company {company_id} ({body.company_name}) with owner {owner_user_id}")
 

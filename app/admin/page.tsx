@@ -15,15 +15,12 @@ import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import IconButton from '@mui/material/IconButton';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import Tooltip from '@mui/material/Tooltip';
 import Divider from '@mui/material/Divider';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import EmailIcon from '@mui/icons-material/Email';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -74,16 +71,14 @@ export default function AdminCompaniesPage() {
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
   // Create form state
   const [form, setForm] = useState({
     company_name: '',
-    owner_name: '',
+    owner_first_name: '',
+    owner_last_name: '',
     owner_email: '',
-    owner_password: '',
-    add_admin_access: true,
   });
   const [formError, setFormError] = useState('');
 
@@ -337,13 +332,11 @@ export default function AdminCompaniesPage() {
   const resetForm = () => {
     setForm({
       company_name: '',
-      owner_name: '',
+      owner_first_name: '',
+      owner_last_name: '',
       owner_email: '',
-      owner_password: '',
-      add_admin_access: true,
     });
     setFormError('');
-    setShowPassword(false);
   };
 
   const handleCreateOpen = () => {
@@ -361,28 +354,32 @@ export default function AdminCompaniesPage() {
       setFormError('Company name is required');
       return;
     }
-    if (!form.owner_name.trim()) {
-      setFormError('Owner name is required');
+    if (!form.owner_first_name.trim()) {
+      setFormError('First name is required');
+      return;
+    }
+    if (!form.owner_last_name.trim()) {
+      setFormError('Last name is required');
       return;
     }
     if (!form.owner_email.trim()) {
       setFormError('Owner email is required');
       return;
     }
-    if (form.owner_password.length < 8) {
-      setFormError('Password must be at least 8 characters');
-      return;
-    }
-
     setCreating(true);
     setFormError('');
 
     try {
       const headers = await getAuthHeaders();
+      const owner_name = `${form.owner_first_name.trim()} ${form.owner_last_name.trim()}`;
       const response = await fetch(getAdminApiUrl(), {
         method: 'POST',
         headers,
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          company_name: form.company_name,
+          owner_name,
+          owner_email: form.owner_email,
+        }),
       });
 
       if (!response.ok) {
@@ -393,7 +390,7 @@ export default function AdminCompaniesPage() {
       const data = await response.json();
       setSnackbar({
         open: true,
-        message: `Created "${data.company_name}" successfully`,
+        message: `Created "${data.company_name}" — invite email sent`,
         severity: 'success',
       });
       handleCreateClose();
@@ -522,16 +519,24 @@ export default function AdminCompaniesPage() {
           />
 
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2 }}>
-            First Owner Account
+            First Admin Account
           </Typography>
-          <TextField
-            label="Owner Name"
-            fullWidth
-            required
-            value={form.owner_name}
-            onChange={(e) => setForm((f) => ({ ...f, owner_name: e.target.value }))}
-            sx={{ mb: 2 }}
-          />
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              label="First Name"
+              fullWidth
+              required
+              value={form.owner_first_name}
+              onChange={(e) => setForm((f) => ({ ...f, owner_first_name: e.target.value }))}
+            />
+            <TextField
+              label="Last Name"
+              fullWidth
+              required
+              value={form.owner_last_name}
+              onChange={(e) => setForm((f) => ({ ...f, owner_last_name: e.target.value }))}
+            />
+          </Box>
           <TextField
             label="Owner Email"
             type="email"
@@ -541,44 +546,10 @@ export default function AdminCompaniesPage() {
             onChange={(e) => setForm((f) => ({ ...f, owner_email: e.target.value }))}
             sx={{ mb: 2 }}
           />
-          <TextField
-            label="Temporary Password"
-            type={showPassword ? 'text' : 'password'}
-            fullWidth
-            required
-            value={form.owner_password}
-            onChange={(e) => setForm((f) => ({ ...f, owner_password: e.target.value }))}
-            helperText="Owner will be prompted to change on first login"
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                      size="small"
-                    >
-                      {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
-            sx={{ mb: 2 }}
-          />
+          <Alert icon={<EmailIcon />} severity="info" sx={{ mb: 2 }}>
+            An invite email will be sent to set up their account.
+          </Alert>
 
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={form.add_admin_access}
-                onChange={(e) => setForm((f) => ({ ...f, add_admin_access: e.target.checked }))}
-              />
-            }
-            label="Add me as admin to this company"
-          />
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
-            Lets you view the company dashboard for support
-          </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={handleCreateClose} disabled={creating}>

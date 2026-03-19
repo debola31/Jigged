@@ -1,0 +1,355 @@
+/**
+ * Team Invitations Edge Function
+ *
+ * Handles magic link invitations for team members.
+ *
+ * Endpoints:
+ * - POST /team-invites                    - Send invitation (creates invitation + sends magic link)
+ * - GET  /team-invites?company_id=xxx     - List invitations for a company
+ * - DELETE /team-invites/:id              - Revoke a pending invitation
+ * - POST /team-invites/:id/resend         - Resend invitation email
+ */
+
+import { getServiceRoleClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+
+/**
+ * Verify the caller is an admin of the specified company.
+ * Returns the user_id if authorized, throws otherwise.
+ */
+async function verifyAdmin(
+  supabase: ReturnType<typeof getServiceRoleClient>,
+  authHeader: string,
+  companyId: string
+): Promise<string> {
+  // Extract token from Bearer header
+  const token = authHeader.replace('Bearer ', '');
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) {
+    throw new Error('Not authenticated');
+  }
+
+  // Check admin role
+  const { data: access } = await supabase
+    .from('user_company_access')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('company_id', companyId)
+    .in('role', ['admin'])
+    .single();
+
+  if (!access) {
+    throw new Error('Not authorized — admin role required');
+  }
+
+  return user.id;
+}
+
+/**
+ * Get the site URL for redirect links.
+ */
+function getSiteUrl(): string {
+  return Deno.env.get('SITE_URL') || Deno.env.get('NEXT_PUBLIC_APP_URL') || 'http://localhost:3000';
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
+  const url = new URL(req.url);
+  const pathParts = url.pathname.split('/').filter(Boolean);
+  // pathParts: ["team-invites"] or ["team-invites", ":id"] or ["team-invites", ":id", "resend"]
+
+  try {
+    const supabase = getServiceRoleClient();
+    const authHeader = req.headers.get('Authorization') || '';
+
+    // POST /team-invites — Send invitation
+    if (req.method === 'POST' && pathParts.length === 1) {
+      const body = await req.json();
+      const { company_id, email, role } = body;
+
+      if (!company_id || !email || !role) {
+        return errorResponse('company_id, email, and role are required', 400);
+      }
+
+      if (!['admin', 'user', 'operator'].includes(role)) {
+        return errorResponse('role must be "admin", "user", or "operator"', 400);
+      }
+
+      // Basic email validation
+      if (!/^[^@]+@[^@]+\.[^@]+$/.test(email)) {
+        return errorResponse('Please enter a valid email address', 400);
+      }
+
+      const userId = await verifyAdmin(supabase, authHeader, company_id);
+
+      // Check if user already has access to this company
+      const { data: existingUsers } = await supabase.auth.admin.listUsers();
+      const existingUser = existingUsers?.users?.find((u: { email?: string }) => u.email === email.toLowerCase());
+
+      if (existingUser) {
+        const { data: existingAccess } = await supabase
+          .from('user_company_access')
+          .select('id')
+          .eq('user_id', existingUser.id)
+          .eq('company_id', company_id)
+          .single();
+
+        if (existingAccess) {
+          return errorResponse('This user already has access to this company', 400);
+        }
+      }
+
+      // Check for existing pending invitation
+      const { data: existingInvite } = await supabase
+        .from('invitations')
+        .select('id')
+        .eq('email', email.toLowerCase())
+        .eq('company_id', company_id)
+        .eq('status', 'pending')
+        .single();
+
+      if (existingInvite) {
+        return errorResponse('A pending invitation already exists for this email', 400);
+      }
+
+      // Look up company name for context
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', company_id)
+        .single();
+
+      const companyName = companyData?.name || '';
+
+      // Create invitation record
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      const { data: invitation, error: insertError } = await supabase
+        .from('invitations')
+        .insert({
+          company_id,
+          email: email.toLowerCase(),
+          role,
+          invited_by: userId,
+          expires_at: expiresAt.toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError || !invitation) {
+        console.error('Error creating invitation:', insertError);
+        return errorResponse('Failed to create invitation', 500);
+      }
+
+      // Send magic link via Supabase inviteUserByEmail
+      const siteUrl = getSiteUrl();
+      const redirectTo = `${siteUrl}/auth/callback?next=/accept-invite/${invitation.id}`;
+
+      try {
+        const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email.toLowerCase(), {
+          redirectTo,
+          data: {
+            invitation_id: invitation.id,
+            company_name: companyName,
+            invited_role: role,
+          },
+        });
+
+        if (inviteError) {
+          // Fallback for existing confirmed users: generate a magic link instead
+          console.warn('inviteUserByEmail failed, trying generateLink fallback:', inviteError.message);
+
+          const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+            type: 'magiclink',
+            email: email.toLowerCase(),
+            options: {
+              redirectTo,
+            },
+          });
+
+          if (linkError) {
+            console.error('generateLink also failed:', linkError);
+            // Invitation record is created — admin can resend later
+            return jsonResponse({
+              success: true,
+              invitation_id: invitation.id,
+              message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error('Email sending error:', emailErr);
+        // Invitation record exists — admin can resend
+        return jsonResponse({
+          success: true,
+          invitation_id: invitation.id,
+          message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+        });
+      }
+
+      return jsonResponse({
+        success: true,
+        invitation_id: invitation.id,
+        message: `Invitation sent to ${email}`,
+      });
+    }
+
+    // GET /team-invites?company_id=xxx — List invitations
+    if (req.method === 'GET' && pathParts.length === 1) {
+      const companyId = url.searchParams.get('company_id');
+
+      if (!companyId) {
+        return errorResponse('company_id is required', 400);
+      }
+
+      await verifyAdmin(supabase, authHeader, companyId);
+
+      // Lazily expire old invitations
+      await supabase
+        .from('invitations')
+        .update({ status: 'expired' })
+        .eq('company_id', companyId)
+        .eq('status', 'pending')
+        .lt('expires_at', new Date().toISOString());
+
+      // Fetch all invitations
+      const { data: invitations, error: fetchError } = await supabase
+        .from('invitations')
+        .select('id, company_id, email, role, status, invited_by, expires_at, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+
+      if (fetchError) {
+        console.error('Error fetching invitations:', fetchError);
+        return errorResponse('Failed to fetch invitations', 500);
+      }
+
+      return jsonResponse(invitations || []);
+    }
+
+    // DELETE /team-invites/:id — Revoke invitation
+    if (req.method === 'DELETE' && pathParts.length === 2) {
+      const invitationId = pathParts[1];
+
+      // Look up the invitation to get company_id for auth check
+      const { data: invitation } = await supabase
+        .from('invitations')
+        .select('id, company_id, status')
+        .eq('id', invitationId)
+        .single();
+
+      if (!invitation) {
+        return errorResponse('Invitation not found', 404);
+      }
+
+      await verifyAdmin(supabase, authHeader, invitation.company_id);
+
+      if (invitation.status !== 'pending') {
+        return errorResponse('Only pending invitations can be revoked', 400);
+      }
+
+      const { error: updateError } = await supabase
+        .from('invitations')
+        .update({ status: 'revoked' })
+        .eq('id', invitationId);
+
+      if (updateError) {
+        console.error('Error revoking invitation:', updateError);
+        return errorResponse('Failed to revoke invitation', 500);
+      }
+
+      return jsonResponse({ success: true, message: 'Invitation revoked' });
+    }
+
+    // POST /team-invites/:id/resend — Resend invitation
+    if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'resend') {
+      const invitationId = pathParts[1];
+
+      // Look up invitation
+      const { data: invitation } = await supabase
+        .from('invitations')
+        .select('id, company_id, email, role, status, expires_at')
+        .eq('id', invitationId)
+        .single();
+
+      if (!invitation) {
+        return errorResponse('Invitation not found', 404);
+      }
+
+      await verifyAdmin(supabase, authHeader, invitation.company_id);
+
+      if (invitation.status !== 'pending') {
+        return errorResponse('Only pending invitations can be resent', 400);
+      }
+
+      // Look up company name
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', invitation.company_id)
+        .single();
+
+      const companyName = companyData?.name || '';
+
+      // Reset expiry
+      const newExpiresAt = new Date();
+      newExpiresAt.setDate(newExpiresAt.getDate() + 7);
+
+      await supabase
+        .from('invitations')
+        .update({ expires_at: newExpiresAt.toISOString() })
+        .eq('id', invitationId);
+
+      // Resend magic link
+      const siteUrl = getSiteUrl();
+      const redirectTo = `${siteUrl}/auth/callback?next=/accept-invite/${invitation.id}`;
+
+      try {
+        const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(invitation.email, {
+          redirectTo,
+          data: {
+            invitation_id: invitation.id,
+            company_name: companyName,
+            invited_role: invitation.role,
+          },
+        });
+
+        if (inviteError) {
+          // Fallback for existing users
+          const { error: linkError } = await supabase.auth.admin.generateLink({
+            type: 'magiclink',
+            email: invitation.email,
+            options: { redirectTo },
+          });
+
+          if (linkError) {
+            return errorResponse('Failed to resend invitation email', 500);
+          }
+        }
+      } catch (emailErr) {
+        console.error('Resend error:', emailErr);
+        return errorResponse('Failed to resend invitation email', 500);
+      }
+
+      return jsonResponse({
+        success: true,
+        message: `Invitation resent to ${invitation.email}`,
+      });
+    }
+
+    return errorResponse('Not found', 404);
+  } catch (error) {
+    if (error.message === 'Not authenticated') {
+      return errorResponse('Not authenticated', 401);
+    }
+    if (error.message?.includes('Not authorized')) {
+      return errorResponse(error.message, 403);
+    }
+    console.error('Team invites function error:', error);
+    return errorResponse(`Internal server error: ${error.message}`, 500);
+  }
+});

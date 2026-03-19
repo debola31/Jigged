@@ -19,8 +19,16 @@ import Snackbar from '@mui/material/Snackbar';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
-import AddIcon from '@mui/icons-material/Add';
+import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import DeleteIcon from '@mui/icons-material/Delete';
+import SendIcon from '@mui/icons-material/Send';
+import CloseIcon from '@mui/icons-material/Close';
 import GroupIcon from '@mui/icons-material/Group';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
@@ -43,12 +51,13 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import AdminGuard from '@/components/auth/AdminGuard';
-import type { TeamMember } from '@/types/team';
+import type { TeamMember, Invitation } from '@/types/team';
 
 /**
  * Get the Edge Function URL for unified team endpoint.
  */
 const getTeamUrl = () => getEdgeFunctionUrl('team');
+const getInvitesUrl = () => getEdgeFunctionUrl('team-invites');
 
 // TabPanel component following Operations pattern
 interface TabPanelProps {
@@ -118,6 +127,10 @@ export default function TeamPage() {
     message: string;
     severity: 'error' | 'success';
   }>({ open: false, message: '', severity: 'success' });
+
+  // Invitations state
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [invitationsLoading, setInvitationsLoading] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -265,6 +278,80 @@ export default function TeamPage() {
       setUsersLoading(false);
     }
   }, [companyId, searchDebounced]);
+
+  // Load pending invitations
+  const loadInvitations = useCallback(async () => {
+    setInvitationsLoading(true);
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const url = `${getInvitesUrl()}?company_id=${companyId}`;
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch invitations');
+
+      const data: Invitation[] = await response.json();
+      setInvitations(data.filter((inv) => inv.status === 'pending'));
+    } catch (err) {
+      console.error('Error loading invitations:', err);
+    } finally {
+      setInvitationsLoading(false);
+    }
+  }, [companyId]);
+
+  // Revoke an invitation
+  const handleRevokeInvitation = async (invitationId: string) => {
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(`${getInvitesUrl()}/${invitationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+
+      if (!response.ok) throw new Error('Failed to revoke invitation');
+
+      setSnackbar({ open: true, message: 'Invitation revoked', severity: 'success' });
+      loadInvitations();
+    } catch (err) {
+      console.error('Error revoking invitation:', err);
+      setSnackbar({ open: true, message: 'Failed to revoke invitation', severity: 'error' });
+    }
+  };
+
+  // Resend an invitation
+  const handleResendInvitation = async (invitationId: string) => {
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(`${getInvitesUrl()}/${invitationId}/resend`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+
+      if (!response.ok) throw new Error('Failed to resend invitation');
+
+      const data = await response.json();
+      setSnackbar({ open: true, message: data.message || 'Invitation resent', severity: 'success' });
+      loadInvitations();
+    } catch (err) {
+      console.error('Error resending invitation:', err);
+      setSnackbar({ open: true, message: 'Failed to resend invitation', severity: 'error' });
+    }
+  };
+
+  // Load invitations on mount
+  useEffect(() => {
+    loadInvitations();
+  }, [loadInvitations]);
 
   // Load data based on active tab
   useEffect(() => {
@@ -534,10 +621,10 @@ export default function TeamPage() {
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
+            startIcon={<PersonAddIcon />}
             onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=admin`)}
           >
-            New Admin
+            Invite Admin
           </Button>
         </Box>
 
@@ -552,15 +639,15 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No admins match your search.'
-                  : 'Add your first admin.'}
+                  : 'Invite your first admin.'}
               </Typography>
               {!searchDebounced && (
                 <Button
                   variant="contained"
-                  startIcon={<AddIcon />}
+                  startIcon={<PersonAddIcon />}
                   onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=admin`)}
                 >
-                  Add Admin
+                  Invite Admin
                 </Button>
               )}
             </CardContent>
@@ -666,10 +753,10 @@ export default function TeamPage() {
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
+            startIcon={<PersonAddIcon />}
             onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=user`)}
           >
-            New User
+            Invite User
           </Button>
         </Box>
 
@@ -684,15 +771,15 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No users match your search.'
-                  : 'Add your first user.'}
+                  : 'Invite your first user.'}
               </Typography>
               {!searchDebounced && (
                 <Button
                   variant="contained"
-                  startIcon={<AddIcon />}
+                  startIcon={<PersonAddIcon />}
                   onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=user`)}
                 >
-                  Add User
+                  Invite User
                 </Button>
               )}
             </CardContent>
@@ -798,10 +885,10 @@ export default function TeamPage() {
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
+            startIcon={<PersonAddIcon />}
             onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=operator`)}
           >
-            New Operator
+            Invite Operator
           </Button>
         </Box>
 
@@ -816,15 +903,15 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No operators match your search.'
-                  : 'Create your first operator.'}
+                  : 'Invite your first operator.'}
               </Typography>
               {!searchDebounced && (
                 <Button
                   variant="contained"
-                  startIcon={<AddIcon />}
+                  startIcon={<PersonAddIcon />}
                   onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=operator`)}
                 >
-                  Add Operator
+                  Invite Operator
                 </Button>
               )}
             </CardContent>
@@ -878,6 +965,55 @@ export default function TeamPage() {
           </Card>
         )}
       </TabPanel>
+
+      {/* Pending Invitations */}
+      {invitations.length > 0 && (
+        <Card elevation={2} sx={{ mt: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Pending Invitations
+            </Typography>
+            <List disablePadding>
+              {invitations.map((inv) => (
+                <ListItem
+                  key={inv.id}
+                  divider
+                  secondaryAction={
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <Tooltip title="Resend invitation">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleResendInvitation(inv.id)}
+                        >
+                          <SendIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Revoke invitation">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleRevokeInvitation(inv.id)}
+                        >
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  }
+                >
+                  <ListItemText
+                    primary={inv.email}
+                    secondary={`Expires ${new Date(inv.expires_at).toLocaleDateString()}`}
+                  />
+                  <Chip
+                    label={inv.role}
+                    size="small"
+                    sx={{ mr: 6, textTransform: 'capitalize' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Delete Dialog */}
       <Dialog

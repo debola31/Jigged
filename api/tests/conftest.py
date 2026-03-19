@@ -4,13 +4,21 @@ Pytest fixtures for Jigged API tests.
 Provides fixtures for Supabase client, test data, and authentication.
 """
 import os
+import sys
+from pathlib import Path
+
 import pytest
 from typing import AsyncGenerator, Generator
+
+# Load .env.local from project root so integration tests get DB URLs etc.
+from dotenv import load_dotenv
+_env_file = Path(__file__).resolve().parents[2] / ".env.local"
+load_dotenv(_env_file)
+
 from httpx import AsyncClient, ASGITransport
 from supabase import create_client, Client
 
 # Import the FastAPI app
-import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from index import app

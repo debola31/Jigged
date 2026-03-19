@@ -1,6 +1,6 @@
 # Jigged - Manufacturing ERP
 
-> Web-based ERP for small-scale precision manufacturing shops.
+> Web-based ERP for small-scale precision manufacturing shops
 
 ## Overview
 

@@ -115,6 +115,15 @@ Deno.serve(async (req)=>{
       ].includes(role)) {
         return errorResponse('role must be "admin", "user", or "operator"', 400);
       }
+
+      // Look up company name for email personalization
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', company_id)
+        .single();
+      const companyName = companyData?.name || '';
+
       if (password.length < 8) {
         return errorResponse('Password must be at least 8 characters', 400);
       }
@@ -152,8 +161,9 @@ Deno.serve(async (req)=>{
         email_confirm: true,
         user_metadata: {
           needs_password_change: true,
-          name
-        }
+          name,
+          company_name: companyName,
+        },
       });
       if (authError || !authData.user) {
         console.error('Error creating auth user:', authError);

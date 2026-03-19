@@ -55,7 +55,7 @@ export default function TermsPage() {
     <p class="last-updated">Last updated: March 18, 2026</p>
 
     <h2>Agreement to Our Legal Terms</h2>
-    <p>We are Adebola Akeredolu, doing business as Jigged ("<strong>Company</strong>," "<strong>we</strong>," "<strong>us</strong>," "<strong>our</strong>").</p>
+    <p>We are Jigged ("<strong>Company</strong>," "<strong>we</strong>," "<strong>us</strong>," "<strong>our</strong>").</p>
     <p>We operate the website <a href="https://jigged.app">jigged.app</a>, as well as any other related products and services that refer or link to these legal terms (the "<strong>Legal Terms</strong>") (collectively, the "<strong>Services</strong>").</p>
     <p>You can contact us by email at <a href="mailto:legal@jigged.app">legal@jigged.app</a>.</p>
     <p>These Legal Terms constitute a legally binding agreement made between you, whether personally or on behalf of an entity ("<strong>you</strong>"), and Jigged, concerning your access to and use of the Services. You agree that by accessing the Services, you have read, understood, and agreed to be bound by all of these Legal Terms. IF YOU DO NOT AGREE WITH ALL OF THESE LEGAL TERMS, THEN YOU ARE EXPRESSLY PROHIBITED FROM USING THE SERVICES AND YOU MUST DISCONTINUE USE IMMEDIATELY.</p>

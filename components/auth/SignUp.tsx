@@ -201,6 +201,18 @@ export default function SignUp() {
             )}
           </Button>
 
+          <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 1 }}>
+            By creating an account, you agree to our{' '}
+            <MuiLink component={Link} href="/terms" underline="hover">
+              Terms of Service
+            </MuiLink>
+            {' and '}
+            <MuiLink component={Link} href="/privacy" underline="hover">
+              Privacy Policy
+            </MuiLink>
+            .
+          </Typography>
+
           <Typography variant="body2" align="center" color="text.secondary">
             Already have an account?{' '}
             <MuiLink component={Link} href="/login" underline="hover">

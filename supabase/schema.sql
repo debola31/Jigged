@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-19T02:10:42Z
+-- Generated: 2026-03-19T06:11:51Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -2603,7 +2603,7 @@ COMMENT ON TABLE "public"."system_admins"
     IS 'Platform-level administrator access. Users in this table have system-wide admin privileges that span across all companies. Separate from company-level roles in user_company_access.';
 
 COMMENT ON TABLE "public"."user_company_access"
-    IS 'Junction table linking Supabase auth users to companies with role-based access. Enables multi-tenant access control. Users can belong to multiple companies with different roles (owner, admin, operator).';
+    IS 'Junction table linking Supabase auth users to companies with role-based access. Enables multi-tenant access control. Users can belong to multiple companies with different roles (admin, user, operator).';
 
 COMMENT ON TABLE "public"."user_preferences"
     IS 'Per-user preferences and settings. Stores last accessed company for quick switching, UI preferences, and other user-specific configuration as JSONB.';
@@ -3236,7 +3236,7 @@ COMMENT ON COLUMN "public"."user_company_access"."company_id"
     IS 'FK to companies. Cascades on delete. The company user can access.';
 
 COMMENT ON COLUMN "public"."user_company_access"."role"
-    IS 'Role in the company: owner (company creator, same permissions as admin), admin (full access), user (can use all modules), operator (shop floor access only)';
+    IS 'Role in the company: admin (full access), user (can use all modules), operator (shop floor access only)';
 
 COMMENT ON COLUMN "public"."user_company_access"."created_at"
     IS 'Timestamp when access was granted.';

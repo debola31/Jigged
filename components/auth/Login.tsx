@@ -23,12 +23,13 @@ interface LoginProps {
 
 /**
  * Validate returnTo path using an allowlist approach.
- * Must start with /dashboard and normalize to prevent open redirects.
+ * Must start with an allowed prefix and normalize to prevent open redirects.
  */
 function isValidReturnTo(path: string): boolean {
   try {
     const normalized = new URL(path, window.location.origin);
-    return normalized.pathname.startsWith('/dashboard') && normalized.origin === window.location.origin;
+    const allowedPrefixes = ['/dashboard', '/accept-invite'];
+    return allowedPrefixes.some(p => normalized.pathname.startsWith(p)) && normalized.origin === window.location.origin;
   } catch {
     return false;
   }

@@ -14,17 +14,29 @@ export interface TeamMember {
   created_at: string;
 }
 
-export interface TeamMemberCreateRequest {
+/**
+ * Invitation types for magic link team member invitations.
+ */
+
+export interface Invitation {
+  id: string;
   company_id: string;
-  name: string;
   email: string;
-  password: string;
+  role: 'admin' | 'user' | 'operator';
+  status: 'pending' | 'accepted' | 'expired' | 'revoked';
+  invited_by: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface InviteRequest {
+  company_id: string;
+  email: string;
   role: 'admin' | 'user' | 'operator';
 }
 
-export interface TeamMemberCreateResponse {
+export interface InviteResponse {
   success: boolean;
-  id: string;
-  user_id: string;
+  invitation_id: string;
   message: string;
 }

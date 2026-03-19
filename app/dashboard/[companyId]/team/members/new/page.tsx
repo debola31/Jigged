@@ -9,51 +9,40 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
-import InputAdornment from '@mui/material/InputAdornment';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
-import type { TeamMemberCreateResponse } from '@/types/team';
+import type { InviteResponse } from '@/types/team';
 
 /**
- * Get the Edge Function URL for unified team endpoint.
+ * Get the Edge Function URL for team invitations.
  */
-const getTeamUrl = () => getEdgeFunctionUrl('team');
+const getInviteUrl = () => getEdgeFunctionUrl('team-invites');
 
 /**
- * Create New Team Member Page.
+ * Invite Team Member Page.
  *
- * Creates an admin, user, or operator with Supabase Auth (email/password).
- * Admin sets a temporary password; user must change on first login.
+ * Sends a magic link invitation email to the specified address.
+ * The invited user clicks the link to join the company with the assigned role.
  */
-export default function NewTeamMemberPage() {
+export default function InviteTeamMemberPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const defaultRole = searchParams.get('role') as 'admin' | 'user' | 'operator' || 'user';
 
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [role, setRole] = useState<'admin' | 'user' | 'operator'>(defaultRole);
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!name.trim()) {
-      setError('Name is required');
-      return;
-    }
 
     if (!email.trim()) {
       setError('Email is required');
@@ -66,13 +55,9 @@ export default function NewTeamMemberPage() {
       return;
     }
 
-    if (!password || password.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       // Get auth session for Edge Function authorization
@@ -83,8 +68,8 @@ export default function NewTeamMemberPage() {
         throw new Error('Not authenticated');
       }
 
-      // Call Edge Function to create team member with Supabase user
-      const url = getTeamUrl();
+      // Call Edge Function to send invitation
+      const url = getInviteUrl();
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -93,34 +78,37 @@ export default function NewTeamMemberPage() {
         },
         body: JSON.stringify({
           company_id: companyId,
-          name: name.trim(),
           email: email.trim().toLowerCase(),
-          password,
           role,
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to create team member' }));
-        throw new Error(errorData.error || 'Failed to create team member');
+        const errorData = await response.json().catch(() => ({ error: 'Failed to send invitation' }));
+        throw new Error(errorData.error || 'Failed to send invitation');
       }
 
-      const data: TeamMemberCreateResponse = await response.json();
+      const data: InviteResponse = await response.json();
 
       if (!data.success) {
-        throw new Error(data.message || 'Failed to create team member');
+        throw new Error(data.message || 'Failed to send invitation');
       }
 
-      // Navigate back to team page with appropriate tab
-      const tabIndex = role === 'admin' ? 0 : role === 'user' ? 1 : 2;
-      router.push(`/dashboard/${companyId}/team?tab=${tabIndex}`);
+      setSuccess(data.message || `Invitation sent to ${email}`);
+
+      // Navigate back to team page after a brief delay
+      setTimeout(() => {
+        router.push(`/dashboard/${companyId}/team`);
+      }, 1500);
     } catch (err) {
-      console.error('Error creating team member:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create team member');
+      console.error('Error sending invitation:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send invitation');
     } finally {
       setLoading(false);
     }
   };
+
+  const roleLabel = role === 'admin' ? 'Admin' : role === 'operator' ? 'Operator' : 'User';
 
   return (
     <Box>
@@ -134,10 +122,10 @@ export default function NewTeamMemberPage() {
 
       <Paper sx={{ p: 4, maxWidth: 500 }}>
         <Typography variant="h5" gutterBottom>
-          New {role === 'admin' ? 'Admin' : 'User'}
+          Invite {roleLabel}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Create a new team member with email login access.
+          Send an email invitation with a magic link.
         </Typography>
 
         {error && (
@@ -146,17 +134,13 @@ export default function NewTeamMemberPage() {
           </Alert>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <TextField
-            label="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            fullWidth
-            required
-            sx={{ mb: 3 }}
-            autoFocus
-          />
+        {success && (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            {success}
+          </Alert>
+        )}
 
+        <form onSubmit={handleSubmit}>
           <TextField
             label="Email"
             type="email"
@@ -164,7 +148,9 @@ export default function NewTeamMemberPage() {
             onChange={(e) => setEmail(e.target.value)}
             fullWidth
             required
+            autoFocus
             sx={{ mb: 3 }}
+            helperText="They will receive an email with a link to join your team"
           />
 
           <FormControl fullWidth sx={{ mb: 3 }}>
@@ -180,31 +166,6 @@ export default function NewTeamMemberPage() {
             </Select>
           </FormControl>
 
-          <TextField
-            label="Temporary Password"
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            fullWidth
-            required
-            sx={{ mb: 3 }}
-            helperText="User will be required to change this on first login"
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                    >
-                      {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
-
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Button
               type="button"
@@ -217,10 +178,10 @@ export default function NewTeamMemberPage() {
             <Button
               type="submit"
               variant="contained"
-              disabled={loading}
+              disabled={loading || !!success}
               startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
             >
-              {loading ? 'Creating...' : `Create ${role === 'admin' ? 'Admin' : 'User'}`}
+              {loading ? 'Sending...' : 'Send Invitation'}
             </Button>
           </Box>
         </form>

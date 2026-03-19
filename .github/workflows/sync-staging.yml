@@ -31,7 +31,7 @@ jobs:
           # Check for merge conflicts
           git checkout staging
           if ! git merge --no-commit --no-ff origin/main 2>/dev/null; then
-            git merge --abort
+            git merge --abort 2>/dev/null || true
             echo "::warning::Merge conflicts detected. Creating PR for manual resolution."
             # Create PR without merging
             EXISTING_PR=$(gh pr list --base staging --head main --json number --jq '.[0].number')
@@ -46,7 +46,7 @@ jobs:
             fi
             exit 0
           fi
-          git merge --abort
+          git reset --hard origin/staging
 
           # No conflicts — create PR and merge immediately
           EXISTING_PR=$(gh pr list --base staging --head main --json number --jq '.[0].number')

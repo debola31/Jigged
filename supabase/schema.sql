@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-17T06:07:34Z
+-- Generated: 2026-03-19T02:10:42Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -272,7 +272,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     "email" text,
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
-    CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text, 'operator'::text])))
+    CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text, 'operator'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."user_preferences"
@@ -486,7 +486,7 @@ CREATE POLICY "Users can insert chat queries for own company"
     FOR INSERT
     WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['admin'::text, 'user'::text]))))));
 
 DROP POLICY IF EXISTS "Users can read own company chat history" ON "public"."ai_chat_queries";
 CREATE POLICY "Users can read own company chat history"
@@ -494,7 +494,7 @@ CREATE POLICY "Users can read own company chat history"
     FOR SELECT
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
-  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['owner'::text, 'admin'::text, 'user'::text]))))));
+  WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['admin'::text, 'user'::text]))))));
 
 DROP POLICY IF EXISTS "Admins can delete AI config" ON "public"."ai_config";
 CREATE POLICY "Admins can delete AI config"
@@ -1674,14 +1674,14 @@ BEGIN
         RAISE EXCEPTION 'Access denied: cannot create demo company for another user';
     END IF;
 
-    -- Role check: caller must be owner or admin of source company
+    -- Role check: caller must be admin of source company
     IF NOT EXISTS (
         SELECT 1 FROM user_company_access
         WHERE user_id = p_user_id
           AND company_id = p_source_company_id
-          AND role IN ('owner', 'admin')
+          AND role = 'admin'
     ) THEN
-        RAISE EXCEPTION 'Access denied: must be owner or admin of source company';
+        RAISE EXCEPTION 'Access denied: must be admin of source company';
     END IF;
 
     -- Idempotency: return existing demo company if one exists
@@ -1908,7 +1908,7 @@ AS $function$
     SELECT 1 FROM user_company_access
     WHERE user_id = auth.uid()
       AND company_id = check_company_id
-      AND role IN ('owner', 'admin')
+      AND role = 'admin'
   );
 $function$
 

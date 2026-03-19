@@ -16,7 +16,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -109,15 +109,36 @@ export default function FeedbackDialog({ open, onClose, onSuccess }: FeedbackDia
 
     try {
       const supabase = getSupabase();
+      const trimmedText = feedbackText.trim();
       const { error: insertError } = await supabase.from('feedback').insert({
         company_id: companyId,
         user_id: user.id,
         page_path: pathname,
         page_title: pageTitle,
-        feedback_text: feedbackText.trim(),
+        feedback_text: trimmedText,
       });
 
       if (insertError) throw insertError;
+
+      // Fire-and-forget email notification — don't block the user
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (accessToken) {
+        fetch(getEdgeFunctionUrl('notify-feedback'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            user_id: user.id,
+            company_id: companyId,
+            page_title: pageTitle,
+            page_path: pathname,
+            feedback_text: trimmedText,
+          }),
+        }).catch((err) => console.error('Feedback email notification failed:', err));
+      }
 
       setFeedbackText('');
       onClose();

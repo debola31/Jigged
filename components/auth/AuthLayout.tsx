@@ -3,6 +3,7 @@
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import MuiLink from '@mui/material/Link';
 import Link from 'next/link';
 import { JiggedLogo } from '@/components/branding';
 
@@ -84,6 +85,19 @@ export default function AuthLayout({ children }: AuthLayoutProps) {
           {/* Auth Form */}
           <Box>
             {children}
+          </Box>
+
+          {/* Legal Links */}
+          <Box sx={{ textAlign: 'center', mt: 4 }}>
+            <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.35)' }}>
+              <MuiLink component={Link} href="/terms" underline="hover" sx={{ color: 'inherit', '&:hover': { color: 'rgba(255, 255, 255, 0.6)' } }}>
+                Terms
+              </MuiLink>
+              {' \u00B7 '}
+              <MuiLink component={Link} href="/privacy" underline="hover" sx={{ color: 'inherit', '&:hover': { color: 'rgba(255, 255, 255, 0.6)' } }}>
+                Privacy
+              </MuiLink>
+            </Typography>
           </Box>
         </Box>
       </Container>

@@ -14,6 +14,7 @@ export default function FeedbackFab() {
   return (
     <>
       <Fab
+        variant="extended"
         color="primary"
         size="medium"
         aria-label="Give feedback"
@@ -25,7 +26,8 @@ export default function FeedbackFab() {
           zIndex: 1150,
         }}
       >
-        <FeedbackIcon />
+        <FeedbackIcon sx={{ mr: 1 }} />
+        Feedback
       </Fab>
 
       <FeedbackDialog

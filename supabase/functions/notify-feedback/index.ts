@@ -2,12 +2,20 @@ import { getServiceRoleClient, jsonResponse, errorResponse, handleCors } from '.
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
-interface FeedbackPayload {
-  user_id: string;
+interface FeedbackRecord {
+  id: string;
   company_id: string;
-  page_title: string;
+  user_id: string;
   page_path: string;
+  page_title: string;
   feedback_text: string;
+  created_at: string;
+}
+
+interface WebhookPayload {
+  type: 'INSERT';
+  table: string;
+  record: FeedbackRecord;
 }
 
 async function sendEmail(
@@ -40,12 +48,13 @@ Deno.serve(async (req: Request) => {
       return errorResponse('Email service not configured', 500);
     }
 
-    const payload: FeedbackPayload = await req.json();
-    const { user_id, company_id, page_title, page_path, feedback_text } = payload;
+    const payload: WebhookPayload = await req.json();
 
-    if (!user_id || !company_id || !feedback_text) {
-      return errorResponse('Missing required fields', 400);
+    if (payload.type !== 'INSERT' || payload.table !== 'feedback') {
+      return jsonResponse({ message: 'Ignored — not a feedback insert' });
     }
+
+    const { user_id, company_id, page_title, page_path, feedback_text, created_at } = payload.record;
 
     // Look up user email and company name for the notification
     const supabase = getServiceRoleClient();
@@ -68,6 +77,7 @@ Deno.serve(async (req: Request) => {
         `Page: ${page_title} (${page_path})`,
         `User: ${userEmail}`,
         `Company: ${companyName}`,
+        `Submitted: ${created_at}`,
         '',
         '---',
         '',
@@ -78,6 +88,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ message: 'Feedback notification sent' });
   } catch (err) {
     console.error('notify-feedback error:', err);
-    return errorResponse('Failed to send notification', 500);
+    // Return 200 anyway — the row is already inserted, don't retry the webhook
+    return jsonResponse({ message: 'Error processing notification', error: String(err) });
   }
 });

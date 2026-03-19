@@ -9,6 +9,7 @@ import { AuthGuard } from '@/components/auth';
 import DemoModeProvider from '@/components/providers/DemoModeProvider';
 import DemoModeBanner from '@/components/demo/DemoModeBanner';
 import { useMobileDrawer } from '@/hooks/useMobileDrawer';
+import FeedbackFab from '@/components/feedback/FeedbackFab';
 
 export default function DashboardLayout({
   children,
@@ -37,6 +38,7 @@ export default function DashboardLayout({
             </Box>
           </Box>
         </Box>
+        <FeedbackFab />
       </DemoModeProvider>
     </AuthGuard>
   );

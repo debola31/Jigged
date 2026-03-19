@@ -10,10 +10,12 @@
  * - POST /team-invites/:id/resend         - Resend invitation email
  */
 
-import { getServiceRoleClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
 
 /**
  * Verify the caller is an admin of the specified company.
+ * Uses an anon client with the user's JWT to extract user identity,
+ * then uses the service role client for admin queries.
  * Returns the user_id if authorized, throws otherwise.
  */
 async function verifyAdmin(
@@ -21,15 +23,16 @@ async function verifyAdmin(
   authHeader: string,
   companyId: string
 ): Promise<string> {
-  // Extract token from Bearer header
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabase.auth.getUser(token);
+  // Use anon client with user's JWT to get the authenticated user
+  const anonClient = getAnonClient(authHeader);
+  const { data: { user }, error } = await anonClient.auth.getUser();
 
   if (error || !user) {
+    console.error('Auth verification failed:', error?.message);
     throw new Error('Not authenticated');
   }
 
-  // Check admin role
+  // Check admin role using service role client (bypasses RLS)
   const { data: access } = await supabase
     .from('user_company_access')
     .select('role')

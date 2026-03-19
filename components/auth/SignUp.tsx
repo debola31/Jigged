@@ -91,7 +91,7 @@ export default function SignUp() {
             Please click the link in the email to verify your account.
           </Typography>
           <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 2 }}>
-            After confirming your email, an administrator will grant you access to your company.
+            After confirming your email, we&apos;ll be in touch to get your company set up.
           </Typography>
           <Box sx={{ mt: 3, textAlign: 'center' }}>
             <MuiLink component={Link} href="/login" underline="hover">

@@ -5,10 +5,13 @@ PostgreSQL/Supabase Schema Export Script
 Exports a complete database schema with deterministic ordering for git diffs.
 Includes RLS policies, functions, triggers, and all constraints.
 
+Exports separate schema files for prod and staging environments.
+
 Usage:
-    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py
-    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --output custom_path.sql
-    PROD_SUPABASE_DATABASE_URL=postgresql://... python scripts/export_schema.py --dry-run
+    python scripts/export_schema.py                  # Export both prod and staging
+    python scripts/export_schema.py --env prod       # Export prod only
+    python scripts/export_schema.py --env staging    # Export staging only
+    python scripts/export_schema.py --dry-run        # Print to stdout
 """
 
 import os
@@ -734,31 +737,69 @@ class SchemaExporter:
         return "\n".join(s for s in sections if s is not None)
 
 
+def resolve_output_path(relative_path: str) -> str:
+    """Resolve output path relative to project root."""
+    if os.path.isabs(relative_path):
+        return relative_path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    return os.path.join(project_root, relative_path)
+
+
+def export_env(env_name: str, db_url: str, output_file: str, schemas: List[str], dry_run: bool):
+    """Export schema for a single environment."""
+    exporter = SchemaExporter(db_url, schemas)
+    sql = exporter.export()
+
+    if dry_run:
+        print(f"-- === {env_name.upper()} ===")
+        print(sql)
+    else:
+        output_path = resolve_output_path(output_file)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        with open(output_path, "w") as f:
+            f.write(sql)
+        print(f"[{env_name}] Schema exported to {output_path}")
+        print(f"[{env_name}] Schemas included: {', '.join(schemas)}")
+
+
+# Environment configuration: name -> (env var, output file)
+ENVIRONMENTS = {
+    "prod": ("PROD_SUPABASE_DATABASE_URL", "supabase/schema.prod.sql"),
+    "staging": ("SUPABASE_DATABASE_URL", "supabase/schema.staging.sql"),
+}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Export PostgreSQL/Supabase database schema with deterministic ordering",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Export using PROD_SUPABASE_DATABASE_URL environment variable
-    PROD_SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db python scripts/export_schema.py
+    # Export both prod and staging schemas
+    python scripts/export_schema.py
 
-    # Export to custom output file
-    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --output /path/to/schema.sql
+    # Export prod only
+    python scripts/export_schema.py --env prod
+
+    # Export staging only
+    python scripts/export_schema.py --env staging
 
     # Export specific schemas only
-    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --schemas public
+    python scripts/export_schema.py --schemas public
 
     # Dry run - print to stdout
-    PROD_SUPABASE_DATABASE_URL=... python scripts/export_schema.py --dry-run
+    python scripts/export_schema.py --dry-run
         """,
     )
 
     parser.add_argument(
-        "--output",
-        "-o",
-        default="supabase/schema.sql",
-        help="Output file path (default: supabase/schema.sql)",
+        "--env",
+        "-e",
+        choices=["prod", "staging"],
+        default=None,
+        help="Environment to export (default: both prod and staging)",
     )
     parser.add_argument(
         "--schemas",
@@ -775,34 +816,24 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get database URL (production is the schema source of truth)
-    SUPABASE_DATABASE_URL = os.environ.get("PROD_SUPABASE_DATABASE_URL")
-    if not SUPABASE_DATABASE_URL:
-        print("Error: PROD_SUPABASE_DATABASE_URL environment variable is required", file=sys.stderr)
-        print("Example: PROD_SUPABASE_DATABASE_URL=postgresql://user:pass@host:5432/db", file=sys.stderr)
+    # Determine which environments to export
+    envs_to_export = [args.env] if args.env else ["prod", "staging"]
+
+    exported = 0
+    for env_name in envs_to_export:
+        env_var, output_file = ENVIRONMENTS[env_name]
+        db_url = os.environ.get(env_var)
+
+        if not db_url:
+            print(f"Warning: {env_var} not set, skipping {env_name}", file=sys.stderr)
+            continue
+
+        export_env(env_name, db_url, output_file, args.schemas, args.dry_run)
+        exported += 1
+
+    if exported == 0:
+        print("Error: No database URLs configured. Set PROD_SUPABASE_DATABASE_URL and/or SUPABASE_DATABASE_URL.", file=sys.stderr)
         sys.exit(1)
-
-    # Export schema
-    exporter = SchemaExporter(SUPABASE_DATABASE_URL, args.schemas)
-    sql = exporter.export()
-
-    if args.dry_run:
-        print(sql)
-    else:
-        # Resolve output path relative to script location
-        output_path = args.output
-        if not os.path.isabs(output_path):
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(script_dir)
-            output_path = os.path.join(project_root, output_path)
-
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-        with open(output_path, "w") as f:
-            f.write(sql)
-        print(f"Schema exported to {output_path}")
-        print(f"Schemas included: {', '.join(args.schemas)}")
 
 
 if __name__ == "__main__":

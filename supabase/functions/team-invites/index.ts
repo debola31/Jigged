@@ -2,6 +2,7 @@
  * Team Invitations Edge Function
  *
  * Handles magic link invitations for team members.
+ * Uses Resend API for email delivery (bypasses Supabase email rate limits).
  *
  * Endpoints:
  * - POST /team-invites                    - Send invitation (creates invitation + sends magic link)
@@ -11,6 +12,8 @@
  */
 
 import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+
+const RESEND_API_URL = 'https://api.resend.com/emails';
 
 /**
  * Verify the caller is an admin of the specified company.
@@ -80,6 +83,124 @@ function getOriginUrl(req: Request): string {
   return Deno.env.get('SITE_URL') || Deno.env.get('NEXT_PUBLIC_APP_URL') || 'http://localhost:3000';
 }
 
+/**
+ * Generate an invitation link for a user via Supabase Auth.
+ * Tries 'invite' type first (for new users), falls back to 'magiclink' (for existing users).
+ * Returns the action_link URL that the user should click.
+ */
+async function generateInviteLink(
+  supabase: ReturnType<typeof getServiceRoleClient>,
+  email: string,
+  redirectTo: string,
+  metadata: Record<string, string>,
+): Promise<string> {
+  // Try invite link first (creates user if they don't exist)
+  const { data: inviteData, error: inviteError } = await supabase.auth.admin.generateLink({
+    type: 'invite',
+    email,
+    options: {
+      redirectTo,
+      data: metadata,
+    },
+  });
+
+  if (!inviteError && inviteData?.properties?.action_link) {
+    return inviteData.properties.action_link;
+  }
+
+  console.warn('generateLink(invite) failed, trying magiclink:', inviteError?.message);
+
+  // Fallback: magic link for existing users
+  const { data: magicData, error: magicError } = await supabase.auth.admin.generateLink({
+    type: 'magiclink',
+    email,
+    options: {
+      redirectTo,
+    },
+  });
+
+  if (magicError || !magicData?.properties?.action_link) {
+    console.error('generateLink(magiclink) also failed:', magicError);
+    throw new Error('Failed to generate invitation link');
+  }
+
+  return magicData.properties.action_link;
+}
+
+/**
+ * Build the invitation email HTML.
+ * Matches the design from supabase/templates/invite.html.
+ */
+function buildInviteEmailHtml(companyName: string, actionLink: string): string {
+  const companyText = companyName
+    ? `<strong style="color:#ffffff;">${companyName}</strong>`
+    : 'a team';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0; background-color:#111439; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#111439; padding:40px 20px;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background-color:#1a1f4a; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:40px;">
+        <tr><td align="center" style="padding-bottom:24px;">
+          <img src="https://jigged.app/logo-icon.png" width="48" height="48" alt="Jigged" style="border-radius:12px;" />
+        </td></tr>
+        <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
+          You've been invited to Jigged
+        </td></tr>
+        <tr><td align="center" style="color:#B0B3B8; font-size:14px; line-height:1.5; padding-bottom:24px;">
+          You've been invited to join ${companyText} on Jigged. Click the button below to accept the invitation and set up your account.
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:24px;">
+          <a href="${actionLink}" style="display:inline-block; background-color:#4682B4; color:#ffffff; text-decoration:none; padding:14px 32px; border-radius:8px; font-size:16px; font-weight:500;">
+            Accept Invitation
+          </a>
+        </td></tr>
+        <tr><td align="center" style="color:#B0B3B8; font-size:12px;">
+          If you weren't expecting this invitation, you can safely ignore this email.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Send an invitation email via Resend API.
+ */
+async function sendInviteEmail(
+  apiKey: string,
+  to: string,
+  companyName: string,
+  actionLink: string,
+): Promise<void> {
+  const html = buildInviteEmailHtml(companyName, actionLink);
+
+  const res = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      from: 'Jigged <hello@jigged.app>',
+      to: [to],
+      subject: `You've been invited to ${companyName || 'Jigged'}`,
+      html,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API error (${res.status}): ${body}`);
+  }
+}
+
 Deno.serve(async (req) => {
   // Handle CORS
   const corsResponse = handleCors(req);
@@ -92,6 +213,12 @@ Deno.serve(async (req) => {
   try {
     const supabase = getServiceRoleClient();
     const authHeader = req.headers.get('Authorization') || '';
+
+    const resendApiKey = Deno.env.get('RESEND_API_KEY');
+    if (!resendApiKey) {
+      console.error('RESEND_API_KEY not configured');
+      return errorResponse('Email service not configured', 500);
+    }
 
     // POST /team-invites — Send invitation
     if (req.method === 'POST' && pathParts.length === 1) {
@@ -176,45 +303,20 @@ Deno.serve(async (req) => {
         return errorResponse('Failed to create invitation', 500);
       }
 
-      // Send magic link via Supabase inviteUserByEmail
+      // Generate invitation link and send email via Resend
       const siteUrl = getOriginUrl(req);
-      const redirectTo = `${siteUrl}/auth/callback?next=/accept-invite/${invitation.id}`;
+      const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
 
       try {
-        const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email.toLowerCase(), {
-          redirectTo,
-          data: {
-            invitation_id: invitation.id,
-            company_name: companyName,
-            invited_role: role,
-          },
+        const actionLink = await generateInviteLink(supabase, email.toLowerCase(), redirectTo, {
+          invitation_id: invitation.id,
+          company_name: companyName,
+          invited_role: role,
         });
 
-        if (inviteError) {
-          // Fallback for existing confirmed users: generate a magic link instead
-          console.warn('inviteUserByEmail failed, trying generateLink fallback:', inviteError.message);
-
-          const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-            type: 'magiclink',
-            email: email.toLowerCase(),
-            options: {
-              redirectTo,
-            },
-          });
-
-          if (linkError) {
-            console.error('generateLink also failed:', linkError);
-            // Invitation record is created — admin can resend later
-            return jsonResponse({
-              success: true,
-              invitation_id: invitation.id,
-              message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
-            });
-          }
-        }
+        await sendInviteEmail(resendApiKey, email.toLowerCase(), companyName, actionLink);
       } catch (emailErr) {
         console.error('Email sending error:', emailErr);
-        // Invitation record exists — admin can resend
         return jsonResponse({
           success: true,
           invitation_id: invitation.id,
@@ -260,6 +362,32 @@ Deno.serve(async (req) => {
       }
 
       return jsonResponse(invitations || []);
+    }
+
+    // GET /team-invites/:id — Get single invitation (for accept-invite page)
+    // No admin check — just returns the invitation. The accept-invite page
+    // validates email match client-side. Uses service role to bypass RLS.
+    if (req.method === 'GET' && pathParts.length === 2) {
+      const invitationId = pathParts[1];
+
+      const { data: invitation, error: fetchError } = await supabase
+        .from('invitations')
+        .select('id, company_id, email, role, status, invited_by, expires_at, created_at')
+        .eq('id', invitationId)
+        .single();
+
+      if (fetchError || !invitation) {
+        return errorResponse('Invitation not found', 404);
+      }
+
+      // Also fetch company name
+      const { data: company } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', invitation.company_id)
+        .single();
+
+      return jsonResponse({ ...invitation, company_name: company?.name || '' });
     }
 
     // DELETE /team-invites/:id — Revoke invitation
@@ -335,32 +463,18 @@ Deno.serve(async (req) => {
         .update({ expires_at: newExpiresAt.toISOString() })
         .eq('id', invitationId);
 
-      // Resend magic link
+      // Generate link and resend via Resend
       const siteUrl = getOriginUrl(req);
-      const redirectTo = `${siteUrl}/auth/callback?next=/accept-invite/${invitation.id}`;
+      const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
 
       try {
-        const { error: inviteError } = await supabase.auth.admin.inviteUserByEmail(invitation.email, {
-          redirectTo,
-          data: {
-            invitation_id: invitation.id,
-            company_name: companyName,
-            invited_role: invitation.role,
-          },
+        const actionLink = await generateInviteLink(supabase, invitation.email, redirectTo, {
+          invitation_id: invitation.id,
+          company_name: companyName,
+          invited_role: invitation.role,
         });
 
-        if (inviteError) {
-          // Fallback for existing users
-          const { error: linkError } = await supabase.auth.admin.generateLink({
-            type: 'magiclink',
-            email: invitation.email,
-            options: { redirectTo },
-          });
-
-          if (linkError) {
-            return errorResponse('Failed to resend invitation email', 500);
-          }
-        }
+        await sendInviteEmail(resendApiKey, invitation.email, companyName, actionLink);
       } catch (emailErr) {
         console.error('Resend error:', emailErr);
         return errorResponse('Failed to resend invitation email', 500);

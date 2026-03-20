@@ -147,10 +147,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
           </Button>
 
           <Typography variant="body2" align="center" color="text.secondary">
-            Don&apos;t have an account?{' '}
-            <MuiLink component={Link} href="/signup" underline="hover">
-              Sign up
-            </MuiLink>
+            Need an account? Contact your company administrator for an invitation.
           </Typography>
         </Box>
       </CardContent>

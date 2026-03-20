@@ -44,13 +44,19 @@ export default function AuthProvider({ children }: AuthProviderProps) {
 
     // Get initial session
     const getInitialSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      if (data.session) {
-        hadSession.current = true;
+      try {
+        const { data } = await supabase.auth.getSession();
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+        if (data.session) {
+          hadSession.current = true;
+        }
+      } catch (error) {
+        console.error('Failed to get initial session:', error);
+        Sentry.captureException(error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     getInitialSession();

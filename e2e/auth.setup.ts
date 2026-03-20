@@ -10,6 +10,9 @@ import { TEST_EMAIL, TEST_PASSWORD, AUTH_STATE_PATH } from './fixtures/test-data
  * Supabase handles its own cookie format — no manual cookie injection needed.
  */
 setup('authenticate', async ({ page, baseURL }) => {
+  // Forward browser console messages to the test output for debugging
+  page.on('console', msg => console.log(`[browser] ${msg.type()}: ${msg.text()}`));
+
   // If a Vercel bypass secret is set, add it as a cookie so the browser
   // can access preview deployments protected by Vercel Deployment Protection.
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
@@ -23,6 +26,18 @@ setup('authenticate', async ({ page, baseURL }) => {
         path: '/',
       },
     ]);
+  }
+
+  // Health check: verify the deployment is reachable before navigating
+  if (baseURL) {
+    const response = await page.request.get(baseURL, { maxRedirects: 0 });
+    console.log(`[auth.setup] Health check: ${response.status()} ${response.url()}`);
+    if (response.status() === 401 || response.status() === 403) {
+      throw new Error(
+        `Vercel Deployment Protection is blocking access (${response.status()}). ` +
+        `Check VERCEL_AUTOMATION_BYPASS_SECRET is set correctly.`
+      );
+    }
   }
 
   await page.goto('/login');

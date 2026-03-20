@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-20T04:49:44Z
+-- Generated: 2026-03-20T19:32:09Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS "public"."demo_data_templates"
     "created_by" uuid,
     CONSTRAINT "demo_templates_pkey" PRIMARY KEY (id),
     CONSTRAINT "demo_templates_name_version_key" UNIQUE (name, version)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."feedback"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "user_id" uuid NOT NULL,
+    "page_path" text NOT NULL,
+    "page_title" text NOT NULL,
+    "feedback_text" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "feedback_pkey" PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."inventory_items"
@@ -472,6 +484,7 @@ ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."feedback" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_unit_conversions" ENABLE ROW LEVEL SECURITY;
@@ -633,6 +646,22 @@ CREATE POLICY "System admins can manage demo_data_templates"
     ON "public"."demo_data_templates"
     FOR ALL
     USING (is_system_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "Admins can read feedback for their companies" ON "public"."feedback";
+CREATE POLICY "Admins can read feedback for their companies"
+    ON "public"."feedback"
+    FOR SELECT
+    USING ((EXISTS ( SELECT 1
+   FROM user_company_access uca
+  WHERE ((uca.user_id = auth.uid()) AND (uca.company_id = feedback.company_id) AND (uca.role = 'admin'::text)))));
+
+DROP POLICY IF EXISTS "Users can insert feedback for their companies" ON "public"."feedback";
+CREATE POLICY "Users can insert feedback for their companies"
+    ON "public"."feedback"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT uca.company_id
+   FROM user_company_access uca
+  WHERE (uca.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "Users can delete inventory_items" ON "public"."inventory_items";
 CREATE POLICY "Users can delete inventory_items"
@@ -1392,6 +1421,12 @@ ALTER TABLE "public"."customers"
 ALTER TABLE "public"."demo_data_templates"
     ADD CONSTRAINT "demo_templates_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
+ALTER TABLE "public"."feedback"
+    ADD CONSTRAINT "feedback_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."feedback"
+    ADD CONSTRAINT "feedback_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."inventory_items"
     ADD CONSTRAINT "inventory_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1886,24 +1921,6 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.get_invitation(p_invitation_id uuid)
- RETURNS TABLE(id uuid, company_id uuid, email character varying, role character varying, status character varying, invited_by uuid, expires_at timestamp with time zone, created_at timestamp with time zone, company_name character varying)
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-    RETURN QUERY
-    SELECT i.id, i.company_id, i.email, i.role, i.status, i.invited_by, i.expires_at, i.created_at,
-           c.name AS company_name
-    FROM invitations i
-    LEFT JOIN companies c ON c.id = i.company_id
-    WHERE i.id = p_invitation_id;
-END;
-$function$
-
-;
-
 CREATE OR REPLACE FUNCTION public.get_operator_access_id(check_company_id uuid)
  RETURNS uuid
  LANGUAGE sql
@@ -1984,6 +2001,51 @@ BEGIN
   UNION ALL
   SELECT ra.job_id, ra.operation_name, ra.ready_count
   FROM ready_agg ra;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.get_ready_operations_for_station(p_company_id uuid, p_operation_type_id uuid)
+ RETURNS TABLE(job_id uuid, job_operation_id uuid, operation_name text, op_status text)
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+BEGIN
+  RETURN QUERY
+  WITH eligible_jobs AS (
+    SELECT j.id
+    FROM jobs j
+    WHERE j.company_id = p_company_id
+      AND j.status IN ('pending', 'in_progress', 'released')
+  ),
+  station_ops AS (
+    SELECT jo.id, jo.job_id, jo.operation_name, jo.status, jo.routing_node_id
+    FROM job_operations jo
+    JOIN eligible_jobs ej ON ej.id = jo.job_id
+    WHERE jo.operation_type_id = p_operation_type_id
+      AND jo.status IN ('pending', 'in_progress')
+  ),
+  ready_or_active AS (
+    SELECT so.id, so.job_id, so.operation_name, so.status
+    FROM station_ops so
+    WHERE so.status = 'in_progress'
+       OR so.routing_node_id IS NULL
+       OR NOT EXISTS (
+         SELECT 1
+         FROM routing_edges re
+         WHERE re.target_node_id = so.routing_node_id
+           AND EXISTS (
+             SELECT 1
+             FROM job_operations pred_jo
+             WHERE pred_jo.job_id = so.job_id
+               AND pred_jo.routing_node_id = re.source_node_id
+               AND pred_jo.status NOT IN ('completed', 'skipped')
+           )
+       )
+  )
+  SELECT ra.job_id, ra.id AS job_operation_id, ra.operation_name, ra.status AS op_status
+  FROM ready_or_active ra;
 END;
 $function$
 
@@ -2107,6 +2169,38 @@ BEGIN
         RAISE EXCEPTION 'Only the notes field can be updated on inventory transactions';
     END IF;
     RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.rls_auto_enable()
+ RETURNS event_trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog'
+AS $function$
+DECLARE
+  cmd record;
+BEGIN
+  FOR cmd IN
+    SELECT *
+    FROM pg_event_trigger_ddl_commands()
+    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+      AND object_type IN ('table','partitioned table')
+  LOOP
+     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN
+      BEGIN
+        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);
+        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;
+      EXCEPTION
+        WHEN OTHERS THEN
+          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;
+      END;
+     ELSE
+        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;
+     END IF;
+  END LOOP;
 END;
 $function$
 
@@ -2563,6 +2657,9 @@ CREATE TRIGGER companies_updated_at BEFORE UPDATE ON public.companies FOR EACH R
 DROP TRIGGER IF EXISTS "customers_updated_at" ON "public"."customers";
 CREATE TRIGGER customers_updated_at BEFORE UPDATE ON public.customers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "feedback" ON "public"."feedback";
+CREATE TRIGGER feedback AFTER INSERT ON public.feedback FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://rxjrshezmuttbbxmhojd.supabase.co/functions/v1/notify-feedback', 'POST', '{"Content-type":"application/json","Authorization":"Bearer [REDACTED]"}', '{}', '5000');
+
 DROP TRIGGER IF EXISTS "inventory_items_updated_at" ON "public"."inventory_items";
 CREATE TRIGGER inventory_items_updated_at BEFORE UPDATE ON public.inventory_items FOR EACH ROW EXECUTE FUNCTION update_inventory_items_updated_at();
 
@@ -2615,7 +2712,7 @@ DROP TRIGGER IF EXISTS "user_preferences_updated_at" ON "public"."user_preferenc
 CREATE TRIGGER user_preferences_updated_at BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "waitlist" ON "public"."waitlist";
-CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://mayuquvexmqjvwkfasxg.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer [REDACTED]"}', '{}', '5000');
+CREATE TRIGGER waitlist AFTER INSERT ON public.waitlist FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://rxjrshezmuttbbxmhojd.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer [REDACTED]"}', '{}', '5000');
 
 
 -- ============================================================
@@ -2641,6 +2738,9 @@ COMMENT ON TABLE "public"."customers"
 
 COMMENT ON TABLE "public"."demo_data_templates"
     IS 'Templates for seeding demo/sample data into new company accounts. Contains versioned JSONB payloads of sample parts, customers, jobs, etc. Only one version per template name can be active at a time.';
+
+COMMENT ON TABLE "public"."feedback"
+    IS 'In-app user feedback submissions';
 
 COMMENT ON TABLE "public"."inventory_items"
     IS 'Core inventory item records with primary unit tracking. Stores materials, supplies, and other trackable items.';
@@ -2890,6 +2990,12 @@ COMMENT ON COLUMN "public"."demo_data_templates"."created_at"
 
 COMMENT ON COLUMN "public"."demo_data_templates"."created_by"
     IS 'FK to auth.users. The admin who created this template. Nullable.';
+
+COMMENT ON COLUMN "public"."feedback"."page_path"
+    IS 'The URL pathname where feedback was submitted';
+
+COMMENT ON COLUMN "public"."feedback"."page_title"
+    IS 'Human-readable page name at time of submission';
 
 COMMENT ON COLUMN "public"."inventory_items"."primary_unit"
     IS 'Base unit of measure (e.g., lbs, kg, pcs)';

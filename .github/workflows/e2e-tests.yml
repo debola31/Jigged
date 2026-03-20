@@ -9,7 +9,7 @@ jobs:
     if: >
       github.event.deployment_status.state == 'success' &&
       github.event.deployment_status.environment == 'Preview'
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
 
     steps:

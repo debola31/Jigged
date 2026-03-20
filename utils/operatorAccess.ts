@@ -143,9 +143,81 @@ export async function getCurrentOperator(companyId: string): Promise<{
   return operatorAccess;
 }
 
+// ============================================================================
+// DAG READINESS HELPERS
+// ============================================================================
+
+/**
+ * Get ready operations for a specific station using DAG-aware logic.
+ * Calls the get_ready_operations_for_station DB function which checks
+ * routing_edges to ensure all predecessor operations are completed/skipped.
+ */
+async function getReadyOperationsForStation(
+  companyId: string,
+  operationTypeId: string
+): Promise<Map<string, { jobOperationId: string; operationName: string; status: string }>> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('get_ready_operations_for_station', {
+    p_company_id: companyId,
+    p_operation_type_id: operationTypeId,
+  });
+
+  if (error) {
+    console.error('Error fetching ready operations for station:', error);
+    return new Map();
+  }
+
+  const result = new Map<string, { jobOperationId: string; operationName: string; status: string }>();
+  for (const row of data || []) {
+    result.set(row.job_id, {
+      jobOperationId: row.job_operation_id,
+      operationName: row.operation_name,
+      status: row.op_status,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Check if a specific job operation is ready to start by verifying
+ * all predecessor nodes in the routing DAG are completed/skipped.
+ * Returns true if no routing is linked (backward compat).
+ */
+async function isJobOperationReady(
+  jobId: string,
+  routingNodeId: string | null
+): Promise<boolean> {
+  if (!routingNodeId) return true;
+
+  const supabase = getSupabase();
+
+  // Find predecessor edges
+  const { data: edges } = await supabase
+    .from('routing_edges')
+    .select('source_node_id')
+    .eq('target_node_id', routingNodeId);
+
+  if (!edges || edges.length === 0) return true; // root node
+
+  // Check if any predecessor job_operations are NOT completed/skipped
+  const sourceNodeIds = edges.map((e: { source_node_id: string }) => e.source_node_id);
+  const { data: unfinishedPreds } = await supabase
+    .from('job_operations')
+    .select('id')
+    .eq('job_id', jobId)
+    .in('routing_node_id', sourceNodeIds)
+    .not('status', 'in', '("completed","skipped")');
+
+  return !unfinishedPreds || unfinishedPreds.length === 0;
+}
+
 /**
  * Get list of jobs available for the operator.
  * Optionally filtered by operation type (station).
+ * When filtered by station, only shows jobs where the operation at that
+ * station is "ready" — all predecessor operations in the routing are done.
  */
 export async function getOperatorJobs(
   companyId: string,
@@ -168,33 +240,64 @@ export async function getOperatorJobs(
   if (error) throw new Error(error.message);
   if (!jobs) return [];
 
+  // When filtering by station, use DAG-aware readiness check
+  if (operationTypeId) {
+    const readyOps = await getReadyOperationsForStation(companyId, operationTypeId);
+
+    const result: OperatorJob[] = [];
+
+    for (const job of jobs) {
+      const readyOp = readyOps.get(job.id);
+      if (!readyOp) continue; // Operation at this station is not ready
+
+      // Check if someone is working on this operation
+      let currentOperatorName: string | null = null;
+      const { data: sessionData } = await supabase
+        .from('operator_sessions')
+        .select('operator_id')
+        .eq('job_operation_id', readyOp.jobOperationId)
+        .is('ended_at', null)
+        .single();
+
+      if (sessionData?.operator_id) {
+        const { data: opData } = await supabase
+          .from('user_company_access')
+          .select('name')
+          .eq('id', sessionData.operator_id)
+          .single();
+        currentOperatorName = opData?.name || null;
+      }
+
+      result.push({
+        id: job.id,
+        job_number: job.job_number,
+        customer_name: (job.customers as { name: string } | null)?.name || null,
+        part_name: (job.parts as { description: string; part_number: string } | null)?.description || null,
+        part_number: (job.parts as { description: string; part_number: string } | null)?.part_number || null,
+        status: job.status,
+        operation_id: readyOp.jobOperationId,
+        operation_name: readyOp.operationName,
+        operation_status: readyOp.status,
+        current_operator_name: currentOperatorName,
+      });
+    }
+
+    return result;
+  }
+
+  // No station filter — show all jobs (overview mode, no DAG filtering)
   const result: OperatorJob[] = [];
 
   for (const job of jobs) {
-    // Get operations for this job
-    let opsQuery = supabase
+    const { data: ops } = await supabase
       .from('job_operations')
       .select('id, operation_name, status, operation_type_id')
       .eq('job_id', job.id);
 
-    if (operationTypeId) {
-      opsQuery = opsQuery.eq('operation_type_id', operationTypeId);
-    }
-
-    const { data: ops } = await opsQuery;
-
-    // Skip jobs with no matching operations if filtering by operation type
-    if (operationTypeId && (!ops || ops.length === 0)) continue;
-
-    // Find current operation for this station (pending or in_progress)
     const currentOp = ops?.find((op: { id: string; operation_name: string; status: string; operation_type_id: string }) =>
       op.status === 'pending' || op.status === 'in_progress'
     );
 
-    // Skip jobs where all operations for this station are already completed/skipped
-    if (operationTypeId && !currentOp) continue;
-
-    // Check if someone is working on this operation
     let currentOperatorName: string | null = null;
     if (currentOp) {
       const { data: sessionData } = await supabase
@@ -205,7 +308,6 @@ export async function getOperatorJobs(
         .single();
 
       if (sessionData?.operator_id) {
-        // Look up operator name from user_company_access
         const { data: opData } = await supabase
           .from('user_company_access')
           .select('name')
@@ -258,7 +360,7 @@ export async function getOperatorJobDetail(
   // Get operations for this job
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, operation_name, status, instructions, estimated_setup_hours, estimated_run_hours_per_unit, operation_type_id')
+    .select('id, operation_name, status, instructions, estimated_setup_hours, estimated_run_hours_per_unit, operation_type_id, routing_node_id')
     .eq('job_id', jobId);
 
   if (operationTypeId) {
@@ -267,9 +369,17 @@ export async function getOperatorJobDetail(
 
   const { data: ops } = await opsQuery;
 
-  const currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_hours: number | null; estimated_run_hours_per_unit: number | null; operation_type_id: string }) =>
+  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_hours: number | null; estimated_run_hours_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
     op.status === 'pending' || op.status === 'in_progress'
-  );
+  ) || null;
+
+  // Check DAG readiness: if the operation is pending, verify predecessors are done
+  if (currentOp && currentOp.status === 'pending') {
+    const ready = await isJobOperationReady(jobId, currentOp.routing_node_id);
+    if (!ready) {
+      currentOp = null; // Not ready — hide from operator
+    }
+  }
 
   // Get active session for this operation
   let activeSessionId: string | null = null;
@@ -351,6 +461,14 @@ export async function startJob(
 
   if (opError || !jobOp) {
     throw new Error('No pending operation found for this job and station');
+  }
+
+  // 1b. Verify DAG predecessors are satisfied before starting
+  if (jobOp.status === 'pending') {
+    const ready = await isJobOperationReady(jobId, jobOp.routing_node_id);
+    if (!ready) {
+      throw new Error('Cannot start this operation: predecessor operations are not yet completed');
+    }
   }
 
   // 2. Auto-stop any existing active session for this operator

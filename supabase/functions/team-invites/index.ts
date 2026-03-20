@@ -140,7 +140,10 @@ Deno.serve(async (req) => {
         .single();
 
       if (existingInvite) {
-        return errorResponse('A pending invitation already exists for this email', 400);
+        await supabase
+          .from('invitations')
+          .update({ status: 'revoked' })
+          .eq('id', existingInvite.id);
       }
 
       // Look up company name for context

@@ -13,7 +13,7 @@ import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import {
   getOperatorJobDetail,
@@ -260,8 +260,8 @@ export default function OperatorJobDetailPage() {
           }}
         >
           <CardContent>
-            <Typography variant="h6" color="primary.main" sx={{ mb: 1 }}>
-              {job.operation_name}
+            <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+              Work Instructions
             </Typography>
             {job.instructions && (
               <Typography
@@ -340,8 +340,8 @@ export default function OperatorJobDetailPage() {
             <Button
               variant="contained"
               size="large"
-              color="warning"
-              startIcon={<StopIcon />}
+              color="error"
+              startIcon={<ExitToAppIcon />}
               onClick={handleStop}
               disabled={actionLoading}
               sx={{
@@ -350,7 +350,7 @@ export default function OperatorJobDetailPage() {
                 fontWeight: 600,
               }}
             >
-              {actionLoading ? <CircularProgress size={24} /> : 'STOP (PAUSE)'}
+              {actionLoading ? <CircularProgress size={24} /> : 'EXIT'}
             </Button>
 
             <Button

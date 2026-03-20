@@ -44,7 +44,7 @@ import {
 } from '@/utils/jobsAccess';
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
 import type { JobWithRelations, JobOperation, JobAttachment } from '@/types/job';
-import { JobStatusChip, OperationsPanel, ViewRoutingModal } from '@/components/jobs';
+import { JobStatusChip, OperationsPanel, ViewRoutingModal, JobQRCode } from '@/components/jobs';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -462,6 +462,24 @@ export default function JobDetailPage() {
                   </Box>
                 )}
               </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Job QR Code */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={2}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                Job QR Code
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <JobQRCode
+                jobId={jobId}
+                jobNumber={job.job_number}
+                partName={job.parts?.part_number}
+                companyId={companyId}
+              />
             </CardContent>
           </Card>
         </Grid>

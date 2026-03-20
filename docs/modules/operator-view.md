@@ -30,6 +30,7 @@ The Operator View module provides a mobile-first interface for shop floor operat
 | Operator | Switch to a different station via dropdown or QR scan | I can move between workstations without logging out |
 | Operator | View a list of pending jobs filtered to my station | I know what work is available at my current station |
 | Operator | Start work on a job | Time tracking begins and others see Im working on it |
+| Operator | Scan a job QR code to navigate to a specific job | I can quickly find the job I need to work on without scrolling through a list |
 | Operator | Stop work on a job | I can take a break or switch to another job |
 | Operator | Mark a job operation as complete | The job moves to the next operation or completion |
 | Operator | View my work session history | I can review past jobs, durations, and dates |
@@ -469,6 +470,26 @@ Owners manage operator accounts from the admin dashboard.
 - Generated from the Operations module (each operation_type has a QR code)
 
 - If operator is already authenticated, scanning updates the station and redirects to the jobs list
+
+### Job QR Codes
+
+**Format:** URL encoding job UUID
+
+`https://app.jigged.io/operator/{companyId}/login?job={job_id}`
+
+- Printed on job travelers (physical paperwork that moves with the part through the shop)
+
+- Operator scans to navigate directly to a specific job's detail page
+
+- Generated from the admin Jobs module (each job has a QR code on its detail page)
+
+- If operator is already authenticated, scanning redirects to the job detail page
+
+- If operator is not authenticated, the job parameter is preserved through login and the operator is redirected to the job detail page after successful authentication
+
+- The operator still needs a station selected to start work on the job (station determines which operation step they work on). They can select a station from the header dropdown.
+
+- A single QR code per job — works regardless of which station the operator is at
 
 ---
 

@@ -267,7 +267,7 @@ function OperatorShell({
                   <Typography
                     variant="body1"
                     sx={{
-                      color: 'primary.main',
+                      color: '#D4872A',
                       fontWeight: 500,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -276,7 +276,7 @@ function OperatorShell({
                   >
                     {stationName}
                   </Typography>
-                  <ArrowDropDownIcon sx={{ color: 'primary.main', ml: 0.5 }} />
+                  <ArrowDropDownIcon sx={{ color: '#D4872A', ml: 0.5 }} />
                 </Box>
               </>
             )}

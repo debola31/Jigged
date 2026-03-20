@@ -233,41 +233,72 @@ Deno.serve(async (req) => {
         });
 
         if (inviteError) {
-          // Fallback for existing confirmed users: generate a magic link and send via Resend
-          console.warn('inviteUserByEmail failed, trying generateLink fallback:', inviteError.message);
+          console.warn('inviteUserByEmail failed:', inviteError.message);
 
-          const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-            type: 'magiclink',
-            email: email.toLowerCase(),
-            options: {
-              redirectTo,
-            },
-          });
+          // Check if this is a ghost user (exists in Auth but has no company access anywhere)
+          if (existingUser) {
+            const { data: anyAccess } = await supabase
+              .from('user_company_access')
+              .select('id')
+              .eq('user_id', existingUser.id)
+              .limit(1)
+              .single();
 
-          if (linkError) {
-            console.error('generateLink also failed:', linkError);
-            return jsonResponse({
-              success: true,
-              invitation_id: invitation.id,
-              message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
-            });
-          }
+            if (!anyAccess) {
+              // Ghost user from a previous failed invite — delete and re-invite
+              console.log('Deleting ghost user and re-inviting:', email.toLowerCase());
+              await supabase.auth.admin.deleteUser(existingUser.id);
 
-          // Send the generated magic link via Resend
-          try {
-            await sendInviteEmailViaResend({
-              to: email.toLowerCase(),
-              actionLink: linkData.properties.action_link,
-              companyName,
-              role,
-            });
-          } catch (emailErr) {
-            console.error('Resend email failed:', emailErr);
-            return jsonResponse({
-              success: true,
-              invitation_id: invitation.id,
-              message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
-            });
+              const { error: retryError } = await supabase.auth.admin.inviteUserByEmail(email.toLowerCase(), {
+                redirectTo,
+                data: {
+                  invitation_id: invitation.id,
+                  company_name: companyName,
+                  invited_role: role,
+                },
+              });
+
+              if (retryError) {
+                console.error('Re-invite after delete also failed:', retryError);
+                return jsonResponse({
+                  success: true,
+                  invitation_id: invitation.id,
+                  message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+                });
+              }
+            } else {
+              // Active user in another company — send magic link via Resend
+              const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+                type: 'magiclink',
+                email: email.toLowerCase(),
+                options: { redirectTo },
+              });
+
+              if (linkError) {
+                console.error('generateLink failed:', linkError);
+                return jsonResponse({
+                  success: true,
+                  invitation_id: invitation.id,
+                  message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+                });
+              }
+
+              try {
+                await sendInviteEmailViaResend({
+                  to: email.toLowerCase(),
+                  actionLink: linkData.properties.action_link,
+                  companyName,
+                  role,
+                });
+              } catch (emailErr) {
+                console.error('Resend email failed:', emailErr);
+                return jsonResponse({
+                  success: true,
+                  invitation_id: invitation.id,
+                  message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+                });
+              }
+            }
           }
         }
       } catch (emailErr) {
@@ -408,26 +439,61 @@ Deno.serve(async (req) => {
         });
 
         if (inviteError) {
-          // Fallback for existing users: generate link and send via Resend
-          const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-            type: 'magiclink',
-            email: invitation.email,
-            options: { redirectTo },
-          });
+          console.warn('inviteUserByEmail failed on resend:', inviteError.message);
 
-          if (linkError) {
-            return errorResponse('Failed to resend invitation email', 500);
-          }
+          // Look up existing user to determine the right fallback
+          const { data: existingUsers } = await supabase.auth.admin.listUsers();
+          const existingUser = existingUsers?.users?.find(
+            (u: { email?: string }) => u.email === invitation.email.toLowerCase()
+          );
 
-          try {
-            await sendInviteEmailViaResend({
-              to: invitation.email,
-              actionLink: linkData.properties.action_link,
-              companyName,
-              role: invitation.role,
-            });
-          } catch (emailErr) {
-            console.error('Resend email failed:', emailErr);
+          if (existingUser) {
+            const { data: anyAccess } = await supabase
+              .from('user_company_access')
+              .select('id')
+              .eq('user_id', existingUser.id)
+              .limit(1)
+              .single();
+
+            if (!anyAccess) {
+              // Ghost user — delete and re-invite
+              await supabase.auth.admin.deleteUser(existingUser.id);
+              const { error: retryError } = await supabase.auth.admin.inviteUserByEmail(invitation.email, {
+                redirectTo,
+                data: {
+                  invitation_id: invitation.id,
+                  company_name: companyName,
+                  invited_role: invitation.role,
+                },
+              });
+              if (retryError) {
+                return errorResponse('Failed to resend invitation email', 500);
+              }
+            } else {
+              // Active user — send magic link via Resend
+              const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+                type: 'magiclink',
+                email: invitation.email,
+                options: { redirectTo },
+              });
+
+              if (linkError) {
+                return errorResponse('Failed to resend invitation email', 500);
+              }
+
+              try {
+                await sendInviteEmailViaResend({
+                  to: invitation.email,
+                  actionLink: linkData.properties.action_link,
+                  companyName,
+                  role: invitation.role,
+                });
+              } catch (emailErr) {
+                console.error('Resend email failed:', emailErr);
+                return errorResponse('Failed to resend invitation email', 500);
+              }
+            }
+          } else {
             return errorResponse('Failed to resend invitation email', 500);
           }
         }

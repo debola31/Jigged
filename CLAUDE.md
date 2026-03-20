@@ -12,6 +12,15 @@ Jigged is a web-based ERP system designed for small-scale precision manufacturin
 - **Authentication:** Supabase Auth
 - **Hosting:** Vercel
 
+## API Architecture Rule
+
+**Supabase-first architecture.** All simple CRUD operations go through the Supabase client (`utils/*Access.ts` files). The FastAPI backend (`api/`) is ONLY for:
+1. AI-powered operations (requires API keys not safe for browser)
+2. Operations requiring Supabase service role key (`auth.admin.*`, `auth.users` access)
+3. Complex multi-step business logic (import pipelines with conflict detection)
+
+**Do NOT create new FastAPI endpoints for standard CRUD.** See `docs/architecture.md` Section 8 for the full standard and decision checklist.
+
 ---
 
 ## Design System: Jigged Manufacturing ERP (Material-UI)

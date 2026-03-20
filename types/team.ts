@@ -29,6 +29,23 @@ export interface Invitation {
   created_at: string;
 }
 
+/**
+ * Unified row type for the team AG Grid tables.
+ * Represents both active team members and pending invitations.
+ */
+export interface TeamRow {
+  id: string;
+  type: 'member' | 'invitation';
+  name: string | null;
+  email: string | null;
+  role: 'admin' | 'user' | 'operator';
+  status: 'active' | 'pending';
+  created_at: string;
+  last_sign_in_at?: string | null;
+  expires_at?: string | null;
+  invitation_id?: string;
+}
+
 export interface InviteRequest {
   company_id: string;
   email: string;

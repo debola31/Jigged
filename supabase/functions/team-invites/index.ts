@@ -143,11 +143,16 @@ function buildInviteEmailHtml(companyName: string, actionLink: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body style="margin:0; padding:0; background-color:#111439; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#111439; padding:40px 20px;">
+  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#111439" style="background-color:#111439; padding:40px 20px;">
     <tr><td align="center">
-      <table width="480" cellpadding="0" cellspacing="0" style="background-color:#1a1f4a; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:40px;">
+      <table width="480" cellpadding="0" cellspacing="0" bgcolor="#1a1f4a" style="background-color:#1a1f4a; border:1px solid #2d3260; border-radius:8px; padding:40px;">
         <tr><td align="center" style="padding-bottom:24px;">
-          <img src="https://jigged.app/logo-icon.png" width="48" height="48" alt="Jigged" style="border-radius:12px;" />
+          <svg viewBox="0 0 64 64" width="48" height="48" xmlns="http://www.w3.org/2000/svg">
+            <rect width="64" height="64" rx="12" fill="#151520"/>
+            <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A"/>
+            <rect x="30" y="10" width="10" height="32" fill="#4682B4"/>
+            <path d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54" fill="#2BBCB3"/>
+          </svg>
         </td></tr>
         <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
           You've been invited to Jigged
@@ -188,7 +193,7 @@ async function sendInviteEmail(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      from: 'Jigged <hello@jigged.app>',
+      from: 'Jigged <noreply@jigged.app>',
       to: [to],
       subject: `You've been invited to ${companyName || 'Jigged'}`,
       html,

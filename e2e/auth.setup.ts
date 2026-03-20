@@ -9,8 +9,46 @@ import { TEST_EMAIL, TEST_PASSWORD, AUTH_STATE_PATH } from './fixtures/test-data
  * in cookies (sb-<project-ref>-auth-token*). By logging in through the real UI,
  * Supabase handles its own cookie format — no manual cookie injection needed.
  */
-setup('authenticate', async ({ page }) => {
+setup('authenticate', async ({ page, baseURL }) => {
+  // Forward browser console messages to the test output for debugging
+  page.on('console', msg => console.log(`[browser] ${msg.type()}: ${msg.text()}`));
+
+  // If a Vercel bypass secret is set, add it as a cookie so the browser
+  // can access preview deployments protected by Vercel Deployment Protection.
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypassSecret && baseURL) {
+    const url = new URL(baseURL);
+    await page.context().addCookies([
+      {
+        name: 'x-vercel-protection-bypass',
+        value: bypassSecret,
+        domain: url.hostname,
+        path: '/',
+      },
+    ]);
+  }
+
+  // Health check: verify the deployment is reachable before navigating
+  if (baseURL) {
+    const response = await page.request.get(baseURL, { maxRedirects: 0 });
+    console.log(`[auth.setup] Health check: ${response.status()} ${response.url()}`);
+    if (response.status() === 401 || response.status() === 403) {
+      throw new Error(
+        `Vercel Deployment Protection is blocking access (${response.status()}). ` +
+        `Check VERCEL_AUTOMATION_BYPASS_SECRET is set correctly.`
+      );
+    }
+  }
+
   await page.goto('/login');
+
+  // Debug: log the URL we landed on and take a screenshot
+  console.log(`[auth.setup] Navigated to: ${page.url()}`);
+  console.log(`[auth.setup] Base URL: ${baseURL}`);
+  await page.screenshot({ path: 'test-results/auth-setup-debug.png' });
+
+  // Wait for the login form to be fully rendered
+  await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 60_000 });
 
   // Fill the MUI TextFields by their labels
   await page.getByLabel('Email').fill(TEST_EMAIL);

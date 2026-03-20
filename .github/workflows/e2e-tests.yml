@@ -9,7 +9,7 @@ jobs:
     if: >
       github.event.deployment_status.state == 'success' &&
       github.event.deployment_status.environment == 'Preview'
-    timeout-minutes: 10
+    timeout-minutes: 15
     runs-on: ubuntu-latest
 
     steps:
@@ -36,11 +36,14 @@ jobs:
           PLAYWRIGHT_TEST_BASE_URL: ${{ github.event.deployment_status.target_url }}
           E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
           E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7

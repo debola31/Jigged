@@ -14,6 +14,10 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
 import MuiLink from '@mui/material/Link';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { useAuth } from '@/components/providers/AuthProvider';
 
@@ -25,6 +29,8 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isValidRecovery, setIsValidRecovery] = useState(false);
   const [checking, setChecking] = useState(true);
 
@@ -174,7 +180,7 @@ export default function ResetPassword() {
         <Box component="form" onSubmit={handleSubmit}>
           <TextField
             label="New Password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             fullWidth
             required
             value={newPassword}
@@ -183,11 +189,22 @@ export default function ResetPassword() {
             sx={{ mb: 2 }}
             autoComplete="new-password"
             helperText="Must be at least 6 characters"
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" size="small">
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              },
+            }}
           />
 
           <TextField
             label="Confirm New Password"
-            type="password"
+            type={showConfirmPassword ? 'text' : 'password'}
             fullWidth
             required
             value={confirmPassword}
@@ -195,6 +212,17 @@ export default function ResetPassword() {
             disabled={loading}
             sx={{ mb: 3 }}
             autoComplete="new-password"
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowConfirmPassword(!showConfirmPassword)} edge="end" size="small">
+                      {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              },
+            }}
             error={confirmPassword !== '' && newPassword !== confirmPassword}
             helperText={
               confirmPassword !== '' && newPassword !== confirmPassword

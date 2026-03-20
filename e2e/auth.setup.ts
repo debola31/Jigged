@@ -9,11 +9,31 @@ import { TEST_EMAIL, TEST_PASSWORD, AUTH_STATE_PATH } from './fixtures/test-data
  * in cookies (sb-<project-ref>-auth-token*). By logging in through the real UI,
  * Supabase handles its own cookie format — no manual cookie injection needed.
  */
-setup('authenticate', async ({ page }) => {
+setup('authenticate', async ({ page, baseURL }) => {
+  // If a Vercel bypass secret is set, add it as a cookie so the browser
+  // can access preview deployments protected by Vercel Deployment Protection.
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypassSecret && baseURL) {
+    const url = new URL(baseURL);
+    await page.context().addCookies([
+      {
+        name: 'x-vercel-protection-bypass',
+        value: bypassSecret,
+        domain: url.hostname,
+        path: '/',
+      },
+    ]);
+  }
+
   await page.goto('/login');
 
+  // Debug: log the URL we landed on and take a screenshot
+  console.log(`[auth.setup] Navigated to: ${page.url()}`);
+  console.log(`[auth.setup] Base URL: ${baseURL}`);
+  await page.screenshot({ path: 'test-results/auth-setup-debug.png' });
+
   // Wait for the login form to be fully rendered
-  await page.getByRole('button', { name: 'Sign In' }).waitFor();
+  await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 60_000 });
 
   // Fill the MUI TextFields by their labels
   await page.getByLabel('Email').fill(TEST_EMAIL);

@@ -193,7 +193,7 @@ async function sendInviteEmail(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      from: 'Jigged <hello@jigged.app>',
+      from: 'Jigged <noreply@jigged.app>',
       to: [to],
       subject: `You've been invited to ${companyName || 'Jigged'}`,
       html,

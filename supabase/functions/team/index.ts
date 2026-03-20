@@ -48,8 +48,15 @@ Deno.serve(async (req)=>{
       if (!accessRecords || accessRecords.length === 0) {
         return jsonResponse([]);
       }
+      // Exclude system admins from the team list
+      const { data: sysAdmins } = await supabase.from('system_admins').select('user_id');
+      const systemAdminIds = new Set(sysAdmins?.map((sa: { user_id: string }) => sa.user_id) || []);
+      const filteredRecords = accessRecords.filter((r: { user_id: string }) => !systemAdminIds.has(r.user_id));
+      if (filteredRecords.length === 0) {
+        return jsonResponse([]);
+      }
       // Build user info map from auth.users (for email and last_sign_in_at)
-      const userIds = accessRecords.map((r)=>r.user_id).filter(Boolean);
+      const userIds = filteredRecords.map((r)=>r.user_id).filter(Boolean);
       const userMap = {};
       if (userIds.length > 0) {
         const { data: users, error: usersError } = await supabase.auth.admin.listUsers();
@@ -65,7 +72,7 @@ Deno.serve(async (req)=>{
         }
       }
       // Combine data
-      const result = accessRecords.map((record)=>({
+      const result = filteredRecords.map((record)=>({
           id: record.id,
           user_id: record.user_id,
           company_id: record.company_id,

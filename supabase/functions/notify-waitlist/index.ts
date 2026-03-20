@@ -61,8 +61,8 @@ Deno.serve(async (req: Request) => {
     const results = await Promise.allSettled([
       // Internal notification
       sendEmail(apiKey, {
-        from: 'Jigged <hello@jigged.app>',
-        to: 'hello@jigged.app',
+        from: 'Jigged <noreply@jigged.app>',
+        to: 'noreply@jigged.app',
         subject: `New access request: ${company_name || 'Unknown'}`,
         text: [
           'New waitlist request:',
@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
 
       // Confirmation to requester
       sendEmail(apiKey, {
-        from: 'Debola from Jigged <hello@jigged.app>',
+        from: 'Debola from Jigged <noreply@jigged.app>',
         to: email,
         subject: 'We got your request — welcome to Jigged',
         text: [

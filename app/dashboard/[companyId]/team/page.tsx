@@ -22,9 +22,6 @@ import SearchIcon from '@mui/icons-material/Search';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SendIcon from '@mui/icons-material/Send';
@@ -51,7 +48,7 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import AdminGuard from '@/components/auth/AdminGuard';
-import type { TeamMember, Invitation } from '@/types/team';
+import type { TeamMember, Invitation, TeamRow } from '@/types/team';
 
 /**
  * Get the Edge Function URL for unified team endpoint.
@@ -90,18 +87,18 @@ export default function TeamPage() {
   // Tab state (0: Admins, 1: Users, 2: Operators)
   const [activeTab, setActiveTab] = useState(0);
 
-  // Operators state (now uses TeamMember like other tabs)
-  const [operators, setOperators] = useState<TeamMember[]>([]);
+  // Operators state
+  const [operators, setOperators] = useState<TeamRow[]>([]);
   const [operatorsLoading, setOperatorsLoading] = useState(false);
-  const operatorsGridRef = useRef<AgGridReact<TeamMember>>(null);
+  const operatorsGridRef = useRef<AgGridReact<TeamRow>>(null);
 
   // Team members state (for Admins and Users tabs)
-  const [admins, setAdmins] = useState<TeamMember[]>([]);
-  const [users, setUsers] = useState<TeamMember[]>([]);
+  const [admins, setAdmins] = useState<TeamRow[]>([]);
+  const [users, setUsers] = useState<TeamRow[]>([]);
   const [adminsLoading, setAdminsLoading] = useState(false);
   const [usersLoading, setUsersLoading] = useState(false);
-  const adminsGridRef = useRef<AgGridReact<TeamMember>>(null);
-  const usersGridRef = useRef<AgGridReact<TeamMember>>(null);
+  const adminsGridRef = useRef<AgGridReact<TeamRow>>(null);
+  const usersGridRef = useRef<AgGridReact<TeamRow>>(null);
 
   // Shared state
   const [search, setSearch] = useState('');
@@ -138,6 +135,31 @@ export default function TeamPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Convert a TeamMember to a TeamRow
+  const memberToRow = (m: TeamMember): TeamRow => ({
+    id: m.id,
+    type: 'member',
+    name: m.name,
+    email: m.email,
+    role: m.role,
+    status: 'active',
+    created_at: m.created_at,
+    last_sign_in_at: m.last_sign_in_at,
+  });
+
+  // Convert an Invitation to a TeamRow
+  const invitationToRow = (inv: Invitation): TeamRow => ({
+    id: `inv-${inv.id}`,
+    type: 'invitation',
+    name: null,
+    email: inv.email,
+    role: inv.role,
+    status: 'pending',
+    created_at: inv.created_at,
+    expires_at: inv.expires_at,
+    invitation_id: inv.id,
+  });
+
   // Load operators from unified team Edge Function
   const loadOperators = useCallback(async () => {
     setOperatorsLoading(true);
@@ -160,19 +182,22 @@ export default function TeamPage() {
         throw new Error('Failed to fetch operators');
       }
 
-      let data: TeamMember[] = await response.json();
+      const data: TeamMember[] = await response.json();
+      const memberRows = data.map(memberToRow);
+      const pendingRows = invitations.filter(inv => inv.role === 'operator').map(invitationToRow);
+      let combined = [...memberRows, ...pendingRows];
 
       // Client-side search filter
       if (searchDebounced) {
         const searchLower = searchDebounced.toLowerCase();
-        data = data.filter(
-          (op) =>
-            op.name?.toLowerCase().includes(searchLower) ||
-            op.email?.toLowerCase().includes(searchLower)
+        combined = combined.filter(
+          (row) =>
+            row.name?.toLowerCase().includes(searchLower) ||
+            row.email?.toLowerCase().includes(searchLower)
         );
       }
 
-      setOperators(data);
+      setOperators(combined);
     } catch (err) {
       console.error('Error loading operators:', err);
       setSnackbar({
@@ -183,7 +208,7 @@ export default function TeamPage() {
     } finally {
       setOperatorsLoading(false);
     }
-  }, [companyId, searchDebounced]);
+  }, [companyId, searchDebounced, invitations]);
 
   // Load admins from unified team Edge Function
   const loadAdmins = useCallback(async () => {
@@ -207,19 +232,22 @@ export default function TeamPage() {
         throw new Error('Failed to fetch admins');
       }
 
-      let data: TeamMember[] = await response.json();
+      const data: TeamMember[] = await response.json();
+      const memberRows = data.map(memberToRow);
+      const pendingRows = invitations.filter(inv => inv.role === 'admin').map(invitationToRow);
+      let combined = [...memberRows, ...pendingRows];
 
       // Client-side search filter
       if (searchDebounced) {
         const searchLower = searchDebounced.toLowerCase();
-        data = data.filter(
+        combined = combined.filter(
           (m) =>
             m.name?.toLowerCase().includes(searchLower) ||
             m.email?.toLowerCase().includes(searchLower)
         );
       }
 
-      setAdmins(data);
+      setAdmins(combined);
     } catch (err) {
       console.error('Error loading admins:', err);
       setSnackbar({
@@ -230,7 +258,7 @@ export default function TeamPage() {
     } finally {
       setAdminsLoading(false);
     }
-  }, [companyId, searchDebounced]);
+  }, [companyId, searchDebounced, invitations]);
 
   // Load users from unified team Edge Function
   const loadUsers = useCallback(async () => {
@@ -254,19 +282,22 @@ export default function TeamPage() {
         throw new Error('Failed to fetch users');
       }
 
-      let data: TeamMember[] = await response.json();
+      const data: TeamMember[] = await response.json();
+      const memberRows = data.map(memberToRow);
+      const pendingRows = invitations.filter(inv => inv.role === 'user').map(invitationToRow);
+      let combined = [...memberRows, ...pendingRows];
 
       // Client-side search filter
       if (searchDebounced) {
         const searchLower = searchDebounced.toLowerCase();
-        data = data.filter(
+        combined = combined.filter(
           (m) =>
             m.name?.toLowerCase().includes(searchLower) ||
             m.email?.toLowerCase().includes(searchLower)
         );
       }
 
-      setUsers(data);
+      setUsers(combined);
     } catch (err) {
       console.error('Error loading users:', err);
       setSnackbar({
@@ -277,7 +308,7 @@ export default function TeamPage() {
     } finally {
       setUsersLoading(false);
     }
-  }, [companyId, searchDebounced]);
+  }, [companyId, searchDebounced, invitations]);
 
   // Load pending invitations
   const loadInvitations = useCallback(async () => {
@@ -408,10 +439,16 @@ export default function TeamPage() {
           severity: 'success',
         });
       } else if (deleteDialog.type === 'bulk') {
+        // Only delete actual members, not pending invitations
+        const memberIds = selectedIds.filter(id => !id.startsWith('inv-'));
+        if (memberIds.length === 0) {
+          setDeleteDialog({ open: false, type: 'single' });
+          return;
+        }
         const { error } = await supabase
           .from('user_company_access')
           .delete()
-          .in('id', selectedIds);
+          .in('id', memberIds);
 
         if (error) throw error;
 
@@ -443,8 +480,8 @@ export default function TeamPage() {
     }
   };
 
-  // Selection change handler - all tabs now use TeamMember
-  const handleSelectionChanged = (event: SelectionChangedEvent<TeamMember>) => {
+  // Selection change handler
+  const handleSelectionChanged = (event: SelectionChangedEvent<TeamRow>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
       .map((node) => node.data?.id)
@@ -452,16 +489,16 @@ export default function TeamPage() {
     setSelectedIds(selectedData);
   };
 
-  // Row click navigation - all roles now go to same detail page
-  const handleRowClicked = (event: RowClickedEvent<TeamMember>) => {
-    if (!event.data) return;
+  // Row click navigation - only for active members, not pending invitations
+  const handleRowClicked = (event: RowClickedEvent<TeamRow>) => {
+    if (!event.data || event.data.type === 'invitation') return;
     router.push(`/dashboard/${companyId}/team/members/${event.data.id}`);
   };
 
   // Keyboard navigation
-  const handleCellKeyDown = (event: CellKeyDownEvent<TeamMember>) => {
+  const handleCellKeyDown = (event: CellKeyDownEvent<TeamRow>) => {
     const keyboardEvent = event.event as KeyboardEvent | undefined;
-    if (keyboardEvent?.key === 'Enter' && event.data) {
+    if (keyboardEvent?.key === 'Enter' && event.data && event.data.type === 'member') {
       router.push(`/dashboard/${companyId}/team/members/${event.data.id}`);
     }
   };
@@ -489,8 +526,47 @@ export default function TeamPage() {
     return date.toLocaleDateString();
   };
 
-  // AG Grid column definitions for Operators (now uses TeamMember like others)
-  const operatorColumnDefs: ColDef<TeamMember>[] = useMemo(
+  // Status cell renderer
+  const StatusCellRenderer = useCallback((params: { value: string }) => {
+    if (params.value === 'pending') {
+      return <Chip label="Pending" color="warning" size="small" variant="outlined" />;
+    }
+    return <Chip label="Active" color="success" size="small" variant="outlined" />;
+  }, []);
+
+  // Actions cell renderer for pending invitation rows
+  const ActionsCellRenderer = useCallback((params: { data: TeamRow }) => {
+    if (params.data?.type !== 'invitation' || !params.data.invitation_id) return null;
+    return (
+      <Box sx={{ display: 'flex', gap: 0.5 }}>
+        <Tooltip title="Resend invitation">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResendInvitation(params.data.invitation_id!);
+            }}
+          >
+            <SendIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Revoke invitation">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRevokeInvitation(params.data.invitation_id!);
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    );
+  }, []);
+
+  // AG Grid column definitions for Operators
+  const operatorColumnDefs: ColDef<TeamRow>[] = useMemo(
     () => [
       {
         field: 'name',
@@ -506,6 +582,12 @@ export default function TeamPage() {
         flex: 1,
         minWidth: 200,
         valueFormatter: (params) => params.value || '—',
+      },
+      {
+        field: 'status',
+        headerName: 'Status',
+        width: 120,
+        cellRenderer: StatusCellRenderer,
       },
       {
         field: 'last_sign_in_at',
@@ -513,12 +595,20 @@ export default function TeamPage() {
         width: 130,
         valueFormatter: (params) => formatRelativeTime(params.value),
       },
+      {
+        headerName: '',
+        width: 100,
+        sortable: false,
+        resizable: false,
+        cellRenderer: ActionsCellRenderer,
+        suppressHeaderMenuButton: true,
+      },
     ],
-    []
+    [StatusCellRenderer, ActionsCellRenderer]
   );
 
   // AG Grid column definitions for Team Members (Admins/Users)
-  const teamMemberColumnDefs: ColDef<TeamMember>[] = useMemo(
+  const teamMemberColumnDefs: ColDef<TeamRow>[] = useMemo(
     () => [
       {
         field: 'name',
@@ -536,13 +626,27 @@ export default function TeamPage() {
         valueFormatter: (params) => params.value || '—',
       },
       {
+        field: 'status',
+        headerName: 'Status',
+        width: 120,
+        cellRenderer: StatusCellRenderer,
+      },
+      {
         field: 'created_at',
         headerName: 'Joined',
         width: 130,
         valueFormatter: (params) => formatRelativeTime(params.value),
       },
+      {
+        headerName: '',
+        width: 100,
+        sortable: false,
+        resizable: false,
+        cellRenderer: ActionsCellRenderer,
+        suppressHeaderMenuButton: true,
+      },
     ],
-    []
+    [StatusCellRenderer, ActionsCellRenderer]
   );
 
   const defaultColDef: ColDef = useMemo(
@@ -667,7 +771,7 @@ export default function TeamPage() {
                 },
               }}
             >
-              <AgGridReact<TeamMember>
+              <AgGridReact<TeamRow>
                 ref={adminsGridRef}
                 rowData={admins}
                 columnDefs={teamMemberColumnDefs}
@@ -799,7 +903,7 @@ export default function TeamPage() {
                 },
               }}
             >
-              <AgGridReact<TeamMember>
+              <AgGridReact<TeamRow>
                 ref={usersGridRef}
                 rowData={users}
                 columnDefs={teamMemberColumnDefs}
@@ -931,7 +1035,7 @@ export default function TeamPage() {
                 },
               }}
             >
-              <AgGridReact<TeamMember>
+              <AgGridReact<TeamRow>
                 ref={operatorsGridRef}
                 rowData={operators}
                 columnDefs={operatorColumnDefs}
@@ -965,55 +1069,6 @@ export default function TeamPage() {
           </Card>
         )}
       </TabPanel>
-
-      {/* Pending Invitations */}
-      {invitations.length > 0 && (
-        <Card elevation={2} sx={{ mt: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Pending Invitations
-            </Typography>
-            <List disablePadding>
-              {invitations.map((inv) => (
-                <ListItem
-                  key={inv.id}
-                  divider
-                  secondaryAction={
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      <Tooltip title="Resend invitation">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleResendInvitation(inv.id)}
-                        >
-                          <SendIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Revoke invitation">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleRevokeInvitation(inv.id)}
-                        >
-                          <CloseIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  }
-                >
-                  <ListItemText
-                    primary={inv.email}
-                    secondary={`Expires ${new Date(inv.expires_at).toLocaleDateString()}`}
-                  />
-                  <Chip
-                    label={inv.role}
-                    size="small"
-                    sx={{ mr: 6, textTransform: 'capitalize' }}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Delete Dialog */}
       <Dialog

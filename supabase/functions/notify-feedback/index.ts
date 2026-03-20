@@ -68,8 +68,8 @@ Deno.serve(async (req: Request) => {
     const companyName = companyResult.data?.name ?? 'unknown';
 
     await sendEmail(apiKey, {
-      from: 'Jigged <hello@jigged.app>',
-      to: 'hello@jigged.app',
+      from: 'Jigged <noreply@jigged.app>',
+      to: 'noreply@jigged.app',
       subject: `Feedback: ${page_title} — ${companyName}`,
       text: [
         'New in-app feedback:',

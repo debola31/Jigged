@@ -245,21 +245,34 @@ Deno.serve(async (req) => {
               .single();
 
             if (!anyAccess) {
-              // Ghost user from a previous failed invite — delete and re-invite
+              // Ghost user from a previous failed invite — delete and re-invite via Resend
               console.log('Deleting ghost user and re-inviting:', email.toLowerCase());
               await supabase.auth.admin.deleteUser(existingUser.id);
 
-              const { error: retryError } = await supabase.auth.admin.inviteUserByEmail(email.toLowerCase(), {
-                redirectTo,
-                data: {
-                  invitation_id: invitation.id,
-                  company_name: companyName,
-                  invited_role: role,
-                },
+              const { data: inviteLinkData, error: inviteLinkError } = await supabase.auth.admin.generateLink({
+                type: 'invite',
+                email: email.toLowerCase(),
+                options: { redirectTo },
               });
 
-              if (retryError) {
-                console.error('Re-invite after delete also failed:', retryError);
+              if (inviteLinkError) {
+                console.error('generateLink after delete failed:', inviteLinkError);
+                return jsonResponse({
+                  success: true,
+                  invitation_id: invitation.id,
+                  message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+                });
+              }
+
+              try {
+                await sendInviteEmailViaResend({
+                  to: email.toLowerCase(),
+                  actionLink: inviteLinkData.properties.action_link,
+                  companyName,
+                  role,
+                });
+              } catch (emailErr) {
+                console.error('Resend email failed:', emailErr);
                 return jsonResponse({
                   success: true,
                   invitation_id: invitation.id,
@@ -456,17 +469,28 @@ Deno.serve(async (req) => {
               .single();
 
             if (!anyAccess) {
-              // Ghost user — delete and re-invite
+              // Ghost user — delete and re-invite via Resend
               await supabase.auth.admin.deleteUser(existingUser.id);
-              const { error: retryError } = await supabase.auth.admin.inviteUserByEmail(invitation.email, {
-                redirectTo,
-                data: {
-                  invitation_id: invitation.id,
-                  company_name: companyName,
-                  invited_role: invitation.role,
-                },
+
+              const { data: inviteLinkData, error: inviteLinkError } = await supabase.auth.admin.generateLink({
+                type: 'invite',
+                email: invitation.email,
+                options: { redirectTo },
               });
-              if (retryError) {
+
+              if (inviteLinkError) {
+                return errorResponse('Failed to resend invitation email', 500);
+              }
+
+              try {
+                await sendInviteEmailViaResend({
+                  to: invitation.email,
+                  actionLink: inviteLinkData.properties.action_link,
+                  companyName,
+                  role: invitation.role,
+                });
+              } catch (emailErr) {
+                console.error('Resend email failed:', emailErr);
                 return errorResponse('Failed to resend invitation email', 500);
               }
             } else {

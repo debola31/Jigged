@@ -12,6 +12,48 @@
 
 import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
 
+const RESEND_API_URL = 'https://api.resend.com/emails';
+
+/**
+ * Send an invitation email via Resend for existing users
+ * (where Supabase's inviteUserByEmail fails).
+ */
+async function sendInviteEmailViaResend(
+  { to, actionLink, companyName, role }: { to: string; actionLink: string; companyName: string; role: string },
+): Promise<void> {
+  const apiKey = Deno.env.get('RESEND_API_KEY');
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY not configured');
+  }
+
+  const res = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      from: 'Jigged <noreply@jigged.app>',
+      to: [to],
+      subject: `You've been invited to join ${companyName || 'a team'} on Jigged`,
+      html: `
+        <h2>You've been invited to join ${companyName || 'a team'} on Jigged</h2>
+        <p>You've been invited as <strong>${role}</strong>.</p>
+        <p>Click the link below to accept the invitation:</p>
+        <p><a href="${actionLink}" style="display:inline-block;padding:12px 24px;background:#1976d2;color:#fff;text-decoration:none;border-radius:6px;">Accept Invitation</a></p>
+        <p>Or copy and paste this URL into your browser:</p>
+        <p>${actionLink}</p>
+        <p>This link will expire in 7 days.</p>
+      `,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API error (${res.status}): ${body}`);
+  }
+}
+
 /**
  * Verify the caller is an admin of the specified company.
  * Uses an anon client with the user's JWT to extract user identity,
@@ -191,7 +233,7 @@ Deno.serve(async (req) => {
         });
 
         if (inviteError) {
-          // Fallback for existing confirmed users: generate a magic link instead
+          // Fallback for existing confirmed users: generate a magic link and send via Resend
           console.warn('inviteUserByEmail failed, trying generateLink fallback:', inviteError.message);
 
           const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
@@ -204,7 +246,23 @@ Deno.serve(async (req) => {
 
           if (linkError) {
             console.error('generateLink also failed:', linkError);
-            // Invitation record is created — admin can resend later
+            return jsonResponse({
+              success: true,
+              invitation_id: invitation.id,
+              message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+            });
+          }
+
+          // Send the generated magic link via Resend
+          try {
+            await sendInviteEmailViaResend({
+              to: email.toLowerCase(),
+              actionLink: linkData.properties.action_link,
+              companyName,
+              role,
+            });
+          } catch (emailErr) {
+            console.error('Resend email failed:', emailErr);
             return jsonResponse({
               success: true,
               invitation_id: invitation.id,
@@ -350,14 +408,26 @@ Deno.serve(async (req) => {
         });
 
         if (inviteError) {
-          // Fallback for existing users
-          const { error: linkError } = await supabase.auth.admin.generateLink({
+          // Fallback for existing users: generate link and send via Resend
+          const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
             type: 'magiclink',
             email: invitation.email,
             options: { redirectTo },
           });
 
           if (linkError) {
+            return errorResponse('Failed to resend invitation email', 500);
+          }
+
+          try {
+            await sendInviteEmailViaResend({
+              to: invitation.email,
+              actionLink: linkData.properties.action_link,
+              companyName,
+              role: invitation.role,
+            });
+          } catch (emailErr) {
+            console.error('Resend email failed:', emailErr);
             return errorResponse('Failed to resend invitation email', 500);
           }
         }

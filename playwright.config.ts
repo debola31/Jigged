@@ -22,10 +22,13 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // Bypass Vercel Deployment Protection on preview deployments.
     // Generate the secret in Vercel → Settings → Deployment Protection → Automation Bypass.
+    // x-vercel-set-bypass-cookie tells Vercel to set a cookie so subsequent
+    // navigations (redirects, client-side routing) also bypass protection.
     ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
       ? {
           extraHTTPHeaders: {
             'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+            'x-vercel-set-bypass-cookie': 'samesitenone',
           },
         }
       : {}),

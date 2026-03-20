@@ -13,6 +13,10 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
 import MuiLink from '@mui/material/Link';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 
@@ -41,6 +45,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,7 +120,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
 
           <TextField
             label="Password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             fullWidth
             required
             value={password}
@@ -123,6 +128,17 @@ export default function Login({ expired, returnTo }: LoginProps) {
             disabled={loading}
             sx={{ mb: 1 }}
             autoComplete="current-password"
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" size="small">
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              },
+            }}
           />
 
           <Box sx={{ textAlign: 'right', mb: 2 }}>
@@ -147,10 +163,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
           </Button>
 
           <Typography variant="body2" align="center" color="text.secondary">
-            Don&apos;t have an account?{' '}
-            <MuiLink component={Link} href="/signup" underline="hover">
-              Sign up
-            </MuiLink>
+            Need an account? Contact your company administrator for an invitation.
           </Typography>
         </Box>
       </CardContent>

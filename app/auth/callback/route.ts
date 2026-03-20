@@ -29,6 +29,17 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      // If next param is default ('/'), check if this is an invitation flow.
+      // The team-invites Edge Function stores invitation_id in user metadata
+      // when calling inviteUserByEmail. This fallback ensures users reach the
+      // accept-invite page even if Supabase strips query params from redirect_to.
+      if (next === '/') {
+        const { data: { user } } = await supabase.auth.getUser();
+        const invitationId = user?.user_metadata?.invitation_id;
+        if (invitationId) {
+          return NextResponse.redirect(`${origin}/accept-invite/${invitationId}`);
+        }
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

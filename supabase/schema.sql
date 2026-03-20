@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-19T06:11:51Z
+-- Generated: 2026-03-20T04:49:44Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -140,6 +140,23 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_unit_conversions"
     CONSTRAINT "inventory_unit_conversions_pkey" PRIMARY KEY (id),
     CONSTRAINT "inventory_unit_conversions_item_unit_unique" UNIQUE (inventory_item_id, from_unit),
     CONSTRAINT "inventory_unit_conversions_factor_positive" CHECK ((to_primary_factor > (0)::numeric))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."invitations"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "email" character varying(255) NOT NULL,
+    "role" character varying(50) NOT NULL,
+    "status" character varying(20) DEFAULT 'pending'::character varying,
+    "invited_by" uuid NOT NULL,
+    "accepted_by" uuid,
+    "expires_at" timestamp with time zone NOT NULL,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "accepted_at" timestamp with time zone,
+    CONSTRAINT "invitations_pkey" PRIMARY KEY (id),
+    CONSTRAINT "invitations_role_check" CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'user'::character varying, 'operator'::character varying])::text[]))),
+    CONSTRAINT "invitations_status_check" CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'expired'::character varying, 'revoked'::character varying])::text[])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_categories"
@@ -458,6 +475,7 @@ ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_unit_conversions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
@@ -712,6 +730,20 @@ CREATE POLICY "ai_readonly_select"
     USING ((EXISTS ( SELECT 1
    FROM inventory_items
   WHERE ((inventory_items.id = inventory_unit_conversions.inventory_item_id) AND (inventory_items.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Admins can manage invitations" ON "public"."invitations";
+CREATE POLICY "Admins can manage invitations"
+    ON "public"."invitations"
+    FOR ALL
+    USING (is_company_admin(company_id));
+
+DROP POLICY IF EXISTS "Users can read invitations for their email" ON "public"."invitations";
+CREATE POLICY "Users can read invitations for their email"
+    ON "public"."invitations"
+    FOR SELECT
+    USING (((email)::text = (( SELECT users.email
+   FROM auth.users
+  WHERE (users.id = auth.uid())))::text));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_attachments";
 CREATE POLICY "ai_readonly_select"
@@ -1378,6 +1410,15 @@ ALTER TABLE "public"."inventory_transactions"
 ALTER TABLE "public"."inventory_unit_conversions"
     ADD CONSTRAINT "inventory_unit_conversions_item_id_fkey" FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."invitations"
+    ADD CONSTRAINT "invitations_accepted_by_fkey" FOREIGN KEY (accepted_by) REFERENCES auth.users(id);
+
+ALTER TABLE "public"."invitations"
+    ADD CONSTRAINT "invitations_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."invitations"
+    ADD CONSTRAINT "invitations_invited_by_fkey" FOREIGN KEY (invited_by) REFERENCES auth.users(id);
+
 ALTER TABLE "public"."job_attachments"
     ADD CONSTRAINT "job_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1535,6 +1576,9 @@ CREATE INDEX IF NOT EXISTS inventory_transactions_item_id_created_at_idx ON publ
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_id_idx ON public.inventory_transactions USING btree (job_id) WHERE (job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_operation_id_idx ON public.inventory_transactions USING btree (job_operation_id) WHERE (job_operation_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_unit_conversions_item_id_idx ON public.inventory_unit_conversions USING btree (inventory_item_id);
+CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON public.invitations USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_invitations_email ON public.invitations USING btree (email);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email_company ON public.invitations USING btree (email, company_id) WHERE ((status)::text = 'pending'::text);
 CREATE INDEX IF NOT EXISTS idx_job_attachments_company ON public.job_attachments USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON public.job_attachments USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_attachments_source ON public.job_attachments USING btree (source_quote_attachment_id);
@@ -1585,6 +1629,44 @@ CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (em
 -- ============================================================
 -- 7. FUNCTIONS
 -- ============================================================
+CREATE OR REPLACE FUNCTION public.accept_invitation(p_invitation_id uuid, p_user_id uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_inv RECORD;
+BEGIN
+    -- Lock the invitation row to prevent concurrent acceptance
+    SELECT * INTO v_inv FROM invitations
+    WHERE id = p_invitation_id AND status = 'pending' AND expires_at > NOW()
+    FOR UPDATE;
+
+    IF v_inv IS NULL THEN
+        RAISE EXCEPTION 'Invalid or expired invitation';
+    END IF;
+
+    -- Create user_company_access if not exists
+    -- Name is empty — the accept-invite page prompts the user for their name
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT p_user_id, v_inv.company_id, v_inv.role, ''
+    WHERE NOT EXISTS (
+        SELECT 1 FROM user_company_access
+        WHERE user_id = p_user_id AND company_id = v_inv.company_id
+    );
+
+    -- Mark invitation as accepted
+    UPDATE invitations
+    SET status = 'accepted', accepted_by = p_user_id, accepted_at = NOW()
+    WHERE id = v_inv.id;
+
+    RETURN v_inv.company_id;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.convert_quote_to_job(p_quote_id uuid, p_notes text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -1799,6 +1881,24 @@ BEGIN
     AND quote_number ~ '^Q-\d+$';
   
   RETURN 'Q-' || LPAD(next_num::TEXT, 4, '0');
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.get_invitation(p_invitation_id uuid)
+ RETURNS TABLE(id uuid, company_id uuid, email character varying, role character varying, status character varying, invited_by uuid, expires_at timestamp with time zone, created_at timestamp with time zone, company_name character varying)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT i.id, i.company_id, i.email, i.role, i.status, i.invited_by, i.expires_at, i.created_at,
+           c.name AS company_name
+    FROM invitations i
+    LEFT JOIN companies c ON c.id = i.company_id
+    WHERE i.id = p_invitation_id;
 END;
 $function$
 

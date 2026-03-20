@@ -119,6 +119,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
           />
 
           <TextField
+            id="login-password"
             label="Password"
             type={showPassword ? 'text' : 'password'}
             fullWidth

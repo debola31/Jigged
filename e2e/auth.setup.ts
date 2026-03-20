@@ -12,6 +12,9 @@ import { TEST_EMAIL, TEST_PASSWORD, AUTH_STATE_PATH } from './fixtures/test-data
 setup('authenticate', async ({ page }) => {
   await page.goto('/login');
 
+  // Wait for the login form to be fully rendered
+  await page.getByRole('button', { name: 'Sign In' }).waitFor();
+
   // Fill the MUI TextFields by their labels
   await page.getByLabel('Email').fill(TEST_EMAIL);
   await page.getByLabel('Password').fill(TEST_PASSWORD);

@@ -9,7 +9,7 @@ import { AuthGuard } from '@/components/auth';
 import DemoModeProvider from '@/components/providers/DemoModeProvider';
 import DemoModeBanner from '@/components/demo/DemoModeBanner';
 import { useMobileDrawer } from '@/hooks/useMobileDrawer';
-import FeedbackFab from '@/components/feedback/FeedbackFab';
+import FeedbackFab, { useFeedbackDialog } from '@/components/feedback/FeedbackFab';
 
 export default function DashboardLayout({
   children,
@@ -19,6 +19,7 @@ export default function DashboardLayout({
   const params = useParams();
   const companyId = params.companyId as string;
   const { isMobile, drawerOpen, openDrawer, closeDrawer } = useMobileDrawer();
+  const feedback = useFeedbackDialog();
 
   // Tag all Sentry events with the current company for multi-tenant context
   useEffect(() => {
@@ -29,7 +30,7 @@ export default function DashboardLayout({
     <AuthGuard companyId={companyId} requireCompany>
       <DemoModeProvider>
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-          <Sidebar isMobile={isMobile} open={drawerOpen} onClose={closeDrawer} />
+          <Sidebar isMobile={isMobile} open={drawerOpen} onClose={closeDrawer} onFeedbackClick={feedback.openDialog} />
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', ml: { xs: 0, md: '240px' }, minWidth: 0 }}>
             <Header isMobile={isMobile} onMenuClick={openDrawer} />
             <DemoModeBanner />
@@ -38,7 +39,14 @@ export default function DashboardLayout({
             </Box>
           </Box>
         </Box>
-        <FeedbackFab />
+        <FeedbackFab
+          dialogOpen={feedback.dialogOpen}
+          snackbarOpen={feedback.snackbarOpen}
+          onOpen={feedback.openDialog}
+          onClose={feedback.closeDialog}
+          onSuccess={feedback.showSuccess}
+          onSnackbarClose={feedback.closeSnackbar}
+        />
       </DemoModeProvider>
     </AuthGuard>
   );

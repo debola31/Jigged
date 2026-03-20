@@ -18,6 +18,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
+import FeedbackIcon from '@mui/icons-material/Feedback';
 import CompanySwitcher from './CompanySwitcher';
 import { useUserRole } from '@/hooks/useUserRole';
 
@@ -46,9 +47,10 @@ interface SidebarProps {
   isMobile: boolean;
   open: boolean;
   onClose: () => void;
+  onFeedbackClick?: () => void;
 }
 
-export default function Sidebar({ isMobile, open, onClose }: SidebarProps) {
+export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: SidebarProps) {
   const pathname = usePathname();
   const params = useParams();
   const companyId = params.companyId as string;
@@ -117,6 +119,36 @@ export default function Sidebar({ isMobile, open, onClose }: SidebarProps) {
           })}
         </List>
       </Box>
+
+      {/* Feedback button at bottom of sidebar */}
+      {onFeedbackClick && (
+        <Box sx={{ px: 1.5, pb: 2 }}>
+          <ListItemButton
+            onClick={onFeedbackClick}
+            sx={{
+              borderRadius: 2,
+              py: 1.5,
+              px: 2,
+              color: 'rgba(255, 255, 255, 0.7)',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'rgba(255, 255, 255, 0.08)',
+                color: 'white',
+              },
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
+              <FeedbackIcon />
+            </ListItemIcon>
+            <ListItemText
+              primary="Feedback"
+              slotProps={{
+                primary: { sx: { fontWeight: 500, fontSize: '0.95rem' } },
+              }}
+            />
+          </ListItemButton>
+        </Box>
+      )}
     </>
   );
 

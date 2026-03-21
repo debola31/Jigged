@@ -20,7 +20,6 @@ import {
   getCurrentOperator,
   getOperatorSessions,
 } from '@/utils/operatorAccess';
-import { useStationContext } from '@/components/operator/OperatorStationContext';
 import { formatDuration } from '@/types/operator';
 import type { OperatorSession } from '@/types/operator';
 import { getSupabase } from '@/lib/supabase';
@@ -35,8 +34,6 @@ export default function OperatorProfilePage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
-  const { stationName } = useStationContext();
-
   const [operatorName, setOperatorName] = useState<string>('');
   const [operatorEmail, setOperatorEmail] = useState<string>('');
   const [sessions, setSessions] = useState<OperatorSession[]>([]);
@@ -147,13 +144,8 @@ export default function OperatorProfilePage() {
             {operatorName}
           </Typography>
           {operatorEmail && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
               {operatorEmail}
-            </Typography>
-          )}
-          {stationName && (
-            <Typography variant="body2" color="primary.main">
-              Station: {stationName}
             </Typography>
           )}
         </CardContent>

@@ -200,7 +200,7 @@ function OperatorShell({
   onLogout: () => void;
   children: React.ReactNode;
 }) {
-  const { stationName, stations, setStation } = useStationContext();
+  const { stationId, stationName, stations, setStation } = useStationContext();
   const router = useRouter();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
@@ -237,76 +237,39 @@ function OperatorShell({
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
-          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
             <Typography
-              variant="h6"
+              variant="body1"
               component="div"
-              sx={{ fontWeight: 500, flexShrink: 0 }}
+              sx={{ fontWeight: 600, lineHeight: 1.2 }}
             >
               {operatorName || 'Operator'}
             </Typography>
             {stationName && (
-              <>
+              <Box
+                onClick={handleStationMenuOpen}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  overflow: 'hidden',
+                }}
+              >
                 <Typography
-                  variant="h6"
-                  component="span"
-                  sx={{ mx: 1, color: 'rgba(255, 255, 255, 0.3)', fontWeight: 300 }}
-                >
-                  |
-                </Typography>
-                <Box
-                  onClick={handleStationMenuOpen}
+                  variant="body2"
                   sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    cursor: 'pointer',
-                    minHeight: 48,
+                    color: '#D4872A',
+                    fontWeight: 500,
                     overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.2,
                   }}
                 >
-                  <Typography
-                    variant="body1"
-                    sx={{
-                      color: '#D4872A',
-                      fontWeight: 500,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {stationName}
-                  </Typography>
-                  <ArrowDropDownIcon sx={{ color: '#D4872A', ml: 0.5 }} />
-                </Box>
-              </>
-            )}
-            {!stationName && stations.length > 0 && (
-              <>
-                <Typography
-                  variant="h6"
-                  component="span"
-                  sx={{ mx: 1, color: 'rgba(255, 255, 255, 0.3)', fontWeight: 300 }}
-                >
-                  |
+                  Station: {stationName}
                 </Typography>
-                <Box
-                  onClick={handleStationMenuOpen}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    cursor: 'pointer',
-                    minHeight: 48,
-                  }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{ color: 'rgba(255, 255, 255, 0.5)' }}
-                  >
-                    Select Station
-                  </Typography>
-                  <ArrowDropDownIcon sx={{ color: 'rgba(255, 255, 255, 0.5)', ml: 0.5 }} />
-                </Box>
-              </>
+                <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
+              </Box>
             )}
           </Box>
 
@@ -352,7 +315,7 @@ function OperatorShell({
         sx={{
           flex: 1,
           mt: '56px', // AppBar height
-          mb: '56px', // BottomNavigation height
+          mb: stationId ? '56px' : 0, // BottomNavigation height (hidden during station selection)
           overflow: 'auto',
           p: 2,
         }}
@@ -360,44 +323,46 @@ function OperatorShell({
         {children}
       </Box>
 
-      {/* Bottom Navigation */}
-      <Paper
-        sx={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
-        }}
-        elevation={3}
-      >
-        <BottomNavigation
-          value={navValue}
-          onChange={onNavChange}
-          showLabels
+      {/* Bottom Navigation — hidden during station selection */}
+      {stationId && (
+        <Paper
           sx={{
-            bgcolor: 'rgba(17, 20, 57, 0.98)',
-            '& .MuiBottomNavigationAction-root': {
-              color: 'rgba(255, 255, 255, 0.5)',
-              minWidth: 80,
-              '&.Mui-selected': {
-                color: 'primary.main',
-              },
-            },
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
           }}
+          elevation={3}
         >
-          <BottomNavigationAction
-            label="Jobs"
-            icon={<WorkIcon />}
-            sx={{ minHeight: 56 }}
-          />
-          <BottomNavigationAction
-            label="Profile"
-            icon={<PersonIcon />}
-            sx={{ minHeight: 56 }}
-          />
-        </BottomNavigation>
-      </Paper>
+          <BottomNavigation
+            value={navValue}
+            onChange={onNavChange}
+            showLabels
+            sx={{
+              bgcolor: 'rgba(17, 20, 57, 0.98)',
+              '& .MuiBottomNavigationAction-root': {
+                color: 'rgba(255, 255, 255, 0.5)',
+                minWidth: 80,
+                '&.Mui-selected': {
+                  color: 'primary.main',
+                },
+              },
+            }}
+          >
+            <BottomNavigationAction
+              label="Jobs"
+              icon={<WorkIcon />}
+              sx={{ minHeight: 56 }}
+            />
+            <BottomNavigationAction
+              label="Profile"
+              icon={<PersonIcon />}
+              sx={{ minHeight: 56 }}
+            />
+          </BottomNavigation>
+        </Paper>
+      )}
     </Box>
   );
 }

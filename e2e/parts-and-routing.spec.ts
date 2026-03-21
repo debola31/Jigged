@@ -61,8 +61,9 @@ test.describe('Parts and Routing workflow', () => {
       // May already be hidden if operations loaded fast
     });
 
-    // Select the first available operation
-    const firstOperation = addOpDialog.getByRole('listitem').first();
+    // Select the first available operation (ListItem uses component="div", so use CSS class)
+    const firstOperation = addOpDialog.locator('.MuiListItem-root').first();
+    await firstOperation.waitFor({ state: 'visible', timeout: 10_000 });
     await firstOperation.click();
 
     // Dialog should close after selection
@@ -77,7 +78,8 @@ test.describe('Parts and Routing workflow', () => {
     await addOpDialog2.locator('.MuiCircularProgress-root').waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {});
 
     // Select a second operation (could be the same type or different)
-    const operations = addOpDialog2.getByRole('listitem');
+    const operations = addOpDialog2.locator('.MuiListItem-root');
+    await operations.first().waitFor({ state: 'visible', timeout: 10_000 });
     const opCount = await operations.count();
     if (opCount > 1) {
       await operations.nth(1).click();

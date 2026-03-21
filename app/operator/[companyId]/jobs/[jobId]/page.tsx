@@ -198,17 +198,7 @@ export default function OperatorJobDetailPage() {
 
   // Prompt operator to select a station before showing job details
   if (!stationId) {
-    return (
-      <Box>
-        <IconButton
-          onClick={() => router.push(`/operator/${companyId}/jobs`)}
-          sx={{ mb: 2 }}
-        >
-          <ArrowBackIcon />
-        </IconButton>
-        <StationSelector />
-      </Box>
-    );
+    return <StationSelector />;
   }
 
   return (

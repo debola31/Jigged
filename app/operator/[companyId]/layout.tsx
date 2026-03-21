@@ -18,6 +18,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
@@ -42,7 +43,7 @@ export default function OperatorLayout({
   const pathname = usePathname();
   const companyId = params.companyId as string;
 
-  const [operatorName, setOperatorName] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('operator');
   const [navValue, setNavValue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -74,7 +75,7 @@ export default function OperatorLayout({
       // 3. Validate user has access to this company (uses user_company_access)
       const { data: operatorAccess } = await supabase
         .from('user_company_access')
-        .select('id, name')
+        .select('id, name, role')
         .eq('user_id', session.user.id)
         .eq('company_id', companyId)
         .single();
@@ -85,7 +86,7 @@ export default function OperatorLayout({
         return;
       }
 
-      setOperatorName(operatorAccess.name || 'Operator');
+      setUserRole(operatorAccess.role || 'operator');
       setIsLoading(false);
     };
 
@@ -170,7 +171,7 @@ export default function OperatorLayout({
   return (
     <OperatorStationProvider>
       <OperatorShell
-        operatorName={operatorName}
+        userRole={userRole}
         companyId={companyId}
         navValue={navValue}
         onNavChange={handleNavChange}
@@ -186,14 +187,14 @@ export default function OperatorLayout({
  * Inner shell component that can access station context.
  */
 function OperatorShell({
-  operatorName,
+  userRole,
   companyId,
   navValue,
   onNavChange,
   onLogout,
   children,
 }: {
-  operatorName: string;
+  userRole: string;
   companyId: string;
   navValue: number;
   onNavChange: (event: React.SyntheticEvent, newValue: number) => void;
@@ -237,14 +238,7 @@ function OperatorShell({
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
-            <Typography
-              variant="body1"
-              component="div"
-              sx={{ fontWeight: 600, lineHeight: 1.2 }}
-            >
-              {operatorName || 'Operator'}
-            </Typography>
+          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
             {stationName && (
               <Box
                 onClick={handleStationMenuOpen}
@@ -253,22 +247,22 @@ function OperatorShell({
                   alignItems: 'center',
                   cursor: 'pointer',
                   overflow: 'hidden',
+                  minHeight: 48,
                 }}
               >
                 <Typography
-                  variant="body2"
+                  variant="body1"
                   sx={{
                     color: '#D4872A',
-                    fontWeight: 500,
+                    fontWeight: 600,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    lineHeight: 1.2,
                   }}
                 >
                   Station: {stationName}
                 </Typography>
-                <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
+                <ArrowDropDownIcon sx={{ color: '#D4872A', ml: 0.25 }} />
               </Box>
             )}
           </Box>
@@ -298,6 +292,16 @@ function OperatorShell({
             ))}
           </Menu>
 
+          {userRole !== 'operator' && (
+            <IconButton
+              color="inherit"
+              onClick={() => router.push(`/dashboard/${companyId}`)}
+              aria-label="Go to dashboard"
+              sx={{ minWidth: 48, minHeight: 48 }}
+            >
+              <DashboardIcon />
+            </IconButton>
+          )}
           <IconButton
             color="inherit"
             onClick={onLogout}

@@ -150,20 +150,18 @@ export default function StationQRCode({
         >
           Download PDF
         </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<OpenInNewIcon />}
+          href={stationUrl}
+          target="_blank"
+        >
+          Open Operator View
+        </Button>
       </Box>
 
-      {/* Open Link + Scan Instruction */}
-      <Button
-        variant="text"
-        size="small"
-        startIcon={<OpenInNewIcon />}
-        href={stationUrl}
-        target="_blank"
-        sx={{ mt: 2 }}
-      >
-        Open Operator View
-      </Button>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
         Scan this QR code or tap the link above to open the Operator View for this station.
       </Typography>
     </Box>

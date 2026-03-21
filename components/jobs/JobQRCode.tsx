@@ -5,7 +5,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
-import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -37,17 +36,6 @@ export default function JobQRCode({
     if (!qrRef.current) return null;
     return qrRef.current.querySelector('canvas');
   }, []);
-
-  const handleDownloadPNG = useCallback(() => {
-    const canvas = getQRCanvas();
-    if (!canvas) return;
-
-    const dataUrl = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.download = `${jobNumber}-job-qr.png`;
-    link.href = dataUrl;
-    link.click();
-  }, [getQRCanvas, jobNumber]);
 
   const handleDownloadPDF = useCallback(() => {
     const canvas = getQRCanvas();
@@ -137,14 +125,6 @@ export default function JobQRCode({
 
       {/* Export Buttons */}
       <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<DownloadIcon />}
-          onClick={handleDownloadPNG}
-        >
-          Download PNG
-        </Button>
         <Button
           variant="outlined"
           size="small"

@@ -48,7 +48,8 @@ test.describe('Parts and Routing workflow', () => {
     // ── Step 3: Add operations to the routing ──
 
     // Click "Add Operation" button to open the operation selection dialog
-    await page.getByRole('button', { name: /Add Operation/i }).click();
+    // Two "Add Operation" buttons exist (toolbar + empty state) — use .first()
+    await page.getByRole('button', { name: /Add Operation/i }).first().click();
 
     // Wait for the dialog to load operations
     const addOpDialog = page.getByRole('dialog');
@@ -67,8 +68,8 @@ test.describe('Parts and Routing workflow', () => {
     // Dialog should close after selection
     await expect(addOpDialog).toBeHidden({ timeout: 5_000 });
 
-    // Add a second operation
-    await page.getByRole('button', { name: /Add Operation/i }).click();
+    // Add a second operation (empty-state button is gone, but use .first() for safety)
+    await page.getByRole('button', { name: /Add Operation/i }).first().click();
     const addOpDialog2 = page.getByRole('dialog');
     await expect(addOpDialog2).toBeVisible();
 

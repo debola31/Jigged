@@ -33,8 +33,8 @@ test.describe('Parts and Routing workflow', () => {
     // Save the part
     await page.getByRole('button', { name: /^Save$/i }).click();
 
-    // Should redirect to the part detail page
-    await expect(page).toHaveURL(/\/parts\/[^/]+$/, { timeout: 15_000 });
+    // Should redirect to the part detail page (not /parts/new)
+    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });
 
     // Verify the part was created
     await expect(page.getByText(partNumber)).toBeVisible();

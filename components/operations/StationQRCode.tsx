@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { QRCodeCanvas } from 'qrcode.react';
 import { jsPDF } from 'jspdf';
 
@@ -151,9 +152,19 @@ export default function StationQRCode({
         </Button>
       </Box>
 
-      {/* Scan Instruction */}
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-        Scan this QR code from any device to open the Operator View for this station.
+      {/* Open Link + Scan Instruction */}
+      <Button
+        variant="text"
+        size="small"
+        startIcon={<OpenInNewIcon />}
+        href={stationUrl}
+        target="_blank"
+        sx={{ mt: 2 }}
+      >
+        Open Operator View
+      </Button>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
+        Scan this QR code or tap the link above to open the Operator View for this station.
       </Typography>
     </Box>
   );

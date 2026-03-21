@@ -252,6 +252,14 @@ function OperatorShell({
               >
                 <Typography
                   variant="body1"
+                  component="span"
+                  sx={{ fontWeight: 600, mr: 0.5 }}
+                >
+                  Station:
+                </Typography>
+                <Typography
+                  variant="body1"
+                  component="span"
                   sx={{
                     color: '#D4872A',
                     fontWeight: 600,
@@ -260,7 +268,7 @@ function OperatorShell({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  Station: {stationName}
+                  {stationName}
                 </Typography>
                 <ArrowDropDownIcon sx={{ color: '#D4872A', ml: 0.25 }} />
               </Box>

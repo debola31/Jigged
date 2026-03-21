@@ -18,6 +18,7 @@ import {
   getActiveSession,
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
+import StationSelector from '@/components/operator/StationSelector';
 import type { OperatorJob, ActiveSession } from '@/types/operator';
 
 /**
@@ -90,6 +91,11 @@ export default function OperatorJobsPage() {
         return 'default';
     }
   };
+
+  // Prompt operator to select a station before showing jobs
+  if (!stationId) {
+    return <StationSelector />;
+  }
 
   if (loading) {
     return (
@@ -213,16 +219,6 @@ export default function OperatorJobsPage() {
                 <Typography variant="body1" sx={{ mb: 1 }}>
                   {job.part_name || job.part_number || 'No part specified'}
                 </Typography>
-
-                {job.operation_name && (
-                  <Typography
-                    variant="body2"
-                    color="primary.main"
-                    sx={{ mb: 1 }}
-                  >
-                    Operation: {job.operation_name}
-                  </Typography>
-                )}
 
                 {job.current_operator_name && (
                   <Typography variant="caption" color="text.secondary">

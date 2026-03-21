@@ -25,6 +25,7 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
 import type { OperatorJobDetail } from '@/types/operator';
 import { formatDuration } from '@/types/operator';
 import JobCompleteModal from '@/components/operator/JobCompleteModal';
+import StationSelector from '@/components/operator/StationSelector';
 
 /**
  * Session Timer Component.
@@ -191,6 +192,21 @@ export default function OperatorJobDetailPage() {
     return (
       <Box sx={{ p: 2 }}>
         <Alert severity="error">Job not found</Alert>
+      </Box>
+    );
+  }
+
+  // Prompt operator to select a station before showing job details
+  if (!stationId) {
+    return (
+      <Box>
+        <IconButton
+          onClick={() => router.push(`/operator/${companyId}/jobs`)}
+          sx={{ mb: 2 }}
+        >
+          <ArrowBackIcon />
+        </IconButton>
+        <StationSelector />
       </Box>
     );
   }

@@ -31,7 +31,7 @@ test.describe('Parts and Routing workflow', () => {
     await page.getByLabel(/Description/i).fill(partDescription);
 
     // Save the part
-    await page.getByRole('button', { name: /^Create$/i }).click();
+    await page.getByRole('button', { name: /^Save$/i }).click();
 
     // Should redirect to the part detail page
     await expect(page).toHaveURL(/\/parts\/[^/]+$/, { timeout: 15_000 });

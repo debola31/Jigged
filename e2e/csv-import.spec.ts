@@ -10,6 +10,8 @@ import path from 'path';
  * - Test company must exist
  */
 test.describe('CSV Import workflow', () => {
+  test.skip(!!process.env.CI, 'Requires FastAPI backend not available in CI');
+
   test('import parts from CSV file', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });

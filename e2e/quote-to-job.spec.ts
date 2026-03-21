@@ -26,7 +26,7 @@ test.describe('Quote to Job workflow', () => {
     await expect(page).toHaveURL(/\/quotes\/new/);
 
     // Select a customer (MUI Autocomplete)
-    const customerField = page.getByLabel(/Select Customer/i);
+    const customerField = page.getByRole('combobox', { name: /Select Customer/i });
     await customerField.click();
     await customerField.fill('');
     // Pick the first customer option (skip the "Create New Customer" option)
@@ -38,7 +38,7 @@ test.describe('Quote to Job workflow', () => {
       .click();
 
     // Select a part (MUI Autocomplete)
-    const partField = page.getByLabel(/Select Part/i);
+    const partField = page.getByRole('combobox', { name: /Select Part/i });
     await partField.click();
     await partField.fill('');
     // Pick the first part option (skip "Create New Part")

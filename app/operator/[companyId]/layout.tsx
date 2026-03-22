@@ -250,17 +250,16 @@ function OperatorShell({
           backdropFilter: 'blur(8px)',
         }}
       >
-        <Toolbar sx={{ minHeight: 56 }}>
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.5, py: 0.5, minWidth: 0 }}>
+        <Toolbar sx={{ minHeight: 64 }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
             {/* Company name row */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, paddingBottom: stationName ? '6px' : 0 }}>
               <JiggedIcon size={20} />
               <Typography
                 variant="body1"
                 component="div"
                 sx={{
                   fontWeight: 600,
-                  lineHeight: 1.2,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',

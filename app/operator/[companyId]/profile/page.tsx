@@ -135,13 +135,6 @@ export default function OperatorProfilePage() {
 
   return (
     <Box>
-      {/* Company branding */}
-      {companyName && (
-        <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-          {companyName}
-        </Typography>
-      )}
-
       <Typography variant="h5" component="h1" fontWeight={600} sx={{ mb: 3 }}>
         Profile
       </Typography>
@@ -168,6 +161,11 @@ export default function OperatorProfilePage() {
           {operatorEmail && (
             <Typography variant="body2" color="text.secondary">
               {operatorEmail}
+            </Typography>
+          )}
+          {companyName && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {companyName}
             </Typography>
           )}
         </CardContent>

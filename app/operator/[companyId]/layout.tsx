@@ -20,7 +20,6 @@ import PersonIcon from '@mui/icons-material/Person';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
-import { getCompany } from '@/utils/companyAccess';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
@@ -46,7 +45,6 @@ export default function OperatorLayout({
   const companyId = params.companyId as string;
 
   const [userRole, setUserRole] = useState<string>('operator');
-  const [companyName, setCompanyName] = useState<string>('');
   const [navValue, setNavValue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -90,12 +88,6 @@ export default function OperatorLayout({
       }
 
       setUserRole(operatorAccess.role || 'operator');
-
-      // Fetch company name for header branding
-      const company = await getCompany(companyId);
-      if (company?.name) {
-        setCompanyName(company.name);
-      }
 
       setIsLoading(false);
     };
@@ -182,7 +174,6 @@ export default function OperatorLayout({
     <OperatorStationProvider>
       <OperatorShell
         userRole={userRole}
-        companyName={companyName}
         companyId={companyId}
         navValue={navValue}
         onNavChange={handleNavChange}
@@ -199,7 +190,6 @@ export default function OperatorLayout({
  */
 function OperatorShell({
   userRole,
-  companyName,
   companyId,
   navValue,
   onNavChange,
@@ -207,7 +197,6 @@ function OperatorShell({
   children,
 }: {
   userRole: string;
-  companyName: string;
   companyId: string;
   navValue: number;
   onNavChange: (event: React.SyntheticEvent, newValue: number) => void;
@@ -251,43 +240,48 @@ function OperatorShell({
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         }}
       >
-        {/* Row 1: Company name (left) | Jigged icon (center) | Actions (right) */}
         <Toolbar
           sx={{
-            minHeight: 'auto !important',
-            py: 1,
+            minHeight: '48px !important',
             px: 2,
-            position: 'relative',
           }}
         >
-          <Typography
-            variant="body1"
-            component="div"
-            sx={{
-              fontWeight: 600,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: '40%',
-            }}
-          >
-            {companyName || 'Jigged'}
-          </Typography>
-
-          {/* Centered Jigged icon */}
+          {/* Left: Jigged icon + station selector */}
+          <JiggedIcon size={20} />
           <Box
+            onClick={handleStationMenuOpen}
             sx={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
               display: 'flex',
               alignItems: 'center',
+              cursor: 'pointer',
+              ml: 1,
+              minHeight: 48,
+              overflow: 'hidden',
+              maxWidth: 'calc(100vw - 140px)',
+              borderRadius: 1,
+              px: 0.75,
+              '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
             }}
           >
-            <JiggedIcon size={22} />
+            <Typography
+              variant="body1"
+              component="span"
+              sx={{
+                color: '#D4872A',
+                fontWeight: 600,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {stationName || 'Select Station'}
+            </Typography>
+            <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
           </Box>
 
           <Box sx={{ flex: 1 }} />
+
+          {/* Right: action icons */}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"
@@ -309,43 +303,6 @@ function OperatorShell({
             <LogoutIcon fontSize="small" />
           </IconButton>
         </Toolbar>
-
-        {/* Station bar — below divider */}
-        {stationName && (
-          <Box
-            onClick={handleStationMenuOpen}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              cursor: 'pointer',
-              overflow: 'hidden',
-              px: 2,
-              py: 0.75,
-            }}
-          >
-            <Typography
-              variant="body2"
-              component="span"
-              sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 500, mr: 0.5 }}
-            >
-              Station:
-            </Typography>
-            <Typography
-              variant="body2"
-              component="span"
-              sx={{
-                color: '#D4872A',
-                fontWeight: 500,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {stationName}
-            </Typography>
-            <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
-          </Box>
-        )}
 
         {/* Station Selector Menu */}
         <Menu
@@ -378,7 +335,7 @@ function OperatorShell({
         component="main"
         sx={{
           flex: 1,
-          mt: stationId ? '80px' : '44px', // AppBar height (taller with station bar)
+          mt: '48px', // Single-row AppBar height
           mb: stationId ? '56px' : 0, // BottomNavigation height (hidden during station selection)
           overflow: 'auto',
           p: 2,

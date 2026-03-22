@@ -123,7 +123,7 @@ export default function OperatorJobsPage() {
           mb: 2,
         }}
       >
-        <Typography variant="h5" component="h1" fontWeight={600}>
+        <Typography variant="h6" component="h1" fontWeight={600}>
           Available Jobs
         </Typography>
         <IconButton onClick={loadJobs} disabled={loading}>

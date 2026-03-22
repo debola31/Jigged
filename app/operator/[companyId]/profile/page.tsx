@@ -23,6 +23,7 @@ import {
   getCurrentOperator,
   getOperatorSessions,
 } from '@/utils/operatorAccess';
+import { getCompany } from '@/utils/companyAccess';
 import { formatDuration } from '@/types/operator';
 import type { OperatorSession } from '@/types/operator';
 import { getSupabase } from '@/lib/supabase';
@@ -40,6 +41,7 @@ export default function OperatorProfilePage() {
   const [operatorName, setOperatorName] = useState<string>('');
   const [operatorEmail, setOperatorEmail] = useState<string>('');
   const [operatorUserId, setOperatorUserId] = useState<string>('');
+  const [companyName, setCompanyName] = useState<string>('');
   const [sessions, setSessions] = useState<OperatorSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,12 @@ export default function OperatorProfilePage() {
         }
 
         setOperatorName(operator.name || 'Operator');
+
+        // Fetch company name for branding
+        const company = await getCompany(companyId);
+        if (company?.name) {
+          setCompanyName(company.name);
+        }
 
         // Load session history
         const sessionData = await getOperatorSessions(operator.id, 50);
@@ -127,6 +135,13 @@ export default function OperatorProfilePage() {
 
   return (
     <Box>
+      {/* Company branding */}
+      {companyName && (
+        <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
+          {companyName}
+        </Typography>
+      )}
+
       <Typography variant="h5" component="h1" fontWeight={600} sx={{ mb: 3 }}>
         Profile
       </Typography>

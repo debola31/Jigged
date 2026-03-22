@@ -17,6 +17,7 @@ import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import { getSupabase } from '@/lib/supabase';
+import { getCompany } from '@/utils/companyAccess';
 
 /**
  * Operator Login Page.
@@ -30,7 +31,9 @@ export default function OperatorLoginPage() {
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const stationId = searchParams.get('station') || undefined;
+  const jobId = searchParams.get('job') || undefined;
 
+  const [companyName, setCompanyName] = useState<string>('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -39,6 +42,13 @@ export default function OperatorLoginPage() {
   const [checkingSession, setCheckingSession] = useState(true);
 
   const supabase = getSupabase();
+
+  // Fetch company name for display
+  useEffect(() => {
+    getCompany(companyId).then((company) => {
+      if (company?.name) setCompanyName(company.name);
+    });
+  }, [companyId]);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -63,6 +73,8 @@ export default function OperatorLoginPage() {
           // Check if password change required
           if (session.user.user_metadata?.needs_password_change) {
             router.push(`/operator/${companyId}/change-password`);
+          } else if (jobId) {
+            router.push(`/operator/${companyId}/jobs/${jobId}`);
           } else {
             router.push(`/operator/${companyId}/jobs`);
           }
@@ -74,7 +86,7 @@ export default function OperatorLoginPage() {
     };
 
     checkSession();
-  }, [companyId, router, stationId, supabase]);
+  }, [companyId, router, stationId, jobId, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,8 +148,12 @@ export default function OperatorLoginPage() {
         sessionStorage.setItem('jigged_operator_station', stationId);
       }
 
-      // 6. Redirect to jobs
-      router.push(`/operator/${companyId}/jobs`);
+      // 6. Redirect to job detail (if scanned from job QR) or jobs list
+      if (jobId) {
+        router.push(`/operator/${companyId}/jobs/${jobId}`);
+      } else {
+        router.push(`/operator/${companyId}/jobs`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
@@ -189,6 +205,11 @@ export default function OperatorLoginPage() {
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
           <JiggedLogo size="large" />
         </Box>
+        {companyName && (
+          <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
+            {companyName}
+          </Typography>
+        )}
         <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
           Operator Sign In
         </Typography>
@@ -270,10 +291,15 @@ export default function OperatorLoginPage() {
           </Button>
         </Box>
 
-        {/* Station Info */}
+        {/* Station / Job Info */}
         {stationId && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
             Station: {stationId.slice(0, 8)}...
+          </Typography>
+        )}
+        {jobId && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: stationId ? 1 : 3, display: 'block' }}>
+            Job: {jobId.slice(0, 8)}...
           </Typography>
         )}
       </Paper>

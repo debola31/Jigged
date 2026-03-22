@@ -204,23 +204,74 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 ---
 
-### 8. Backend (FastAPI)
+### 8. API Architecture Pattern
 
-**Structure:**
+Jigged uses a **Supabase-first** architecture. The Supabase client (`lib/supabase.ts`) handles all simple CRUD operations via the `utils/*Access.ts` data access layer (14+ files). The frontend talks directly to PostgreSQL through Supabase's PostgREST API, secured by Row-Level Security (RLS).
 
-- index.py - Entry point, CORS config, route registration
+The FastAPI backend (`api/`) exists **only** for operations that cannot run in the browser.
 
-- routes/ - API route handlers (imports for customers, parts, operations)
+#### 8.1 When to Use FastAPI (Backend)
 
-- services/ai.py - AI provider abstraction (Anthropic, OpenAI, Google)
+An endpoint belongs in FastAPI only if it meets one or more of these criteria:
 
-**CSV Import Flow:**
+| Criteria | Reason | Examples |
+|----------|--------|----------|
+| **AI-powered operations** | Requires API keys (Anthropic/OpenAI/Google) that must not be exposed to the browser | CSV column mapping (`/import/*/analyze`), insights chat, dashboard insights |
+| **Supabase service role key** | Needs `auth.admin.*` or access to `auth.users` table, which the anon key cannot reach | Operator creation, admin company management, password resets, email lookups |
+| **Complex multi-step business logic** | Validation pipelines, conflict detection, batch processing, or transactional guarantees beyond a single Supabase RPC | Import validate/execute pipelines |
 
-1. Analyze: Upload CSV → AI suggests column mapping
+#### 8.2 When to Use Supabase Client (Frontend)
 
-2. Validate: Check data → detect conflicts → preview
+Everything else:
 
-3. Execute: Insert records → return results
+- Single-table CRUD (create, read, update, soft-delete)
+- List queries with search, sort, pagination
+- Simple joins and filtered queries
+- Any operation where RLS policies provide sufficient authorization
+
+#### 8.3 Decision Checklist for New Features
+
+1. Does it need an AI provider API key? → **FastAPI**
+2. Does it need `auth.admin.*` or access to `auth.users`? → **FastAPI**
+3. Does it involve multi-step validation, conflict detection, or batch transactional logic? → **FastAPI**
+4. Is it a straightforward CRUD operation on a business table? → **Supabase client via `utils/*Access.ts`**
+
+#### 8.4 Current FastAPI Endpoints
+
+| Category | Count | Route file | Criteria met |
+|----------|-------|------------|--------------|
+| Import analysis (AI column mapping) | 4 | `import_routes.py`, `parts_import_routes.py`, `operations_import_routes.py`, `inventory_routes.py` | AI |
+| Insights (dashboard, refresh, chat) | 3 | `insights_routes.py` | AI + complex aggregation |
+| Operator management | 4 | `operators_routes.py` | Service role (`auth.admin.*`) |
+| Admin company management | 4 | `admin_routes.py` | Service role + system admin |
+| Import validate/execute pipelines | 8 | `import_routes.py`, `parts_import_routes.py`, `operations_import_routes.py`, `inventory_routes.py` | Complex business logic |
+| Chat history | 1 | `insights_routes.py` | Grouped with insights |
+
+#### 8.5 Backend Structure
+
+```plain text
+api/
+├── index.py                         # Entry point, CORS config, route registration
+├── routes/
+│   ├── admin_routes.py              # System admin endpoints (service role)
+│   ├── import_routes.py             # Customer import (AI + pipeline)
+│   ├── insights_routes.py           # AI insights + chat
+│   ├── inventory_routes.py          # Inventory import (AI + pipeline)
+│   ├── operations_import_routes.py  # Operations import (AI + pipeline)
+│   ├── operators_routes.py          # Operator auth management (service role)
+│   └── parts_import_routes.py       # Parts import (AI + pipeline)
+├── models/                          # Pydantic request/response models
+├── services/
+│   └── ai.py                        # AI provider abstraction (Anthropic, OpenAI, Google)
+└── utils/
+    └── rate_limiter.py              # Rate limiting for AI endpoints
+```
+
+**CSV Import Flow (all entity imports follow this pattern):**
+
+1. **Analyze:** Upload CSV → AI suggests column mapping (requires AI key)
+2. **Validate:** Check data → detect conflicts → preview (complex logic)
+3. **Execute:** Insert records → return results (batch transactional)
 
 ---
 

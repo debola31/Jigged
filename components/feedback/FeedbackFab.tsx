@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import Fab from '@mui/material/Fab';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
-import FeedbackIcon from '@mui/icons-material/Feedback';
 import FeedbackDialog from './FeedbackDialog';
 
 /**
@@ -27,7 +25,7 @@ export function useFeedbackDialog() {
 interface FeedbackFabProps {
   dialogOpen: boolean;
   snackbarOpen: boolean;
-  onOpen: () => void;
+  onOpen?: () => void;
   onClose: () => void;
   onSuccess: () => void;
   onSnackbarClose: () => void;
@@ -36,32 +34,12 @@ interface FeedbackFabProps {
 export default function FeedbackFab({
   dialogOpen,
   snackbarOpen,
-  onOpen,
   onClose,
   onSuccess,
   onSnackbarClose,
 }: FeedbackFabProps) {
   return (
     <>
-      {/* Mobile-only FAB — on desktop the sidebar button triggers the dialog */}
-      <Fab
-        variant="extended"
-        color="primary"
-        size="medium"
-        aria-label="Give feedback"
-        onClick={onOpen}
-        sx={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          zIndex: 1150,
-          display: { xs: 'flex', md: 'none' },
-        }}
-      >
-        <FeedbackIcon sx={{ mr: 1 }} />
-        Feedback
-      </Fab>
-
       <FeedbackDialog
         open={dialogOpen}
         onClose={onClose}

@@ -10,27 +10,27 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { QRCodeCanvas } from 'qrcode.react';
 import { jsPDF } from 'jspdf';
 
-interface StationQRCodeProps {
-  operationTypeId: string;
-  operationName: string;
-  operationCode?: string | null;
+interface JobQRCodeProps {
+  jobId: string;
+  jobNumber: string;
+  partName?: string | null;
   companyId: string;
   companyName?: string;
   size?: number;
 }
 
-export default function StationQRCode({
-  operationTypeId,
-  operationName,
-  operationCode,
+export default function JobQRCode({
+  jobId,
+  jobNumber,
+  partName,
   companyId,
   companyName,
   size = 200,
-}: StationQRCodeProps) {
+}: JobQRCodeProps) {
   const qrRef = useRef<HTMLDivElement>(null);
 
-  // Generate the station URL that operators will scan
-  const stationUrl = `${window.location.origin}/operator/${companyId}/login?station=${operationTypeId}`;
+  // Generate the job URL that operators will scan
+  const jobUrl = `${window.location.origin}/operator/${companyId}/login?job=${jobId}`;
 
   const getQRCanvas = useCallback((): HTMLCanvasElement | null => {
     if (!qrRef.current) return null;
@@ -51,48 +51,51 @@ export default function StationQRCode({
     });
 
     const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
 
     // QR code size in PDF (80mm square)
     const qrSize = 80;
     const qrX = (pageWidth - qrSize) / 2;
-    const qrY = 60;
+    let yPos = 30;
 
     // Add company name at top if provided
     if (companyName) {
       pdf.setFontSize(14);
       pdf.setTextColor(100);
-      pdf.text(companyName, pageWidth / 2, 30, { align: 'center' });
+      pdf.text(companyName, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
     }
 
-    // Add station name as header
+    // Add job number as header
     pdf.setFontSize(24);
     pdf.setTextColor(0);
-    pdf.text(operationName, pageWidth / 2, companyName ? 45 : 35, { align: 'center' });
+    pdf.text(jobNumber, pageWidth / 2, yPos, { align: 'center' });
+    yPos += 10;
 
-    // Add QR code
-    pdf.addImage(dataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
-
-    // Add code below QR if provided
-    if (operationCode) {
+    // Add part name if provided
+    if (partName) {
       pdf.setFontSize(16);
       pdf.setTextColor(50);
-      pdf.text(operationCode, pageWidth / 2, qrY + qrSize + 15, { align: 'center' });
+      pdf.text(partName, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 10;
     }
+
+    // Add QR code
+    const qrY = yPos + 5;
+    pdf.addImage(dataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
 
     // Add instruction text
     pdf.setFontSize(12);
     pdf.setTextColor(100);
     pdf.text(
-      'Scan this QR code to open the Operator View for this station',
+      'Scan this QR code to open the Operator View for this job',
       pageWidth / 2,
-      qrY + qrSize + (operationCode ? 30 : 15),
+      qrY + qrSize + 15,
       { align: 'center' }
     );
 
     // Save PDF
-    pdf.save(`${operationName.replace(/\s+/g, '-')}-station-qr.pdf`);
-  }, [getQRCanvas, operationName, operationCode, companyName]);
+    pdf.save(`${jobNumber}-job-qr.pdf`);
+  }, [getQRCanvas, jobNumber, partName, companyName]);
 
   return (
     <Box>
@@ -110,7 +113,7 @@ export default function StationQRCode({
       >
         <div ref={qrRef}>
           <QRCodeCanvas
-            value={stationUrl}
+            value={jobUrl}
             size={size}
             level="H"
             includeMargin
@@ -134,7 +137,7 @@ export default function StationQRCode({
           variant="outlined"
           size="small"
           startIcon={<OpenInNewIcon />}
-          href={stationUrl}
+          href={jobUrl}
           target="_blank"
         >
           Open Operator View
@@ -142,7 +145,7 @@ export default function StationQRCode({
       </Box>
 
       <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-        Scan this QR code or tap the link above to open the Operator View for this station.
+        Scan this QR code or tap the link above to open the Operator View for this job.
       </Typography>
     </Box>
   );

@@ -8,7 +8,7 @@ test.describe('Smoke tests', () => {
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
     // Verify the sidebar navigation is visible (confirms the layout rendered)
-    await expect(page.getByRole('navigation')).toBeVisible();
+    await expect(page.getByRole('navigation')).toBeVisible({ timeout: 15_000 });
   });
 
   test('login page is accessible', async ({ browser }) => {

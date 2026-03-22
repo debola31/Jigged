@@ -282,13 +282,16 @@ export default function JobCompleteModal({
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <TextField
                       label="Qty Used"
-                      type="number"
+                      type="text"
                       size="small"
-                      value={material.confirmed_quantity}
-                      onChange={(e) =>
-                        handleConfirmedQtyChange(index, parseFloat(e.target.value) || 0)
-                      }
-                      inputProps={{ min: 0, step: 'any' }}
+                      value={material.confirmed_quantity === 0 ? '' : String(material.confirmed_quantity)}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                          handleConfirmedQtyChange(index, raw === '' ? 0 : parseFloat(raw) || 0);
+                        }
+                      }}
+                      inputProps={{ inputMode: 'decimal', pattern: '[0-9]*\\.?[0-9]*' }}
                       sx={{ width: 120 }}
                     />
                     <Typography variant="body2" color="text.secondary">

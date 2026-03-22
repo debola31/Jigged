@@ -870,3 +870,48 @@ export async function getStationName(
 
   return data?.name || null;
 }
+
+/**
+ * Get stations (operation types) that have pending/in-progress operations for a specific job.
+ * Used when an operator scans a job QR code to determine which station(s) to offer.
+ */
+export async function getStationsForJob(
+  jobId: string,
+  companyId: string
+): Promise<Array<{ id: string; name: string }>> {
+  const supabase = getSupabase();
+
+  // Verify the job belongs to this company
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .single();
+
+  if (!job) return [];
+
+  const { data: ops } = await supabase
+    .from('job_operations')
+    .select('operation_type_id, operation_types(name)')
+    .eq('job_id', jobId)
+    .in('status', ['pending', 'in_progress']);
+
+  if (!ops || ops.length === 0) return [];
+
+  // Deduplicate by operation_type_id
+  const seen = new Set<string>();
+  const stations: Array<{ id: string; name: string }> = [];
+  for (const op of ops) {
+    if (op.operation_type_id && !seen.has(op.operation_type_id)) {
+      seen.add(op.operation_type_id);
+      const otData = op.operation_types as unknown as { name: string } | null;
+      stations.push({
+        id: op.operation_type_id,
+        name: otData?.name || 'Unknown Station',
+      });
+    }
+  }
+
+  return stations;
+}

@@ -14,13 +14,16 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Chip from '@mui/material/Chip';
+import Snackbar from '@mui/material/Snackbar';
 import LockIcon from '@mui/icons-material/Lock';
 import LogoutIcon from '@mui/icons-material/Logout';
+import FeedbackIcon from '@mui/icons-material/Feedback';
+import FeedbackDialog from '@/components/feedback/FeedbackDialog';
 import {
   getCurrentOperator,
   getOperatorSessions,
 } from '@/utils/operatorAccess';
-import { useStationContext } from '@/components/operator/OperatorStationContext';
+import { getCompany } from '@/utils/companyAccess';
 import { formatDuration } from '@/types/operator';
 import type { OperatorSession } from '@/types/operator';
 import { getSupabase } from '@/lib/supabase';
@@ -35,13 +38,15 @@ export default function OperatorProfilePage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
-  const { stationName } = useStationContext();
-
   const [operatorName, setOperatorName] = useState<string>('');
   const [operatorEmail, setOperatorEmail] = useState<string>('');
+  const [operatorUserId, setOperatorUserId] = useState<string>('');
+  const [companyName, setCompanyName] = useState<string>('');
   const [sessions, setSessions] = useState<OperatorSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
@@ -53,8 +58,9 @@ export default function OperatorProfilePage() {
 
         // Get auth session for email
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
-          setOperatorEmail(session.user.email);
+        if (session?.user) {
+          setOperatorEmail(session.user.email || '');
+          setOperatorUserId(session.user.id);
         }
 
         // Get operator info
@@ -66,6 +72,12 @@ export default function OperatorProfilePage() {
         }
 
         setOperatorName(operator.name || 'Operator');
+
+        // Fetch company name for branding
+        const company = await getCompany(companyId);
+        if (company?.name) {
+          setCompanyName(company.name);
+        }
 
         // Load session history
         const sessionData = await getOperatorSessions(operator.id, 50);
@@ -147,25 +159,25 @@ export default function OperatorProfilePage() {
             {operatorName}
           </Typography>
           {operatorEmail && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
               {operatorEmail}
             </Typography>
           )}
-          {stationName && (
-            <Typography variant="body2" color="primary.main">
-              Station: {stationName}
+          {companyName && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {companyName}
             </Typography>
           )}
         </CardContent>
       </Card>
 
       {/* Actions */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+      <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
         <Button
           variant="outlined"
           startIcon={<LockIcon />}
           onClick={() => router.push(`/operator/${companyId}/change-password`)}
-          sx={{ flex: 1, minHeight: 48 }}
+          sx={{ flex: 1, minHeight: 48, minWidth: 140 }}
         >
           Change Password
         </Button>
@@ -174,11 +186,40 @@ export default function OperatorProfilePage() {
           color="error"
           startIcon={<LogoutIcon />}
           onClick={handleLogout}
-          sx={{ flex: 1, minHeight: 48 }}
+          sx={{ flex: 1, minHeight: 48, minWidth: 140 }}
         >
           Logout
         </Button>
       </Box>
+      <Button
+        variant="outlined"
+        startIcon={<FeedbackIcon />}
+        onClick={() => setFeedbackOpen(true)}
+        sx={{ mb: 3, minHeight: 48 }}
+        fullWidth
+      >
+        Give Feedback
+      </Button>
+
+      <FeedbackDialog
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        onSuccess={() => {
+          setFeedbackOpen(false);
+          setFeedbackSuccess(true);
+        }}
+        userId={operatorUserId}
+      />
+      <Snackbar
+        open={feedbackSuccess}
+        autoHideDuration={4000}
+        onClose={() => setFeedbackSuccess(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="success" onClose={() => setFeedbackSuccess(false)}>
+          Thanks for your feedback!
+        </Alert>
+      </Snackbar>
 
       {/* Work History */}
       <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>

@@ -16,7 +16,6 @@ export default function NewPartPage() {
         mode="create"
         companyId={companyId}
         initialData={EMPTY_PART_FORM}
-        onSuccess={() => router.push(`/dashboard/${companyId}/parts`)}
         onCancel={() => router.back()}
       />
     </Box>

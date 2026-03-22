@@ -20,6 +20,7 @@ import {
   getCurrentOperator,
   startJob,
   stopJob,
+  getStationsForJob,
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import type { OperatorJobDetail } from '@/types/operator';
@@ -74,7 +75,7 @@ export default function OperatorJobDetailPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
-  const { stationId } = useStationContext();
+  const { stationId, setStation } = useStationContext();
 
   const [job, setJob] = useState<OperatorJobDetail | null>(null);
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
@@ -82,6 +83,8 @@ export default function OperatorJobDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [jobStations, setJobStations] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [resolvingStation, setResolvingStation] = useState(false);
 
   // Get current operator on mount
   useEffect(() => {
@@ -93,6 +96,24 @@ export default function OperatorJobDetailPage() {
     }
     loadOperator();
   }, [companyId]);
+
+  // When no station is set, resolve which stations this job has operations at
+  useEffect(() => {
+    if (stationId) return; // Already have a station
+
+    async function resolveJobStations() {
+      setResolvingStation(true);
+      const stations = await getStationsForJob(jobId, companyId);
+      if (stations.length === 1) {
+        // Auto-select the only available station
+        setStation(stations[0].id);
+      } else {
+        setJobStations(stations);
+      }
+      setResolvingStation(false);
+    }
+    resolveJobStations();
+  }, [jobId, companyId, stationId, setStation]);
 
   const loadJob = useCallback(async () => {
     setLoading(true);
@@ -198,7 +219,47 @@ export default function OperatorJobDetailPage() {
 
   // Prompt operator to select a station before showing job details
   if (!stationId) {
-    return <StationSelector />;
+    if (resolvingStation) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    // No pending operations for this job
+    if (jobStations && jobStations.length === 0) {
+      return (
+        <Box sx={{ py: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+            No pending operations for this job.
+          </Typography>
+          <Button
+            variant="outlined"
+            onClick={() => router.push(`/operator/${companyId}/jobs`)}
+          >
+            Back to Jobs
+          </Button>
+        </Box>
+      );
+    }
+
+    // Multiple stations — show filtered picker
+    if (jobStations && jobStations.length > 1) {
+      return (
+        <StationSelector
+          filteredStations={jobStations}
+          subtitle="This job has operations at the following stations:"
+        />
+      );
+    }
+
+    // Still resolving or waiting for auto-select
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   return (

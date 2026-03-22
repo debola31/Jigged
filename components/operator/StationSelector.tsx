@@ -13,9 +13,20 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
  *
  * Shown when no station is selected. Displays available stations
  * as large tappable buttons so the operator can pick one.
+ *
+ * When `filteredStations` is provided (e.g. from a job QR scan),
+ * only those stations are shown instead of all company stations.
  */
-export default function StationSelector() {
+export default function StationSelector({
+  filteredStations,
+  subtitle,
+}: {
+  filteredStations?: Array<{ id: string; name: string }>;
+  subtitle?: string;
+} = {}) {
   const { stations, setStation, loading } = useStationContext();
+
+  const displayStations = filteredStations || stations;
 
   if (loading) {
     return (
@@ -46,10 +57,10 @@ export default function StationSelector() {
             Select Your Station
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-            Choose the station you are working at to continue.
+            {subtitle || 'Choose the station you are working at to continue.'}
           </Typography>
 
-          {stations.length === 0 ? (
+          {displayStations.length === 0 ? (
             <Typography variant="body1" color="text.secondary">
               No stations available. Please contact your supervisor.
             </Typography>
@@ -63,7 +74,7 @@ export default function StationSelector() {
                 mx: 'auto',
               }}
             >
-              {stations.map((station) => (
+              {displayStations.map((station) => (
                 <Button
                   key={station.id}
                   variant="outlined"

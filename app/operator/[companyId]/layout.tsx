@@ -251,7 +251,7 @@ function OperatorShell({
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.25, minWidth: 0 }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.5, py: 0.5, minWidth: 0 }}>
             {/* Company name row */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
               <JiggedIcon size={20} />

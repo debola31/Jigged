@@ -17,6 +17,7 @@ import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import { getSupabase } from '@/lib/supabase';
+import { getCompany } from '@/utils/companyAccess';
 
 /**
  * Operator Login Page.
@@ -32,6 +33,7 @@ export default function OperatorLoginPage() {
   const stationId = searchParams.get('station') || undefined;
   const jobId = searchParams.get('job') || undefined;
 
+  const [companyName, setCompanyName] = useState<string>('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -40,6 +42,13 @@ export default function OperatorLoginPage() {
   const [checkingSession, setCheckingSession] = useState(true);
 
   const supabase = getSupabase();
+
+  // Fetch company name for display
+  useEffect(() => {
+    getCompany(companyId).then((company) => {
+      if (company?.name) setCompanyName(company.name);
+    });
+  }, [companyId]);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -196,6 +205,11 @@ export default function OperatorLoginPage() {
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
           <JiggedLogo size="large" />
         </Box>
+        {companyName && (
+          <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
+            {companyName}
+          </Typography>
+        )}
         <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
           Operator Sign In
         </Typography>

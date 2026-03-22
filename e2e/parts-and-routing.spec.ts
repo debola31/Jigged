@@ -79,10 +79,17 @@ test.describe('Parts and Routing workflow', () => {
     // Dialog should close after selection
     await expect(addOpDialog).toBeHidden({ timeout: 5_000 });
 
+    // The builder auto-opens an Edit Operation modal for the new node — dismiss it
+    const editDialog = page.getByRole('dialog');
+    if (await editDialog.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await editDialog.getByRole('button', { name: /Cancel/i }).click();
+      await expect(editDialog).toBeHidden({ timeout: 5_000 });
+    }
+
     // ── Step 4: Save the routing ──
 
     // Use "Save Routing" (desktop) or "Save" (mobile) button in the wizard header
-    await page.getByRole('button', { name: /Save Routing|^Save$/i }).click();
+    await page.getByRole('button', { name: /Save/i }).first().click();
 
     // Should redirect back to part detail
     await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });

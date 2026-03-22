@@ -20,7 +20,9 @@ import PersonIcon from '@mui/icons-material/Person';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
+import { getCompany } from '@/utils/companyAccess';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 /**
@@ -44,6 +46,7 @@ export default function OperatorLayout({
   const companyId = params.companyId as string;
 
   const [userRole, setUserRole] = useState<string>('operator');
+  const [companyName, setCompanyName] = useState<string>('');
   const [navValue, setNavValue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -87,6 +90,13 @@ export default function OperatorLayout({
       }
 
       setUserRole(operatorAccess.role || 'operator');
+
+      // Fetch company name for header branding
+      const company = await getCompany(companyId);
+      if (company?.name) {
+        setCompanyName(company.name);
+      }
+
       setIsLoading(false);
     };
 
@@ -172,6 +182,7 @@ export default function OperatorLayout({
     <OperatorStationProvider>
       <OperatorShell
         userRole={userRole}
+        companyName={companyName}
         companyId={companyId}
         navValue={navValue}
         onNavChange={handleNavChange}
@@ -188,6 +199,7 @@ export default function OperatorLayout({
  */
 function OperatorShell({
   userRole,
+  companyName,
   companyId,
   navValue,
   onNavChange,
@@ -195,6 +207,7 @@ function OperatorShell({
   children,
 }: {
   userRole: string;
+  companyName: string;
   companyId: string;
   navValue: number;
   onNavChange: (event: React.SyntheticEvent, newValue: number) => void;
@@ -238,7 +251,25 @@ function OperatorShell({
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
-          <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+            {/* Company name row */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <JiggedIcon size={20} />
+              <Typography
+                variant="body1"
+                component="div"
+                sx={{
+                  fontWeight: 600,
+                  lineHeight: 1.2,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {companyName || 'Jigged'}
+              </Typography>
+            </Box>
+            {/* Station row */}
             {stationName && (
               <Box
                 onClick={handleStationMenuOpen}
@@ -247,30 +278,30 @@ function OperatorShell({
                   alignItems: 'center',
                   cursor: 'pointer',
                   overflow: 'hidden',
-                  minHeight: 48,
                 }}
               >
                 <Typography
-                  variant="body1"
+                  variant="body2"
                   component="span"
-                  sx={{ fontWeight: 600, mr: 0.5 }}
+                  sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 500, mr: 0.5, lineHeight: 1.2 }}
                 >
                   Station:
                 </Typography>
                 <Typography
-                  variant="body1"
+                  variant="body2"
                   component="span"
                   sx={{
                     color: '#D4872A',
-                    fontWeight: 600,
+                    fontWeight: 500,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
+                    lineHeight: 1.2,
                   }}
                 >
                   {stationName}
                 </Typography>
-                <ArrowDropDownIcon sx={{ color: '#D4872A', ml: 0.25 }} />
+                <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
               </Box>
             )}
           </Box>

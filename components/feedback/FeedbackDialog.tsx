@@ -85,9 +85,10 @@ interface FeedbackDialogProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  userId?: string;
 }
 
-export default function FeedbackDialog({ open, onClose, onSuccess }: FeedbackDialogProps) {
+export default function FeedbackDialog({ open, onClose, onSuccess, userId }: FeedbackDialogProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const pathname = usePathname();
@@ -102,7 +103,8 @@ export default function FeedbackDialog({ open, onClose, onSuccess }: FeedbackDia
   const companyId = params.companyId as string;
 
   const handleSubmit = async () => {
-    if (!feedbackText.trim() || !user) return;
+    const resolvedUserId = userId ?? user?.id;
+    if (!feedbackText.trim() || !resolvedUserId) return;
 
     setSubmitting(true);
     setError(null);
@@ -111,7 +113,7 @@ export default function FeedbackDialog({ open, onClose, onSuccess }: FeedbackDia
       const supabase = getSupabase();
       const { error: insertError } = await supabase.from('feedback').insert({
         company_id: companyId,
-        user_id: user.id,
+        user_id: resolvedUserId,
         page_path: pathname,
         page_title: pageTitle,
         feedback_text: feedbackText.trim(),

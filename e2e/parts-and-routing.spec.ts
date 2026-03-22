@@ -50,6 +50,13 @@ test.describe('Parts and Routing workflow', () => {
     // Wait for the routing builder to be ready
     await page.waitForLoadState('networkidle');
 
+    // Dismiss the "Workflow Editor Guide" popover that auto-opens on first visit.
+    // It appears after ~800ms and its backdrop blocks all clicks.
+    await page.waitForTimeout(1_500);
+    await page.keyboard.press('Escape');
+    // Give the popover time to close
+    await page.waitForTimeout(500);
+
     // Click "Add Operation" button to open the operation selection dialog
     // Two "Add Operation" buttons may exist (toolbar + empty state) — use .first()
     await page.getByRole('button', { name: /Add Operation/i }).first().click();
@@ -85,8 +92,12 @@ test.describe('Parts and Routing workflow', () => {
 
     // ── Step 4: Save the routing ──
 
-    // Use "Save Routing" (desktop) or "Save" (mobile) button in the wizard header
-    await page.getByRole('button', { name: /Save/i }).first().click();
+    // Dismiss any remaining popovers/tooltips that might block clicks
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
+    // Click "Save Routing" button
+    await page.getByRole('button', { name: /Save Routing/i }).click();
 
     // Should redirect back to part detail
     await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });

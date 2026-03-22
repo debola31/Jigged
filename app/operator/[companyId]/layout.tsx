@@ -251,116 +251,126 @@ function OperatorShell({
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         }}
       >
+        {/* Row 1: Company name (left) | Jigged icon (center) | Actions (right) */}
         <Toolbar
           sx={{
             minHeight: 'auto !important',
-            flexDirection: 'column',
-            alignItems: 'stretch',
             py: 1,
             px: 2,
+            position: 'relative',
           }}
         >
-          {/* Row 1: Company identity + action icons */}
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <JiggedIcon size={20} />
+          <Typography
+            variant="body1"
+            component="div"
+            sx={{
+              fontWeight: 600,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '40%',
+            }}
+          >
+            {companyName || 'Jigged'}
+          </Typography>
+
+          {/* Centered Jigged icon */}
+          <Box
+            sx={{
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <JiggedIcon size={22} />
+          </Box>
+
+          <Box sx={{ flex: 1 }} />
+          {userRole !== 'operator' && (
+            <IconButton
+              color="inherit"
+              onClick={() => router.push(`/dashboard/${companyId}`)}
+              aria-label="Go to dashboard"
+              size="small"
+              sx={{ ml: 0.5 }}
+            >
+              <DashboardIcon fontSize="small" />
+            </IconButton>
+          )}
+          <IconButton
+            color="inherit"
+            onClick={onLogout}
+            aria-label="logout"
+            size="small"
+            sx={{ ml: 0.5 }}
+          >
+            <LogoutIcon fontSize="small" />
+          </IconButton>
+        </Toolbar>
+
+        {/* Station bar — below divider */}
+        {stationName && (
+          <Box
+            onClick={handleStationMenuOpen}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+              overflow: 'hidden',
+              px: 2,
+              py: 0.75,
+            }}
+          >
             <Typography
-              variant="body1"
-              component="div"
+              variant="body2"
+              component="span"
+              sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 500, mr: 0.5 }}
+            >
+              Station:
+            </Typography>
+            <Typography
+              variant="body2"
+              component="span"
               sx={{
-                fontWeight: 600,
-                ml: 0.75,
+                color: '#D4872A',
+                fontWeight: 500,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
             >
-              {companyName || 'Jigged'}
+              {stationName}
             </Typography>
-            <Box sx={{ flex: 1 }} />
-            {userRole !== 'operator' && (
-              <IconButton
-                color="inherit"
-                onClick={() => router.push(`/dashboard/${companyId}`)}
-                aria-label="Go to dashboard"
-                size="small"
-                sx={{ ml: 0.5 }}
-              >
-                <DashboardIcon fontSize="small" />
-              </IconButton>
-            )}
-            <IconButton
-              color="inherit"
-              onClick={onLogout}
-              aria-label="logout"
-              size="small"
-              sx={{ ml: 0.5 }}
-            >
-              <LogoutIcon fontSize="small" />
-            </IconButton>
+            <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
           </Box>
+        )}
 
-          {/* Row 2: Station selector (indented to align with company text) */}
-          {stationName && (
-            <Box
-              onClick={handleStationMenuOpen}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                overflow: 'hidden',
-                pl: '26px',
-                mt: 0.25,
-              }}
-            >
-              <Typography
-                variant="body2"
-                component="span"
-                sx={{ color: 'rgba(255, 255, 255, 0.6)', fontWeight: 500, mr: 0.5 }}
-              >
-                Station:
-              </Typography>
-              <Typography
-                variant="body2"
-                component="span"
-                sx={{
-                  color: '#D4872A',
-                  fontWeight: 500,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {stationName}
-              </Typography>
-              <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 18, ml: 0.25 }} />
-            </Box>
-          )}
-
-          {/* Station Selector Menu */}
-          <Menu
-            anchorEl={anchorEl}
-            open={Boolean(anchorEl)}
-            onClose={handleStationMenuClose}
-            slotProps={{
-              paper: {
-                sx: {
-                  maxHeight: 300,
-                  minWidth: 200,
-                },
+        {/* Station Selector Menu */}
+        <Menu
+          anchorEl={anchorEl}
+          open={Boolean(anchorEl)}
+          onClose={handleStationMenuClose}
+          slotProps={{
+            paper: {
+              sx: {
+                maxHeight: 300,
+                minWidth: 200,
               },
-            }}
-          >
-            {stations.map((station) => (
-              <MenuItem
-                key={station.id}
-                onClick={() => handleStationSelect(station.id)}
-                sx={{ minHeight: 48 }}
-              >
-                <ListItemText primary={station.name} />
-              </MenuItem>
-            ))}
-          </Menu>
-        </Toolbar>
+            },
+          }}
+        >
+          {stations.map((station) => (
+            <MenuItem
+              key={station.id}
+              onClick={() => handleStationSelect(station.id)}
+              sx={{ minHeight: 48 }}
+            >
+              <ListItemText primary={station.name} />
+            </MenuItem>
+          ))}
+        </Menu>
       </AppBar>
 
       {/* Main Content */}
@@ -368,7 +378,7 @@ function OperatorShell({
         component="main"
         sx={{
           flex: 1,
-          mt: '56px', // AppBar height
+          mt: stationId ? '80px' : '44px', // AppBar height (taller with station bar)
           mb: stationId ? '56px' : 0, // BottomNavigation height (hidden during station selection)
           overflow: 'auto',
           p: 2,

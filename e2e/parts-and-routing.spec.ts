@@ -76,15 +76,12 @@ test.describe('Parts and Routing workflow', () => {
     // Select the first available operation
     await operationItems.first().click();
 
-    // Dialog should close after selection
-    await expect(addOpDialog).toBeHidden({ timeout: 5_000 });
-
-    // The builder auto-opens an Edit Operation modal for the new node — dismiss it
+    // The Add dialog closes and the builder auto-opens an Edit Operation modal.
+    // Wait for the Edit modal to appear, then dismiss it.
     const editDialog = page.getByRole('dialog');
-    if (await editDialog.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await editDialog.getByRole('button', { name: /Cancel/i }).click();
-      await expect(editDialog).toBeHidden({ timeout: 5_000 });
-    }
+    await editDialog.getByText(/Edit Operation/i).waitFor({ state: 'visible', timeout: 10_000 });
+    await editDialog.getByRole('button', { name: /^Cancel$/i }).click();
+    await expect(editDialog).toBeHidden({ timeout: 5_000 });
 
     // ── Step 4: Save the routing ──
 

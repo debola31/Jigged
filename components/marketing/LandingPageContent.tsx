@@ -8,7 +8,7 @@ import Hero from './Hero';
 import PainPoints from './PainPoints';
 import Features from './Features';
 import HowItWorks from './HowItWorks';
-import SocialProof from './SocialProof';
+// import SocialProof from './SocialProof'; // Re-enable once testimonial is confirmed
 import FinalCTA from './FinalCTA';
 
 export default function LandingPageContent() {
@@ -34,7 +34,7 @@ export default function LandingPageContent() {
       <PainPoints />
       <Features />
       <HowItWorks />
-      <SocialProof />
+      {/* <SocialProof /> Re-enable once testimonial is confirmed */}
       <FinalCTA />
     </>
   );

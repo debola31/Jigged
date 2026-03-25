@@ -106,7 +106,7 @@ export default function Features() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    p: 1.5,
+                    p: 0.5,
                   }}
                 >
                   {Array.isArray(feature.image) ? (
@@ -129,6 +129,7 @@ export default function Features() {
                             borderRadius: 2,
                             border: 'none',
                             objectFit: 'contain',
+                            imageRendering: '-webkit-optimize-contrast',
                           }}
                         />
                       ))}
@@ -142,6 +143,7 @@ export default function Features() {
                         maxWidth: '100%',
                         maxHeight: '100%',
                         objectFit: 'contain',
+                        imageRendering: '-webkit-optimize-contrast',
                       }}
                     />
                   )}

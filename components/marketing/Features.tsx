@@ -127,7 +127,7 @@ export default function Features() {
                           sx={{
                             height: '100%',
                             borderRadius: 2,
-                            border: '2px solid rgba(255, 255, 255, 0.12)',
+                            border: 'none',
                             objectFit: 'contain',
                           }}
                         />

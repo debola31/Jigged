@@ -17,17 +17,11 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import Box from '@mui/material/Box';
 import MenuItem from '@mui/material/MenuItem';
+import { SHOP_SIZES } from '@/lib/constants/marketing';
 
 interface EmailCaptureProps {
   source?: string;
 }
-
-const SHOP_SIZES = [
-  '1–5 people',
-  '6–15 people',
-  '16–50 people',
-  '50+ people',
-];
 
 export default function EmailCapture({ source = 'landing_page' }: EmailCaptureProps) {
   const [email, setEmail] = useState('');

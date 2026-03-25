@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import Hero from './Hero';
+import PainPoints from './PainPoints';
+import Features from './Features';
+import HowItWorks from './HowItWorks';
+import SocialProof from './SocialProof';
+import FinalCTA from './FinalCTA';
 
 export default function LandingPageContent() {
   const router = useRouter();
@@ -26,6 +31,11 @@ export default function LandingPageContent() {
   return (
     <>
       <Hero />
+      <PainPoints />
+      <Features />
+      <HowItWorks />
+      <SocialProof />
+      <FinalCTA />
     </>
   );
 }

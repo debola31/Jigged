@@ -9,24 +9,43 @@ export default function SocialProof() {
     <Box
       component="section"
       sx={{
-        py: { xs: 4, md: 6 },
-        bgcolor: 'rgba(0, 0, 0, 0.1)',
+        py: { xs: 5, md: 7 },
+        bgcolor: 'rgba(0, 0, 0, 0.15)',
       }}
     >
       <Container maxWidth="md">
-        <Typography
-          variant="h5"
-          align="center"
-          sx={{
-            fontWeight: 500,
-            fontStyle: 'italic',
-            color: 'rgba(255, 255, 255, 0.85)',
-            lineHeight: 1.6,
-          }}
-        >
-          &ldquo;Built alongside real precision manufacturing shops
-          who were tired of fighting their ERP.&rdquo;
-        </Typography>
+        <Box sx={{ textAlign: 'center' }}>
+          <Typography
+            variant="h4"
+            component="blockquote"
+            sx={{
+              fontStyle: 'italic',
+              fontWeight: 400,
+              color: 'rgba(255, 255, 255, 0.85)',
+              lineHeight: 1.6,
+              fontSize: { xs: '1.25rem', md: '1.65rem' },
+              mb: 3,
+            }}
+          >
+            &ldquo;[Testimonial coming soon]&rdquo;
+          </Typography>
+
+          <Typography
+            variant="body1"
+            sx={{
+              fontWeight: 600,
+              color: 'rgba(255, 255, 255, 0.9)',
+            }}
+          >
+            Shane Sobieski
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{ color: 'rgba(255, 255, 255, 0.6)' }}
+          >
+            Contour Tool & Machine
+          </Typography>
+        </Box>
       </Container>
     </Box>
   );

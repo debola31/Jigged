@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  Fragment,
   type ReactNode,
 } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
@@ -53,6 +54,7 @@ export default function DemoModeProvider({ children }: { children: ReactNode }) 
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
     if (!companyId) return;
@@ -131,13 +133,13 @@ export default function DemoModeProvider({ children }: { children: ReactNode }) 
     setIsResetting(true);
     try {
       await resetDemoCompany(realCompanyId, user.id);
-      router.refresh();
+      setResetKey(k => k + 1);
     } catch (err) {
       console.error('Error resetting demo:', err);
     } finally {
       setIsResetting(false);
     }
-  }, [user, realCompanyId, router]);
+  }, [user, realCompanyId]);
 
   return (
     <DemoModeContext.Provider
@@ -155,7 +157,9 @@ export default function DemoModeProvider({ children }: { children: ReactNode }) 
         isResetting,
       }}
     >
-      {children}
+      <Fragment key={resetKey}>
+        {children}
+      </Fragment>
     </DemoModeContext.Provider>
   );
 }

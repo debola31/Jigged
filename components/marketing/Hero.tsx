@@ -3,8 +3,9 @@
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import Link from 'next/link';
 import JiggedIcon from '@/components/branding/JiggedIcon';
-import EmailCapture from './EmailCapture';
 
 export default function Hero() {
   const backgroundSx = {
@@ -105,14 +106,25 @@ export default function Hero() {
                 lineHeight: 1.7,
               }}
             >
-              Built for precision manufacturing.
-              <br />
-              Everything you need, nothing you don&apos;t.
+              Quoting, job tracking, inventory, and operator tools — built for
+              precision shops, not enterprise factories. Everything you need, nothing you don't.
             </Typography>
-
-            <Box sx={{ maxWidth: 480 }}>
-              <EmailCapture source="landing_hero" />
-            </Box>
+            <Button
+              component={Link}
+              href="/invite/early-access"
+              variant="contained"
+              size="large"
+              sx={{
+                minWidth: { xs: 'auto', md: 220 },
+                fontWeight: 600,
+                background: 'linear-gradient(135deg, #D4872A 0%, #4682B4 50%, #2BBCB3 100%)',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #b8721f 0%, #3A6B94 50%, #239e97 100%)',
+                },
+              }}
+            >
+              Get Started
+            </Button>
           </Box>
         </Box>
       </Container>

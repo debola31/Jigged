@@ -92,19 +92,6 @@ export default function InviteForm() {
                 We&apos;ll have your shop set up shortly and send you a
                 personal login.
               </Typography>
-              <Typography
-                variant="body2"
-                sx={{ color: 'rgba(255, 255, 255, 0.4)', mt: 1 }}
-              >
-                Redirecting to home...
-              </Typography>
-              <Button
-                href="/"
-                size="small"
-                sx={{ color: 'rgba(255, 255, 255, 0.6)', textTransform: 'none' }}
-              >
-                Back to home
-              </Button>
             </Stack>
           ) : (
             <>

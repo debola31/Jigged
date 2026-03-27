@@ -1,7 +1,8 @@
 'use client';
 
 import * as Sentry from '@sentry/nextjs';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { submitWaitlist } from '@/app/actions/waitlist';
 import { SHOP_SIZES } from '@/lib/constants/marketing';
 import Container from '@mui/material/Container';
@@ -14,13 +15,21 @@ import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 export default function InviteForm() {
+  const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [shopSize, setShopSize] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  useEffect(() => {
+    if (status !== 'success') return;
+    const timer = setTimeout(() => router.push('/'), 4000);
+    return () => clearTimeout(timer);
+  }, [status, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +95,20 @@ export default function InviteForm() {
             </Stack>
           ) : (
             <>
+              <Button
+                href="/"
+                size="small"
+                startIcon={<ArrowBackIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.5)',
+                  textTransform: 'none',
+                  mb: 2,
+                  ml: -1,
+                  '&:hover': { color: 'rgba(255, 255, 255, 0.8)' },
+                }}
+              >
+                Back to home
+              </Button>
               <Typography
                 variant="h4"
                 component="h1"

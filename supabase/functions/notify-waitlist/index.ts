@@ -14,28 +14,78 @@ interface WaitlistRecord {
 }
 
 interface WebhookPayload {
-  type: 'INSERT';
+  type: 'INSERT' | 'UPDATE';
   table: string;
   record: WaitlistRecord;
 }
 
 async function sendEmail(
   apiKey: string,
-  { from, to, subject, text }: { from: string; to: string; subject: string; text: string },
+  { from, to, subject, text, html }: { from: string; to: string; subject: string; text: string; html?: string },
 ): Promise<void> {
+  const payload: Record<string, unknown> = { from, to: [to], subject, text };
+  if (html) payload.html = html;
+
   const res = await fetch(RESEND_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ from, to: [to], subject, text }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`Resend API error (${res.status}): ${body}`);
   }
+}
+
+function buildWelcomeEmailHtml(name: string | null, companyName: string | null): string {
+  const greeting = name ? `Hi ${name},` : 'Hi there,';
+  const shopText = companyName
+    ? `<strong style="color:#ffffff;">${companyName}</strong>`
+    : 'your shop';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light only">
+  <meta name="supported-color-schemes" content="light only">
+  <style>
+    :root { color-scheme: light only; }
+    [data-ogsc] body, .dark-mode body { background-color: #111439 !important; }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#111439; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#111439" style="background-color:#111439; padding:40px 20px;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" bgcolor="#1a1f4a" style="background-color:#1a1f4a; border:1px solid #2d3260; border-radius:8px; padding:40px;">
+        <tr><td align="center" style="padding-bottom:24px;">
+          <svg viewBox="0 0 64 64" width="48" height="48" xmlns="http://www.w3.org/2000/svg">
+            <rect width="64" height="64" rx="12" fill="#151520"/>
+            <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A"/>
+            <rect x="30" y="10" width="10" height="32" fill="#4682B4"/>
+            <path d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54" fill="#2BBCB3"/>
+          </svg>
+        </td></tr>
+        <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
+          Welcome to Jigged
+        </td></tr>
+        <tr><td align="center" style="color:#B0B3B8; font-size:14px; line-height:1.5; padding-bottom:24px;">
+          ${greeting}<br><br>
+          Thanks for signing up for ${shopText}. We're setting up your shop now &mdash; you'll get a personal login shortly.
+        </td></tr>
+        <tr><td align="center" style="color:#B0B3B8; font-size:13px; padding-top:8px;">
+          &mdash; Debola from Jigged
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -51,8 +101,8 @@ Deno.serve(async (req: Request) => {
 
     const payload: WebhookPayload = await req.json();
 
-    if (payload.type !== 'INSERT' || payload.table !== 'waitlist') {
-      return jsonResponse({ message: 'Ignored — not a waitlist insert' });
+    if ((payload.type !== 'INSERT' && payload.type !== 'UPDATE') || payload.table !== 'waitlist') {
+      return jsonResponse({ message: 'Ignored — not a waitlist event' });
     }
 
     const { email, name, company_name, shop_size, source, created_at } = payload.record;
@@ -81,12 +131,13 @@ Deno.serve(async (req: Request) => {
         from: 'Debola from Jigged <noreply@jigged.app>',
         to: email,
         subject: 'We got your request — welcome to Jigged',
+        html: buildWelcomeEmailHtml(name, company_name),
         text: [
           `Hi ${name || 'there'},`,
           '',
           `Thanks for signing up for ${company_name || 'your shop'}. We're setting up your shop now — you'll get a personal login shortly.`,
           '',
-          '— Debola, Jigged',
+          '— Debola from Jigged',
         ].join('\n'),
       }),
     ]);

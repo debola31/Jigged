@@ -62,8 +62,8 @@ Deno.serve(async (req: Request) => {
       // Internal notification
       sendEmail(apiKey, {
         from: 'Jigged <noreply@jigged.app>',
-        to: 'noreply@jigged.app',
-        subject: `New access request: ${company_name || 'Unknown'}`,
+        to: 'debola@jigged.app',
+        subject: `New signup: ${company_name || 'Unknown'}`,
         text: [
           'New waitlist request:',
           '',
@@ -84,9 +84,7 @@ Deno.serve(async (req: Request) => {
         text: [
           `Hi ${name || 'there'},`,
           '',
-          `Thanks for requesting access for ${company_name || 'your shop'}. We're onboarding shops personally right now to make sure everything fits your workflow.`,
-          '',
-          "We'll reach out within 24-48 hours to get you set up.",
+          `Thanks for signing up for ${company_name || 'your shop'}. We're setting up your shop now — you'll get a personal login shortly.`,
           '',
           '— Debola, Jigged',
         ].join('\n'),

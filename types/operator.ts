@@ -76,6 +76,9 @@ export interface OperatorJob {
   operation_status: string | null;
   // Who is currently working on this operation
   current_operator_name: string | null;
+  // Job progress
+  operations_total: number;
+  operations_completed: number;
 }
 
 /**
@@ -99,6 +102,11 @@ export interface OperatorJobDetail {
   session_started_at: string | null;
   current_operator_id: string | null;
   current_operator_name: string | null;
+  // Job progress
+  operations_total: number;
+  operations_completed: number;
+  // Material requirements for current operation
+  materials: Array<{ name: string; quantity: number; unit: string }>;
 }
 
 // ============================================================================

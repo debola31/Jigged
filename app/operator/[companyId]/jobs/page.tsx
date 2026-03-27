@@ -9,6 +9,7 @@ import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import IconButton from '@mui/material/IconButton';
@@ -224,6 +225,21 @@ export default function OperatorJobsPage() {
                   <Typography variant="caption" color="text.secondary">
                     In progress: {job.current_operator_name}
                   </Typography>
+                )}
+
+                {job.operations_total > 1 && (
+                  <Box sx={{ mt: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {job.operations_completed}/{job.operations_total} ops
+                      </Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={(job.operations_completed / job.operations_total) * 100}
+                      sx={{ height: 4, borderRadius: 1 }}
+                    />
+                  </Box>
                 )}
               </CardContent>
             </CardActionArea>

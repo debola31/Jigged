@@ -231,7 +231,7 @@ export default function OperatorJobsPage() {
                   <Box sx={{ mt: 1 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                       <Typography variant="caption" color="text.secondary">
-                        {job.operations_completed}/{job.operations_total} ops
+                        {job.operations_completed}/{job.operations_total} operations
                       </Typography>
                     </Box>
                     <LinearProgress

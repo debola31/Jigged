@@ -248,36 +248,38 @@ function OperatorShell({
         >
           {/* Left: Jigged icon + station selector */}
           <JiggedIcon size={20} />
-          <Box
-            onClick={handleStationMenuOpen}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              cursor: 'pointer',
-              ml: 1,
-              minHeight: 48,
-              overflow: 'hidden',
-              maxWidth: 'calc(100vw - 140px)',
-              borderRadius: 1,
-              px: 0.75,
-              '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
-            }}
-          >
-            <Typography
-              variant="body1"
-              component="span"
+          {stationId && (
+            <Box
+              onClick={handleStationMenuOpen}
               sx={{
-                color: '#D4872A',
-                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                cursor: 'pointer',
+                ml: 1,
+                minHeight: 48,
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                maxWidth: 'calc(100vw - 140px)',
+                borderRadius: 1,
+                px: 0.75,
+                '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
               }}
             >
-              {stationName || 'Select Station'}
-            </Typography>
-            <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
-          </Box>
+              <Typography
+                variant="body1"
+                component="span"
+                sx={{
+                  color: '#D4872A',
+                  fontWeight: 600,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {stationName || 'Select Station'}
+              </Typography>
+              <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
+            </Box>
+          )}
 
           <Box sx={{ flex: 1 }} />
 

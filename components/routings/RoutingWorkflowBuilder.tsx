@@ -623,6 +623,7 @@ export default function RoutingWorkflowBuilder({
             operationName,
             resourceGroupName,
             runTimePerUnit: null,
+            setupTime: 0,
             instructions: null,
             laborRate,
             materials: [],
@@ -646,6 +647,7 @@ export default function RoutingWorkflowBuilder({
         const newNode = await createRoutingNode(routingId, {
           operation_type_id: operationTypeId,
           run_time_per_unit: '',
+          setup_time: '',
           instructions: '',
           materials: [],
         });
@@ -660,6 +662,7 @@ export default function RoutingWorkflowBuilder({
             operationName,
             resourceGroupName,
             runTimePerUnit: null,
+            setupTime: 0,
             instructions: null,
             laborRate,
             materials: [],
@@ -851,6 +854,9 @@ export default function RoutingWorkflowBuilder({
       const runTimePerUnit = formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null;
+      const setupTime = formData.setup_time
+        ? parseFloat(formData.setup_time)
+        : 0;
       const instructions = formData.instructions || null;
       const materials = formData.materials || [];
 
@@ -863,6 +869,7 @@ export default function RoutingWorkflowBuilder({
               data: {
                 ...data,
                 runTimePerUnit,
+                setupTime,
                 instructions,
                 materials,
               } as OperationNodeData,
@@ -879,6 +886,7 @@ export default function RoutingWorkflowBuilder({
               return {
                 ...n,
                 runTimePerUnit,
+                setupTime,
                 instructions,
                 materials,
               };

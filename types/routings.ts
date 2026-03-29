@@ -44,6 +44,7 @@ export interface RoutingNode {
   routing_id: string;
   operation_type_id: string;
   run_time_per_unit: number | null;
+  setup_time: number;
   instructions: string | null;
   metadata: Record<string, unknown>;
   materials: RoutingNodeMaterial[];
@@ -129,6 +130,7 @@ export interface OperationNodeData {
   operationName: string;
   resourceGroupName: string | null;
   runTimePerUnit: number | null;
+  setupTime: number;
   instructions: string | null;
   laborRate: number | null;
   materials: RoutingNodeMaterial[];
@@ -158,6 +160,7 @@ export type FlowEdge = Edge;
 export interface RoutingNodeFormData {
   operation_type_id: string;
   run_time_per_unit: string;
+  setup_time: string;
   instructions: string;
   materials: RoutingNodeMaterial[];
 }
@@ -168,6 +171,7 @@ export interface RoutingNodeFormData {
 export const EMPTY_NODE_FORM: RoutingNodeFormData = {
   operation_type_id: '',
   run_time_per_unit: '',
+  setup_time: '',
   instructions: '',
   materials: [],
 };
@@ -185,6 +189,7 @@ export function nodeToFormData(node: RoutingNode): RoutingNodeFormData {
   return {
     operation_type_id: node.operation_type_id,
     run_time_per_unit: node.run_time_per_unit !== null ? String(node.run_time_per_unit) : '',
+    setup_time: node.setup_time ? String(node.setup_time) : '',
     instructions: node.instructions || '',
     materials: node.materials || [],
   };
@@ -208,6 +213,7 @@ export function toFlowElements(
       operationName: node.operation_type?.name || 'Unknown Operation',
       resourceGroupName: node.operation_type?.resource_group?.name || null,
       runTimePerUnit: node.run_time_per_unit,
+      setupTime: node.setup_time,
       instructions: node.instructions,
       laborRate: node.operation_type?.labor_rate || null,
       materials: node.materials || [],
@@ -231,16 +237,19 @@ export function toFlowElements(
 export function calculateRoutingTime(
   nodes: RoutingNodeWithOperation[],
   quantity: number = 1
-): { runTime: number; totalTime: number } {
+): { runTime: number; setupTime: number; totalTime: number } {
   let runTime = 0;
+  let setupTime = 0;
 
   for (const node of nodes) {
     runTime += (node.run_time_per_unit || 0) * quantity;
+    setupTime += node.setup_time || 0;
   }
 
   return {
     runTime,
-    totalTime: runTime,
+    setupTime,
+    totalTime: setupTime + runTime,
   };
 }
 
@@ -250,8 +259,16 @@ export function calculateRoutingTime(
 export function formatTime(minutes: number | null): string {
   if (minutes === null || minutes === 0) return '—';
 
+  // Sub-minute: show seconds
+  if (minutes < 1) {
+    const seconds = Math.round(minutes * 60);
+    return `${seconds} sec`;
+  }
+
   if (minutes < 60) {
-    return `${minutes} min`;
+    // Show whole minutes, or 1 decimal if fractional
+    const display = Number.isInteger(minutes) ? minutes : Math.round(minutes * 10) / 10;
+    return `${display} min`;
   }
 
   const hours = Math.floor(minutes / 60);

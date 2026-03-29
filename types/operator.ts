@@ -96,7 +96,7 @@ export interface OperatorJobDetail {
   operation_name: string | null;
   operation_status: string | null;
   instructions: string | null;
-  estimated_hours: number | null;
+  estimated_minutes: number | null;
   // Active session info
   active_session_id: string | null;
   session_started_at: string | null;

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-03-20T19:32:06Z
+-- Generated: 2026-03-29T23:49:40Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -240,6 +240,7 @@ CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "materials" jsonb DEFAULT '[]'::jsonb,
+    "setup_time" numeric DEFAULT 0,
     CONSTRAINT "routing_nodes_pkey" PRIMARY KEY (id)
 );
 
@@ -362,10 +363,10 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "sequence" integer NOT NULL,
     "operation_name" text NOT NULL,
     "operation_type_id" uuid,
-    "estimated_setup_hours" numeric(8,2) DEFAULT 0,
-    "estimated_run_hours_per_unit" numeric(8,4) DEFAULT 0,
-    "actual_setup_hours" numeric(8,2),
-    "actual_run_hours" numeric(8,2),
+    "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
+    "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
+    "actual_setup_minutes" numeric(8,2),
+    "actual_run_minutes" numeric(8,2),
     "status" text NOT NULL DEFAULT 'pending'::text,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -1825,11 +1826,11 @@ AS $function$
       LOOP
           INSERT INTO job_operations (
               job_id, sequence, operation_name, operation_type_id,
-              instructions, estimated_setup_hours, estimated_run_hours_per_unit, status,
+              instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, status,
               routing_node_id
           ) VALUES (
               p_job_id, v_sequence, v_node.operation_name, v_node.operation_type_id,
-              v_node.instructions, 0, v_node.run_time_per_unit, 'pending',
+              v_node.instructions, COALESCE(v_node.setup_time, 0), v_node.run_time_per_unit, 'pending',
               v_node.id
           );
           v_sequence := v_sequence + 10;
@@ -2156,7 +2157,6 @@ DECLARE
     v_routing_id UUID;
     v_job_id UUID;
 BEGIN
-    -- Get active template data
     SELECT template_data INTO v_template
     FROM demo_data_templates
     WHERE name = p_template_name AND is_active = TRUE
@@ -2166,15 +2166,12 @@ BEGIN
         RAISE EXCEPTION 'No active demo data template found for name: %', p_template_name;
     END IF;
 
-    -- -----------------------------------------------------------------------
     -- Insert customers
-    -- -----------------------------------------------------------------------
     IF v_template->'customers' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO customers (id, company_id, name, contact_name, contact_email,
                                    contact_phone, city, state, country, created_at)
             VALUES (v_new_id, p_company_id,
@@ -2185,30 +2182,24 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
     -- Insert resource_groups
-    -- -----------------------------------------------------------------------
     IF v_template->'resource_groups' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO resource_groups (id, company_id, name, description, created_at)
             VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description',
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert operation_types (depends on resource_groups)
-    -- -----------------------------------------------------------------------
+    -- Insert operation_types
     IF v_template->'operation_types' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description, created_at)
             VALUES (v_new_id, p_company_id,
                     (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
@@ -2219,15 +2210,12 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert part_categories (NEW — supports cost-plus model)
-    -- -----------------------------------------------------------------------
+    -- Insert part_categories
     IF v_template->'part_categories' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'part_categories')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO part_categories (id, company_id, name, default_markup_percent, description, created_at)
             VALUES (v_new_id, p_company_id,
                     v_item->>'name',
@@ -2237,15 +2225,12 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert parts (pricing column removed — now uses category_id, manual_cost, cost_source)
-    -- -----------------------------------------------------------------------
+    -- Insert parts
     IF v_template->'parts' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO parts (id, company_id, part_number, description,
                                category_id, manual_cost, cost_source, created_at)
             VALUES (v_new_id, p_company_id,
@@ -2260,21 +2245,16 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
     -- Insert inventory_items
-    -- -----------------------------------------------------------------------
     IF v_template->'inventory_items' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO inventory_items (id, company_id, name, description, sku, primary_unit,
                                          quantity, cost_per_unit, reorder_point, created_at)
             VALUES (v_new_id, p_company_id,
-                    v_item->>'name',
-                    v_item->>'description',
-                    v_item->>'sku',
+                    v_item->>'name', v_item->>'description', v_item->>'sku',
                     v_item->>'primary_unit',
                     COALESCE((v_item->>'quantity')::NUMERIC, 0),
                     (v_item->>'cost_per_unit')::NUMERIC,
@@ -2283,150 +2263,134 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert routings + routing_nodes + routing_edges (1:1 with parts)
-    -- -----------------------------------------------------------------------
+    -- Insert routings + routing_nodes + routing_edges
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings')
         LOOP
             v_new_id := gen_random_uuid();
             v_routing_id := v_new_id;
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
             INSERT INTO routings (id, company_id, part_id, name, description, created_by, created_at)
             VALUES (v_new_id, p_company_id,
                     (v_ref_map->>(v_item->>'part_ref'))::UUID,
-                    v_item->>'name',
-                    v_item->>'description',
-                    p_user_id,
+                    v_item->>'name', v_item->>'description', p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
 
-            -- Insert nodes for this routing
             IF v_item->'nodes' IS NOT NULL THEN
                 FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes')
                 LOOP
                     v_new_id := gen_random_uuid();
                     v_ref_map := jsonb_set(v_ref_map, ARRAY[v_node->>'_ref'], to_jsonb(v_new_id::TEXT));
-
                     INSERT INTO routing_nodes (id, routing_id, operation_type_id,
-                                               run_time_per_unit, instructions, materials)
-                    VALUES (v_new_id,
-                            v_routing_id,
+                                               run_time_per_unit, setup_time, instructions, materials)
+                    VALUES (v_new_id, v_routing_id,
                             (v_ref_map->>(v_node->>'operation_type_ref'))::UUID,
                             (v_node->>'run_time_per_unit')::NUMERIC,
+                            COALESCE((v_node->>'setup_time')::NUMERIC, 0),
                             v_node->>'instructions',
                             COALESCE(v_node->'materials', '[]'::JSONB));
                 END LOOP;
             END IF;
 
-            -- Insert edges for this routing
             IF v_item->'edges' IS NOT NULL THEN
                 FOR v_edge IN SELECT * FROM jsonb_array_elements(v_item->'edges')
                 LOOP
                     INSERT INTO routing_edges (routing_id, source_node_id, target_node_id)
-                    VALUES (
-                        v_routing_id,
-                        (v_ref_map->>(v_edge->>'source_ref'))::UUID,
-                        (v_ref_map->>(v_edge->>'target_ref'))::UUID
-                    );
+                    VALUES (v_routing_id,
+                            (v_ref_map->>(v_edge->>'source_ref'))::UUID,
+                            (v_ref_map->>(v_edge->>'target_ref'))::UUID);
                 END LOOP;
             END IF;
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert quotes (depends on customers, parts)
-    -- Now includes cost-plus snapshot fields
-    -- -----------------------------------------------------------------------
+    -- Insert quotes
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
         LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO quotes (id, company_id, quote_number, customer_id, part_id,
-                                quantity, unit_price, total_price, status,
-                                description, created_by, created_at, status_changed_at,
-                                base_cost, cost_source, markup_percent,
-                                estimated_labor_cost, estimated_material_cost)
+            INSERT INTO quotes (id, company_id, customer_id, part_id, description,
+                                quantity, unit_price, status, created_by,
+                                base_cost, markup_percent, cost_source,
+                                labor_cost_snapshot, material_cost_snapshot, created_at)
             VALUES (v_new_id, p_company_id,
-                    v_item->>'quote_number',
                     (v_ref_map->>(v_item->>'customer_ref'))::UUID,
                     CASE WHEN v_item->>'part_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID
-                         ELSE NULL END,
+                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID ELSE NULL END,
+                    v_item->>'description',
                     COALESCE((v_item->>'quantity')::INTEGER, 1),
                     (v_item->>'unit_price')::NUMERIC,
-                    (v_item->>'total_price')::NUMERIC,
-                    COALESCE(v_item->>'status', 'draft'),
-                    v_item->>'description',
-                    p_user_id,
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
-                    (v_item->>'status_changed_at')::TIMESTAMPTZ,
+                    COALESCE(v_item->>'status', 'draft'), p_user_id,
                     (v_item->>'base_cost')::NUMERIC,
-                    v_item->>'cost_source',
                     (v_item->>'markup_percent')::NUMERIC,
-                    (v_item->>'estimated_labor_cost')::NUMERIC,
-                    (v_item->>'estimated_material_cost')::NUMERIC);
+                    v_item->>'cost_source',
+                    (v_item->>'labor_cost_snapshot')::NUMERIC,
+                    (v_item->>'material_cost_snapshot')::NUMERIC,
+                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert jobs + job_operations (depends on customers, parts, quotes)
-    -- -----------------------------------------------------------------------
+    -- Insert jobs + job_operations
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
         LOOP
             v_new_id := gen_random_uuid();
             v_job_id := v_new_id;
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO jobs (id, company_id, job_number, customer_id, part_id,
-                              quote_id, description, status, created_by,
-                              created_at, started_at, completed_at, shipped_at, status_changed_at)
+            INSERT INTO jobs (id, company_id, customer_id, part_id, quote_id,
+                              description, status, created_by, created_at,
+                              started_at, completed_at, shipped_at, status_changed_at)
             VALUES (v_new_id, p_company_id,
-                    v_item->>'job_number',
                     (v_ref_map->>(v_item->>'customer_ref'))::UUID,
                     CASE WHEN v_item->>'part_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID
-                         ELSE NULL END,
+                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID ELSE NULL END,
                     CASE WHEN v_item->>'quote_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID
-                         ELSE NULL END,
+                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID ELSE NULL END,
                     v_item->>'description',
-                    COALESCE(v_item->>'status', 'pending'),
-                    p_user_id,
+                    COALESCE(v_item->>'status', 'pending'), p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
                     (v_item->>'started_at')::TIMESTAMPTZ,
                     (v_item->>'completed_at')::TIMESTAMPTZ,
                     (v_item->>'shipped_at')::TIMESTAMPTZ,
                     (v_item->>'status_changed_at')::TIMESTAMPTZ);
 
-            -- Insert job_operations
             IF v_item->'operations' IS NOT NULL THEN
                 FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations')
                 LOOP
                     v_new_id := gen_random_uuid();
                     v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::TEXT));
-
                     INSERT INTO job_operations (id, job_id, sequence, operation_name,
-                                                operation_type_id, estimated_setup_hours,
-                                                estimated_run_hours_per_unit,
-                                                actual_setup_hours, actual_run_hours,
-                                                status,
-                                                routing_node_id, instructions,
+                                                operation_type_id, estimated_setup_minutes,
+                                                estimated_run_minutes_per_unit,
+                                                actual_setup_minutes, actual_run_minutes,
+                                                status, routing_node_id, instructions,
                                                 started_at, completed_at, created_at)
-                    VALUES (v_new_id,
-                            v_job_id,
+                    VALUES (v_new_id, v_job_id,
                             (v_op->>'sequence')::INTEGER,
                             v_op->>'operation_name',
                             CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
                                  THEN (v_ref_map->>(v_op->>'operation_type_ref'))::UUID
                                  ELSE NULL END,
-                            COALESCE((v_op->>'estimated_setup_hours')::NUMERIC, 0),
-                            COALESCE((v_op->>'estimated_run_hours_per_unit')::NUMERIC, 0),
-                            (v_op->>'actual_setup_hours')::NUMERIC,
-                            (v_op->>'actual_run_hours')::NUMERIC,
+                            -- New keys (minutes) take priority; old keys (hours) are converted * 60
+                            COALESCE(
+                                (v_op->>'estimated_setup_minutes')::NUMERIC,
+                                (v_op->>'estimated_setup_hours')::NUMERIC * 60,
+                                0
+                            ),
+                            COALESCE(
+                                (v_op->>'estimated_run_minutes_per_unit')::NUMERIC,
+                                (v_op->>'estimated_run_hours_per_unit')::NUMERIC * 60,
+                                0
+                            ),
+                            COALESCE(
+                                (v_op->>'actual_setup_minutes')::NUMERIC,
+                                (v_op->>'actual_setup_hours')::NUMERIC * 60
+                            ),
+                            COALESCE(
+                                (v_op->>'actual_run_minutes')::NUMERIC,
+                                (v_op->>'actual_run_hours')::NUMERIC * 60
+                            ),
                             COALESCE(v_op->>'status', 'pending'),
                             CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
                                  THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID
@@ -2440,9 +2404,7 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Post-insert: link converted quotes to their jobs
-    -- -----------------------------------------------------------------------
+    -- Link converted quotes to jobs
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
         LOOP
@@ -2984,17 +2946,17 @@ COMMENT ON COLUMN "public"."job_operations"."operation_name"
 COMMENT ON COLUMN "public"."job_operations"."operation_type_id"
     IS 'FK to operation_types. What type of operation is performed. SET NULL if operation type deleted.';
 
-COMMENT ON COLUMN "public"."job_operations"."estimated_setup_hours"
-    IS 'Estimated setup hours from routing.';
+COMMENT ON COLUMN "public"."job_operations"."estimated_setup_minutes"
+    IS 'Estimated one-time setup minutes from routing (per batch, not per unit).';
 
-COMMENT ON COLUMN "public"."job_operations"."estimated_run_hours_per_unit"
-    IS 'Estimated run hours per unit from routing.';
+COMMENT ON COLUMN "public"."job_operations"."estimated_run_minutes_per_unit"
+    IS 'Estimated run minutes per unit from routing.';
 
-COMMENT ON COLUMN "public"."job_operations"."actual_setup_hours"
-    IS 'Actual setup hours recorded by operator.';
+COMMENT ON COLUMN "public"."job_operations"."actual_setup_minutes"
+    IS 'Actual setup minutes recorded by operator.';
 
-COMMENT ON COLUMN "public"."job_operations"."actual_run_hours"
-    IS 'Actual total run hours recorded by operator.';
+COMMENT ON COLUMN "public"."job_operations"."actual_run_minutes"
+    IS 'Actual total run minutes recorded by operator.';
 
 COMMENT ON COLUMN "public"."job_operations"."status"
     IS 'Operation status. Values: pending, in_progress, completed, skipped. Default: pending';
@@ -3295,6 +3257,9 @@ COMMENT ON COLUMN "public"."routing_nodes"."created_at"
 
 COMMENT ON COLUMN "public"."routing_nodes"."updated_at"
     IS 'Timestamp when the node was last updated';
+
+COMMENT ON COLUMN "public"."routing_nodes"."setup_time"
+    IS 'One-time setup/changeover time in minutes. Applies once per batch, not per unit.';
 
 COMMENT ON COLUMN "public"."routings"."id"
     IS 'Primary key. UUID auto-generated.';

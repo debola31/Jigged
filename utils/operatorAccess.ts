@@ -14,7 +14,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
-import { calculateActualRunHours } from '@/utils/sessionDuration';
+import { calculateActualRunMinutes } from '@/utils/sessionDuration';
 import type {
   OperatorJob,
   OperatorJobDetail,
@@ -382,7 +382,7 @@ export async function getOperatorJobDetail(
   // Get operations for this job
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, operation_name, status, instructions, estimated_setup_hours, estimated_run_hours_per_unit, operation_type_id, routing_node_id')
+    .select('id, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
     .eq('job_id', jobId);
 
   if (operationTypeId) {
@@ -391,7 +391,7 @@ export async function getOperatorJobDetail(
 
   const { data: ops } = await opsQuery;
 
-  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_hours: number | null; estimated_run_hours_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
+  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_minutes: number | null; estimated_run_minutes_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
     op.status === 'pending' || op.status === 'in_progress'
   ) || null;
 
@@ -434,12 +434,12 @@ export async function getOperatorJobDetail(
     }
   }
 
-  // Calculate estimated hours
-  let estimatedHours: number | null = null;
+  // Calculate estimated minutes
+  let estimatedMinutes: number | null = null;
   if (currentOp) {
-    const setup = Number(currentOp.estimated_setup_hours) || 0;
-    const runPer = Number(currentOp.estimated_run_hours_per_unit) || 0;
-    estimatedHours = setup + runPer;
+    const setup = Number(currentOp.estimated_setup_minutes) || 0;
+    const runPer = Number(currentOp.estimated_run_minutes_per_unit) || 0;
+    estimatedMinutes = setup + runPer;
   }
 
   // Count all operations for job progress
@@ -500,7 +500,7 @@ export async function getOperatorJobDetail(
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
     instructions: currentOp?.instructions || null,
-    estimated_hours: estimatedHours,
+    estimated_minutes: estimatedMinutes,
     active_session_id: activeSessionId,
     session_started_at: sessionStartedAt,
     current_operator_id: currentOperatorId,
@@ -747,8 +747,8 @@ export async function completeJob(
     })
     .eq('id', session.id);
 
-  // 2. Calculate actual run hours from all sessions for this operation
-  let actualRunHours: number | null = null;
+  // 2. Calculate actual run minutes from all sessions for this operation
+  let actualRunMinutes: number | null = null;
   if (session.job_operation_id) {
     const { data: allSessions } = await supabase
       .from('operator_sessions')
@@ -757,20 +757,20 @@ export async function completeJob(
       .not('ended_at', 'is', null);
 
     if (allSessions && allSessions.length > 0) {
-      actualRunHours = calculateActualRunHours(
+      actualRunMinutes = calculateActualRunMinutes(
         allSessions as { started_at: string; ended_at: string }[]
       );
     }
   }
 
-  // 3. Mark job_operation as completed with actual hours
+  // 3. Mark job_operation as completed with actual minutes
   if (session.job_operation_id) {
     await supabase
       .from('job_operations')
       .update({
         status: 'completed',
         completed_at: now,
-        actual_run_hours: actualRunHours,
+        actual_run_minutes: actualRunMinutes,
       })
       .eq('id', session.job_operation_id);
   }

@@ -54,6 +54,7 @@ export default function NodeEditModal({
   const [formData, setFormData] = useState<RoutingNodeFormData>({
     operation_type_id: '',
     run_time_per_unit: '',
+    setup_time: '',
     instructions: '',
     materials: [],
   });
@@ -71,6 +72,7 @@ export default function NodeEditModal({
         operation_type_id: nodeData.operationTypeId,
         run_time_per_unit:
           nodeData.runTimePerUnit !== null ? String(nodeData.runTimePerUnit) : '',
+        setup_time: nodeData.setupTime ? String(nodeData.setupTime) : '',
         instructions: nodeData.instructions || '',
         materials: nodeData.materials || [],
       });
@@ -100,6 +102,16 @@ export default function NodeEditModal({
       parseFloat(formData.run_time_per_unit) < 0
     ) {
       newErrors.run_time_per_unit = 'Cannot be negative';
+    }
+
+    // Validate setup_time if provided
+    if (formData.setup_time && isNaN(parseFloat(formData.setup_time))) {
+      newErrors.setup_time = 'Must be a valid number';
+    } else if (
+      formData.setup_time &&
+      parseFloat(formData.setup_time) < 0
+    ) {
+      newErrors.setup_time = 'Cannot be negative';
     }
 
     setErrors(newErrors);
@@ -215,22 +227,40 @@ export default function NodeEditModal({
             <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
               Time Estimate
             </Typography>
-            <TextField
-              label="Run Time per Unit"
-              value={formData.run_time_per_unit}
-              onChange={(e) =>
-                setFormData((prev) => ({
-                  ...prev,
-                  run_time_per_unit: e.target.value,
-                }))
-              }
-              type="number"
-              inputProps={{ min: 0, step: 0.1 }}
-              error={!!errors.run_time_per_unit}
-              helperText={errors.run_time_per_unit || 'Minutes per unit'}
-              disabled={saving}
-              fullWidth
-            />
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                label="Setup Time"
+                value={formData.setup_time}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    setup_time: e.target.value,
+                  }))
+                }
+                type="number"
+                inputProps={{ min: 0, step: 1 }}
+                error={!!errors.setup_time}
+                helperText={errors.setup_time || 'One-time setup per batch (minutes)'}
+                disabled={saving}
+                fullWidth
+              />
+              <TextField
+                label="Run Time per Unit"
+                value={formData.run_time_per_unit}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    run_time_per_unit: e.target.value,
+                  }))
+                }
+                type="number"
+                inputProps={{ min: 0, step: 0.1 }}
+                error={!!errors.run_time_per_unit}
+                helperText={errors.run_time_per_unit || 'Minutes per unit'}
+                disabled={saving}
+                fullWidth
+              />
+            </Box>
           </Box>
 
           {/* Instructions Section */}

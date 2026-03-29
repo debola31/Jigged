@@ -71,22 +71,22 @@ function SessionTimer({ startedAt }: { startedAt: string }) {
 
 /**
  * Estimated vs Elapsed comparison.
- * Shows a progress bar and text comparing elapsed time to estimated hours.
+ * Shows a progress bar and text comparing elapsed time to estimated minutes.
  */
 function EstimatedComparison({
-  estimatedHours,
+  estimatedMinutes,
   sessionStartedAt,
 }: {
-  estimatedHours: number;
+  estimatedMinutes: number;
   sessionStartedAt: string;
 }) {
-  const [elapsedHours, setElapsedHours] = useState(0);
+  const [elapsedMinutes, setElapsedMinutes] = useState(0);
 
   useEffect(() => {
     const start = new Date(sessionStartedAt).getTime();
 
     const update = () => {
-      setElapsedHours((Date.now() - start) / (1000 * 60 * 60));
+      setElapsedMinutes((Date.now() - start) / (1000 * 60));
     };
 
     update();
@@ -94,17 +94,22 @@ function EstimatedComparison({
     return () => clearInterval(interval);
   }, [sessionStartedAt]);
 
-  const progress = Math.min((elapsedHours / estimatedHours) * 100, 100);
-  const overEstimate = elapsedHours > estimatedHours;
+  const progress = Math.min((elapsedMinutes / estimatedMinutes) * 100, 100);
+  const overEstimate = elapsedMinutes > estimatedMinutes;
+
+  const fmt = (min: number) => {
+    if (min < 60) return `${Math.round(min)} min`;
+    return `${(min / 60).toFixed(1)} hrs`;
+  };
 
   return (
     <Box sx={{ mt: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
         <Typography variant="caption" color="text.secondary">
-          Elapsed: {elapsedHours.toFixed(1)} hrs
+          Elapsed: {fmt(elapsedMinutes)}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          Estimated: {estimatedHours.toFixed(1)} hrs
+          Estimated: {fmt(estimatedMinutes)}
         </Typography>
       </Box>
       <LinearProgress
@@ -411,9 +416,9 @@ export default function OperatorJobDetailPage() {
                 {job.instructions}
               </Typography>
             )}
-            {job.estimated_hours && (
+            {job.estimated_minutes && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Estimated: {job.estimated_hours.toFixed(1)} hours
+                Estimated: {job.estimated_minutes < 60 ? `${Math.round(job.estimated_minutes)} min` : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
               </Typography>
             )}
           </CardContent>
@@ -469,9 +474,9 @@ export default function OperatorJobDetailPage() {
               Time on Job
             </Typography>
             <SessionTimer startedAt={job.session_started_at} />
-            {job.estimated_hours != null && job.estimated_hours > 0 && (
+            {job.estimated_minutes != null && job.estimated_minutes > 0 && (
               <EstimatedComparison
-                estimatedHours={job.estimated_hours}
+                estimatedMinutes={job.estimated_minutes}
                 sessionStartedAt={job.session_started_at}
               />
             )}

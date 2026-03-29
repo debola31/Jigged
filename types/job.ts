@@ -29,10 +29,10 @@ export interface JobOperation {
   operation_name: string;
   operation_type_id: string | null;
   routing_node_id: string | null;
-  estimated_setup_hours: number;
-  estimated_run_hours_per_unit: number;
-  actual_setup_hours: number | null;
-  actual_run_hours: number | null;
+  estimated_setup_minutes: number;
+  estimated_run_minutes_per_unit: number;
+  actual_setup_minutes: number | null;
+  actual_run_minutes: number | null;
   status: 'pending' | 'in_progress' | 'completed' | 'skipped';
   started_at: string | null;
   completed_at: string | null;
@@ -186,8 +186,8 @@ export const OPERATION_STATUS_CONFIG: Record<
  * Data for completing an operation
  */
 export interface CompleteOperationData {
-  actual_setup_hours?: number;
-  actual_run_hours?: number;
+  actual_setup_minutes?: number;
+  actual_run_minutes?: number;
   notes?: string;
 }
 

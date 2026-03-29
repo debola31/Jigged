@@ -16,6 +16,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
+import { formatTime } from '@/types/routings';
 import OperationStatusChip from './OperationStatusChip';
 
 interface OperationCardProps {
@@ -73,18 +74,12 @@ export default function OperationCard({
     return new Date(dateStr).toLocaleString();
   };
 
-  const formatHours = (hours: number | null): string => {
-    if (hours === null || hours === undefined) return '—';
-    if (hours < 1) return `${Math.round(hours * 60)} min`;
-    return `${hours.toFixed(1)} hr`;
-  };
-
   const hasDetails =
     operation.instructions ||
     operation.started_at ||
     operation.completed_at ||
-    operation.actual_setup_hours !== null ||
-    operation.actual_run_hours !== null ||
+    operation.actual_setup_minutes !== null ||
+    operation.actual_run_minutes !== null ||
     operation.notes;
 
   return (
@@ -107,23 +102,6 @@ export default function OperationCard({
           p: 2,
         }}
       >
-        {/* Sequence Badge */}
-        <Typography
-          variant="body2"
-          sx={{
-            bgcolor: 'primary.main',
-            color: 'white',
-            px: 1.5,
-            py: 0.5,
-            borderRadius: 1,
-            fontWeight: 600,
-            minWidth: 32,
-            textAlign: 'center',
-          }}
-        >
-          {operation.sequence}
-        </Typography>
-
         {/* Operation Info */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography fontWeight={500} noWrap>
@@ -132,8 +110,9 @@ export default function OperationCard({
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
             <AccessTimeIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
             <Typography variant="caption" color="text.secondary">
-              Est: {formatHours(operation.estimated_setup_hours)} setup,{' '}
-              {formatHours(operation.estimated_run_hours_per_unit)}/unit
+              Est: {operation.estimated_setup_minutes > 0
+                ? `${formatTime(operation.estimated_setup_minutes)} setup, `
+                : ''}{formatTime(operation.estimated_run_minutes_per_unit)}/unit
             </Typography>
           </Box>
         </Box>
@@ -274,36 +253,38 @@ export default function OperationCard({
             </Box>
           )}
 
-          {/* Actual Hours */}
-          {(operation.actual_setup_hours !== null || operation.actual_run_hours !== null) && (
+          {/* Actual Time */}
+          {(operation.actual_setup_minutes !== null || operation.actual_run_minutes !== null) && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
                 Actual Time
               </Typography>
               <Box sx={{ display: 'flex', gap: 3, mt: 0.5 }}>
+                {operation.actual_setup_minutes !== null && (
+                  <Typography variant="body2">
+                    Setup: {formatTime(operation.actual_setup_minutes)}
+                    {operation.estimated_setup_minutes > 0 && (
+                      <Typography
+                        component="span"
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ ml: 1 }}
+                      >
+                        (est: {formatTime(operation.estimated_setup_minutes)})
+                      </Typography>
+                    )}
+                  </Typography>
+                )}
                 <Typography variant="body2">
-                  Setup: {formatHours(operation.actual_setup_hours)}
-                  {operation.estimated_setup_hours > 0 && (
+                  Run: {formatTime(operation.actual_run_minutes)}
+                  {operation.estimated_run_minutes_per_unit > 0 && (
                     <Typography
                       component="span"
                       variant="caption"
                       color="text.secondary"
                       sx={{ ml: 1 }}
                     >
-                      (est: {formatHours(operation.estimated_setup_hours)})
-                    </Typography>
-                  )}
-                </Typography>
-                <Typography variant="body2">
-                  Run: {formatHours(operation.actual_run_hours)}
-                  {operation.estimated_run_hours_per_unit > 0 && (
-                    <Typography
-                      component="span"
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ ml: 1 }}
-                    >
-                      (est: {formatHours(operation.estimated_run_hours_per_unit)}/unit)
+                      (est: {formatTime(operation.estimated_run_minutes_per_unit)}/unit)
                     </Typography>
                   )}
                 </Typography>

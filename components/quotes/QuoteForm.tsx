@@ -190,9 +190,27 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const handleChange =
     (field: keyof QuoteFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setFormData((prev) => ({ ...prev, [field]: e.target.value }));
+      const newValue = e.target.value;
+      setFormData((prev) => ({ ...prev, [field]: newValue }));
       if (fieldErrors[field]) {
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
+      }
+
+      // Recalculate base_cost when quantity changes if routing has setup cost
+      if (field === 'quantity' && costBreakdown && costBreakdown.total_setup_cost > 0) {
+        const qty = parseInt(newValue, 10) || 1;
+        const setupPerUnit = Math.round((costBreakdown.total_setup_cost / qty) * 100) / 100;
+        const baseCost = Math.round((costBreakdown.total_cost + setupPerUnit) * 100) / 100;
+        const markupPct = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
+        const unitPrice = markupPct !== null
+          ? String(calculateUnitPriceFromMarkup(baseCost, markupPct))
+          : String(baseCost);
+        setFormData((prev) => ({
+          ...prev,
+          [field]: newValue,
+          base_cost: String(baseCost),
+          unit_price: unitPrice,
+        }));
       }
     };
 
@@ -269,9 +287,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         const breakdown = await calculateRoutingCost(value.id);
         if (breakdown) {
           setCostBreakdown(breakdown);
-          const baseCostStr = String(breakdown.total_cost);
+          const qty = parseInt(formData.quantity, 10) || 1;
+          const setupPerUnit = breakdown.total_setup_cost > 0
+            ? Math.round((breakdown.total_setup_cost / qty) * 100) / 100
+            : 0;
+          const baseCost = Math.round((breakdown.total_cost + setupPerUnit) * 100) / 100;
+          const baseCostStr = String(baseCost);
           const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-            ? String(calculateUnitPriceFromMarkup(breakdown.total_cost, defaultMarkup))
+            ? String(calculateUnitPriceFromMarkup(baseCost, defaultMarkup))
             : baseCostStr;
           setFormData((prev) => ({
             ...prev,

@@ -87,14 +87,14 @@ export default function RoutingCostModal({
 
             {breakdown.labor_items.length > 0 && (
               <>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>Labor</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Labor (per unit)</Typography>
                 <Table size="small" sx={{ mb: 2 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell>Operation</TableCell>
-                      <TableCell align="right">Time (min)</TableCell>
+                      <TableCell align="right">Run (min)</TableCell>
                       <TableCell align="right">Rate ($/hr)</TableCell>
-                      <TableCell align="right">Cost</TableCell>
+                      <TableCell align="right">Cost/unit</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -112,6 +112,36 @@ export default function RoutingCostModal({
                     </TableRow>
                   </TableBody>
                 </Table>
+
+                {breakdown.total_setup_cost > 0 && (
+                  <>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Setup (one-time per batch)</Typography>
+                    <Table size="small" sx={{ mb: 2 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Operation</TableCell>
+                          <TableCell align="right">Setup (min)</TableCell>
+                          <TableCell align="right">Rate ($/hr)</TableCell>
+                          <TableCell align="right">Cost</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {breakdown.labor_items.filter(item => item.setup_time_minutes > 0).map((item, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{item.operation_name}</TableCell>
+                            <TableCell align="right">{item.setup_time_minutes}</TableCell>
+                            <TableCell align="right">{formatCurrency(item.labor_rate)}</TableCell>
+                            <TableCell align="right">{formatCurrency(item.setup_cost)}</TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow>
+                          <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(breakdown.total_setup_cost)}</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </>
+                )}
               </>
             )}
 

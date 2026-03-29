@@ -305,6 +305,9 @@ export async function createRoutingNode(
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
+      setup_time: formData.setup_time
+        ? parseFloat(formData.setup_time)
+        : 0,
       instructions: formData.instructions.trim() || null,
       metadata: {},
       materials: formData.materials || [],
@@ -336,6 +339,9 @@ export async function updateRoutingNode(
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
+      setup_time: formData.setup_time
+        ? parseFloat(formData.setup_time)
+        : 0,
       instructions: formData.instructions.trim() || null,
       materials: formData.materials || [],
       updated_at: new Date().toISOString(),
@@ -429,6 +435,7 @@ export async function saveRoutingGraph(
     isNew?: boolean;
     operationTypeId: string;
     runTimePerUnit: number | null;
+    setupTime?: number;
     instructions: string | null;
     materials: unknown[];
   }>,
@@ -469,6 +476,7 @@ export async function saveRoutingGraph(
           routing_id: routingId,
           operation_type_id: node.operationTypeId,
           run_time_per_unit: node.runTimePerUnit,
+          setup_time: node.setupTime ?? 0,
           instructions: node.instructions,
           metadata: {},
           materials: node.materials || [],
@@ -483,6 +491,7 @@ export async function saveRoutingGraph(
         .update({
           operation_type_id: node.operationTypeId,
           run_time_per_unit: node.runTimePerUnit,
+          setup_time: node.setupTime ?? 0,
           instructions: node.instructions,
           materials: node.materials || [],
           updated_at: new Date().toISOString(),
@@ -522,6 +531,7 @@ interface PendingNode {
   resourceGroupName: string | null;
   laborRate: number | null;
   runTimePerUnit: number | null;
+  setupTime?: number;
   instructions: string | null;
   materials: unknown[];
 }
@@ -637,6 +647,7 @@ export async function saveRoutingWithGraph(
           routing_id: routing.id,
           operation_type_id: node.operationTypeId,
           run_time_per_unit: node.runTimePerUnit,
+          setup_time: node.setupTime ?? 0,
           instructions: node.instructions,
           metadata: {},
           materials: node.materials || [],
@@ -651,6 +662,7 @@ export async function saveRoutingWithGraph(
         .update({
           operation_type_id: node.operationTypeId,
           run_time_per_unit: node.runTimePerUnit,
+          setup_time: node.setupTime ?? 0,
           instructions: node.instructions,
           materials: node.materials || [],
           updated_at: new Date().toISOString(),

@@ -6,6 +6,7 @@ import { Box, Typography, IconButton, Tooltip, Chip } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import { formatTime } from '@/types/routings';
 import type { OperationNodeData } from '@/types/routings';
 
 // Define the node type for React Flow
@@ -97,7 +98,13 @@ function OperationNodeComponent({ id, data, selected }: OperationNodeProps) {
             variant="caption"
             sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
           >
-            {data.runTimePerUnit ? `${data.runTimePerUnit}m/unit` : 'No time set'}
+            {data.setupTime && data.runTimePerUnit
+              ? `${formatTime(data.setupTime)} setup + ${formatTime(data.runTimePerUnit)}/unit`
+              : data.setupTime
+                ? `${formatTime(data.setupTime)} setup`
+                : data.runTimePerUnit
+                  ? `${formatTime(data.runTimePerUnit)}/unit`
+                  : 'No time set'}
           </Typography>
         </Box>
 

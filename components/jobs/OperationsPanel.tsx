@@ -100,8 +100,8 @@ export default function OperationsPanel({
   };
 
   const handleCompleteConfirm = async (data: {
-    actual_setup_hours?: number;
-    actual_run_hours?: number;
+    actual_setup_minutes?: number;
+    actual_run_minutes?: number;
     notes?: string;
   }) => {
     if (!selectedOperationId) return;

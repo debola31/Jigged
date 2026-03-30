@@ -1,7 +1,7 @@
 /**
  * Quote status values
  */
-export type QuoteStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'expired';
+export type QuoteStatus = 'pending_approval' | 'approved' | 'rejected' | 'expired';
 
 /**
  * Quote record from database
@@ -159,7 +159,6 @@ export const QUOTE_STATUS_CONFIG: Record<
   QuoteStatus,
   { label: string; color: 'default' | 'primary' | 'success' | 'error' | 'warning' }
 > = {
-  draft: { label: 'Draft', color: 'default' },
   pending_approval: { label: 'Pending Approval', color: 'primary' },
   approved: { label: 'Approved', color: 'success' },
   rejected: { label: 'Rejected', color: 'error' },

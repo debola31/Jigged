@@ -13,7 +13,7 @@ Phase 0 establishes the core quote-to-job workflow for Jigged. This is the minim
 ## The Flow
 
 ```javascript
-QUOTE (draft)
+QUOTE (pending_approval)
     │
     ▼
 QUOTE (sent)  ────────────▶  QUOTE (declined)
@@ -439,7 +439,7 @@ Phase 0 is complete when Shane can:
 ## Quote Status Workflow
 
   ```javascript
-     DRAFT
+   NEW QUOTE
        │
        ▼
    PENDING APPROVAL  ───────────▶  REJECTED
@@ -455,9 +455,7 @@ Phase 0 is complete when Shane can:
 
   **Status Definitions:**
 
-  - **Draft** - Quote is being prepared, not yet sent to customer
-
-  - Pending Approval - Quote has been sent to Customer & Shop Owner, awaiting response
+  - **Pending Approval** - Quote has been sent to Customer & Shop Owner, awaiting response
 
   - **Approved** - Customer & Shop Owner Approved the quote, ready to convert to job
 
@@ -497,7 +495,7 @@ Phase 0 is complete when Shane can:
   | total_price | Decimal | No | Total quoted price (quantity × unit_price) |
   | estimated_lead_time_days | Integer | No | Estimated days to complete |
   | valid_until | Date | No | Quote expiration date |
-  | status | Text | Yes | draft, pending approval, approved, rejected, expired |
+  | status | Text | Yes | pending_approval, approved, rejected, expired |
   | converted_to_job_id | UUID (FK) | No | Link to job when converted |
   | converted_at | Timestamp | No | When quote was converted to job |
   | notes | Text | No | Internal notes |
@@ -516,7 +514,7 @@ Phase 0 is complete when Shane can:
 
   - Search box (searches quote number, customer name, part number)
 
-  - Filter dropdown: Status (All / Draft / Pending Approval / Approved / Rejected)
+  - Filter dropdown: Status (All / Pending Approval / Approved / Rejected)
 
   - Filter dropdown: Customer (All / specific customer)
 
@@ -528,13 +526,11 @@ Phase 0 is complete when Shane can:
 
   **Row Actions (icon buttons):**
 
-  - Edit (pencil) - only for Draft status
+  - Edit (pencil) - only for Pending Approval or Rejected status
 
   - Convert to Job (play icon) - only for Approved status
 
   **Status Pills:**
-
-  - Draft = Gray
 
   - Pending Approval = Blue
 
@@ -552,7 +548,7 @@ Phase 0 is complete when Shane can:
 
   **Route:** `/dashboard/{companyId}/quotes/new` or `/dashboard/{companyId}/quotes/{id}/edit`
 
-  **Note:** Edit only available for Draft status quotes.
+  **Note:** Edit only available for Pending Approval or Rejected status quotes.
 
   **Form Sections:**
 
@@ -598,7 +594,7 @@ Phase 0 is complete when Shane can:
 
   **Actions:**
 
-  - Save as Draft → Returns to list
+  - Send for Approval → Goes to quote detail
 
   - Cancel → Returns to list without saving
 
@@ -630,10 +626,9 @@ Phase 0 is complete when Shane can:
 
   | Current Status | Available Actions |
   |---|---|
-  | Draft | Edit, Mark as Sent for Approval, Delete |
-  | Pending Approval | Mark as Approved, Mark as Rejected |
+  | Pending Approval | Edit, Mark as Approved, Mark as Rejected |
   | Approved | Convert to Job |
-  | Rejected | (none - read only) |
+  | Rejected | Edit, Re-submit for Approval |
   | Expired | (none - read only) |
 
 ### 4. Convert to Job Modal
@@ -871,14 +866,13 @@ Phase 0 is complete when Shane can:
 
   | From | To | Trigger |
   |---|---|---|
-  | Draft | Pending Approval | User clicks "Send for Approval" |
-  | Draft | Deleted | User clicks "Delete" |
+  | New Quote | Pending Approval | User creates and saves a new quote |
   | Pending Approval | Approved | User clicks "Mark as Approved" |
   | Pending Approval | Rejected | User clicks "Mark as Rejected" |
   | Pending Approval | Expired | System auto-expires past valid_until (future feature) |
   | Approved | (converted) | User clicks "Convert to Job" |
 
-  **Note:** Once a quote leaves Draft status, it cannot be edited. Create a new quote instead.
+  **Note:** Quotes in Pending Approval or Rejected status can be edited. Approved and Expired quotes cannot be edited.
 
   ---
 
@@ -926,7 +920,7 @@ Phase 0 is complete when Shane can:
 
   - CRUD operations
 
-  - Status transitions (draft → Pending Approval → Approved/Rejected)
+  - Status transitions (Pending Approval → Approved/Rejected)
 
   - Convert to Job
 
@@ -962,9 +956,9 @@ Phase 0 is complete when Shane can:
 
   - [ ] Total price calculates automatically
 
-  - [ ] Can save quote as draft
+  - [ ] New quote saves directly as pending_approval
 
-  - [ ] Can mark draft as sent for approval
+  - [ ] Can edit pending_approval and rejected quotes
 
   - [ ] Can mark pending approval quote as Approved or Rejected
 
@@ -974,7 +968,7 @@ Phase 0 is complete when Shane can:
 
   - [ ] Quote number auto-generates (Q-0001 format)
 
-  - [ ] Cannot edit quotes that are not in draft status
+  - [ ] Cannot edit quotes that are not in pending_approval or rejected status
 
 ### Quick Create
 
@@ -1069,7 +1063,7 @@ Phase 0 is complete when Shane can:
 
   **Behavior:**
 
-  - Attachments can only be added/modified in Draft or Rejected status
+  - Attachments can only be added/modified in Pending Approval or Rejected status
 
   - Multiple files can be uploaded at once via drag-and-drop or file picker
 
@@ -1097,7 +1091,7 @@ Phase 0 is complete when Shane can:
 
   - Replace existing attachment
 
-  - Delete attachment (draft/rejected quotes only)
+  - Delete attachment (pending_approval/rejected quotes only)
 
   **Job Conversion:** First attachment is automatically copied to the job when converting.
 
@@ -1121,7 +1115,7 @@ Phase 0 is complete when Shane can:
 
   **Filters:**
 
-  - Status dropdown: All, Draft, Pending Approval, Approved, Rejected
+  - Status dropdown: All, Pending Approval, Approved, Rejected
 
   - Customer dropdown: All or specific customer
 
@@ -1157,7 +1151,7 @@ Phase 0 is complete when Shane can:
 
 ## Status Workflow Updates
 
-  **Editing Rule:** Only Draft and Rejected quotes can be edited
+  **Editing Rule:** Only Pending Approval and Rejected quotes can be edited
 
   **Re-submit:** Rejected quotes can be edited and re-submitted for approval (rejected → pending_approval)
 
@@ -2412,7 +2406,7 @@ Phase 0 is complete when Shane can:
 
 ### Card 1: Open Quotes
 
-  **Query:** Count quotes where status IN ('draft', 'sent')
+  **Query:** Count quotes where status IN ('pending_approval', 'sent')
 
   **Display:**
 
@@ -2542,7 +2536,7 @@ Phase 0 is complete when Shane can:
 
   - [ ] Dashboard loads as home page after login
 
-  - [ ] Shows count of open quotes (draft + sent)
+  - [ ] Shows count of open quotes (pending_approval + sent)
 
   - [ ] Shows count of active jobs (pending + in_progress)
 

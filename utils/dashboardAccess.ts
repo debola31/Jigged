@@ -294,7 +294,7 @@ export async function getMetricValue(
 ): Promise<number> {
   switch (key) {
     case 'open_quotes':
-      return getCount('quotes', companyId, { status: ['draft', 'pending_approval'] });
+      return getCount('quotes', companyId, { status: ['pending_approval'] });
     case 'active_jobs':
       return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
     case 'in_progress_jobs':

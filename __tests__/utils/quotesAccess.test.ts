@@ -128,7 +128,7 @@ describe('quotesAccess utilities', () => {
     quantity: 100,
     unit_price: 25.5,
     total_price: 2550,
-    status: 'draft' as QuoteStatus,
+    status: 'pending_approval' as QuoteStatus,
     status_changed_at: '2024-01-01T00:00:00Z',
     converted_to_job_id: null,
     converted_at: null,
@@ -242,10 +242,10 @@ describe('quotesAccess utilities', () => {
       mockQueryBuilder.count = 10;
       mockQueryBuilder.error = null;
 
-      await getQuotesCount('company-1', { status: 'draft', customerId: 'cust-1' });
+      await getQuotesCount('company-1', { status: 'pending_approval', customerId: 'cust-1' });
 
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'draft');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'pending_approval');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('customer_id', 'cust-1');
     });
   });
@@ -437,7 +437,7 @@ describe('quotesAccess utilities', () => {
       unit_price: '30.00',
     };
 
-    it('updates draft quote successfully', async () => {
+    it('updates pending approval quote successfully', async () => {
       // First call - check status
       let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -450,7 +450,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'draft' },
+                  data: { status: 'pending_approval' },
                   error: null,
                 }),
               }),
@@ -537,27 +537,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
-        'Only draft or rejected quotes can be edited'
-      );
-    });
-
-    it('rejects updating pending_approval quotes', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'pending_approval' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
-        'Only draft or rejected quotes can be edited'
+        'Only pending approval or rejected quotes can be edited'
       );
     });
   });
@@ -776,48 +756,6 @@ describe('quotesAccess utilities', () => {
   // ============== Status Transition Tests ==============
 
   describe('markQuoteAsPendingApproval', () => {
-    it('transitions draft quote to pending_approval', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'draft' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsPendingApproval('quote-1');
-
-      expect(result.status).toBe('pending_approval');
-    });
-
     it('transitions rejected quote to pending_approval', async () => {
       let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
@@ -924,7 +862,7 @@ describe('quotesAccess utilities', () => {
       expect(result.status).toBe('approved');
     });
 
-    it('rejects invalid transition from draft', async () => {
+    it('rejects invalid transition from rejected', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
@@ -932,7 +870,7 @@ describe('quotesAccess utilities', () => {
           eq: vi.fn().mockReturnValue({
             ...mockQueryBuilder,
             single: vi.fn().mockReturnValue({
-              data: { status: 'draft' },
+              data: { status: 'rejected' },
               error: null,
             }),
           }),
@@ -940,7 +878,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(markQuoteAsApproved('quote-1')).rejects.toThrow(
-        'Cannot change status from draft to approved'
+        'Cannot change status from rejected to approved'
       );
     });
   });
@@ -1086,7 +1024,7 @@ describe('quotesAccess utilities', () => {
             single: vi.fn().mockReturnValue({
               data: {
                 ...mockQuote,
-                status: 'draft',
+                status: 'pending_approval',
                 converted_to_job_id: null,
               },
               error: null,
@@ -1186,7 +1124,7 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('uploadQuoteAttachment', () => {
-    it('uploads PDF attachment to draft quote', async () => {
+    it('uploads PDF attachment to pending approval quote', async () => {
       const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
       Object.defineProperty(mockFile, 'size', { value: 1024 });
 
@@ -1201,7 +1139,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'draft' },
+                  data: { status: 'pending_approval' },
                   error: null,
                 }),
               }),
@@ -1285,7 +1223,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        'Attachments can only be added to draft or rejected quotes'
+        'Attachments can only be added to pending approval or rejected quotes'
       );
     });
 
@@ -1304,7 +1242,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'draft' },
+                  data: { status: 'pending_approval' },
                   error: null,
                 }),
               }),
@@ -1333,7 +1271,7 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('deleteQuoteAttachment', () => {
-    it('deletes attachment from draft quote', async () => {
+    it('deletes attachment from pending approval quote', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
         if (table === 'quote_attachments') {
           return {
@@ -1348,7 +1286,7 @@ describe('quotesAccess utilities', () => {
                     data: {
                       id: 'attachment-1',
                       file_path: 'path/to/file.pdf',
-                      quotes: { status: 'draft' },
+                      quotes: { status: 'pending_approval' },
                     },
                     error: null,
                   }),
@@ -1398,7 +1336,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(deleteQuoteAttachment('attachment-1', 'company-1')).rejects.toThrow(
-        'Attachments can only be deleted from draft or rejected quotes'
+        'Attachments can only be deleted from pending approval or rejected quotes'
       );
     });
   });
@@ -1450,7 +1388,7 @@ describe('quotesAccess utilities', () => {
   // ============== Cost Refresh Tests ==============
 
   describe('refreshQuoteCost', () => {
-    it('rejects non-draft/rejected quotes', async () => {
+    it('rejects non-pending_approval/rejected quotes', async () => {
       // First call: fetch quote (approved)
       mockQueryBuilder.data = {
         id: 'quote-1',
@@ -1460,14 +1398,14 @@ describe('quotesAccess utilities', () => {
       };
 
       await expect(refreshQuoteCost('quote-1', 'co-1')).rejects.toThrow(
-        /only draft or rejected/i
+        /only pending approval or rejected/i
       );
     });
 
     it('rejects quotes with no part', async () => {
       mockQueryBuilder.data = {
         id: 'quote-1',
-        status: 'draft',
+        status: 'pending_approval',
         part_id: null,
         parts: null,
       };

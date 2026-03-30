@@ -371,7 +371,6 @@ export default function QuotesPage() {
             onChange={(e) => setStatusFilter(e.target.value as QuoteStatus | 'all')}
           >
             <MenuItem value="all">All Statuses</MenuItem>
-            <MenuItem value="draft">Draft</MenuItem>
             <MenuItem value="pending_approval">Pending Approval</MenuItem>
             <MenuItem value="approved">Approved</MenuItem>
             <MenuItem value="rejected">Rejected</MenuItem>

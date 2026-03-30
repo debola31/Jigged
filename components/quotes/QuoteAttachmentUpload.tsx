@@ -247,7 +247,7 @@ export default function QuoteAttachmentUpload({
 
       {disabled && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Attachments can only be modified in draft or rejected quotes.
+          Attachments can only be modified in pending approval or rejected quotes.
         </Alert>
       )}
 

@@ -194,7 +194,7 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_revenue_forecast",
         "description": (
             "Get revenue forecast from the open quote pipeline. "
-            "Sums total_price from quotes with status in (draft, pending_approval, accepted). "
+            "Sums total_price from quotes with status in (pending_approval, accepted). "
             "Breaks down by status to show pipeline stages. Returns data suitable for a bar chart."
         ),
         "input_schema": {

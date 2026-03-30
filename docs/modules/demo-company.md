@@ -64,7 +64,7 @@ Fallback if no first name available: `"Demo Shop"` (rename prompt on first visit
 | Resource Groups | 4 | CNC, Manual, Quality, Finishing |
 | Operation Types | 8 | With labor rates, linked to resource groups |
 | Routings | 3 | With nodes and edges |
-| Quotes | 5 | Draft, pending_approval, accepted statuses |
+| Quotes | 5 | pending_approval, accepted statuses |
 | Jobs | 4 | Pending, in_progress, completed statuses |
 | Job Operations | 10+ | Across the 4 jobs |
 | Inventory Items | 8 | With quantities and units |

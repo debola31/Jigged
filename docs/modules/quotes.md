@@ -19,9 +19,6 @@ The Quotes module handles the sales quoting process - the entry point for work i
 ## Quote Status Workflow
 
 ```javascript
-   DRAFT
-     │
-     ▼
  PENDING APPROVAL  ───────────▶  REJECTED
      │
      ▼
@@ -35,9 +32,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 **Status Definitions:**
 
-- **Draft** - Quote is being prepared, not yet sent to customer
-
-- Pending Approval - Quote has been sent to Customer & Shop Owner, awaiting response
+- **Pending Approval** - Quote has been created and sent to Customer & Shop Owner, awaiting response
 
 - **Approved** - Customer & Shop Owner Approved the quote, ready to convert to job
 
@@ -83,12 +78,12 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | total_price | Decimal | No | Total quoted price (quantity × unit_price) |
 | estimated_lead_time_days | Integer | No | Estimated days to complete |
 | valid_until | Date | No | Quote expiration date |
-| status | Text | Yes | draft, pending approval, approved, rejected, expired |
+| status | Text | Yes | pending_approval, approved, rejected, expired |
 | converted_to_job_id | UUID (FK) | No | Link to job when converted |
 | converted_at | Timestamp | No | When quote was converted to job |
 | notes | Text | No | Internal notes |
 
-**Snapshot Behavior:** `base_cost`, `cost_source`, `markup_percent`, `estimated_labor_cost`, and `estimated_material_cost` are **snapshot fields** — copied from the part/routing at quote creation time. They do NOT auto-update if the part's routing changes later. Draft quotes for affected parts may show a "cost may be outdated" indicator, but the stored values remain frozen until the user explicitly refreshes them.
+**Snapshot Behavior:** `base_cost`, `cost_source`, `markup_percent`, `estimated_labor_cost`, and `estimated_material_cost` are **snapshot fields** — copied from the part/routing at quote creation time. They do NOT auto-update if the part's routing changes later. Pending approval quotes for affected parts may show a "cost may be outdated" indicator, but the stored values remain frozen until the user explicitly refreshes them.
 
 ---
 
@@ -104,7 +99,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 - Search box (searches quote number, customer name, part number)
 
-- Filter dropdown: Status (All / Draft / Pending Approval / Approved / Rejected)
+- Filter dropdown: Status (All / Pending Approval / Approved / Rejected)
 
 - Filter dropdown: Customer (All / specific customer)
 
@@ -116,13 +111,11 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 **Row Actions (icon buttons):**
 
-- Edit (pencil) - only for Draft status
+- Edit (pencil) - only for Pending Approval or Rejected status
 
 - Convert to Job (play icon) - only for Approved status
 
 **Status Pills:**
-
-- Draft = Gray
 
 - Pending Approval = Blue
 
@@ -140,7 +133,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 **Route:** `/dashboard/{companyId}/quotes/new` or `/dashboard/{companyId}/quotes/{id}/edit`
 
-**Note:** Edit only available for Draft status quotes.
+**Note:** Edit only available for Pending Approval or Rejected status quotes.
 
 **Form Sections:**
 
@@ -201,7 +194,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 **Actions:**
 
-- Save as Draft → Returns to list
+- Send for Approval → Goes to quote detail
 
 - Cancel → Returns to list without saving
 
@@ -228,7 +221,7 @@ The Quotes module handles the sales quoting process - the entry point for work i
   - Cost breakdown (expandable: labor by operation + materials) when cost_source is 'routing'
   - Markup % with source hint ("Category default" or "Custom override")
   - Unit Price, Quantity, Total Price
-  - If part's routing has changed since quote creation: subtle "Cost may be outdated" indicator with "Refresh cost" action (available on draft/rejected quotes only)
+  - If part's routing has changed since quote creation: subtle "Cost may be outdated" indicator with "Refresh cost" action (available on pending approval/rejected quotes only)
 
 - Lead time, Valid until
 
@@ -238,10 +231,9 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 | Current Status | Available Actions |
 |---|---|
-| Draft | Edit, Mark as Sent for Approval, Delete |
-| Pending Approval | Mark as Approved, Mark as Rejected |
+| Pending Approval | Edit, Mark as Approved, Mark as Rejected |
 | Approved | Convert to Job |
-| Rejected | (none - read only) |
+| Rejected | Edit |
 | Expired | (none - read only) |
 
 ### 4. Convert to Job Modal
@@ -518,14 +510,13 @@ System auto-fills:
 
 | From | To | Trigger |
 |---|---|---|
-| Draft | Pending Approval | User clicks "Send for Approval" |
-| Draft | Deleted | User clicks "Delete" |
+| New Quote | Pending Approval | User clicks "Send for Approval" on creation form |
 | Pending Approval | Approved | User clicks "Mark as Approved" |
 | Pending Approval | Rejected | User clicks "Mark as Rejected" |
 | Pending Approval | Expired | System auto-expires past valid_until (future feature) |
 | Approved | (converted) | User clicks "Convert to Job" |
 
-**Note:** Once a quote leaves Draft status, it cannot be edited. Create a new quote instead.
+**Note:** Pending Approval or Rejected quotes can be edited. Approved, Converted, and Expired quotes cannot be edited.
 
 ---
 
@@ -573,7 +564,7 @@ The Quotes module uses direct Supabase calls from the frontend (via `utils/quote
 
 - CRUD operations
 
-- Status transitions (draft → Pending Approval → Approved/Rejected)
+- Status transitions (Pending Approval → Approved/Rejected)
 
 - Convert to Job
 
@@ -623,9 +614,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Total price calculates automatically
 
-- [ ] Can save quote as draft
-
-- [ ] Can mark draft as sent for approval
+- [ ] Quote goes directly to Pending Approval on creation
 
 - [ ] Can mark pending approval quote as Approved or Rejected
 
@@ -635,7 +624,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Quote number auto-generates (Q-0001 format)
 
-- [ ] Cannot edit quotes that are not in draft status
+- [ ] Cannot edit quotes that are not in Pending Approval or Rejected status
 
 ### Quick Create
 
@@ -691,7 +680,7 @@ The quote form shows an expandable cost breakdown when cost_source is 'routing':
 
 Quote cost fields are snapshots (frozen at creation time). If a part's routing is updated after a quote was created:
 
-- **Draft/Rejected quotes:** Show a subtle "Cost may be outdated" indicator with a "Refresh cost" button that re-fetches the routing cost and updates the snapshot fields
+- **Pending Approval/Rejected quotes:** Show a subtle "Cost may be outdated" indicator with a "Refresh cost" button that re-fetches the routing cost and updates the snapshot fields
 - **Pending Approval/Approved/Converted quotes:** No indicator — the quoted price stands as agreed
 
 ### Acceptance Criteria (Routing Cost)
@@ -706,7 +695,7 @@ Quote cost fields are snapshots (frozen at creation time). If a part's routing i
 
 - [ ] Quote detail page shows "cost may be outdated" when part routing has changed since quote creation
 
-- [ ] "Refresh cost" button updates draft/rejected quote cost from current routing
+- [ ] "Refresh cost" button updates pending approval/rejected quote cost from current routing
 
 ---
 
@@ -724,7 +713,7 @@ Quotes support PDF file attachments for drawings, specifications, and other docu
 
 **Behavior:**
 
-- Attachments can only be added/modified in Draft or Rejected status
+- Attachments can only be added/modified in Pending Approval or Rejected status
 
 - Multiple files can be uploaded at once via drag-and-drop or file picker
 
@@ -752,7 +741,7 @@ Quotes support PDF file attachments for customer drawings, specifications, or re
 
 - Replace existing attachment
 
-- Delete attachment (draft/rejected quotes only)
+- Delete attachment (pending approval/rejected quotes only)
 
 **Job Conversion:** First attachment is automatically copied to the job when converting.
 
@@ -776,7 +765,7 @@ While creating/editing a quote, users can create new entities without leaving th
 
 **Filters:**
 
-- Status dropdown: All, Draft, Pending Approval, Approved, Rejected
+- Status dropdown: All, Pending Approval, Approved, Rejected
 
 - Customer dropdown: All or specific customer
 
@@ -792,7 +781,7 @@ While creating/editing a quote, users can create new entities without leaving th
 
 **Quantity:** Integer, 1 to 1,000,000
 
-**Base Cost:** Decimal, 0 to 999,999.9999 (optional, but required before leaving draft)
+**Base Cost:** Decimal, 0 to 999,999.9999 (optional, but required before sending for approval)
 
 **Markup Percent:** Decimal, -100 to 100 (negative markups allowed for loss-leader quotes)
 
@@ -820,7 +809,7 @@ When selecting an existing part:
 
 ## Status Workflow Updates
 
-**Editing Rule:** Only Draft and Rejected quotes can be edited
+**Editing Rule:** Only Pending Approval and Rejected quotes can be edited
 
 **Re-submit:** Rejected quotes can be edited and re-submitted for approval (rejected → pending_approval)
 

@@ -696,7 +696,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             tempAttachments={tempAttachments}
             onAttachmentChange={loadAttachments}
             onTempAttachmentsChange={setTempAttachments}
-            disabled={mode === 'edit' && formData.status !== 'draft' && formData.status !== 'rejected'}
+            disabled={mode === 'edit' && formData.status !== 'pending_approval' && formData.status !== 'rejected'}
           />
         </CardContent>
       </Card>
@@ -712,7 +712,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           disabled={loading}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
-          {loading ? 'Saving...' : mode === 'create' ? 'Save as Draft' : 'Save'}
+          {loading ? 'Sending...' : mode === 'create' ? 'Send for Approval' : 'Save'}
         </Button>
       </Box>
 

@@ -12,9 +12,9 @@ This matrix tracks all test cases for the Jigged application.
 
 | ID | Name | Category | Status | Input/Precondition | Pass Criteria | Fail Criteria | Test File |
 |---|---|---|---|---|---|---|---|
-| BL-001 | Quote draft to pending | Business Logic | Implemented | Status change draft to pending | Transition allowed | Blocked | quotesAccess.test.ts |
+| BL-001 | Quote rejected to pending | Business Logic | Implemented | Status change rejected to pending_approval | Transition allowed | Blocked | quotesAccess.test.ts |
 | BL-002 | Quote pending to approved | Business Logic | Implemented | Status change pending to approved | Transition allowed | Blocked | quotesAccess.test.ts |
-| BL-003 | Quote approved to draft (invalid) | Business Logic | Implemented | Invalid transition | Blocked with error | Allowed | quotesAccess.test.ts |
+| BL-003 | Quote approved to pending (invalid) | Business Logic | Implemented | Invalid transition | Blocked with error | Allowed | quotesAccess.test.ts |
 | BL-004 | Multi-tenancy isolation | Business Logic | Implemented | Query other company | Returns empty/403 | Shows other company data | companyAccess.test.ts |
 | BL-005 | Last company preference | Business Logic | Implemented | User with preference | Redirects correctly | Wrong company or error | companyAccess.test.ts |
 | BL-006 | Attachment limit | Business Logic | Implemented | 6th attachment | Rejected | Accepted | storageHelpers.test.ts |

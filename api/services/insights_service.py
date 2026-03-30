@@ -761,7 +761,7 @@ def get_resource_utilization(
 def get_revenue_forecast(company_id: str) -> dict:
     """
     Get revenue forecast from the open quote pipeline.
-    Sums total_price from quotes with status in (draft, pending_approval, accepted).
+    Sums total_price from quotes with status in (pending_approval, accepted).
     """
     supabase = _get_supabase_service_role()
 
@@ -769,7 +769,7 @@ def get_revenue_forecast(company_id: str) -> dict:
         supabase.table("quotes")
         .select("id, status, total_price, customer_id, customers!left(name)")
         .eq("company_id", company_id)
-        .in_("status", ["draft", "pending_approval", "accepted"])
+        .in_("status", ["pending_approval", "accepted"])
         .execute()
     )
 
@@ -787,7 +787,7 @@ def get_revenue_forecast(company_id: str) -> dict:
         by_status[status]["count"] += 1
 
     # Sort by pipeline stage order
-    stage_order = {"accepted": 0, "pending_approval": 1, "draft": 2}
+    stage_order = {"accepted": 0, "pending_approval": 1}
     pipeline = sorted(
         by_status.values(),
         key=lambda x: stage_order.get(x["status"], 99),

@@ -106,10 +106,10 @@ export default function QuoteDetailPage() {
     }
   };
 
-  // Check if routing cost is outdated for draft/rejected quotes
+  // Check if routing cost is outdated for pending_approval/rejected quotes
   useEffect(() => {
     if (!quote || !quote.part_id || !quote.base_cost) return;
-    if (quote.status !== 'draft' && quote.status !== 'rejected') return;
+    if (quote.status !== 'pending_approval' && quote.status !== 'rejected') return;
     if (quote.cost_source !== 'routing') return;
 
     calculateRoutingCost(quote.part_id).then((breakdown) => {
@@ -247,8 +247,8 @@ export default function QuoteDetailPage() {
     );
   }
 
-  // If in edit mode and quote is draft or rejected, show the form
-  if (editMode && (quote.status === 'draft' || quote.status === 'rejected')) {
+  // If in edit mode and quote is pending_approval or rejected, show the form
+  if (editMode && (quote.status === 'pending_approval' || quote.status === 'rejected')) {
     const handleSaveSuccess = async () => {
       setEditMode(false);
       await fetchQuote();
@@ -301,7 +301,7 @@ export default function QuoteDetailPage() {
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {(quote.status === 'draft' || quote.status === 'rejected') && (
+          {quote.status === 'pending_approval' && (
             <>
               <Button
                 variant="outlined"
@@ -311,19 +311,6 @@ export default function QuoteDetailPage() {
               >
                 Edit
               </Button>
-              <Button
-                variant="contained"
-                startIcon={<SendIcon />}
-                onClick={() => handleAction(() => markQuoteAsPendingApproval(quoteId))}
-                disabled={actionLoading}
-              >
-                {quote.status === 'rejected' ? 'Re-submit for Approval' : 'Send for Approval'}
-              </Button>
-            </>
-          )}
-
-          {quote.status === 'pending_approval' && (
-            <>
               <Button
                 variant="contained"
                 color="success"
@@ -342,6 +329,27 @@ export default function QuoteDetailPage() {
                 sx={{ color: 'white' }}
               >
                 Reject
+              </Button>
+            </>
+          )}
+
+          {quote.status === 'rejected' && (
+            <>
+              <Button
+                variant="outlined"
+                startIcon={<EditIcon />}
+                onClick={() => setEditMode(true)}
+                disabled={actionLoading}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<SendIcon />}
+                onClick={() => handleAction(() => markQuoteAsPendingApproval(quoteId))}
+                disabled={actionLoading}
+              >
+                Re-submit for Approval
               </Button>
             </>
           )}
@@ -517,7 +525,7 @@ export default function QuoteDetailPage() {
                     >
                       Download
                     </Button>
-                    {(quote.status === 'draft' || quote.status === 'rejected') && (
+                    {(quote.status === 'pending_approval' || quote.status === 'rejected') && (
                       <IconButton
                         color="error"
                         onClick={() => handleDeleteAttachment(attachment.id)}
@@ -556,7 +564,7 @@ export default function QuoteDetailPage() {
                     variant="outlined"
                   />
                 )}
-                {(quote.status === 'draft' || quote.status === 'rejected') && quote.cost_source === 'routing' && (
+                {(quote.status === 'pending_approval' || quote.status === 'rejected') && quote.cost_source === 'routing' && (
                   <Button
                     size="small"
                     startIcon={refreshingCost ? <CircularProgress size={14} /> : <RefreshIcon />}

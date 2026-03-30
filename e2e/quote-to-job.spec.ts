@@ -52,8 +52,8 @@ test.describe('Quote to Job workflow', () => {
     // Fill quantity
     await page.getByLabel(/Quantity/i).fill('10');
 
-    // Save as draft
-    await page.getByRole('button', { name: /Save as Draft/i }).click();
+    // Save quote (creates as pending approval)
+    await page.getByRole('button', { name: /Save/i }).click();
 
     // Should redirect to the quote detail page
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
@@ -61,18 +61,15 @@ test.describe('Quote to Job workflow', () => {
     // Verify the quote was created — quote number should be visible
     await expect(page.getByText(/Q-\d+/)).toBeVisible();
 
-    // ── Step 2: Send for approval ──
-
-    await page.getByRole('button', { name: /Send for Approval/i }).click();
-    // Status should change to "Pending Approval"
+    // Quote is created as "Pending Approval" — verify status
     await expect(page.getByText(/Pending Approval/i)).toBeVisible({ timeout: 10_000 });
 
-    // ── Step 3: Approve the quote ──
+    // ── Step 2: Approve the quote ──
 
     await page.getByRole('button', { name: /Approve/i }).click();
     await expect(page.getByText(/Approved/i)).toBeVisible({ timeout: 10_000 });
 
-    // ── Step 4: Convert to job ──
+    // ── Step 3: Convert to job ──
 
     await page.getByRole('button', { name: /Convert to Job/i }).click();
 
@@ -102,7 +99,7 @@ test.describe('Quote to Job workflow', () => {
     // Verify job was created
     await expect(page.getByText(/J-\d+/)).toBeVisible();
 
-    // ── Step 5: Start the job ──
+    // ── Step 4: Start the job ──
 
     // Job should be in "Pending" status initially
     await expect(page.getByText(/Pending/i).first()).toBeVisible();
@@ -116,7 +113,7 @@ test.describe('Quote to Job workflow', () => {
       await expect(page.getByText(/In Progress/i)).toBeVisible({ timeout: 10_000 });
     }
 
-    // ── Step 6: Complete operations (if present) ──
+    // ── Step 5: Complete operations (if present) ──
 
     // Look for operation "Start" buttons in the operations panel
     const startButtons = page.getByRole('button', { name: /^Start$/i });
@@ -161,7 +158,7 @@ test.describe('Quote to Job workflow', () => {
       }
     }
 
-    // ── Step 7: Job should be completed (auto or manual) ──
+    // ── Step 6: Job should be completed (auto or manual) ──
 
     // After all operations are done, the job should auto-complete
     // or we need to complete it manually
@@ -174,7 +171,7 @@ test.describe('Quote to Job workflow', () => {
 
     await expect(completedChip.first()).toBeVisible({ timeout: 15_000 });
 
-    // ── Step 8: Ship the job ──
+    // ── Step 7: Ship the job ──
 
     await page.getByRole('button', { name: /Mark Shipped/i }).click();
     await expect(page.getByText(/Shipped/i).first()).toBeVisible({ timeout: 10_000 });

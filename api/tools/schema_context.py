@@ -39,7 +39,7 @@ SCHEMA_CONTEXT = """
 - quantity: INTEGER (default 1)
 - unit_price: NUMERIC(12,4)
 - total_price: NUMERIC(12,4)
-- status: TEXT -- one of: 'draft', 'pending_approval', 'approved', 'rejected', 'accepted', 'expired', 'converted'
+- status: TEXT -- one of: 'pending_approval', 'approved', 'rejected', 'accepted', 'expired', 'converted'
 - status_changed_at: TIMESTAMPTZ
 - converted_to_job_id: UUID (FK -> jobs.id, set when quote becomes a job)
 - converted_at: TIMESTAMPTZ

@@ -68,7 +68,7 @@ export default function HowItWorks() {
                 sx={{
                   fontSize: { xs: '2rem', md: '2.5rem' },
                   fontWeight: 700,
-                  color: 'primary.main',
+                  color: 'common.white',
                   lineHeight: 1,
                   mb: { md: 2 },
                   flexShrink: 0,

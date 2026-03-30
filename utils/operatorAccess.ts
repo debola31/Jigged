@@ -14,6 +14,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { calculateActualRunMinutes } from '@/utils/sessionDuration';
 import type {
   OperatorJob,
   OperatorJobDetail,
@@ -268,6 +269,17 @@ export async function getOperatorJobs(
         currentOperatorName = opData?.name || null;
       }
 
+      // Count all operations for progress
+      const { data: allOpsForJob } = await supabase
+        .from('job_operations')
+        .select('status')
+        .eq('job_id', job.id);
+
+      const opsTotal = allOpsForJob?.length || 0;
+      const opsCompleted = allOpsForJob?.filter(
+        (op: { status: string }) => op.status === 'completed' || op.status === 'skipped'
+      ).length || 0;
+
       result.push({
         id: job.id,
         job_number: job.job_number,
@@ -279,6 +291,8 @@ export async function getOperatorJobs(
         operation_name: readyOp.operationName,
         operation_status: readyOp.status,
         current_operator_name: currentOperatorName,
+        operations_total: opsTotal,
+        operations_completed: opsCompleted,
       });
     }
 
@@ -317,6 +331,12 @@ export async function getOperatorJobs(
       }
     }
 
+    const opsTotal = ops?.length || 0;
+    const opsCompleted = ops?.filter(
+      (op: { id: string; operation_name: string; status: string; operation_type_id: string }) =>
+        op.status === 'completed' || op.status === 'skipped'
+    ).length || 0;
+
     result.push({
       id: job.id,
       job_number: job.job_number,
@@ -328,6 +348,8 @@ export async function getOperatorJobs(
       operation_name: currentOp?.operation_name || null,
       operation_status: currentOp?.status || null,
       current_operator_name: currentOperatorName,
+      operations_total: opsTotal,
+      operations_completed: opsCompleted,
     });
   }
 
@@ -360,7 +382,7 @@ export async function getOperatorJobDetail(
   // Get operations for this job
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, operation_name, status, instructions, estimated_setup_hours, estimated_run_hours_per_unit, operation_type_id, routing_node_id')
+    .select('id, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
     .eq('job_id', jobId);
 
   if (operationTypeId) {
@@ -369,7 +391,7 @@ export async function getOperatorJobDetail(
 
   const { data: ops } = await opsQuery;
 
-  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_hours: number | null; estimated_run_hours_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
+  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_minutes: number | null; estimated_run_minutes_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
     op.status === 'pending' || op.status === 'in_progress'
   ) || null;
 
@@ -412,12 +434,59 @@ export async function getOperatorJobDetail(
     }
   }
 
-  // Calculate estimated hours
-  let estimatedHours: number | null = null;
+  // Calculate estimated minutes
+  let estimatedMinutes: number | null = null;
   if (currentOp) {
-    const setup = Number(currentOp.estimated_setup_hours) || 0;
-    const runPer = Number(currentOp.estimated_run_hours_per_unit) || 0;
-    estimatedHours = setup + runPer;
+    const setup = Number(currentOp.estimated_setup_minutes) || 0;
+    const runPer = Number(currentOp.estimated_run_minutes_per_unit) || 0;
+    estimatedMinutes = setup + runPer;
+  }
+
+  // Count all operations for job progress
+  const { data: allOps } = await supabase
+    .from('job_operations')
+    .select('status')
+    .eq('job_id', jobId);
+
+  const operationsTotal = allOps?.length || 0;
+  const operationsCompleted = allOps?.filter(
+    (op: { status: string }) => op.status === 'completed' || op.status === 'skipped'
+  ).length || 0;
+
+  // Fetch material requirements for current operation
+  let materials: Array<{ name: string; quantity: number; unit: string }> = [];
+  if (currentOp?.routing_node_id) {
+    const { data: routingNode } = await supabase
+      .from('routing_nodes')
+      .select('materials')
+      .eq('id', currentOp.routing_node_id)
+      .single();
+
+    if (routingNode?.materials) {
+      const rawMaterials = routingNode.materials as Array<{
+        inventory_item_id: string;
+        quantity: number;
+        unit: string;
+      }>;
+      if (rawMaterials.length > 0) {
+        const itemIds = rawMaterials.map((m) => m.inventory_item_id);
+        const { data: items } = await supabase
+          .from('inventory_items')
+          .select('id, name')
+          .in('id', itemIds);
+
+        const nameMap = new Map(
+          (items || []).map((i: { id: string; name: string }) => [i.id, i.name])
+        );
+        materials = rawMaterials
+          .filter((m) => nameMap.has(m.inventory_item_id))
+          .map((m) => ({
+            name: nameMap.get(m.inventory_item_id) as string,
+            quantity: m.quantity,
+            unit: m.unit,
+          }));
+      }
+    }
   }
 
   return {
@@ -431,11 +500,14 @@ export async function getOperatorJobDetail(
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
     instructions: currentOp?.instructions || null,
-    estimated_hours: estimatedHours,
+    estimated_minutes: estimatedMinutes,
     active_session_id: activeSessionId,
     session_started_at: sessionStartedAt,
     current_operator_id: currentOperatorId,
     current_operator_name: currentOperatorName,
+    operations_total: operationsTotal,
+    operations_completed: operationsCompleted,
+    materials,
   };
 }
 
@@ -675,18 +747,35 @@ export async function completeJob(
     })
     .eq('id', session.id);
 
-  // 2. Mark job_operation as completed
+  // 2. Calculate actual run minutes from all sessions for this operation
+  let actualRunMinutes: number | null = null;
+  if (session.job_operation_id) {
+    const { data: allSessions } = await supabase
+      .from('operator_sessions')
+      .select('started_at, ended_at')
+      .eq('job_operation_id', session.job_operation_id)
+      .not('ended_at', 'is', null);
+
+    if (allSessions && allSessions.length > 0) {
+      actualRunMinutes = calculateActualRunMinutes(
+        allSessions as { started_at: string; ended_at: string }[]
+      );
+    }
+  }
+
+  // 3. Mark job_operation as completed with actual minutes
   if (session.job_operation_id) {
     await supabase
       .from('job_operations')
       .update({
         status: 'completed',
         completed_at: now,
+        actual_run_minutes: actualRunMinutes,
       })
       .eq('id', session.job_operation_id);
   }
 
-  // 3. Check if all operations are complete
+  // 4. Check if all operations are complete
   const { data: remaining } = await supabase
     .from('job_operations')
     .select('id')
@@ -702,7 +791,7 @@ export async function completeJob(
       .eq('id', jobId);
   }
 
-  // 4. Deplete inventory for confirmed materials
+  // 5. Deplete inventory for confirmed materials
   if (request.materials && request.materials.length > 0) {
     for (const material of request.materials) {
       if (material.confirmed_quantity > 0) {
@@ -872,8 +961,12 @@ export async function getStationName(
 }
 
 /**
- * Get stations (operation types) that have pending/in-progress operations for a specific job.
+ * Get stations (operation types) that are ready to be worked on for a specific job.
  * Used when an operator scans a job QR code to determine which station(s) to offer.
+ *
+ * Only returns stations whose operations are DAG-ready: all predecessor operations
+ * in the routing must be completed or skipped. In-progress operations are always
+ * included (already started).
  */
 export async function getStationsForJob(
   jobId: string,
@@ -893,24 +986,30 @@ export async function getStationsForJob(
 
   const { data: ops } = await supabase
     .from('job_operations')
-    .select('operation_type_id, operation_types(name)')
+    .select('operation_type_id, routing_node_id, status, operation_types(name)')
     .eq('job_id', jobId)
     .in('status', ['pending', 'in_progress']);
 
   if (!ops || ops.length === 0) return [];
 
-  // Deduplicate by operation_type_id
+  // Filter to only DAG-ready operations
   const seen = new Set<string>();
   const stations: Array<{ id: string; name: string }> = [];
   for (const op of ops) {
-    if (op.operation_type_id && !seen.has(op.operation_type_id)) {
-      seen.add(op.operation_type_id);
-      const otData = op.operation_types as unknown as { name: string } | null;
-      stations.push({
-        id: op.operation_type_id,
-        name: otData?.name || 'Unknown Station',
-      });
+    if (!op.operation_type_id || seen.has(op.operation_type_id)) continue;
+
+    // In-progress operations are always ready (already started)
+    if (op.status === 'pending') {
+      const ready = await isJobOperationReady(jobId, op.routing_node_id);
+      if (!ready) continue;
     }
+
+    seen.add(op.operation_type_id);
+    const otData = op.operation_types as unknown as { name: string } | null;
+    stations.push({
+      id: op.operation_type_id,
+      name: otData?.name || 'Unknown Station',
+    });
   }
 
   return stations;

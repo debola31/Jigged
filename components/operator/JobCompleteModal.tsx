@@ -15,8 +15,10 @@ import Alert from '@mui/material/Alert';
 import Card from '@mui/material/Card';
 import IconButton from '@mui/material/IconButton';
 import Autocomplete from '@mui/material/Autocomplete';
+import Fade from '@mui/material/Fade';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { completeJob, getOperationMaterials } from '@/utils/operatorAccess';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import { formatDuration } from '@/types/operator';
@@ -59,6 +61,7 @@ export default function JobCompleteModal({
   const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [completed, setCompleted] = useState(false);
 
   // For adding extra materials
   const [showAddMaterial, setShowAddMaterial] = useState(false);
@@ -87,6 +90,7 @@ export default function JobCompleteModal({
 
     setNotes('');
     setError(null);
+    setCompleted(false);
     setShowAddMaterial(false);
 
     if (jobOperationId) {
@@ -165,7 +169,8 @@ export default function JobCompleteModal({
         notes: notes.trim() || undefined,
         materials: materialsToSend.length > 0 ? materialsToSend : undefined,
       });
-      onConfirm();
+      setCompleted(true);
+      setTimeout(() => onConfirm(), 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete job');
     } finally {
@@ -186,6 +191,45 @@ export default function JobCompleteModal({
         },
       }}
     >
+      {/* Success State */}
+      {completed && (
+        <Fade in timeout={400}>
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              py: 8,
+              px: 4,
+            }}
+          >
+            <CheckCircleOutlineIcon
+              sx={{
+                fontSize: 80,
+                color: 'success.main',
+                mb: 2,
+                animation: 'scaleIn 0.4s ease-out',
+                '@keyframes scaleIn': {
+                  '0%': { transform: 'scale(0)', opacity: 0 },
+                  '50%': { transform: 'scale(1.2)' },
+                  '100%': { transform: 'scale(1)', opacity: 1 },
+                },
+              }}
+            />
+            <Typography variant="h5" fontWeight={700} sx={{ mb: 1 }}>
+              Operation Complete
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              {formatDuration(elapsed)}
+            </Typography>
+          </Box>
+        </Fade>
+      )}
+
+      {/* Normal Form */}
+      {!completed && (
+        <>
       <DialogTitle sx={{ textAlign: 'center', pb: 1 }}>
         Complete Operation
       </DialogTitle>
@@ -376,6 +420,8 @@ export default function JobCompleteModal({
           {loading ? <CircularProgress size={24} /> : 'Confirm Complete'}
         </Button>
       </DialogActions>
+        </>
+      )}
     </Dialog>
   );
 }

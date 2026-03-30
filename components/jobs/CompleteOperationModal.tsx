@@ -19,8 +19,8 @@ interface CompleteOperationModalProps {
   operation: JobOperation | null;
   onClose: () => void;
   onConfirm: (data: {
-    actual_setup_hours?: number;
-    actual_run_hours?: number;
+    actual_setup_minutes?: number;
+    actual_run_minutes?: number;
     notes?: string;
   }) => void;
   loading?: boolean;
@@ -33,38 +33,38 @@ export default function CompleteOperationModal({
   onConfirm,
   loading = false,
 }: CompleteOperationModalProps) {
-  const [actualSetupHours, setActualSetupHours] = useState<string>('');
-  const [actualRunHours, setActualRunHours] = useState<string>('');
+  const [actualSetupMinutes, setActualSetupMinutes] = useState<string>('');
+  const [actualRunMinutes, setActualRunMinutes] = useState<string>('');
   const [notes, setNotes] = useState('');
 
   // Reset form when modal opens with a new operation
   useEffect(() => {
     if (open && operation) {
       // Pre-fill with estimated hours as suggestions
-      setActualSetupHours('');
-      setActualRunHours('');
+      setActualSetupMinutes('');
+      setActualRunMinutes('');
       setNotes('');
     }
   }, [open, operation?.id]);
 
   const handleConfirm = () => {
     const data: {
-      actual_setup_hours?: number;
-      actual_run_hours?: number;
+      actual_setup_minutes?: number;
+      actual_run_minutes?: number;
       notes?: string;
     } = {};
 
-    if (actualSetupHours.trim()) {
-      const parsed = parseFloat(actualSetupHours);
+    if (actualSetupMinutes.trim()) {
+      const parsed = parseFloat(actualSetupMinutes);
       if (!isNaN(parsed) && parsed >= 0) {
-        data.actual_setup_hours = parsed;
+        data.actual_setup_minutes = parsed;
       }
     }
 
-    if (actualRunHours.trim()) {
-      const parsed = parseFloat(actualRunHours);
+    if (actualRunMinutes.trim()) {
+      const parsed = parseFloat(actualRunMinutes);
       if (!isNaN(parsed) && parsed >= 0) {
-        data.actual_run_hours = parsed;
+        data.actual_run_minutes = parsed;
       }
     }
 
@@ -73,12 +73,6 @@ export default function CompleteOperationModal({
     }
 
     onConfirm(data);
-  };
-
-  const formatHours = (hours: number | null): string => {
-    if (hours === null || hours === undefined) return '—';
-    if (hours < 1) return `${Math.round(hours * 60)} min`;
-    return `${hours.toFixed(1)} hr`;
   };
 
   if (!operation) return null;
@@ -102,26 +96,26 @@ export default function CompleteOperationModal({
 
         <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
           <TextField
-            label="Actual Setup Hours"
+            label="Actual Setup (min)"
             type="number"
-            value={actualSetupHours}
-            onChange={(e) => setActualSetupHours(e.target.value)}
-            placeholder={formatHours(operation.estimated_setup_hours)}
-            helperText={`Estimated: ${formatHours(operation.estimated_setup_hours)}`}
+            value={actualSetupMinutes}
+            onChange={(e) => setActualSetupMinutes(e.target.value)}
+            placeholder={String(operation.estimated_setup_minutes || 0)}
+            helperText={`Estimated: ${operation.estimated_setup_minutes || 0} min`}
             size="small"
             fullWidth
-            inputProps={{ min: 0, step: 0.25 }}
+            inputProps={{ min: 0, step: 1 }}
           />
           <TextField
-            label="Actual Run Hours"
+            label="Actual Run (min)"
             type="number"
-            value={actualRunHours}
-            onChange={(e) => setActualRunHours(e.target.value)}
-            placeholder={formatHours(operation.estimated_run_hours_per_unit)}
-            helperText={`Estimated: ${formatHours(operation.estimated_run_hours_per_unit)}/unit`}
+            value={actualRunMinutes}
+            onChange={(e) => setActualRunMinutes(e.target.value)}
+            placeholder={String(operation.estimated_run_minutes_per_unit || 0)}
+            helperText={`Estimated: ${operation.estimated_run_minutes_per_unit || 0} min/unit`}
             size="small"
             fullWidth
-            inputProps={{ min: 0, step: 0.25 }}
+            inputProps={{ min: 0, step: 1 }}
           />
         </Box>
 

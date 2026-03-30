@@ -9,8 +9,13 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
 import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
+import InventoryIcon from '@mui/icons-material/Inventory';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
@@ -61,6 +66,59 @@ function SessionTimer({ startedAt }: { startedAt: string }) {
     >
       {formatDuration(elapsed)}
     </Typography>
+  );
+}
+
+/**
+ * Estimated vs Elapsed comparison.
+ * Shows a progress bar and text comparing elapsed time to estimated minutes.
+ */
+function EstimatedComparison({
+  estimatedMinutes,
+  sessionStartedAt,
+}: {
+  estimatedMinutes: number;
+  sessionStartedAt: string;
+}) {
+  const [elapsedMinutes, setElapsedMinutes] = useState(0);
+
+  useEffect(() => {
+    const start = new Date(sessionStartedAt).getTime();
+
+    const update = () => {
+      setElapsedMinutes((Date.now() - start) / (1000 * 60));
+    };
+
+    update();
+    const interval = setInterval(update, 10000); // Update every 10s is sufficient for progress bar
+    return () => clearInterval(interval);
+  }, [sessionStartedAt]);
+
+  const progress = Math.min((elapsedMinutes / estimatedMinutes) * 100, 100);
+  const overEstimate = elapsedMinutes > estimatedMinutes;
+
+  const fmt = (min: number) => {
+    if (min < 60) return `${Math.round(min)} min`;
+    return `${(min / 60).toFixed(1)} hrs`;
+  };
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">
+          Elapsed: {fmt(elapsedMinutes)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Estimated: {fmt(estimatedMinutes)}
+        </Typography>
+      </Box>
+      <LinearProgress
+        variant="determinate"
+        value={progress}
+        color={overEstimate ? 'warning' : 'primary'}
+        sx={{ height: 8, borderRadius: 1 }}
+      />
+    </Box>
   );
 }
 
@@ -313,6 +371,25 @@ export default function OperatorJobDetailPage() {
           <Typography variant="h6" sx={{ mb: 2 }}>
             {job.part_name || job.part_number || 'No part specified'}
           </Typography>
+
+          {/* Job Progress */}
+          {job.operations_total > 1 && (
+            <Box sx={{ mt: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Progress
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {job.operations_completed} of {job.operations_total} operations
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={(job.operations_completed / job.operations_total) * 100}
+                sx={{ height: 6, borderRadius: 1 }}
+              />
+            </Box>
+          )}
         </CardContent>
       </Card>
 
@@ -339,16 +416,49 @@ export default function OperatorJobDetailPage() {
                 {job.instructions}
               </Typography>
             )}
-            {job.estimated_hours && (
+            {job.estimated_minutes && (
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Estimated: {job.estimated_hours.toFixed(1)} hours
+                Estimated: {job.estimated_minutes < 60 ? `${Math.round(job.estimated_minutes)} min` : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
               </Typography>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* Timer (when working) */}
+      {/* Materials Required */}
+      {job.materials && job.materials.length > 0 && (
+        <Card
+          elevation={2}
+          sx={{
+            mb: 3,
+            bgcolor: 'rgba(26, 31, 74, 0.55)',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <InventoryIcon fontSize="small" color="action" />
+              <Typography variant="h6" color="text.secondary">
+                Materials Required
+              </Typography>
+            </Box>
+            <List dense disablePadding>
+              {job.materials.map((mat, idx) => (
+                <ListItem key={idx} disableGutters sx={{ py: 0.25 }}>
+                  <ListItemText
+                    primary={mat.name}
+                    secondary={`${mat.quantity} ${mat.unit}`}
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Timer with estimated vs elapsed (when working) */}
       {isWorking && job.session_started_at && (
         <Card
           elevation={2}
@@ -364,6 +474,12 @@ export default function OperatorJobDetailPage() {
               Time on Job
             </Typography>
             <SessionTimer startedAt={job.session_started_at} />
+            {job.estimated_minutes != null && job.estimated_minutes > 0 && (
+              <EstimatedComparison
+                estimatedMinutes={job.estimated_minutes}
+                sessionStartedAt={job.session_started_at}
+              />
+            )}
           </CardContent>
         </Card>
       )}

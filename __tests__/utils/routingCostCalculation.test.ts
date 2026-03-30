@@ -45,6 +45,7 @@ function makeNode(overrides: Partial<RoutingWithGraph['nodes'][0]> = {}): Routin
     routing_id: 'routing-1',
     operation_type_id: 'op-1',
     run_time_per_unit: 30,
+    setup_time: 0,
     instructions: null,
     metadata: {},
     materials: [],
@@ -209,5 +210,48 @@ describe('calculateRoutingCost', () => {
 
     expect(result!.material_items).toHaveLength(0);
     expect(result!.warnings.some(w => w.type === 'missing_material_cost')).toBe(true);
+  });
+
+  it('calculates setup cost separately from run cost', async () => {
+    const nodes = [
+      makeNode({
+        run_time_per_unit: 30, // 30 min run
+        setup_time: 60, // 60 min setup
+        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 80, resource_group_id: null },
+      }),
+    ];
+
+    mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
+
+    const result = await calculateRoutingCost('part-1');
+
+    expect(result).not.toBeNull();
+    // Run cost: (30/60) * 80 = 40
+    expect(result!.labor_items[0].cost).toBe(40);
+    // Setup cost: (60/60) * 80 = 80
+    expect(result!.labor_items[0].setup_cost).toBe(80);
+    expect(result!.labor_items[0].setup_time_minutes).toBe(60);
+    expect(result!.total_labor_cost).toBe(40);
+    expect(result!.total_setup_cost).toBe(80);
+    // total_cost is per-unit only (excludes setup)
+    expect(result!.total_cost).toBe(40);
+  });
+
+  it('returns zero setup cost when setup_time is 0', async () => {
+    const nodes = [
+      makeNode({
+        run_time_per_unit: 30,
+        setup_time: 0,
+        operation_type: { id: 'op-1', name: 'Manual Deburring', labor_rate: 50, resource_group_id: null },
+      }),
+    ];
+
+    mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
+
+    const result = await calculateRoutingCost('part-1');
+
+    expect(result!.labor_items[0].setup_cost).toBe(0);
+    expect(result!.labor_items[0].setup_time_minutes).toBe(0);
+    expect(result!.total_setup_cost).toBe(0);
   });
 });

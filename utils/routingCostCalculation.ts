@@ -10,8 +10,10 @@ export interface CostWarning {
 export interface LaborItem {
   operation_name: string;
   run_time_minutes: number;
+  setup_time_minutes: number;
   labor_rate: number;
   cost: number;
+  setup_cost: number;
 }
 
 export interface MaterialItem {
@@ -26,6 +28,7 @@ export interface RoutingCostBreakdown {
   labor_items: LaborItem[];
   material_items: MaterialItem[];
   total_labor_cost: number;
+  total_setup_cost: number;
   total_material_cost: number;
   total_cost: number;
   warnings: CostWarning[];
@@ -57,6 +60,7 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
       labor_items: [],
       material_items: [],
       total_labor_cost: 0,
+      total_setup_cost: 0,
       total_material_cost: 0,
       total_cost: 0,
       warnings,
@@ -114,11 +118,14 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
       });
     } else {
       const laborCost = (node.run_time_per_unit / 60) * node.operation_type.labor_rate;
+      const setupCost = ((node.setup_time || 0) / 60) * node.operation_type.labor_rate;
       laborItems.push({
         operation_name: operationName,
         run_time_minutes: node.run_time_per_unit,
+        setup_time_minutes: node.setup_time || 0,
         labor_rate: node.operation_type.labor_rate,
         cost: Math.round(laborCost * 100) / 100,
+        setup_cost: Math.round(setupCost * 100) / 100,
       });
     }
 
@@ -155,12 +162,14 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
   }
 
   const totalLaborCost = Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
+  const totalSetupCost = Math.round(laborItems.reduce((sum, item) => sum + item.setup_cost, 0) * 100) / 100;
   const totalMaterialCost = Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
 
   return {
     labor_items: laborItems,
     material_items: materialItems,
     total_labor_cost: totalLaborCost,
+    total_setup_cost: totalSetupCost,
     total_material_cost: totalMaterialCost,
     total_cost: Math.round((totalLaborCost + totalMaterialCost) * 100) / 100,
     warnings,

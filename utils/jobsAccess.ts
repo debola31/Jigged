@@ -506,8 +506,8 @@ export async function updateJobOperation(
   operationId: string,
   updates: {
     status?: JobOperation['status'];
-    actual_setup_hours?: number;
-    actual_run_hours?: number;
+    actual_setup_minutes?: number;
+    actual_run_minutes?: number;
     notes?: string;
   }
 ): Promise<JobOperation> {
@@ -694,11 +694,11 @@ export async function completeJobOperation(
     updated_at: new Date().toISOString(),
   };
 
-  if (data.actual_setup_hours !== undefined) {
-    updateData.actual_setup_hours = data.actual_setup_hours;
+  if (data.actual_setup_minutes !== undefined) {
+    updateData.actual_setup_minutes = data.actual_setup_minutes;
   }
-  if (data.actual_run_hours !== undefined) {
-    updateData.actual_run_hours = data.actual_run_hours;
+  if (data.actual_run_minutes !== undefined) {
+    updateData.actual_run_minutes = data.actual_run_minutes;
   }
   if (data.notes !== undefined) {
     updateData.notes = data.notes;
@@ -849,8 +849,8 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
       started_at: null,
       completed_at: null,
       completed_by: null,
-      actual_setup_hours: null,
-      actual_run_hours: null,
+      actual_setup_minutes: null,
+      actual_run_minutes: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', operationId)

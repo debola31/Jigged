@@ -779,7 +779,12 @@ export async function refreshQuoteCost(quoteId: string, companyId: string): Prom
     baseCost = quote.parts.manual_cost;
     costSource = quote.parts.cost_source || 'manual';
   } else if (breakdown) {
-    baseCost = breakdown.total_cost;
+    // Amortize one-time setup cost across the quote quantity
+    const qty = quote.quantity || 1;
+    const setupPerUnit = breakdown.total_setup_cost > 0
+      ? Math.round((breakdown.total_setup_cost / qty) * 100) / 100
+      : 0;
+    baseCost = Math.round((breakdown.total_cost + setupPerUnit) * 100) / 100;
     costSource = 'routing';
     estimatedLaborCost = breakdown.total_labor_cost;
     estimatedMaterialCost = breakdown.total_material_cost;

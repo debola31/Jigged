@@ -52,8 +52,8 @@ test.describe('Quote to Job workflow', () => {
     // Fill quantity
     await page.getByLabel(/Quantity/i).fill('10');
 
-    // Save quote (creates as pending approval)
-    await page.getByRole('button', { name: /Save/i }).click();
+    // Send for approval (creates as pending_approval)
+    await page.getByRole('button', { name: /Send for Approval/i }).click();
 
     // Should redirect to the quote detail page
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });

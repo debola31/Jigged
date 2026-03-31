@@ -13,6 +13,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import Link from 'next/link';
 import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
@@ -203,7 +204,9 @@ export default function OperatorLoginPage() {
       >
         {/* Logo / Title */}
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
-          <JiggedLogo size="large" />
+          <Link href="/" style={{ textDecoration: 'none' }}>
+            <JiggedLogo size="large" />
+          </Link>
         </Box>
         {companyName && (
           <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>

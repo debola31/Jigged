@@ -6,6 +6,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
+import Paper from '@mui/material/Paper';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -321,7 +322,7 @@ export default function OperatorJobDetailPage() {
   }
 
   return (
-    <Box>
+    <Box sx={{ pb: isWorking ? 16 : 0 }}>
       {/* Back Button */}
       <IconButton
         onClick={() => router.push(`/operator/${companyId}/jobs`)}
@@ -393,6 +394,32 @@ export default function OperatorJobDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Timer with estimated vs elapsed (when working) */}
+      {isWorking && job.session_started_at && (
+        <Card
+          elevation={2}
+          sx={{
+            mb: 3,
+            bgcolor: 'rgba(26, 31, 74, 0.55)',
+            backdropFilter: 'blur(8px)',
+            py: 3,
+          }}
+        >
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="overline" color="text.secondary">
+              Time on Job
+            </Typography>
+            <SessionTimer startedAt={job.session_started_at} />
+            {job.estimated_minutes != null && job.estimated_minutes > 0 && (
+              <EstimatedComparison
+                estimatedMinutes={job.estimated_minutes}
+                sessionStartedAt={job.session_started_at}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Operation Info */}
       {job.operation_name && (
         <Card
@@ -458,32 +485,6 @@ export default function OperatorJobDetailPage() {
         </Card>
       )}
 
-      {/* Timer with estimated vs elapsed (when working) */}
-      {isWorking && job.session_started_at && (
-        <Card
-          elevation={2}
-          sx={{
-            mb: 3,
-            bgcolor: 'rgba(26, 31, 74, 0.55)',
-            backdropFilter: 'blur(8px)',
-            py: 3,
-          }}
-        >
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="overline" color="text.secondary">
-              Time on Job
-            </Typography>
-            <SessionTimer startedAt={job.session_started_at} />
-            {job.estimated_minutes != null && job.estimated_minutes > 0 && (
-              <EstimatedComparison
-                estimatedMinutes={job.estimated_minutes}
-                sessionStartedAt={job.session_started_at}
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Someone else working warning */}
       {someoneElseWorking && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -493,15 +494,9 @@ export default function OperatorJobDetailPage() {
       )}
 
       {/* Action Buttons */}
-      <Box
-        sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 2,
-        }}
-      >
-        {!isWorking ? (
-          // START button
+      {!isWorking ? (
+        // START button (inline)
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Button
             variant="contained"
             size="large"
@@ -517,43 +512,61 @@ export default function OperatorJobDetailPage() {
           >
             {actionLoading ? <CircularProgress size={24} /> : 'START WORK'}
           </Button>
-        ) : (
-          // STOP and COMPLETE buttons
-          <>
-            <Button
-              variant="contained"
-              size="large"
-              color="error"
-              startIcon={<ExitToAppIcon />}
-              onClick={handleStop}
-              disabled={actionLoading}
-              sx={{
-                minHeight: 56,
-                fontSize: '1.1rem',
-                fontWeight: 600,
-              }}
-            >
-              {actionLoading ? <CircularProgress size={24} /> : 'EXIT'}
-            </Button>
+        </Box>
+      ) : (
+        // STOP and COMPLETE buttons (sticky bottom bar)
+        <Paper
+          elevation={4}
+          square
+          sx={{
+            position: 'sticky',
+            bottom: 0,
+            mx: -2,
+            px: 2,
+            py: 2,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            bgcolor: 'rgba(26, 31, 74, 0.92)',
+            backdropFilter: 'blur(8px)',
+            borderTop: 1,
+            borderColor: 'divider',
+            zIndex: (t) => t.zIndex.appBar,
+          }}
+        >
+          <Button
+            variant="contained"
+            size="large"
+            color="error"
+            startIcon={<ExitToAppIcon />}
+            onClick={handleStop}
+            disabled={actionLoading}
+            sx={{
+              minHeight: 56,
+              fontSize: '1.1rem',
+              fontWeight: 600,
+            }}
+          >
+            {actionLoading ? <CircularProgress size={24} /> : 'EXIT'}
+          </Button>
 
-            <Button
-              variant="contained"
-              size="large"
-              color="primary"
-              startIcon={<CheckCircleIcon />}
-              onClick={handleComplete}
-              disabled={actionLoading}
-              sx={{
-                minHeight: 64,
-                fontSize: '1.25rem',
-                fontWeight: 600,
-              }}
-            >
-              MARK COMPLETE
-            </Button>
-          </>
-        )}
-      </Box>
+          <Button
+            variant="contained"
+            size="large"
+            color="primary"
+            startIcon={<CheckCircleIcon />}
+            onClick={handleComplete}
+            disabled={actionLoading}
+            sx={{
+              minHeight: 64,
+              fontSize: '1.25rem',
+              fontWeight: 600,
+            }}
+          >
+            MARK COMPLETE
+          </Button>
+        </Paper>
+      )}
 
       {/* Complete Modal */}
       <JobCompleteModal

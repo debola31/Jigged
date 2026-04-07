@@ -89,7 +89,7 @@ SCHEMA_CONTEXT = """
 - customer_id: UUID (FK -> customers.id, nullable)
 - part_id: UUID (FK -> parts.id, nullable)
 - description: TEXT
-- status: TEXT -- one of: 'pending', 'in_progress', 'on_hold', 'completed', 'shipped', 'cancelled'
+- status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'shipped', 'cancelled'
 - status_changed_at: TIMESTAMPTZ
 - current_operation_sequence: INTEGER
 - started_at: TIMESTAMPTZ (when work began, nullable)

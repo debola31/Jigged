@@ -16,7 +16,7 @@ export interface ActivityItem {
 
 export type MetricKey =
   | 'open_quotes'
-  | 'active_jobs'
+  | 'not_started_jobs'
   | 'in_progress_jobs'
   | 'revenue'
   | 'completed_jobs'
@@ -33,8 +33,8 @@ export interface MetricDefinition {
 
 export const AVAILABLE_METRICS: MetricDefinition[] = [
   { key: 'open_quotes', label: 'Open Quotes', format: 'number' },
-  { key: 'active_jobs', label: 'Active Jobs', format: 'number' },
-  { key: 'in_progress_jobs', label: 'In Progress', format: 'number' },
+  { key: 'not_started_jobs', label: 'Jobs Not Started', format: 'number' },
+  { key: 'in_progress_jobs', label: 'Jobs In Progress', format: 'number' },
   { key: 'revenue', label: 'Revenue', format: 'currency', supportsTimePeriod: true },
   { key: 'completed_jobs', label: 'Completed Jobs', format: 'number', supportsTimePeriod: true },
   { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
@@ -42,7 +42,7 @@ export const AVAILABLE_METRICS: MetricDefinition[] = [
 
 export const DEFAULT_PINNED_METRICS: MetricKey[] = [
   'open_quotes',
-  'active_jobs',
+  'not_started_jobs',
   'in_progress_jobs',
   'completed_jobs',
 ];
@@ -51,6 +51,11 @@ export const DEFAULT_PINNED_METRICS: MetricKey[] = [
 const LEGACY_KEY_MAP: Record<string, MetricKey> = {
   weekly_revenue: 'revenue',
   monthly_revenue: 'revenue',
+  // active_jobs used to count not_started + in_progress (a union); it has
+  // been split into two separate metrics. Map old user prefs to the
+  // not_started half so existing dashboards keep one tile in roughly the
+  // same conceptual slot.
+  active_jobs: 'not_started_jobs',
 };
 const REMOVED_KEYS = ['at_risk_count', 'low_inventory_count', 'total_customers', 'total_parts'];
 
@@ -277,7 +282,7 @@ async function getOverdueJobs(companyId: string): Promise<number> {
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
-    .in('status', ['pending', 'in_progress'])
+    .in('status', ['not_started', 'in_progress'])
     .lt('due_date', now);
 
   if (error) throw error;
@@ -295,8 +300,8 @@ export async function getMetricValue(
   switch (key) {
     case 'open_quotes':
       return getCount('quotes', companyId, { status: ['pending_approval'] });
-    case 'active_jobs':
-      return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
+    case 'not_started_jobs':
+      return getCount('jobs', companyId, { status: ['not_started'] });
     case 'in_progress_jobs':
       return getCount('jobs', companyId, { status: ['in_progress'] });
     case 'revenue':

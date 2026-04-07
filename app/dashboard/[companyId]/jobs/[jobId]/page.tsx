@@ -17,7 +17,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckIcon from '@mui/icons-material/Check';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import PauseIcon from '@mui/icons-material/Pause';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -38,8 +37,6 @@ import {
   completeJob,
   shipJob,
   cancelJob,
-  putJobOnHold,
-  resumeJob,
   getJobAttachmentUrl,
 } from '@/utils/jobsAccess';
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
@@ -178,14 +175,12 @@ export default function JobDetailPage() {
     );
   }
 
-  const canEdit = job.status === 'pending' || job.status === 'on_hold';
+  const canEdit = job.status === 'not_started';
   const hasOperations = job.job_operations && job.job_operations.length > 0;
   // Hide manual Start/Complete buttons when operations exist (auto-progression handles these)
-  const canStart = job.status === 'pending' && !hasOperations;
+  const canStart = job.status === 'not_started' && !hasOperations;
   const canComplete = job.status === 'in_progress' && !hasOperations;
   const canShip = job.status === 'completed';
-  const canPause = job.status === 'in_progress';
-  const canResume = job.status === 'on_hold';
   const canCancel = job.status !== 'shipped' && job.status !== 'cancelled';
 
   return (
@@ -244,30 +239,6 @@ export default function JobDetailPage() {
               disabled={actionLoading}
             >
               Start Job
-            </Button>
-          )}
-
-          {canPause && (
-            <Button
-              variant="outlined"
-              color="warning"
-              startIcon={<PauseIcon />}
-              onClick={() => handleAction(() => putJobOnHold(jobId))}
-              disabled={actionLoading}
-            >
-              Put On Hold
-            </Button>
-          )}
-
-          {canResume && (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<PlayArrowIcon />}
-              onClick={() => handleAction(() => resumeJob(jobId))}
-              disabled={actionLoading}
-            >
-              Resume
             </Button>
           )}
 

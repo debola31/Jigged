@@ -28,10 +28,11 @@ export default function DashboardPage() {
     if (!companyId) return;
     Promise.all([
       getMetricValue(companyId, 'open_quotes'),
-      getMetricValue(companyId, 'active_jobs'),
+      getMetricValue(companyId, 'not_started_jobs'),
+      getMetricValue(companyId, 'in_progress_jobs'),
       getMetricValue(companyId, 'revenue'),
-    ]).then(([quotes, jobs, revenue]) => {
-      setIsEmpty(quotes === 0 && jobs === 0 && revenue === 0);
+    ]).then(([quotes, notStarted, inProgress, revenue]) => {
+      setIsEmpty(quotes === 0 && notStarted === 0 && inProgress === 0 && revenue === 0);
     }).catch(() => {});
   }, [companyId]);
 

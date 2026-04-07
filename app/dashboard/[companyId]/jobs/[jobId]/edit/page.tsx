@@ -31,8 +31,8 @@ export default function EditJobPage() {
         }
 
         // Check if job can be edited
-        if (data.status !== 'pending' && data.status !== 'on_hold') {
-          setError('Only pending or on hold jobs can be edited');
+        if (data.status !== 'not_started') {
+          setError('Only not started jobs can be edited');
           return;
         }
 

@@ -39,17 +39,17 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 **Color:** Default/neutral
 
-### Card 2: Active Jobs
+### Card 2: Jobs Not Started
 
-**Query:** Count jobs where status IN ('pending', 'in_progress')
+**Query:** Count jobs where status = 'not_started'
 
 **Display:**
 
 - Large number
 
-- Label: "Active Jobs"
+- Label: "Jobs Not Started"
 
-- Click → Navigate to Jobs list (filtered to active)
+- Click → Navigate to Jobs list (filtered to not started)
 
 **Color:** Default/neutral
 
@@ -165,7 +165,7 @@ Activity is derived from `created_at`, `started_at`, `completed_at`, `shipped_at
 
 - [ ] Shows count of open quotes (draft + pending_approval)
 
-- [ ] Shows count of active jobs (pending + in_progress)
+- [ ] Shows count of jobs not started and jobs in progress as separate tiles
 
 - [ ] Shows revenue for the current week (shipped jobs)
 

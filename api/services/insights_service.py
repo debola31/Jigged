@@ -569,7 +569,7 @@ def get_inventory_alerts(company_id: str) -> dict:
 def get_at_risk_jobs(company_id: str) -> dict:
     """
     Get jobs that are potentially at risk of falling behind.
-    Analyzes pending and in_progress jobs. Joins quotes for quantity (default 1).
+    Analyzes not_started and in_progress jobs. Joins quotes for quantity (default 1).
     Calculates severity based on % complete vs % time elapsed.
     """
     supabase = _get_supabase_service_role()
@@ -584,7 +584,7 @@ def get_at_risk_jobs(company_id: str) -> dict:
             "job_operations(id, status, estimated_setup_hours, estimated_run_hours_per_unit)"
         )
         .eq("company_id", company_id)
-        .in_("status", ["pending", "in_progress"])
+        .in_("status", ["not_started", "in_progress"])
         .execute()
     )
 
@@ -693,7 +693,7 @@ def get_resource_utilization(
             "operation_types!left(name, resource_group_id, resource_groups!left(name)))"
         )
         .eq("company_id", company_id)
-        .in_("status", ["pending", "in_progress", "completed", "shipped"])
+        .in_("status", ["not_started", "in_progress", "completed", "shipped"])
         .gte("created_at", start_date)
         .lt("created_at", end_date)
         .execute()

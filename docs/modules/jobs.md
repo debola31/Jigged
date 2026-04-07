@@ -21,25 +21,16 @@ The Jobs module tracks production work through the shop. Jobs represent actual w
 ## Job Status Workflow
 
 ```javascript
-  PENDING
-     │
-     ▼
-IN_PROGRESS ◄──► ON_HOLD
-     │
-     ▼
- COMPLETED
-     │
-     ▼
-  SHIPPED
+NOT_STARTED ──► IN_PROGRESS ──► COMPLETED ──► SHIPPED
+     │              │
+     └──────────────┴──────► CANCELLED
 ```
 
 **Status Definitions:**
 
-- **Pending** - Job created, not yet started
+- **Not Started** - Job created, no operations have begun
 
 - **In Progress** - Work has begun on the shop floor
-
-- **On Hold** - Job paused (can resume back to In Progress)
 
 - **Completed** - All work finished, ready to ship
 
@@ -73,7 +64,7 @@ IN_PROGRESS ◄──► ON_HOLD
 | customer_id | UUID (FK) | Yes | Link to customer |
 | part_id | UUID (FK) | Yes | Link to part (routing is auto-resolved from the part's routing) |
 | description | Text | No | Job/part description |
-| status | Text | Yes | pending, in_progress, on_hold, completed, shipped, cancelled |
+| status | Text | Yes | not_started, in_progress, completed, shipped, cancelled |
 | started_at | Timestamp | No | When job moved to in_progress |
 | completed_at | Timestamp | No | When job moved to complete |
 | shipped_at | Timestamp | No | When job moved to shipped |
@@ -93,7 +84,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - Search box (searches job number, customer name, part number)
 
-- Filter dropdown: Status (All / Pending / In Progress / On Hold / Completed / Shipped)
+- Filter dropdown: Status (All Jobs / Not Started / In Progress / Completed / Shipped / Cancelled)
 
 - "+ New Job" button
 
@@ -103,11 +94,9 @@ IN_PROGRESS ◄──► ON_HOLD
 
 **Status Pills:**
 
-- Pending = Gray
+- Not Started = Gray
 
 - In Progress = Blue
-
-- On Hold = Yellow/Warning
 
 - Completed = Green
 
@@ -143,7 +132,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 **Actions:**
 
-- Create Job → Creates job in Pending status, redirects to detail
+- Create Job → Creates job in Not Started status, redirects to detail
 
 - Cancel → Returns to list
 
@@ -193,9 +182,8 @@ IN_PROGRESS ◄──► ON_HOLD
 
 | Current Status | Available Actions |
 |---|---|
-| Pending | Start Job, Edit, Cancel Job |
-| In Progress | Put On Hold, Update Progress, Mark Complete, Cancel Job |
-| On Hold | Resume Job (back to In Progress), Cancel Job |
+| Not Started | Start Job, Edit, Cancel Job |
+| In Progress | Update Progress, Mark Complete, Cancel Job |
 | Completed | Mark Shipped, Reopen (back to In Progress) |
 | Shipped | (read only) |
 | Cancelled | (read only) |
@@ -224,9 +212,9 @@ IN_PROGRESS ◄──► ON_HOLD
 
 | From | To | Trigger | Auto-set |
 |---|---|---|---|
-| Pending | In Progress | User clicks "Start Job" | started_at = now |
-| Pending | Cancelled | User clicks "Cancel Job" | - |
-| In Progress | Complete | User clicks "Mark Complete" | completed_at = now |
+| Not Started | In Progress | User clicks "Start Job" (or first operation starts) | started_at = now |
+| Not Started | Cancelled | User clicks "Cancel Job" | - |
+| In Progress | Complete | User clicks "Mark Complete" (or all operations done) | completed_at = now |
 | In Progress | Cancelled | User clicks "Cancel Job" | - |
 | Complete | Shipped | User clicks "Mark Shipped" | shipped_at = now |
 | Complete | In Progress | User clicks "Reopen" | completed_at = null |
@@ -251,7 +239,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - [ ] Can view job detail with all information
 
-- [ ] Can start a pending job (moves to in_progress)
+- [ ] Can start a not started job (moves to in_progress)
 
 - [ ] Can update progress (completed/scrapped quantities)
 
@@ -261,7 +249,7 @@ IN_PROGRESS ◄──► ON_HOLD
 
 - [ ] Can reopen a complete job back to in_progress
 
-- [ ] Can cancel a job from pending or in_progress
+- [ ] Can cancel a job from not started or in_progress
 
 - [ ] Timestamps auto-set on status transitions
 

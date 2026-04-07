@@ -221,17 +221,4 @@ const jiggedTheme = createTheme({
   },
 });
 
-// Work order status color mapping
-export const statusColors = {
-  requested: 'default',
-  approved: 'info',
-  in_progress: 'primary',
-  completed: 'success',
-  on_hold: 'warning',
-  cancelled: 'error',
-  overdue: 'error',
-} as const;
-
-export type StatusColorKey = keyof typeof statusColors;
-
 export default jiggedTheme;

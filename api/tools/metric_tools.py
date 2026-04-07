@@ -34,7 +34,7 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_job_status_distribution",
         "description": (
             "Get the count of jobs in each status category "
-            "(pending, in_progress, on_hold, completed, shipped, cancelled). "
+            "(not_started, in_progress, completed, shipped, cancelled). "
             "Returns data suitable for a pie/donut chart."
         ),
         "input_schema": {
@@ -156,7 +156,7 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_at_risk_jobs",
         "description": (
             "Get jobs that are potentially at risk of missing deadlines. "
-            "Analyzes pending and in_progress jobs, comparing percentage of operations "
+            "Analyzes not_started and in_progress jobs, comparing percentage of operations "
             "completed vs percentage of estimated time elapsed. Returns a list of at-risk "
             "jobs with severity levels (high, medium, low)."
         ),

@@ -52,11 +52,12 @@ export default function OperatorJobsPage() {
   }, [companyId]);
 
   const loadJobs = useCallback(async () => {
+    if (!stationId) return;
     setLoading(true);
     setError(null);
 
     try {
-      const jobsData = await getOperatorJobs(companyId, stationId || undefined);
+      const jobsData = await getOperatorJobs(companyId, stationId);
       setJobs(jobsData);
 
       // Get active session if we have operator ID
@@ -72,8 +73,40 @@ export default function OperatorJobsPage() {
   }, [companyId, stationId, operatorId]);
 
   useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
+    // Wait for station to resolve before fetching — otherwise a fetch with
+    // stationId=undefined returns ALL company jobs, and if it lands after the
+    // station-filtered fetch it pollutes the list with wrong-station jobs.
+    if (!stationId) {
+      setJobs([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const jobsData = await getOperatorJobs(companyId, stationId);
+        if (cancelled) return;
+        setJobs(jobsData);
+        if (operatorId) {
+          const sessionData = await getActiveSession(operatorId);
+          if (cancelled) return;
+          setActiveSession(sessionData);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load jobs');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, stationId, operatorId]);
 
   const handleJobClick = (jobId: string) => {
     router.push(`/operator/${companyId}/jobs/${jobId}`);

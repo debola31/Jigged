@@ -277,7 +277,7 @@ async function getOverdueJobs(companyId: string): Promise<number> {
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
-    .in('status', ['pending', 'in_progress'])
+    .in('status', ['not_started', 'in_progress'])
     .lt('due_date', now);
 
   if (error) throw error;
@@ -296,7 +296,7 @@ export async function getMetricValue(
     case 'open_quotes':
       return getCount('quotes', companyId, { status: ['pending_approval'] });
     case 'active_jobs':
-      return getCount('jobs', companyId, { status: ['pending', 'in_progress'] });
+      return getCount('jobs', companyId, { status: ['not_started', 'in_progress'] });
     case 'in_progress_jobs':
       return getCount('jobs', companyId, { status: ['in_progress'] });
     case 'revenue':

@@ -200,7 +200,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - Quote: pending_approval → approved/rejected/expired
 
-- Job: pending → in_progress → completed → shipped / cancelled
+- Job: not_started → in_progress → completed → shipped / cancelled
 
 ---
 

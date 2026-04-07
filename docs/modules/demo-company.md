@@ -65,7 +65,7 @@ Fallback if no first name available: `"Demo Shop"` (rename prompt on first visit
 | Operation Types | 8 | With labor rates, linked to resource groups |
 | Routings | 3 | With nodes and edges |
 | Quotes | 5 | pending_approval, accepted statuses |
-| Jobs | 4 | Pending, in_progress, completed statuses |
+| Jobs | 4 | Not started, in_progress, completed statuses |
 | Job Operations | 10+ | Across the 4 jobs |
 | Inventory Items | 8 | With quantities and units |
 | Demo Operators | 2 | Mike Johnson, Sarah Williams — with PIN codes |
@@ -521,7 +521,7 @@ BEGIN
                 (v_ref_map->>(v_item->>'quote_ref'))::UUID,
                 (v_ref_map->>(v_item->>'routing_ref'))::UUID,
                 v_item->>'description',
-                COALESCE(v_item->>'status', 'pending'),
+                COALESCE(v_item->>'status', 'not_started'),
                 p_user_id);
 
         -- Insert job_operations

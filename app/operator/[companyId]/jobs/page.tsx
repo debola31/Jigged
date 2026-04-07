@@ -118,8 +118,7 @@ export default function OperatorJobsPage() {
         return 'success';
       case 'in_progress':
         return 'primary';
-      case 'pending':
-      case 'released':
+      case 'not_started':
         return 'default';
       default:
         return 'default';

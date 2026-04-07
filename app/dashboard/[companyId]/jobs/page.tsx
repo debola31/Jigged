@@ -55,7 +55,7 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>('active');
+  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>('all');
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
@@ -112,8 +112,8 @@ export default function JobsPage() {
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
 
-      // Fetch current operations for active jobs
-      const activeStatuses = new Set(['pending', 'in_progress', 'on_hold']);
+      // Fetch current operations for active jobs (not started + in progress)
+      const activeStatuses = new Set(['not_started', 'in_progress']);
       const activeJobIds = data
         .filter(j => activeStatuses.has(j.status))
         .map(j => j.id);
@@ -336,11 +336,9 @@ export default function JobsPage() {
   ];
 
   const statusOptions: Array<{ value: JobFilters['status']; label: string }> = [
-    { value: 'active', label: 'Active Jobs' },
     { value: 'all', label: 'All Jobs' },
-    { value: 'pending', label: 'Pending' },
+    { value: 'not_started', label: 'Not Started' },
     { value: 'in_progress', label: 'In Progress' },
-    { value: 'on_hold', label: 'On Hold' },
     { value: 'completed', label: 'Completed' },
     { value: 'shipped', label: 'Shipped' },
     { value: 'cancelled', label: 'Cancelled' },
@@ -444,11 +442,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || customerFilter || statusFilter !== 'active'
+              {searchDebounced || customerFilter || statusFilter !== 'all'
                 ? 'No jobs match your filters.'
                 : 'Create your first job to get started.'}
             </Typography>
-            {!searchDebounced && !customerFilter && statusFilter === 'active' && (
+            {!searchDebounced && !customerFilter && statusFilter === 'all' && (
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}

@@ -1,7 +1,7 @@
 /**
  * Job status values
  */
-export type JobStatus = 'pending' | 'in_progress' | 'on_hold' | 'completed' | 'shipped' | 'cancelled';
+export type JobStatus = 'not_started' | 'in_progress' | 'completed' | 'shipped' | 'cancelled';
 
 /**
  * Job attachment record from database
@@ -122,7 +122,7 @@ export interface JobFormData {
  * Filters for jobs list
  */
 export interface JobFilters {
-  status?: JobStatus | 'all' | 'active'; // 'active' = not shipped/cancelled
+  status?: JobStatus | 'all';
   customerId?: string;
   search?: string;
 }
@@ -152,11 +152,10 @@ export function jobToFormData(job: Job): JobFormData {
  */
 export const JOB_STATUS_CONFIG: Record<
   JobStatus,
-  { label: string; color: 'default' | 'info' | 'warning' | 'success' | 'error' }
+  { label: string; color: 'default' | 'info' | 'success' | 'error' }
 > = {
-  pending: { label: 'Pending', color: 'default' },
+  not_started: { label: 'Not Started', color: 'default' },
   in_progress: { label: 'In Progress', color: 'info' },
-  on_hold: { label: 'On Hold', color: 'warning' },
   completed: { label: 'Completed', color: 'success' },
   shipped: { label: 'Shipped', color: 'success' },
   cancelled: { label: 'Cancelled', color: 'error' },

@@ -235,7 +235,7 @@ export async function getOperatorJobs(
       parts(description, part_number)
     `)
     .eq('company_id', companyId)
-    .in('status', ['pending', 'in_progress', 'released'])
+    .in('status', ['not_started', 'in_progress'])
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);

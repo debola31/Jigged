@@ -41,7 +41,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 ### Card 2: Active Jobs
 
-**Query:** Count jobs where status IN ('pending', 'in_progress')
+**Query:** Count jobs where status IN ('not_started', 'in_progress')
 
 **Display:**
 
@@ -165,7 +165,7 @@ Activity is derived from `created_at`, `started_at`, `completed_at`, `shipped_at
 
 - [ ] Shows count of open quotes (draft + pending_approval)
 
-- [ ] Shows count of active jobs (pending + in_progress)
+- [ ] Shows count of active jobs (not_started + in_progress)
 
 - [ ] Shows revenue for the current week (shipped jobs)
 

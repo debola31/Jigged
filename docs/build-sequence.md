@@ -2418,17 +2418,17 @@ Phase 0 is complete when Shane can:
 
   **Color:** Default/neutral
 
-### Card 2: Active Jobs
+### Card 2: Jobs Not Started
 
-  **Query:** Count jobs where status IN ('pending', 'in_progress')
+  **Query:** Count jobs where status = 'not_started'
 
   **Display:**
 
   - Large number
 
-  - Label: "Active Jobs"
+  - Label: "Jobs Not Started"
 
-  - Click → Navigate to Jobs list (filtered to active)
+  - Click → Navigate to Jobs list (filtered to not started)
 
   **Color:** Default/neutral
 

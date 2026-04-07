@@ -250,7 +250,7 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 ```
 +-----------------------------------------------------------+
 |  Pinned Metrics (customizable, 1-4 KPIs)                  |
-|  [Open Quotes: 12] | [Active Jobs: 5] | [Revenue: $14K]  |
+|  [Open Quotes: 12] | [Jobs Not Started: 5] | [Revenue: $14K]  |
 |  + Add metric / Edit metrics                              |
 +-----------------------------------------------------------+
 |  Ask about your shop data...                     [Send]   |
@@ -295,7 +295,7 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 **Pinned Metrics (PinnedMetrics component):**
 - Flat KPI strip at top of dashboard (no card wrappers)
 - 1-4 customizable metrics selected via MetricPickerModal
-- Available metrics: open_quotes, active_jobs, weekly_revenue, monthly_revenue, at_risk_count, low_inventory_count, total_customers, total_parts
+- Available metrics: open_quotes, not_started_jobs, in_progress_jobs, revenue, completed_jobs, overdue_jobs
 - Persisted to localStorage per user
 - "+ Add metric" / "Edit metrics" text link below
 

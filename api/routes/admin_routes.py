@@ -178,16 +178,16 @@ async def create_company(request: Request, body: CompanyCreateRequest):
 
     company_id = None
     owner_user_id = None
+    user_already_existed = False
 
     try:
-        # 1. Check if email already exists
+        # 1. Check if email already exists (reuse existing user for multi-tenancy)
+        existing_user = None
         existing_users = service_client.auth.admin.list_users()
         for user in existing_users:
             if hasattr(user, 'email') and user.email == body.owner_email:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"A user with email {body.owner_email} already exists"
-                )
+                existing_user = user
+                break
 
         # 2. Generate slug with collision handling
         base_slug = generate_slug(body.company_name)
@@ -215,18 +215,22 @@ async def create_company(request: Request, body: CompanyCreateRequest):
 
         company_id = company_result.data[0]["id"]
 
-        # 4. Create auth user via invite — sends magic link email
-        auth_response = service_client.auth.admin.invite_user_by_email(
-            body.owner_email,
-            options={
-                "data": {"name": body.owner_name}
-            }
-        )
+        # 4. Reuse existing auth user or create new one via invite
+        if existing_user:
+            owner_user_id = existing_user.id
+            user_already_existed = True
+        else:
+            auth_response = service_client.auth.admin.invite_user_by_email(
+                body.owner_email,
+                options={
+                    "data": {"name": body.owner_name}
+                }
+            )
 
-        if not auth_response.user:
-            raise HTTPException(status_code=500, detail="Failed to create auth user")
+            if not auth_response.user:
+                raise HTTPException(status_code=500, detail="Failed to create auth user")
 
-        owner_user_id = auth_response.user.id
+            owner_user_id = auth_response.user.id
 
         # 5. Create user_company_access for company admin (first user)
         service_client.table("user_company_access").insert({
@@ -263,13 +267,13 @@ async def create_company(request: Request, body: CompanyCreateRequest):
         )
 
     except HTTPException:
-        # Rollback on known errors
-        _rollback(service_client, company_id, owner_user_id)
+        # Rollback on known errors — don't delete pre-existing auth users
+        _rollback(service_client, company_id, owner_user_id if not user_already_existed else None)
         raise
     except Exception as e:
         logger.error(f"Error creating company: {e}")
         sentry_sdk.capture_exception(e)
-        _rollback(service_client, company_id, owner_user_id)
+        _rollback(service_client, company_id, owner_user_id if not user_already_existed else None)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

@@ -223,8 +223,9 @@ export default function PartForm({
             Category
           </Typography>
           <Autocomplete
-            options={categories}
+            options={[{ id: '', name: 'None', default_markup_percent: null }, ...categories]}
             getOptionLabel={(option) => {
+              if (!option.id) return 'None';
               const markup = option.default_markup_percent !== null ? ` (${option.default_markup_percent}% markup)` : '';
               return `${option.name}${markup}`;
             }}

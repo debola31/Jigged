@@ -251,6 +251,18 @@ Deno.serve(async (req) => {
 
       const userId = await verifyAdmin(supabase, authHeader, company_id);
 
+      // Block invitations to demo companies — users should only be invited to the main company.
+      // Demo company access is automatically mirrored from the main company.
+      const { data: targetCompany } = await supabase
+        .from('companies')
+        .select('is_demo')
+        .eq('id', company_id)
+        .single();
+
+      if (targetCompany?.is_demo) {
+        return errorResponse('Cannot send invitations to a demo company. Invite users to the main company instead — they will automatically get demo access.', 400);
+      }
+
       // Check if user already has access to this company
       const { data: existingUsers } = await supabase.auth.admin.listUsers();
       const existingUser = existingUsers?.users?.find((u: { email?: string }) => u.email === email.toLowerCase());

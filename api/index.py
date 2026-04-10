@@ -17,8 +17,8 @@ from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (.env.local is the Next.js convention used in this project)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env.local'))
 
 # Initialize Sentry for error monitoring
 sentry_sdk.init(

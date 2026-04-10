@@ -48,6 +48,7 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import AdminGuard from '@/components/auth/AdminGuard';
+import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import type { TeamMember, Invitation, TeamRow } from '@/types/team';
 
 /**
@@ -83,6 +84,7 @@ export default function TeamPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
+  const { isDemoMode } = useDemoMode();
 
   // Tab state (0: Admins, 1: Users, 2: Operators)
   const [activeTab, setActiveTab] = useState(0);
@@ -723,13 +725,15 @@ export default function TeamPage() {
           )}
 
           <Box sx={{ flex: 1 }} />
-          <Button
-            variant="contained"
-            startIcon={<PersonAddIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=admin`)}
-          >
-            Invite Admin
-          </Button>
+          {!isDemoMode && (
+            <Button
+              variant="contained"
+              startIcon={<PersonAddIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=admin`)}
+            >
+              Invite Admin
+            </Button>
+          )}
         </Box>
 
         {/* Data Grid or Empty State */}
@@ -743,9 +747,11 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No admins match your search.'
-                  : 'Invite your first admin.'}
+                  : isDemoMode
+                    ? 'No admins in this demo company.'
+                    : 'Invite your first admin.'}
               </Typography>
-              {!searchDebounced && (
+              {!searchDebounced && !isDemoMode && (
                 <Button
                   variant="contained"
                   startIcon={<PersonAddIcon />}
@@ -855,13 +861,15 @@ export default function TeamPage() {
           )}
 
           <Box sx={{ flex: 1 }} />
-          <Button
-            variant="contained"
-            startIcon={<PersonAddIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=user`)}
-          >
-            Invite User
-          </Button>
+          {!isDemoMode && (
+            <Button
+              variant="contained"
+              startIcon={<PersonAddIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=user`)}
+            >
+              Invite User
+            </Button>
+          )}
         </Box>
 
         {/* Data Grid or Empty State */}
@@ -875,9 +883,11 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No users match your search.'
-                  : 'Invite your first user.'}
+                  : isDemoMode
+                    ? 'No users in this demo company.'
+                    : 'Invite your first user.'}
               </Typography>
-              {!searchDebounced && (
+              {!searchDebounced && !isDemoMode && (
                 <Button
                   variant="contained"
                   startIcon={<PersonAddIcon />}
@@ -987,13 +997,15 @@ export default function TeamPage() {
           )}
 
           <Box sx={{ flex: 1 }} />
-          <Button
-            variant="contained"
-            startIcon={<PersonAddIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=operator`)}
-          >
-            Invite Operator
-          </Button>
+          {!isDemoMode && (
+            <Button
+              variant="contained"
+              startIcon={<PersonAddIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/team/members/new?role=operator`)}
+            >
+              Invite Operator
+            </Button>
+          )}
         </Box>
 
         {/* Data Grid or Empty State */}
@@ -1007,9 +1019,11 @@ export default function TeamPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {searchDebounced
                   ? 'No operators match your search.'
-                  : 'Invite your first operator.'}
+                  : isDemoMode
+                    ? 'No operators in this demo company.'
+                    : 'Invite your first operator.'}
               </Typography>
-              {!searchDebounced && (
+              {!searchDebounced && !isDemoMode && (
                 <Button
                   variant="contained"
                   startIcon={<PersonAddIcon />}

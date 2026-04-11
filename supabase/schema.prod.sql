@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-04-10T03:00:13Z
+-- Generated: 2026-04-11T01:48:31Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -2157,7 +2157,6 @@ DECLARE
     v_routing_id UUID;
     v_job_id UUID;
 BEGIN
-    -- Get active template data
     SELECT template_data INTO v_template
     FROM demo_data_templates
     WHERE name = p_template_name AND is_active = TRUE
@@ -2167,9 +2166,6 @@ BEGIN
         RAISE EXCEPTION 'No active demo data template found for name: %', p_template_name;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert customers
-    -- -----------------------------------------------------------------------
     IF v_template->'customers' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers')
         LOOP
@@ -2186,9 +2182,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert resource_groups
-    -- -----------------------------------------------------------------------
     IF v_template->'resource_groups' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
         LOOP
@@ -2201,9 +2194,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert operation_types (depends on resource_groups)
-    -- -----------------------------------------------------------------------
     IF v_template->'operation_types' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
         LOOP
@@ -2220,9 +2210,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert part_categories
-    -- -----------------------------------------------------------------------
     IF v_template->'part_categories' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'part_categories')
         LOOP
@@ -2238,9 +2225,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert parts
-    -- -----------------------------------------------------------------------
     IF v_template->'parts' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
         LOOP
@@ -2261,9 +2245,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert inventory_items
-    -- -----------------------------------------------------------------------
     IF v_template->'inventory_items' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items')
         LOOP
@@ -2284,9 +2265,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert routings + routing_nodes + routing_edges (1:1 with parts)
-    -- -----------------------------------------------------------------------
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings')
         LOOP
@@ -2302,7 +2280,6 @@ BEGIN
                     p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
 
-            -- Insert nodes for this routing
             IF v_item->'nodes' IS NOT NULL THEN
                 FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes')
                 LOOP
@@ -2321,7 +2298,6 @@ BEGIN
                 END LOOP;
             END IF;
 
-            -- Insert edges for this routing
             IF v_item->'edges' IS NOT NULL THEN
                 FOR v_edge IN SELECT * FROM jsonb_array_elements(v_item->'edges')
                 LOOP
@@ -2336,9 +2312,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert quotes (depends on customers, parts)
-    -- -----------------------------------------------------------------------
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
         LOOP
@@ -2348,7 +2321,7 @@ BEGIN
             INSERT INTO quotes (id, company_id, customer_id, part_id, description,
                                 quantity, unit_price, status, created_by,
                                 base_cost, markup_percent, cost_source,
-                                labor_cost_snapshot, material_cost_snapshot,
+                                estimated_labor_cost, estimated_material_cost,
                                 created_at)
             VALUES (v_new_id, p_company_id,
                     (v_ref_map->>(v_item->>'customer_ref'))::UUID,
@@ -2363,15 +2336,12 @@ BEGIN
                     (v_item->>'base_cost')::NUMERIC,
                     (v_item->>'markup_percent')::NUMERIC,
                     v_item->>'cost_source',
-                    (v_item->>'labor_cost_snapshot')::NUMERIC,
-                    (v_item->>'material_cost_snapshot')::NUMERIC,
+                    (v_item->>'estimated_labor_cost')::NUMERIC,
+                    (v_item->>'estimated_material_cost')::NUMERIC,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Insert jobs (depends on customers, parts, quotes)
-    -- -----------------------------------------------------------------------
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs')
         LOOP
@@ -2399,8 +2369,6 @@ BEGIN
                     (v_item->>'shipped_at')::TIMESTAMPTZ,
                     (v_item->>'status_changed_at')::TIMESTAMPTZ);
 
-            -- Insert job_operations (column names use *_minutes; templates may
-            -- still use legacy *_hours keys, multiply by 60 when present).
             IF v_item->'operations' IS NOT NULL THEN
                 FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations')
                 LOOP
@@ -2452,9 +2420,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- -----------------------------------------------------------------------
-    -- Post-insert: link converted quotes to their jobs
-    -- -----------------------------------------------------------------------
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes')
         LOOP

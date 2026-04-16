@@ -27,14 +27,8 @@ function getPageTitle(pathname: string): string {
     return 'Quotes';
   }
 
-  // Check for parts routes (including routing sub-routes)
+  // Check for parts routes
   if (segments.includes('parts')) {
-    // Routing sub-routes under parts: /parts/[partId]/routing/new or /edit
-    if (segments.includes('routing')) {
-      if (segments.includes('new')) return 'New Routing';
-      if (segments.includes('edit')) return 'Edit Routing';
-      return 'Routing';
-    }
     if (segments.includes('new')) return 'New Part';
     if (segments.includes('edit')) return 'Edit Part';
     if (segments.includes('import')) return 'Import Parts';

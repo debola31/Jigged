@@ -109,7 +109,7 @@ export default function ViewRoutingModal({
       >
         <Button
           component={Link}
-          href={`/dashboard/${companyId}/parts/${partId}/routing/edit`}
+          href={`/dashboard/${companyId}/parts/${partId}`}
           startIcon={<EditIcon />}
           variant="outlined"
           size="small"

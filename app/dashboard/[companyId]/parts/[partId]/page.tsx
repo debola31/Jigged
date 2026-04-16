@@ -15,7 +15,6 @@ import Grid from '@mui/material/Grid';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
@@ -25,6 +24,7 @@ import DialogActions from '@mui/material/DialogActions';
 
 import { getPartWithRelations, deletePart } from '@/utils/partsAccess';
 import type { Part } from '@/types/part';
+import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
 
 export default function PartDetailPage() {
   const params = useParams();
@@ -93,14 +93,13 @@ export default function PartDetailPage() {
   const hasRelatedRecords = quotesCount > 0 || jobsCount > 0;
 
   return (
-    <Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Back Button and Actions */}
       <Box
         sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          mb: 3,
         }}
       >
         <Button
@@ -142,14 +141,14 @@ export default function PartDetailPage() {
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
+      {/* Top row: basic info + related */}
       <Grid container spacing={3}>
-        {/* Basic Information Card */}
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: 8 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
@@ -188,73 +187,7 @@ export default function PartDetailPage() {
           </Card>
         </Grid>
 
-        {/* Routing Card */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <AccountTreeIcon sx={{ color: 'text.secondary' }} />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Routing
-                </Typography>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              {part.routing ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Operations
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {part.routing.nodes_count}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Run Time
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {part.routing.total_run_time_per_unit !== null
-                        ? `${part.routing.total_run_time_per_unit} min/unit`
-                        : '—'}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<AccountTreeIcon />}
-                      onClick={() =>
-                        router.push(`/dashboard/${companyId}/parts/${partId}/routing/edit`)
-                      }
-                    >
-                      Edit Routing
-                    </Button>
-                  </Box>
-                </Box>
-              ) : (
-                <Box>
-                  <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                    No routing defined
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AccountTreeIcon />}
-                    onClick={() =>
-                      router.push(`/dashboard/${companyId}/parts/${partId}/routing/new`)
-                    }
-                  >
-                    Create Routing
-                  </Button>
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Related Card */}
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, md: 4 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
@@ -291,6 +224,9 @@ export default function PartDetailPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Routing builder — auto-saves on every change */}
+      <PartRoutingPanel companyId={companyId} partId={partId} />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

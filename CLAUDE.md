@@ -133,8 +133,7 @@ user_preferences (id, user_id, last_company_id, created_at, updated_at)
 All app routes include a `companyId` to ensure data isolation:
 - `/dashboard/{companyId}`
 - `/dashboard/{companyId}/parts`
-- `/dashboard/{companyId}/parts/{partId}/routing/new` -- Create routing for part
-- `/dashboard/{companyId}/parts/{partId}/routing/edit` -- Edit routing for part
+- `/dashboard/{companyId}/parts/{partId}` -- Part detail; routing (operations + materials) is edited inline on this page
 - `/dashboard/{companyId}/quotes`
 - `/dashboard/{companyId}/jobs`
 - `/dashboard/{companyId}/operations`
@@ -162,21 +161,25 @@ All app routes include a `companyId` to ensure data isolation:
 │   ├── select-company/      # Company selector
 │   ├── no-access/           # No access page
 │   └── dashboard/[companyId]/ # Dashboard (protected)
-│       ├── parts/
-│       │   └── [partId]/routing/  # Linear routing editor (1:1 with part)
+│       ├── parts/                 # Routing edited inline on the part detail page
 │       ├── quotes/
 │       ├── jobs/
 │       └── operations/
 ├── components/
 │   ├── auth/                # Auth-related components
 │   ├── providers/           # Context providers
+│   ├── parts/
+│   │   ├── PartRoutingPanel.tsx       # Inline auto-save routing editor on the part page
+│   │   └── ...                        # PartForm, etc.
 │   ├── routings/            # Linear routing builder (no React Flow, no DAG)
-│   │   ├── RoutingBuilder.tsx         # Top-level editor: operations + materials
-│   │   ├── RoutingOperationsList.tsx  # Sortable list of operation rows
-│   │   ├── RoutingOperationRow.tsx    # Inline-editable operation row
-│   │   ├── RoutingMaterialsList.tsx   # Sortable list of routing-level materials
-│   │   ├── RoutingMaterialRow.tsx     # Inline-editable material row
-│   │   └── RoutingViewer.tsx          # Read-only routing display
+│   │   ├── RoutingBuilder.tsx         # Side-by-side operations + materials lists
+│   │   ├── RoutingOperationsList.tsx  # Reorder-by-arrow list of operation rows
+│   │   ├── RoutingOperationRow.tsx    # Compact one-line row with modal-edit
+│   │   ├── RoutingMaterialsList.tsx   # Modal-driven list of routing-level materials
+│   │   ├── RoutingMaterialRow.tsx     # Compact one-line material row
+│   │   ├── RoutingViewer.tsx          # Read-only routing display (used by ViewRoutingModal)
+│   │   ├── AddOperationModal.tsx      # Operation picker + setup/run time inputs
+│   │   └── AddMaterialModal.tsx       # Inventory item picker + qty/unit inputs
 │   └── jobs/
 │       ├── JobMaterialsCard.tsx  # Job-level materials (expected + actual consumption)
 │       └── ...                   # OperationsPanel, OperationCard, etc.
@@ -190,7 +193,7 @@ All app routes include a `companyId` to ensure data isolation:
     └── index.py
 ```
 
-Routings are a linear, reorderable list of operations. The routing builder uses a sortable list (drag-to-reorder) with inline-editable rows — it is not a DAG/canvas and does not use `@xyflow/react`. Materials are defined once at the routing level (`routing_materials` table) and snapshotted into `job_materials` when a job is created.
+Routings are a linear, reorderable list of operations. They live **inline on the part detail page** — there is no separate `/routing/new` or `/routing/edit` page or wizard. The `PartRoutingPanel` component embeds Operations + Materials cards side-by-side and auto-saves every change via `saveRoutingWithOperationsAndMaterials`. Reordering uses up/down arrow buttons (no drag-and-drop). Operation add/edit goes through `AddOperationModal` (operation + setup + run time on one screen). Materials are routing-level (`routing_materials` table) and snapshot into `job_materials` when a job is created.
 
 ---
 

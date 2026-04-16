@@ -336,8 +336,7 @@ All app routes include company context for multi-tenant data isolation:
 /dashboard/{companyId}              # Main dashboard
 /dashboard/{companyId}/customers    # Customers module
 /dashboard/{companyId}/parts        # Parts module
-/dashboard/{companyId}/parts/{partId}/routing/new   # Create routing for part
-/dashboard/{companyId}/parts/{partId}/routing/edit  # Edit routing for part
+/dashboard/{companyId}/parts/{partId}                # Part detail (routing edited inline here)
 /dashboard/{companyId}/quotes       # Quotes module
 /dashboard/{companyId}/jobs         # Jobs module
 /dashboard/{companyId}/operations   # Operations module

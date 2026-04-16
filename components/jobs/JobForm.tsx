@@ -270,18 +270,11 @@ export default function JobForm({
                   <Button
                     variant="outlined"
                     size="small"
-                    href={(() => {
-                      const returnParams = new URLSearchParams();
-                      if (formData.customer_id) returnParams.set('customer_id', formData.customer_id);
-                      if (formData.part_id) returnParams.set('part_id', formData.part_id);
-                      if (formData.description) returnParams.set('description', formData.description);
-                      const returnTo = `/dashboard/${companyId}/jobs/new?${returnParams.toString()}`;
-                      return `/dashboard/${companyId}/parts/${formData.part_id}/routing/new?returnTo=${encodeURIComponent(returnTo)}`;
-                    })()}
+                    href={`/dashboard/${companyId}/parts/${formData.part_id}`}
                     startIcon={<ArrowForwardIcon />}
                     sx={{ mt: 1 }}
                   >
-                    Create Routing
+                    Open Part to Add Routing
                   </Button>
                 </Alert>
               )

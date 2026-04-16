@@ -191,7 +191,7 @@ export default function RoutingCostModal({
       >
         <Button
           component={Link}
-          href={`/dashboard/${companyId}/parts/${partId}/routing/edit`}
+          href={`/dashboard/${companyId}/parts/${partId}`}
           target="_blank"
           startIcon={<EditIcon />}
           variant="outlined"

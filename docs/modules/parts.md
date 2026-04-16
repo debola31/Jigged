@@ -148,12 +148,9 @@ Read-only view showing:
 
 - Edit button
 
-▸ **Routing Info Card**
+▸ **Inline Routing Editor (`PartRoutingPanel`)**
 
-The part detail page includes a routing info card that shows:
-
-- If routing exists: Routing name, number of operations, and an "Edit Routing" button (links to `/dashboard/{companyId}/parts/{id}/routing/edit`)
-- If no routing exists: A "Create Routing" button (links to `/dashboard/{companyId}/parts/{id}/routing/new`)
+The part detail page embeds the routing editor directly — there's no separate page to navigate to. The panel shows Operations and Materials side-by-side with auto-save: each modal save, reorder click, or delete persists immediately and a "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't yet have one. See `docs/modules/routings.md` for the full editor behavior.
 
 ---
 

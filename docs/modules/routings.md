@@ -35,17 +35,19 @@ Users build routings by adding operations to a list and dragging to reorder them
 
 ## Linear Routing Builder
 
-The routing editor is a two-section page, not a canvas:
+Routings are edited **inline on the part detail page** via the `PartRoutingPanel` component — there is no separate `/routing/new` or `/routing/edit` page. The panel renders Operations and Materials cards side-by-side and **auto-saves every change to the database** (no "Save Routing" button).
 
-- **Operations list** - A sortable list of operation rows. Each row is editable inline (operation type, setup time, run time per unit, instructions). Rows are drag-to-reorder; reordering updates each row's `sequence`.
+- **Operations list** — Compact one-line rows: operation name + setup/run time as subtle text (amber when missing). Reorder via up/down arrow buttons. Click the pencil to open the edit modal; click the trash to delete. The "Add Operation" button opens a modal that asks for the operation type, setup time, and run time per unit on a single screen.
 
-- **Materials list** - A separate sortable list of materials for the routing. Each row picks an inventory item, quantity, and unit. Materials are routing-level — not attached to individual operations.
+- **Materials list** — Same row pattern, no reorder arrows (materials are an unordered shopping list). The "Add Material" button opens a modal asking for the inventory item, quantity, and unit.
 
-- **Add / remove** - Each section has an "Add" button. Rows can be removed individually.
+- **Auto-save** — Each modal save, reorder click, or delete persists immediately via `saveRoutingWithOperationsAndMaterials`. A subtle "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't have one yet.
 
-- **Minimum Operations** - At least one operation is required to save a routing.
+- **Add / remove** — Each section has an "Add" button. Rows can be removed individually via the trash icon.
 
-Components live under `components/routings/`: `RoutingBuilder`, `RoutingOperationsList`, `RoutingOperationRow`, `RoutingMaterialsList`, `RoutingMaterialRow`, and `RoutingViewer` (read-only display used outside the editor).
+- **No minimum** — A routing can be saved with zero operations during editing (it just won't be useful for jobs). The job-creation flow surfaces the missing routing if needed.
+
+Components live under `components/routings/` (`RoutingBuilder`, `RoutingOperationsList`, `RoutingOperationRow`, `RoutingMaterialsList`, `RoutingMaterialRow`, `RoutingViewer`, `AddOperationModal`, `AddMaterialModal`) and `components/parts/PartRoutingPanel.tsx` (the auto-save wrapper that embeds the lists on the part page).
 
 ---
 
@@ -86,7 +88,7 @@ Each row is one operation step in the routing. Position in the list is defined b
 | run_time_per_unit | numeric | No | Run time per unit in minutes |
 | instructions | text | No | Optional per-operation instructions |
 
-A deferrable unique constraint on `(routing_id, sequence)` allows reorder operations to be performed inside a single transaction without tripping on intermediate duplicates.
+A unique constraint on `(routing_id, sequence)` enforces that no two operations in the same routing share a position. The data-access layer handles reorders with a two-phase update (parks rows at sequence ≥ 100000 before assigning their final values) so no intermediate duplicate ever exists.
 
 ### Routing Materials Table (`routing_materials`)
 
@@ -110,11 +112,12 @@ Materials needed to manufacture the part. Routing-level, not per-operation. Thin
 | As a... | I want to... | So that... |
 |---|---|---|
 | Owner/Admin | Build a routing for a part as a list of operations | I can define how the part is manufactured |
-| Owner/Admin | Drag operations to reorder them | I can adjust the sequence as my process evolves |
-| Owner/Admin | Inline-edit operation, setup time, and run time per unit on each row | I can make small changes without opening a dialog |
+| Owner/Admin | Reorder operations with up/down arrow buttons | I can adjust the sequence without learning drag-and-drop |
+| Owner/Admin | Add an operation through a modal that asks for setup and run time at the same time | I can't accidentally save an operation with missing time data |
 | Owner/Admin | Define a single list of materials for the whole routing | I can see the "shopping list" for the job without hunting through operations |
 | Owner/Admin | View estimated total time (sum of all operations) | I can accurately quote jobs |
-| Owner/Admin | Access the routing editor from the part detail page | I can manage the routing in context of the part |
+| Owner/Admin | Edit the routing directly on the part page without leaving | I can manage the routing in context with everything else about the part |
+| Owner/Admin | See changes auto-save as I make them | I never lose work because I forgot to click save |
 
 ---
 
@@ -124,9 +127,7 @@ Materials needed to manufacture the part. Routing-level, not per-operation. Thin
 
 - Each part can have at most one routing (enforced by unique constraint on `part_id`)
 
-- At least one operation is required to save a routing. An error is shown if no operations have been added.
-
-- Sequence values must be unique within a routing (enforced by deferrable unique constraint on `(routing_id, sequence)`)
+- Sequence values must be unique within a routing (enforced by unique constraint on `(routing_id, sequence)`)
 
 - Routing material quantity must be greater than zero
 
@@ -134,10 +135,7 @@ Materials needed to manufacture the part. Routing-level, not per-operation. Thin
 
 ## Routes
 
-Routings are accessed from the part detail page. There is no standalone routings list page.
-
-- **Create routing:** `/dashboard/{companyId}/parts/{partId}/routing/new` -- Opens the routing builder directly (no name/part selection step; the routing name is auto-generated from the part number)
-- **Edit routing:** `/dashboard/{companyId}/parts/{partId}/routing/edit` -- Opens the routing builder for the existing routing
+Routings have **no dedicated routes**. They live inline on the part detail page (`/dashboard/{companyId}/parts/{partId}`) via the `PartRoutingPanel` component, which auto-saves every change. There is no standalone routings list page either.
 
 ---
 

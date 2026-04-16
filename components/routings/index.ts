@@ -2,7 +2,6 @@
  * Routings Components - Barrel Exports
  */
 
-export { default as RoutingWizard } from './RoutingWizard';
 export { default as RoutingBuilder } from './RoutingBuilder';
 export { default as RoutingOperationsList } from './RoutingOperationsList';
 export { default as RoutingOperationRow, type OperationRowData } from './RoutingOperationRow';

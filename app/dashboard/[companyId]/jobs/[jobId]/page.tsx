@@ -365,7 +365,7 @@ export default function JobDetailPage() {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                       <MuiLink
                         component={Link}
-                        href={`/dashboard/${companyId}/parts/${job.part_id}/routing/edit`}
+                        href={`/dashboard/${companyId}/parts/${job.part_id}`}
                         sx={{ fontWeight: 500 }}
                       >
                         {routingInfo.nodeCount} operation{routingInfo.nodeCount !== 1 ? 's' : ''}

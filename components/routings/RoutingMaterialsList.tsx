@@ -1,31 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Alert,
-  CircularProgress,
-} from '@mui/material';
+import { useState, useEffect, useCallback } from 'react';
+import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
 import RoutingMaterialRow, { type MaterialRowData } from './RoutingMaterialRow';
+import AddMaterialModal, { type MaterialModalValue } from './AddMaterialModal';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import type { InventoryItem } from '@/types/inventory';
 
@@ -39,8 +19,8 @@ export interface RoutingMaterialsListProps {
 }
 
 /**
- * Linear list of routing-level materials with drag-to-reorder and inline edit.
- * Materials are routing-level (job-level shopping list) — not per-operation.
+ * Linear list of routing-level materials. Same UX pattern as operations:
+ * arrow-button reorder, modal-add, modal-edit.
  */
 export default function RoutingMaterialsList({
   rows,
@@ -51,7 +31,11 @@ export default function RoutingMaterialsList({
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [autoFocusId, setAutoFocusId] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<
+    | { mode: 'closed' }
+    | { mode: 'add' }
+    | { mode: 'edit'; rowIndex: number }
+  >({ mode: 'closed' });
 
   useEffect(() => {
     getAllInventoryItems(companyId)
@@ -63,53 +47,69 @@ export default function RoutingMaterialsList({
       .finally(() => setLoading(false));
   }, [companyId]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  const handleAdd = () => {
-    const newRow: MaterialRowData = {
-      tempId: generateTempId(),
-      inventoryItemId: '',
-      itemName: '',
-      quantity: 0,
-      unit: '',
-    };
-    onChange([...rows, newRow]);
-    setAutoFocusId(newRow.tempId);
-  };
-
-  const handleRowChange = (index: number, next: MaterialRowData) => {
+  const handleMoveUp = useCallback((index: number) => {
+    if (index <= 0) return;
     const copy = [...rows];
-    copy[index] = next;
+    [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]];
     onChange(copy);
-  };
+  }, [rows, onChange]);
 
-  const handleRowDelete = (index: number) => {
+  const handleMoveDown = useCallback((index: number) => {
+    if (index >= rows.length - 1) return;
+    const copy = [...rows];
+    [copy[index + 1], copy[index]] = [copy[index], copy[index + 1]];
+    onChange(copy);
+  }, [rows, onChange]);
+
+  const handleDelete = useCallback((index: number) => {
     onChange(rows.filter((_, i) => i !== index));
+  }, [rows, onChange]);
+
+  const handleModalSave = (value: MaterialModalValue) => {
+    if (!value.item) return;
+    if (modalState.mode === 'add') {
+      const newRow: MaterialRowData = {
+        tempId: generateTempId(),
+        inventoryItemId: value.item.id,
+        itemName: value.item.name,
+        quantity: value.quantity,
+        unit: value.unit,
+      };
+      onChange([...rows, newRow]);
+    } else if (modalState.mode === 'edit') {
+      const copy = [...rows];
+      copy[modalState.rowIndex] = {
+        ...copy[modalState.rowIndex],
+        inventoryItemId: value.item.id,
+        itemName: value.item.name,
+        quantity: value.quantity,
+        unit: value.unit,
+      };
+      onChange(copy);
+    }
+    setModalState({ mode: 'closed' });
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = rows.findIndex((r) => r.tempId === active.id);
-    const newIndex = rows.findIndex((r) => r.tempId === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    onChange(arrayMove(rows, oldIndex, newIndex));
-  };
+  const editingRow = modalState.mode === 'edit' ? rows[modalState.rowIndex] : null;
+  const editingInitial: MaterialModalValue | undefined = editingRow
+    ? {
+        item: inventoryItems.find((it) => it.id === editingRow.inventoryItemId) || null,
+        quantity: editingRow.quantity,
+        unit: editingRow.unit,
+      }
+    : undefined;
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, gap: 1, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <Inventory2OutlinedIcon fontSize="small" color="primary" />
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Materials
           </Typography>
           {rows.length > 0 && (
             <Typography variant="caption" color="text.secondary">
-              ({rows.length} item{rows.length === 1 ? '' : 's'})
+              {rows.length} item{rows.length === 1 ? '' : 's'}
             </Typography>
           )}
         </Box>
@@ -117,7 +117,7 @@ export default function RoutingMaterialsList({
           size="small"
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={handleAdd}
+          onClick={() => setModalState({ mode: 'add' })}
           disabled={disabled || loading}
         >
           Add Material
@@ -153,32 +153,28 @@ export default function RoutingMaterialsList({
           </Typography>
         </Box>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext
-            items={rows.map((r) => r.tempId)}
-            strategy={verticalListSortingStrategy}
-          >
-            {rows.map((row, idx) => (
-              <RoutingMaterialRow
-                key={row.tempId}
-                row={row}
-                index={idx}
-                inventoryItems={inventoryItems}
-                inventoryLoading={loading}
-                autoFocus={autoFocusId === row.tempId}
-                onChange={(next) => {
-                  handleRowChange(idx, next);
-                  if (autoFocusId === row.tempId && next.inventoryItemId) {
-                    setAutoFocusId(null);
-                  }
-                }}
-                onDelete={() => handleRowDelete(idx)}
-                disabled={disabled}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+        rows.map((row, idx) => (
+          <RoutingMaterialRow
+            key={row.tempId}
+            row={row}
+            index={idx}
+            totalRows={rows.length}
+            onMoveUp={() => handleMoveUp(idx)}
+            onMoveDown={() => handleMoveDown(idx)}
+            onEdit={() => setModalState({ mode: 'edit', rowIndex: idx })}
+            onDelete={() => handleDelete(idx)}
+            disabled={disabled}
+          />
+        ))
       )}
+
+      <AddMaterialModal
+        open={modalState.mode !== 'closed'}
+        onClose={() => setModalState({ mode: 'closed' })}
+        onSave={handleModalSave}
+        inventoryItems={inventoryItems}
+        initial={editingInitial}
+      />
     </Box>
   );
 }

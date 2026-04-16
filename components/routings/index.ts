@@ -9,3 +9,5 @@ export { default as RoutingOperationRow, type OperationRowData } from './Routing
 export { default as RoutingMaterialsList } from './RoutingMaterialsList';
 export { default as RoutingMaterialRow, type MaterialRowData } from './RoutingMaterialRow';
 export { default as RoutingViewer } from './RoutingViewer';
+export { default as AddOperationModal, type OperationModalValue } from './AddOperationModal';
+export { default as AddMaterialModal, type MaterialModalValue } from './AddMaterialModal';

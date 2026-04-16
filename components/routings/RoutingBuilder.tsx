@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Card, CardContent, Divider } from '@mui/material';
+import { Card, CardContent, Grid } from '@mui/material';
 import RoutingOperationsList from './RoutingOperationsList';
 import RoutingMaterialsList from './RoutingMaterialsList';
 import type { OperationRowData } from './RoutingOperationRow';
@@ -16,8 +16,7 @@ export interface RoutingBuilderProps {
 }
 
 /**
- * Top-level routing builder. Renders Operations on top, Materials below
- * (stacked layout — see variant branches for side-by-side / etc).
+ * Side-by-side Operations + Materials layout. Stacks on mobile.
  */
 export default function RoutingBuilder({
   companyId,
@@ -28,28 +27,31 @@ export default function RoutingBuilder({
   disabled = false,
 }: RoutingBuilderProps) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Card elevation={2}>
-        <CardContent>
-          <RoutingOperationsList
-            rows={operations}
-            onChange={onOperationsChange}
-            companyId={companyId}
-            disabled={disabled}
-          />
-        </CardContent>
-      </Card>
-
-      <Card elevation={2}>
-        <CardContent>
-          <RoutingMaterialsList
-            rows={materials}
-            onChange={onMaterialsChange}
-            companyId={companyId}
-            disabled={disabled}
-          />
-        </CardContent>
-      </Card>
-    </Box>
+    <Grid container spacing={3}>
+      <Grid size={{ xs: 12, md: 6 }}>
+        <Card elevation={2}>
+          <CardContent>
+            <RoutingOperationsList
+              rows={operations}
+              onChange={onOperationsChange}
+              companyId={companyId}
+              disabled={disabled}
+            />
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid size={{ xs: 12, md: 6 }}>
+        <Card elevation={2}>
+          <CardContent>
+            <RoutingMaterialsList
+              rows={materials}
+              onChange={onMaterialsChange}
+              companyId={companyId}
+              disabled={disabled}
+            />
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
   );
 }

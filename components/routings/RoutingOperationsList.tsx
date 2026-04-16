@@ -1,31 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Alert,
-  CircularProgress,
-} from '@mui/material';
+import { useState, useEffect, useCallback } from 'react';
+import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import BuildIcon from '@mui/icons-material/Build';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
+import AddOperationModal, { type OperationModalValue } from './AddOperationModal';
 import { getAllOperations } from '@/utils/operationsAccess';
 import type { OperationWithGroup } from '@/types/operations';
 import { calculateRoutingTime, formatTime } from '@/types/routings';
@@ -40,9 +20,11 @@ export interface RoutingOperationsListProps {
 }
 
 /**
- * Linear list of routing operations with drag-to-reorder and inline editing.
- * "Add Operation" appends a new row whose operation picker auto-focuses, so
- * the user can immediately pick an op and tab into the time fields.
+ * Linear list of routing operations.
+ *  - Reorder via up/down arrow buttons (no drag-and-drop — too unfamiliar
+ *    for the small-shop owners we're targeting).
+ *  - Add Operation opens a modal asking for operation + setup + run time.
+ *  - Edit row opens the same modal pre-populated.
  */
 export default function RoutingOperationsList({
   rows,
@@ -53,7 +35,11 @@ export default function RoutingOperationsList({
   const [operations, setOperations] = useState<OperationWithGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [autoFocusId, setAutoFocusId] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<
+    | { mode: 'closed' }
+    | { mode: 'add' }
+    | { mode: 'edit'; rowIndex: number }
+  >({ mode: 'closed' });
 
   useEffect(() => {
     getAllOperations(companyId)
@@ -65,46 +51,60 @@ export default function RoutingOperationsList({
       .finally(() => setLoading(false));
   }, [companyId]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  const handleAddOperation = () => {
-    const newRow: OperationRowData = {
-      tempId: generateTempId(),
-      operationTypeId: '',
-      operationName: '',
-      resourceGroupName: null,
-      laborRate: null,
-      runTimePerUnit: null,
-      setupTime: 0,
-      instructions: null,
-    };
-    onChange([...rows, newRow]);
-    setAutoFocusId(newRow.tempId);
-  };
-
-  const handleRowChange = (index: number, next: OperationRowData) => {
+  const handleMoveUp = useCallback((index: number) => {
+    if (index <= 0) return;
     const copy = [...rows];
-    copy[index] = next;
+    [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]];
     onChange(copy);
-  };
+  }, [rows, onChange]);
 
-  const handleRowDelete = (index: number) => {
+  const handleMoveDown = useCallback((index: number) => {
+    if (index >= rows.length - 1) return;
+    const copy = [...rows];
+    [copy[index + 1], copy[index]] = [copy[index], copy[index + 1]];
+    onChange(copy);
+  }, [rows, onChange]);
+
+  const handleDelete = useCallback((index: number) => {
     onChange(rows.filter((_, i) => i !== index));
+  }, [rows, onChange]);
+
+  const handleModalSave = (value: OperationModalValue) => {
+    if (!value.operation) return;
+    if (modalState.mode === 'add') {
+      const newRow: OperationRowData = {
+        tempId: generateTempId(),
+        operationTypeId: value.operation.id,
+        operationName: value.operation.name,
+        resourceGroupName: value.operation.resource_group?.name || null,
+        laborRate: value.operation.labor_rate,
+        runTimePerUnit: value.runTimePerUnit,
+        setupTime: value.setupTime,
+        instructions: null,
+      };
+      onChange([...rows, newRow]);
+    } else if (modalState.mode === 'edit') {
+      const copy = [...rows];
+      copy[modalState.rowIndex] = {
+        ...copy[modalState.rowIndex],
+        // operation type is locked in edit mode (delete + re-add to swap)
+        runTimePerUnit: value.runTimePerUnit,
+        setupTime: value.setupTime,
+      };
+      onChange(copy);
+    }
+    setModalState({ mode: 'closed' });
   };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = rows.findIndex((r) => r.tempId === active.id);
-    const newIndex = rows.findIndex((r) => r.tempId === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    onChange(arrayMove(rows, oldIndex, newIndex));
-  };
+  const editingRow = modalState.mode === 'edit' ? rows[modalState.rowIndex] : null;
+  const editingInitial: OperationModalValue | undefined = editingRow
+    ? {
+        operation: operations.find((o) => o.id === editingRow.operationTypeId) || null,
+        setupTime: editingRow.setupTime,
+        runTimePerUnit: editingRow.runTimePerUnit,
+      }
+    : undefined;
 
-  // Build node-shape for time calculator
   const time = calculateRoutingTime(
     rows.map((r) => ({
       id: r.tempId,
@@ -118,28 +118,22 @@ export default function RoutingOperationsList({
       created_at: '',
       updated_at: '',
       operation_type: r.operationTypeId
-        ? {
-            id: r.operationTypeId,
-            name: r.operationName,
-            labor_rate: r.laborRate,
-            resource_group_id: null,
-          }
+        ? { id: r.operationTypeId, name: r.operationName, labor_rate: r.laborRate, resource_group_id: null }
         : null,
     }))
   );
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, gap: 1, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <BuildIcon fontSize="small" color="primary" />
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Operations
           </Typography>
           {rows.length > 0 && (
             <Typography variant="caption" color="text.secondary">
-              ({rows.length} step{rows.length === 1 ? '' : 's'} • setup{' '}
-              {formatTime(time.setupTime)} + run {formatTime(time.runTime)}/unit)
+              {rows.length} step{rows.length === 1 ? '' : 's'} • setup {formatTime(time.setupTime)} + run {formatTime(time.runTime)}/unit
             </Typography>
           )}
         </Box>
@@ -147,7 +141,7 @@ export default function RoutingOperationsList({
           size="small"
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={handleAddOperation}
+          onClick={() => setModalState({ mode: 'add' })}
           disabled={disabled || loading}
         >
           Add Operation
@@ -183,32 +177,28 @@ export default function RoutingOperationsList({
           </Typography>
         </Box>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext
-            items={rows.map((r) => r.tempId)}
-            strategy={verticalListSortingStrategy}
-          >
-            {rows.map((row, idx) => (
-              <RoutingOperationRow
-                key={row.tempId}
-                row={row}
-                index={idx}
-                operations={operations}
-                operationsLoading={loading}
-                autoFocus={autoFocusId === row.tempId}
-                onChange={(next) => {
-                  handleRowChange(idx, next);
-                  if (autoFocusId === row.tempId && next.operationTypeId) {
-                    setAutoFocusId(null);
-                  }
-                }}
-                onDelete={() => handleRowDelete(idx)}
-                disabled={disabled}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+        rows.map((row, idx) => (
+          <RoutingOperationRow
+            key={row.tempId}
+            row={row}
+            index={idx}
+            totalRows={rows.length}
+            onMoveUp={() => handleMoveUp(idx)}
+            onMoveDown={() => handleMoveDown(idx)}
+            onEdit={() => setModalState({ mode: 'edit', rowIndex: idx })}
+            onDelete={() => handleDelete(idx)}
+            disabled={disabled}
+          />
+        ))
       )}
+
+      <AddOperationModal
+        open={modalState.mode !== 'closed'}
+        onClose={() => setModalState({ mode: 'closed' })}
+        onSave={handleModalSave}
+        operations={operations}
+        initial={editingInitial}
+      />
     </Box>
   );
 }

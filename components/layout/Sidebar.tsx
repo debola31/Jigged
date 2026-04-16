@@ -33,11 +33,11 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
-  { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
+  { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
+  { name: 'Parts', path: '/parts', icon: CategoryIcon },
   { name: 'Operations', path: '/operations', icon: BuildIcon },
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
-  { name: 'Parts', path: '/parts', icon: CategoryIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },

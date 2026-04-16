@@ -227,12 +227,12 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 
 | Current Status | Available Actions |
 |---|---|
-| Pending Approval | Edit, Mark as Approved, Mark as Rejected, Print PDF |
-| Approved | Convert to Job, Print PDF |
-| Rejected | Edit, Print PDF |
-| Expired | Print PDF (otherwise read only) |
+| Pending Approval | Edit, Mark as Approved, Mark as Rejected |
+| Approved | Convert to Job |
+| Rejected | Edit |
+| Expired | (none - read only) |
 
-**Print PDF** is available in every status and generates a single-page, customer-facing PDF (`Quote-{quote_number}.pdf`). See [Printing Quotes](#printing-quotes) below.
+**Print PDF** lives in the top-right page toolbar (opposite the "Back to Quotes" link) and is available in every status. It generates a single-page, customer-facing PDF (`Quote-{quote_number}.pdf`). See [Printing Quotes](#printing-quotes) below.
 
 ### 4. Convert to Job Modal
 

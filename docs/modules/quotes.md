@@ -232,6 +232,8 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 | Rejected | Edit |
 | Expired | (none - read only) |
 
+**Print PDF** lives in the top-right page toolbar (opposite the "Back to Quotes" link) and is available in every status. It generates a single-page, customer-facing PDF (`Quote-{quote_number}.pdf`). See [Printing Quotes](#printing-quotes) below.
+
 ### 4. Convert to Job Modal
 
 **Trigger:** Click "Convert to Job" on Approved quote
@@ -660,6 +662,34 @@ Quote cost fields are immutable snapshots frozen at creation time. If a part's r
 - [ ] Material cost calculated from routing node materials × inventory item costs
 
 - [ ] Quote detail page displays markup %, base cost, and cost breakdown
+
+---
+
+## Printing Quotes
+
+Quote detail pages include a **Print PDF** button that generates a single-page, customer-facing PDF locally in the browser (no server round-trip).
+
+**What the PDF contains:**
+
+- Company logo (if uploaded in Settings → Company Branding) and company name in the header
+- Large "QUOTE" heading with the quote number, date, and status
+- **Bill To** block — customer name, contact person, address, phone, and email (pulled from the customer record; missing fields are skipped cleanly)
+- Line-item table — part name, description, quantity, unit price, total
+- Bottom-line total
+- Notes section — the quote's description field, if present
+- Footer with generation date and page number
+
+**Intentionally excluded** (kept off the customer's view):
+
+- Routing / operations / run times
+- Labor and material cost snapshots
+- Markup percentage and base cost
+
+**Filename:** `Quote-{quote_number}.pdf`
+
+**Branding:** Upload your logo at `/dashboard/{companyId}/settings` (admin-only, Company Branding card). PNG, JPG, or WebP up to 2 MB. SVGs are accepted for storage but currently fall back to a text-only header in the PDF — use a raster format for logos that should appear. If no logo is uploaded, the PDF renders with the company name only.
+
+**Immutability:** The PDF reflects the quote's current saved state. Because quotes are immutable cost snapshots after creation (see [Routing-Based Cost Calculation](#immutability-after-creation)), the printed PDF is a faithful record of the price the customer was quoted.
 
 ---
 

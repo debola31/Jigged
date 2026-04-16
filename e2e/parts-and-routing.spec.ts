@@ -39,77 +39,57 @@ test.describe('Parts and Routing workflow', () => {
     // Verify the part was created
     await expect(page.getByText(partName)).toBeVisible();
 
-    // ── Step 2: Create a routing ──
+    // ── Step 2: Add an operation via the inline routing editor ──
+    // The routing panel is embedded on the part detail page — no navigation needed.
 
-    // Click "Create Routing" on the part detail page
-    await page.getByRole('button', { name: /Create Routing/i }).click();
-    await expect(page).toHaveURL(/\/routing\/new/, { timeout: 10_000 });
-
-    // ── Step 3: Add an operation to the routing ──
-
-    // Wait for the routing builder to be ready
     await page.waitForLoadState('networkidle');
 
-    // Dismiss the "Workflow Editor Guide" popover that auto-opens on first visit.
-    // It appears after ~800ms and its backdrop blocks all clicks.
-    await page.waitForTimeout(1_500);
-    await page.keyboard.press('Escape');
-    // Give the popover time to close
-    await page.waitForTimeout(500);
+    // Empty-state hint confirms the panel loaded with no operations yet.
+    await expect(
+      page.getByText(/Click "Add Operation" to start building this routing/i)
+    ).toBeVisible({ timeout: 10_000 });
 
-    // Click "Add Operation" button to open the operation selection dialog
-    // Two "Add Operation" buttons may exist (toolbar + empty state) — use .first()
-    await page.getByRole('button', { name: /Add Operation/i }).first().click();
+    // Click "Add Operation" (in the Operations card header)
+    await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // Wait for the dialog to load operations
+    // Dialog: single AddOperationModal with operation picker + time fields
     const addOpDialog = page.getByRole('dialog');
     await expect(addOpDialog).toBeVisible();
-    await expect(addOpDialog.getByText(/Add Operation/i)).toBeVisible();
+    await expect(addOpDialog.getByRole('heading', { name: /Add Operation/i })).toBeVisible();
 
-    // Wait for operations to load (loading spinner disappears)
-    await addOpDialog.locator('.MuiCircularProgress-root').waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {
-      // May already be hidden if operations loaded fast
-    });
+    // Open the Operation autocomplete and select the first available option.
+    await addOpDialog.getByLabel(/^Operation$/).click();
 
-    // Check if operations exist
-    const operationItems = addOpDialog.locator('.MuiListItem-root');
-    const hasOperations = await operationItems.first().isVisible({ timeout: 10_000 }).catch(() => false);
+    const listbox = page.getByRole('listbox');
+    const firstOption = listbox.getByRole('option').first();
+    const hasOperations = await firstOption
+      .isVisible({ timeout: 10_000 })
+      .catch(() => false);
 
     if (!hasOperations) {
-      // No operation types in test company — skip remaining steps
       test.skip(true, 'No operation types exist in test company');
     }
 
-    // Select the first available operation
-    await operationItems.first().click();
+    await firstOption.click();
 
-    // The Add dialog closes and the builder auto-opens an Edit Operation modal.
-    // Wait for the Edit modal to appear, then dismiss it.
-    const editDialog = page.getByRole('dialog');
-    await editDialog.getByText(/Edit Operation/i).waitFor({ state: 'visible', timeout: 10_000 });
-    await editDialog.getByRole('button', { name: /^Cancel$/i }).click();
-    await expect(editDialog).toBeHidden({ timeout: 5_000 });
+    // Confirm: "Add to routing" (the new modal's primary action)
+    await addOpDialog.getByRole('button', { name: /Add to routing/i }).click();
+    await expect(addOpDialog).toBeHidden({ timeout: 10_000 });
 
-    // ── Step 4: Save the routing ──
+    // ── Step 3: Verify autosave + operation persisted ──
 
-    // Dismiss any remaining popovers/tooltips that might block clicks
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    // The floating indicator transitions through "Saving…" → "All changes saved".
+    // Wait for the end state (the intermediate "Saving…" may flash too fast).
+    await expect(page.getByText(/All changes saved/i)).toBeVisible({ timeout: 15_000 });
 
-    // Click "Save Routing" button
-    await page.getByRole('button', { name: /Save Routing/i }).click();
+    // Sequence marker "1." rendered by RoutingOperationRow confirms the operation
+    // is in the list.
+    await expect(page.getByText(/^1\.$/)).toBeVisible({ timeout: 5_000 });
 
-    // Should redirect back to part detail
-    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });
+    // Still on the part detail page — no redirects in the new inline flow.
+    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/);
 
-    // ── Step 5: Verify routing information on part detail ──
-
-    // The routing card should now show operation count and an "Edit Routing" button
-    await expect(page.getByRole('button', { name: /Edit Routing/i })).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // ── Step 6: Navigate back to parts list and verify ──
+    // ── Step 4: Navigate back to parts list and verify ──
 
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);

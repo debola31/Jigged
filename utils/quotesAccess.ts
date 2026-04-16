@@ -295,11 +295,11 @@ export async function getQuoteWithRelations(quoteId: string, companyId: string):
     .select(
       `
       *,
-      customers!left(id, name),
+      customers!left(id, name, website, contact_name, contact_phone, contact_email, address_line1, address_line2, city, state, postal_code, country),
       parts!left(id, part_name, description, category_id, part_categories(id, name, default_markup_percent)),
       jobs:converted_to_job_id!left(id, job_number, status),
       quote_attachments(*)
-    `
+`
     )
     .eq('id', quoteId)
     .eq('company_id', companyId)

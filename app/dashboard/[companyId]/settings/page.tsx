@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -16,8 +17,12 @@ import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
+import CompanyBrandingCard from '@/components/settings/CompanyBrandingCard';
+import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 
 export default function SettingsPage() {
+  const params = useParams();
+  const companyId = params.companyId as string;
   const {
     isDemoMode,
     hasDemoCompany,
@@ -37,7 +42,13 @@ export default function SettingsPage() {
 
   return (
     <AdminGuard message="You don't have permission to access settings.">
-    <Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Shop contact info (FROM block on printed quotes) */}
+      <CompanyProfileCard companyId={companyId} />
+
+      {/* Company Branding Section */}
+      <CompanyBrandingCard companyId={companyId} />
+
       {/* Demo Mode Section */}
       <Card elevation={2}>
         <CardContent sx={{ p: 3 }}>

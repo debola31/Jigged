@@ -768,10 +768,17 @@ END;
 $function$;
 
 -- ============================================================================
--- 12. Drop routing_edges and routing_nodes.materials (no longer used)
+-- 12. Drop routing_edges (no longer used by the linear model)
+--
+-- NOTE: routing_nodes.materials is dropped in a SEPARATE migration
+-- (20260415_linearize_routings_drop_old_column.sql) because Postgres
+-- refuses to ALTER TABLE on a relation that has pending trigger events
+-- queued earlier in the same transaction (error 55006). The DROP TABLE
+-- ... CASCADE below removes the routing_edges FKs that reference
+-- routing_nodes, which queues such events on routing_nodes — keeping
+-- the column drop in this transaction would fail.
 -- ============================================================================
 
 DROP TABLE IF EXISTS public.routing_edges CASCADE;
-ALTER TABLE public.routing_nodes DROP COLUMN IF EXISTS materials;
 
 COMMIT;

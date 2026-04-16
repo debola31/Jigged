@@ -43,10 +43,17 @@ SET sequence = ordered.seq
 FROM ordered
 WHERE rn.id = ordered.id;
 
+-- Plain (non-deferrable) unique constraint. The data-access reorder logic
+-- in saveRoutingWithOperationsAndMaterials does a two-phase update (parks
+-- existing rows at sequence >= 100000 before assigning final values), so it
+-- never has two rows at the same sequence in flight. DEFERRABLE here would
+-- queue per-row check events that prevent later ALTER TABLE statements in
+-- the same transaction (Postgres error 55006).
+ALTER TABLE routing_nodes
+    DROP CONSTRAINT IF EXISTS routing_nodes_routing_sequence_unique;
 ALTER TABLE routing_nodes
     ADD CONSTRAINT routing_nodes_routing_sequence_unique
-    UNIQUE (routing_id, sequence)
-    DEFERRABLE INITIALLY DEFERRED;
+    UNIQUE (routing_id, sequence);
 
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_routing_sequence
     ON public.routing_nodes (routing_id, sequence);
@@ -64,8 +71,9 @@ CREATE TABLE IF NOT EXISTS public.routing_materials (
     sequence integer NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+    -- Plain unique (not DEFERRABLE) — see note on routing_nodes constraint.
     CONSTRAINT routing_materials_routing_sequence_unique
-        UNIQUE (routing_id, sequence) DEFERRABLE INITIALLY DEFERRED
+        UNIQUE (routing_id, sequence)
 );
 
 CREATE INDEX IF NOT EXISTS idx_routing_materials_routing

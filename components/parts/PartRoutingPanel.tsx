@@ -243,7 +243,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
+          <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <RoutingOperationsList
                 rows={ops}
@@ -255,7 +255,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
           </Card>
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
+          <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <RoutingMaterialsList
                 rows={mats}

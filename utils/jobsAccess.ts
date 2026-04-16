@@ -8,6 +8,7 @@ import type {
   JobStatus,
   JobOperation,
   JobAttachment,
+  JobMaterial,
   CompleteOperationData,
   OperationUpdateResult,
   CurrentOperationInfo,
@@ -113,6 +114,10 @@ export async function getJobWithRelations(
         *,
         operation_types!left(id, name, labor_rate)
       ),
+      job_materials(
+        *,
+        inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+      ),
       job_attachments(*)
     `
     )
@@ -131,6 +136,69 @@ export async function getJobWithRelations(
   }
 
   return data as JobWithRelations | null;
+}
+
+// ============== Job Materials ==============
+
+/**
+ * Fetch the materials for a single job (joined with inventory item info).
+ */
+export async function getJobMaterials(jobId: string): Promise<JobMaterial[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('job_materials')
+    .select(`
+      *,
+      inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+    `)
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching job materials:', error);
+    throw error;
+  }
+
+  return (data as JobMaterial[]) || [];
+}
+
+/**
+ * Update a job material (e.g., record actual quantity, mark consumed).
+ * Pass status='consumed' to also stamp consumed_at/consumed_by.
+ */
+export async function updateJobMaterial(
+  materialId: string,
+  updates: Partial<Pick<JobMaterial, 'actual_quantity' | 'unit' | 'status' | 'expected_quantity'>>
+): Promise<JobMaterial> {
+  const supabase = getSupabase();
+
+  const patch: Record<string, unknown> = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (updates.status === 'consumed') {
+    patch.consumed_at = new Date().toISOString();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) patch.consumed_by = user.id;
+  }
+
+  const { data, error } = await supabase
+    .from('job_materials')
+    .update(patch)
+    .eq('id', materialId)
+    .select(`
+      *,
+      inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error updating job material:', error);
+    throw error;
+  }
+
+  return data as JobMaterial;
 }
 
 /**

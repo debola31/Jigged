@@ -1,28 +1,19 @@
 /**
  * Routings Module Types
  *
- * Types for the visual workflow-based routing system that supports
- * parallel and series operations.
+ * Types for the linear routing system. A routing is an ordered list of
+ * operations plus a routing-level material list. Operations are ordered by
+ * `sequence` (steps of 10 leave room for inserts).
  */
-
-import type { Node, Edge } from '@xyflow/react';
 
 // ============================================
 // Core Database Entities
 // ============================================
 
 /**
- * Material reference for a routing node.
- */
-export interface RoutingNodeMaterial {
-  inventory_item_id: string;
-  quantity: number;
-  unit: string;
-}
-
-/**
- * A routing is a workflow diagram that defines how a part is manufactured.
- * It consists of nodes (operations) connected by edges (dependencies).
+ * A routing is an ordered list of operations that defines how a part is
+ * manufactured, plus the materials needed for the job as a whole. There
+ * is exactly one routing per part.
  */
 export interface Routing {
   id: string;
@@ -36,8 +27,7 @@ export interface Routing {
 }
 
 /**
- * A node in the routing workflow diagram representing a single operation.
- * Nodes are connected by edges to define execution flow.
+ * A single operation in the routing, ordered by `sequence`.
  */
 export interface RoutingNode {
   id: string;
@@ -47,21 +37,24 @@ export interface RoutingNode {
   setup_time: number;
   instructions: string | null;
   metadata: Record<string, unknown>;
-  materials: RoutingNodeMaterial[];
+  sequence: number;
   created_at: string;
   updated_at: string;
 }
 
 /**
- * An edge connecting two nodes in the routing workflow.
- * The source node must complete before the target node can start.
+ * A material listed on the routing. Materials are routing-level, not per
+ * operation, and snapshot into job_materials when a job is created.
  */
-export interface RoutingEdge {
+export interface RoutingMaterial {
   id: string;
   routing_id: string;
-  source_node_id: string;
-  target_node_id: string;
+  inventory_item_id: string;
+  quantity: number;
+  unit: string;
+  sequence: number;
   created_at: string;
+  updated_at: string;
 }
 
 // ============================================
@@ -88,7 +81,7 @@ export interface RoutingWithStats extends RoutingWithPart {
 }
 
 /**
- * Routing node with operation type information for display.
+ * Routing node joined with its operation type (and resource group) for display.
  */
 export interface RoutingNodeWithOperation extends RoutingNode {
   operation_type: {
@@ -104,7 +97,20 @@ export interface RoutingNodeWithOperation extends RoutingNode {
 }
 
 /**
- * Full routing data with all nodes and edges for the workflow builder.
+ * Routing material joined with its inventory item for display and costing.
+ */
+export interface RoutingMaterialWithItem extends RoutingMaterial {
+  inventory_item: {
+    id: string;
+    name: string;
+    primary_unit: string;
+    cost_per_unit: number | null;
+  } | null;
+}
+
+/**
+ * Full routing data: ordered operations + routing-level materials.
+ * Used by the linear builder, viewer, and cost calculator.
  */
 export interface RoutingWithGraph extends Routing {
   part: {
@@ -113,126 +119,69 @@ export interface RoutingWithGraph extends Routing {
     description: string | null;
   } | null;
   nodes: RoutingNodeWithOperation[];
-  edges: RoutingEdge[];
+  materials: RoutingMaterialWithItem[];
 }
-
-// ============================================
-// React Flow Types
-// ============================================
-
-/**
- * Data stored in each React Flow operation node.
- */
-export interface OperationNodeData {
-  [key: string]: unknown;
-  nodeId: string;
-  operationTypeId: string;
-  operationName: string;
-  resourceGroupName: string | null;
-  runTimePerUnit: number | null;
-  setupTime: number;
-  instructions: string | null;
-  laborRate: number | null;
-  materials: RoutingNodeMaterial[];
-}
-
-/**
- * React Flow node type for operation nodes.
- */
-export type FlowOperationNode = Node<OperationNodeData, 'operation'>;
-
-/**
- * React Flow edge type for connections.
- */
-export type FlowEdge = Edge;
 
 // ============================================
 // Form Data Types
 // ============================================
 
-// RoutingFormData removed — Step 1 of wizard eliminated.
-// Routing name is auto-generated from part number.
-// Routing is always scoped to a part via URL context.
-
 /**
- * Form data for creating/editing a routing node.
+ * Form data for creating/editing a routing operation. Inline-edited in the
+ * linear list — no modal.
  */
 export interface RoutingNodeFormData {
   operation_type_id: string;
   run_time_per_unit: string;
   setup_time: string;
   instructions: string;
-  materials: RoutingNodeMaterial[];
 }
 
-/**
- * Empty node form data for new node creation.
- */
 export const EMPTY_NODE_FORM: RoutingNodeFormData = {
   operation_type_id: '',
   run_time_per_unit: '',
   setup_time: '',
   instructions: '',
-  materials: [],
+};
+
+/**
+ * Form data for creating/editing a routing material.
+ */
+export interface RoutingMaterialFormData {
+  inventory_item_id: string;
+  quantity: string;
+  unit: string;
+}
+
+export const EMPTY_MATERIAL_FORM: RoutingMaterialFormData = {
+  inventory_item_id: '',
+  quantity: '',
+  unit: '',
 };
 
 // ============================================
 // Utility Functions
 // ============================================
 
-// routingToFormData removed — no longer needed with Step 1 elimination.
-
-/**
- * Convert a RoutingNode entity to form data.
- */
 export function nodeToFormData(node: RoutingNode): RoutingNodeFormData {
   return {
     operation_type_id: node.operation_type_id,
     run_time_per_unit: node.run_time_per_unit !== null ? String(node.run_time_per_unit) : '',
     setup_time: node.setup_time ? String(node.setup_time) : '',
     instructions: node.instructions || '',
-    materials: node.materials || [],
+  };
+}
+
+export function materialToFormData(material: RoutingMaterial): RoutingMaterialFormData {
+  return {
+    inventory_item_id: material.inventory_item_id,
+    quantity: String(material.quantity),
+    unit: material.unit,
   };
 }
 
 /**
- * Convert database nodes and edges to React Flow format.
- */
-export function toFlowElements(
-  nodes: RoutingNodeWithOperation[],
-  edges: RoutingEdge[]
-): { nodes: FlowOperationNode[]; edges: FlowEdge[] } {
-  const flowNodes: FlowOperationNode[] = nodes.map((node, index) => ({
-    id: node.id,
-    type: 'operation',
-    // Position will be calculated by dagre layout
-    position: { x: index * 250, y: 100 },
-    data: {
-      nodeId: node.id,
-      operationTypeId: node.operation_type_id,
-      operationName: node.operation_type?.name || 'Unknown Operation',
-      resourceGroupName: node.operation_type?.resource_group?.name || null,
-      runTimePerUnit: node.run_time_per_unit,
-      setupTime: node.setup_time,
-      instructions: node.instructions,
-      laborRate: node.operation_type?.labor_rate || null,
-      materials: node.materials || [],
-    },
-  }));
-
-  const flowEdges: FlowEdge[] = edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source_node_id,
-    target: edge.target_node_id,
-    type: 'smoothstep',
-    animated: false,
-  }));
-
-  return { nodes: flowNodes, edges: flowEdges };
-}
-
-/**
- * Calculate total time for a routing given a quantity.
+ * Sum setup + per-unit run time across all operations in a routing.
  */
 export function calculateRoutingTime(
   nodes: RoutingNodeWithOperation[],
@@ -259,14 +208,12 @@ export function calculateRoutingTime(
 export function formatTime(minutes: number | null): string {
   if (minutes === null || minutes === 0) return '—';
 
-  // Sub-minute: show seconds
   if (minutes < 1) {
     const seconds = Math.round(minutes * 60);
     return `${seconds} sec`;
   }
 
   if (minutes < 60) {
-    // Show whole minutes, or 1 decimal if fractional
     const display = Number.isInteger(minutes) ? minutes : Math.round(minutes * 10) / 10;
     return `${display} min`;
   }

@@ -81,6 +81,35 @@ export interface CurrentOperationInfo {
 }
 
 /**
+ * Material expected/consumed for a job. Snapshot from routing_materials at job
+ * creation time.
+ */
+export type JobMaterialStatus = 'pending' | 'consumed' | 'skipped';
+
+export interface JobMaterial {
+  id: string;
+  job_id: string;
+  routing_material_id: string | null;
+  inventory_item_id: string;
+  expected_quantity: number;
+  actual_quantity: number | null;
+  unit: string;
+  status: JobMaterialStatus;
+  consumed_at: string | null;
+  consumed_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined inventory item data
+  inventory_item?: {
+    id: string;
+    name: string;
+    primary_unit: string;
+    quantity: number;
+    cost_per_unit: number | null;
+  } | null;
+}
+
+/**
  * Job with joined relation data
  */
 export interface JobWithRelations extends Job {
@@ -103,6 +132,8 @@ export interface JobWithRelations extends Job {
   } | null;
   // Joined operations
   job_operations?: JobOperation[];
+  // Joined materials (from job_materials, snapshot of routing_materials)
+  job_materials?: JobMaterial[];
   // Joined attachments
   job_attachments?: JobAttachment[];
   // Current operation info (populated by batch query on list page)

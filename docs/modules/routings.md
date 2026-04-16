@@ -2,11 +2,11 @@
 
 ## Overview
 
-The Routings module provides a **visual workflow diagram builder** for defining manufacturing processes. Unlike traditional linear operation lists, routings in Jigged are **node-based workflow diagrams** where operations can run in **parallel** or **series**.
+The Routings module provides a **linear, reorderable operation list** for defining manufacturing processes. A routing is an ordered sequence of operations (plus a routing-level list of materials) that describes how a part is manufactured.
 
 Each part has **exactly one routing** (1:1 relationship). Routings are managed from the **part detail page**, not a standalone routings page. There is no separate "Routings" entry in the sidebar navigation.
 
-Users build routings by dragging operations onto a canvas and connecting them with edges to define execution flow. This enables complex manufacturing processes where multiple operations can happen simultaneously on different machines, reducing total production time.
+Users build routings by adding operations to a list and dragging to reorder them. Each operation row supports inline editing of the operation type, setup time, and run time per unit. Materials needed for the whole routing are defined once in a separate routing-level list — not per operation.
 
 **Priority:** Must Have (Build after Operations, before Jobs)
 
@@ -16,7 +16,9 @@ Users build routings by dragging operations onto a canvas and connecting them wi
 
 - Operations module (routings reference operation types)
 
-**Database Tables:** `routings`, `routing_nodes`, `routing_edges`
+- Inventory module (routing materials reference inventory items)
+
+**Database Tables:** `routings`, `routing_nodes`, `routing_materials`
 
 ---
 
@@ -24,55 +26,40 @@ Users build routings by dragging operations onto a canvas and connecting them wi
 
 | Term | Description |
 |---|---|
-| **Routing** | A workflow diagram defining how a part is manufactured, consisting of nodes (operations) and edges (connections) |
-| **Workflow Node** | An operation represented as a card on the canvas, containing run time, materials, and resource assignment |
-| **Edge/Connection** | A link between nodes showing execution dependency - the source must complete before the target starts |
-| **Parallel Branch** | Multiple nodes that can execute simultaneously because they have no dependencies on each other |
-| **Series Path** | Nodes that execute sequentially, one after another, where each depends on the previous |
-| **Start Node** | The entry point of the workflow - operations with no incoming edges |
-| **End Node** | The final operation(s) before completion - operations with no outgoing edges |
+| **Routing** | The ordered list of operations plus the list of materials that defines how a part is manufactured |
+| **Routing Operation (Node)** | A single operation step in the routing, stored in `routing_nodes` with a `sequence` that determines its position in the list |
+| **Sequence** | Integer that defines linear execution order. Saved in steps of 10 (10, 20, 30, ...) so new rows can be inserted between existing ones without renumbering everything |
+| **Routing Material** | An inventory item expected to be consumed for the whole routing, stored in `routing_materials` |
 
 ---
 
-## Visual Workflow Builder
+## Linear Routing Builder
 
-The routing editor provides a drag-and-drop canvas for building manufacturing workflows:
+Routings are edited **inline on the part detail page** via the `PartRoutingPanel` component — there is no separate `/routing/new` or `/routing/edit` page. The panel renders Operations and Materials cards side-by-side and **auto-saves every change to the database** (no "Save Routing" button).
 
-- **Canvas** - Drag and drop operations as nodes onto an infinite canvas
+- **Operations list** — Compact one-line rows: operation name + setup/run time as subtle text (amber when missing). Reorder via up/down arrow buttons. Click the pencil to open the edit modal; click the trash to delete. The "Add Operation" button opens a modal that asks for the operation type, setup time, and run time per unit on a single screen.
 
-- **Operations Toolbar** - Select operations from your operations library to add to the workflow
+- **Materials list** — Same row pattern, no reorder arrows (materials are an unordered shopping list). The "Add Material" button opens a modal asking for the inventory item, quantity, and unit.
 
-- **Node Cards** - Each node displays operation name, resource group, and estimated time
+- **Auto-save** — Each modal save, reorder click, or delete persists immediately via `saveRoutingWithOperationsAndMaterials`. A subtle "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't have one yet.
 
-- **Connections** - Draw edges between nodes by dragging from output to input handles
+- **Add / remove** — Each section has an "Add" button. Rows can be removed individually via the trash icon.
 
-- **Parallel Patterns** - Create branches by connecting one node to multiple targets
+- **No minimum** — A routing can be saved with zero operations during editing (it just won't be useful for jobs). The job-creation flow surfaces the missing routing if needed.
 
-- **Validation** - System ensures valid workflow (no cycles, all nodes connected)
-
-- **Minimum Operations** - At least one operation is required to save a routing
+Components live under `components/routings/` (`RoutingBuilder`, `RoutingOperationsList`, `RoutingOperationRow`, `RoutingMaterialsList`, `RoutingMaterialRow`, `RoutingViewer`, `AddOperationModal`, `AddMaterialModal`) and `components/parts/PartRoutingPanel.tsx` (the auto-save wrapper that embeds the lists on the part page).
 
 ---
 
-## Workflow Examples
+## Execution Order
 
-### Series Workflow (Sequential Operations)
-
-Operations execute one after another. Total time = sum of all operation times.
+Operations run one after another in ascending `sequence` order. Total estimated time is the sum of setup + (run time per unit × quantity) across all operations in the routing.
 
 ```plain text
-[Start] → [CNC Mill] → [Deburr] → [Inspect] → [End]
+Seq 10: [CNC Mill] → Seq 20: [Deburr] → Seq 30: [Inspect]
 ```
 
-### Parallel Workflow (Simultaneous Operations)
-
-Multiple operations run at the same time on different machines, then converge.
-
-```plain text
-              ┌→ [CNC Mill Op1] ─┐
-[Start] ──────┼→ [CNC Mill Op2] ─┼→ [Deburr] → [Inspect] → [End]
-              └→ [Manual Drill] ─┘
-```
+There is no DAG, no edges, no parallel branches, and no dependency graph. If two operations should "run in parallel" in real life, shop-floor scheduling is handled at the job/operator level, not in the routing structure.
 
 ---
 
@@ -89,25 +76,34 @@ Multiple operations run at the same time on different machines, then converge.
 
 ### Routing Nodes Table (`routing_nodes`)
 
-Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when rendering. Positions are presentation-layer, not business logic - the workflow is defined by edges.
+Each row is one operation step in the routing. Position in the list is defined by the `sequence` column; there is no stored x/y position because the UI is a list, not a canvas.
 
 | Column | Type | Required | Description |
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
 | routing_id | uuid | Yes | FK to routings |
 | operation_type_id | uuid | Yes | FK to operation_types |
-| cycle_time | float | No | Run time per unit in minutes |
-| materials | jsonb | No | Array of materials needed for this operation [{inventory_item_id, quantity, unit}] |
-| metadata | jsonb | No | Optional JSON (can store position hints for custom layouts) |
+| sequence | integer | Yes | Linear order (steps of 10). Unique within a routing. |
+| setup_time | numeric | No | Setup time in minutes |
+| run_time_per_unit | numeric | No | Run time per unit in minutes |
+| instructions | text | No | Optional per-operation instructions |
 
-### Routing Edges Table (`routing_edges`)
+A unique constraint on `(routing_id, sequence)` enforces that no two operations in the same routing share a position. The data-access layer handles reorders with a two-phase update (parks rows at sequence ≥ 100000 before assigning their final values) so no intermediate duplicate ever exists.
+
+### Routing Materials Table (`routing_materials`)
+
+Materials needed to manufacture the part. Routing-level, not per-operation. Think "job-level shopping list".
 
 | Column | Type | Required | Description |
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
-| routing_id | uuid | Yes | FK to routings |
-| source_node_id | uuid | Yes | FK to routing_nodes (start of edge) |
-| target_node_id | uuid | Yes | FK to routing_nodes (end of edge) |
+| routing_id | uuid | Yes | FK to routings (cascade delete) |
+| inventory_item_id | uuid | Yes | FK to inventory_items (restricted delete) |
+| quantity | numeric | Yes | Expected quantity per job (must be > 0) |
+| unit | text | Yes | Unit of measure (primary or configured secondary unit of the inventory item) |
+| sequence | integer | Yes | Display order in the materials list (steps of 10) |
+| created_at | timestamptz | Yes | Record creation |
+| updated_at | timestamptz | Yes | Last update |
 
 ---
 
@@ -115,12 +111,13 @@ Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when
 
 | As a... | I want to... | So that... |
 |---|---|---|
-| Owner/Admin | Build a routing for a part by dragging operations onto a canvas | I can visually design manufacturing workflows |
-| Owner/Admin | Connect operations with edges to define execution order | I can specify which operations depend on others |
-| Owner/Admin | Create parallel branches for simultaneous operations | Multiple operations can run at the same time |
+| Owner/Admin | Build a routing for a part as a list of operations | I can define how the part is manufactured |
+| Owner/Admin | Reorder operations with up/down arrow buttons | I can adjust the sequence without learning drag-and-drop |
+| Owner/Admin | Add an operation through a modal that asks for setup and run time at the same time | I can't accidentally save an operation with missing time data |
+| Owner/Admin | Define a single list of materials for the whole routing | I can see the "shopping list" for the job without hunting through operations |
 | Owner/Admin | View estimated total time (sum of all operations) | I can accurately quote jobs |
-| Owner/Admin | Access the routing editor from the part detail page | I can manage the routing in context of the part |
-| Owner/Admin | Validate my workflow has no cycles | I avoid invalid routing configurations |
+| Owner/Admin | Edit the routing directly on the part page without leaving | I can manage the routing in context with everything else about the part |
+| Owner/Admin | See changes auto-save as I make them | I never lose work because I forgot to click save |
 
 ---
 
@@ -128,119 +125,70 @@ Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when
 
 - Routing name is auto-generated from the part number and must be unique within the company
 
-- Each part can have at most one routing (enforced by unique constraint on part_id)
+- Each part can have at most one routing (enforced by unique constraint on `part_id`)
 
-- At least one operation (node) is required to save a routing. An error is shown if no operations have been added.
+- Sequence values must be unique within a routing (enforced by unique constraint on `(routing_id, sequence)`)
 
-- Workflow must have no cycles (DAG only)
+- Routing material quantity must be greater than zero
 
 ---
 
 ## Routes
 
-Routings are accessed from the part detail page. There is no standalone routings list page.
-
-- **Create routing:** `/dashboard/{companyId}/parts/{partId}/routing/new` -- Opens the workflow builder directly (no Step 1 name/part selection; the routing name is auto-generated from the part number)
-- **Edit routing:** `/dashboard/{companyId}/parts/{partId}/routing/edit` -- Opens the workflow builder for the existing routing
-
-The routing wizard skips Step 1 (name and part selection) and goes straight to the workflow builder (Step 2), since the part context is already known and the routing name is auto-generated.
+Routings have **no dedicated routes**. They live inline on the part detail page (`/dashboard/{companyId}/parts/{partId}`) via the `PartRoutingPanel` component, which auto-saves every change. There is no standalone routings list page either.
 
 ---
 
-## Material Definitions per Routing Node
+## Routing Materials
 
-Routing nodes can optionally define expected materials for each operation. This enables:
+Routing materials define the list of inventory items expected to be consumed for the whole job. They replace the earlier per-operation materials approach, which proved awkward both for routing designers (figuring out which operation "owns" a material) and for operators (materials don't neatly map to single operation steps in practice).
 
-- Routing designers to specify expected materials per operation step
+### Behavior
 
-- Operator View to pre-populate material logging when completing operations
+- Routing designers add material rows with `(inventory_item_id, quantity, unit)`.
 
-- Actual vs expected material consumption comparison
+- When a job is created from a part with a routing, each `routing_materials` row is **snapshotted** into `job_materials` — see [Jobs Module — Material Tracking](jobs.md#material-tracking).
 
-### routing_nodes.materials Column
+- If a routing material is later edited or deleted, existing jobs are **not** retroactively updated; they keep their snapshot in `job_materials`. Deleting a routing material sets `job_materials.routing_material_id` to `NULL` via `ON DELETE SET NULL`.
 
-Add the following column to the routing_nodes table:
+### User Story
 
-| Column | Type | Required | Description |
-|---|---|---|---|
-| materials | jsonb | No | Expected materials for this operation |
-
-### materials JSONB Structure
-
-The materials field is an array of material specifications:
-
-```json
-[
-  {
-    "inventory_item_id": "uuid",
-    "quantity": 0.5,
-    "unit": "lbs"
-  },
-  {
-    "inventory_item_id": "uuid",
-    "quantity": 12,
-    "unit": "inches"
-  }
-]
-```
-
-**Field Descriptions:**
-
-- `inventory_item_id` - UUID FK to inventory_items table
-
-- `quantity` - Expected quantity to be consumed
-
-- `unit` - Unit of measure (must be primary or configured secondary unit)
-
-### UI Addition: Material Input
-
-When editing a routing node, add a "Materials" section:
-
-- "+Add Material" button opens inventory item picker
-
-- For each material: inventory item dropdown, quantity input, unit dropdown
-
-- Materials can be reordered or removed
-
-### User Story Addition
-
-- As a routing designer, I want to specify expected materials for each operation so that operators know what materials to log when completing work
+- As a routing designer, I want to specify the materials needed for the whole routing so that operators and cost calculations have a single, authoritative shopping list per job.
 
 ---
 
 ## Cost Calculation from Routing
 
-Routings serve as the source of truth for part costing when available. The routing's cost rolls up from individual node costs into a total that feeds directly into the quoting system.
+Routings serve as the source of truth for part costing when available. The routing's cost rolls up from individual operation labor plus routing-level materials into a total that feeds directly into the quoting system.
 
-### Per-Node Cost Calculation
+### Labor Cost
 
-Each routing node contributes to cost through labor and materials:
+Summed across all operations in the routing:
 
-**Labor cost per node:**
 ```
-node_labor_cost = (run_time_per_unit / 60) × operation_type.labor_rate
+operation_labor_cost = (run_time_per_unit / 60) × operation_type.labor_rate
+total_labor_cost = Σ all operation_labor_costs
 ```
 
 Where:
-- `run_time_per_unit` is in minutes (from `routing_nodes.cycle_time`)
+- `run_time_per_unit` is in minutes (from `routing_nodes.run_time_per_unit`)
 - `operation_type.labor_rate` is the hourly rate in dollars (from `operation_types.labor_rate`)
 
-**Material cost per node:**
-```
-node_material_cost = Σ (material.quantity × inventory_item.cost_per_unit)
-```
+Setup time can optionally be included if the quote amortizes setup across the job quantity.
 
-Where materials are defined in the node's `materials` JSONB array, each referencing an `inventory_item_id`.
+### Material Cost
+
+Summed across routing materials:
+
+```
+total_material_cost = Σ (routing_material.quantity × inventory_item.cost_per_unit)
+```
 
 ### Total Routing Cost
 
 ```
-total_labor_cost = Σ all node labor costs
-total_material_cost = Σ all node material costs
 total_routing_cost = total_labor_cost + total_material_cost
 ```
-
-**Note on parallel operations:** All node costs are summed regardless of whether operations run in parallel or series. Parallel execution affects *time* (critical path calculation), not *cost*. Every operation must be performed and paid for.
 
 ### Integration with Parts
 
@@ -252,9 +200,9 @@ When a routing exists for a part:
 ### Integration with Quotes
 
 When creating a quote for a part with a routing:
-1. Fetch the routing and its nodes
-2. For each node, join to `operation_types` for `labor_rate`
-3. For each node's materials, join to `inventory_items` for `cost_per_unit`
+1. Fetch the routing, its operations, and its materials
+2. For each operation, join to `operation_types` for `labor_rate`
+3. For each routing material, join to `inventory_items` for `cost_per_unit`
 4. Calculate `total_labor_cost` and `total_material_cost`
 5. Set `quote.base_cost = total_routing_cost`
 6. Set `quote.estimated_labor_cost = total_labor_cost`
@@ -268,11 +216,11 @@ These values are **snapshots** — frozen at quote creation time. See [Quotes Mo
 
 | Scenario | Behavior |
 |---|---|
-| Node has no `run_time_per_unit` (cycle_time) | Skip labor for that node. Show ⚠️ "Missing run time" warning on cost breakdown. |
-| Operation type has no `labor_rate` | Skip labor for that node. Show ⚠️ "Missing labor rate for {operation_name}" warning. |
-| Node has no materials defined | $0 material cost for that node. Normal — no warning needed. |
-| Material has no `cost_per_unit` in inventory | Skip that material's cost. Show ⚠️ "Missing cost for {material_name}" warning. |
-| Routing has 0 nodes | Cost = $0. Show ⚠️ "Routing has no operations" warning on quote form. |
-| Any warnings present | Quote form shows yellow banner: "Cost may be incomplete — {N} items missing data" with expandable details listing each warning. |
+| Operation has no `run_time_per_unit` | Skip labor for that operation. Show "Missing run time" warning on cost breakdown. |
+| Operation type has no `labor_rate` | Skip labor for that operation. Show "Missing labor rate for {operation_name}" warning. |
+| Routing has no materials defined | $0 material cost. Normal — no warning needed. |
+| Material has no `cost_per_unit` in inventory | Skip that material's cost. Show "Missing cost for {material_name}" warning. |
+| Routing has 0 operations | Cost = $0. Show "Routing has no operations" warning on quote form. |
+| Any warnings present | Quote form shows banner: "Cost may be incomplete — {N} items missing data" with expandable details listing each warning. |
 
 Warnings are informational — they do **not** block quote creation. The user can proceed with incomplete cost data and enter a manual override.

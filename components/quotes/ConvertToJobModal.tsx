@@ -13,7 +13,6 @@ import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import { usePathname } from 'next/navigation';
 import type { QuoteWithRelations } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
@@ -31,7 +30,6 @@ export default function ConvertToJobModal({
   quote,
   onConverted,
 }: ConvertToJobModalProps) {
-  const pathname = usePathname();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingRouting, setCheckingRouting] = useState(false);
@@ -92,9 +90,9 @@ export default function ConvertToJobModal({
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
   };
 
-  const returnToUrl = `${pathname}?convert=true`;
+  // Routing is now edited inline on the part page — no dedicated wizard.
   const createRoutingUrl = quote.part_id
-    ? `/dashboard/${quote.company_id}/parts/${quote.part_id}/routing/new?returnTo=${encodeURIComponent(returnToUrl)}`
+    ? `/dashboard/${quote.company_id}/parts/${quote.part_id}`
     : null;
 
   return (

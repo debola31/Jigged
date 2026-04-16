@@ -1,6 +1,6 @@
 # System Architecture
 
-**Last Updated: January 2026**
+**Last Updated: 2026-04-15**
 
 This document describes the technical architecture of Jigged, a multi-tenant ERP system for small-scale precision manufacturing shops.
 
@@ -190,11 +190,11 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - operation_types - Available operations
 
-- routings, routing_nodes, routing_edges - Process definitions (1:1 with parts)
+- routings, routing_nodes, routing_materials - Process definitions (1:1 with parts). `routing_nodes` is a linear, sequence-ordered list of operations; `routing_materials` is the routing-level materials list.
 
 - quotes, quote_attachments - Customer quotes (no routing_id)
 
-- jobs, job_operations - Work orders (no routing_id; routing auto-resolved from part)
+- jobs, job_operations, job_materials - Work orders (no routing_id; routing auto-resolved from part). `job_materials` snapshots `routing_materials` at job creation for consumption tracking.
 
 **Status Workflows:**
 
@@ -336,8 +336,7 @@ All app routes include company context for multi-tenant data isolation:
 /dashboard/{companyId}              # Main dashboard
 /dashboard/{companyId}/customers    # Customers module
 /dashboard/{companyId}/parts        # Parts module
-/dashboard/{companyId}/parts/{partId}/routing/new   # Create routing for part
-/dashboard/{companyId}/parts/{partId}/routing/edit  # Edit routing for part
+/dashboard/{companyId}/parts/{partId}                # Part detail (routing edited inline here)
 /dashboard/{companyId}/quotes       # Quotes module
 /dashboard/{companyId}/jobs         # Jobs module
 /dashboard/{companyId}/operations   # Operations module
@@ -370,12 +369,13 @@ customers            -- Customer records
 parts                -- Part definitions with pricing (company-wide, no customer_id)
 operation_types      -- Available operations
 routings             -- Process routings (1:1 with parts, unique part_id)
-routing_nodes        -- Operation nodes in routing workflow
-routing_edges        -- Connections between routing nodes
+routing_nodes        -- Linear, sequence-ordered list of operations per routing
+routing_materials    -- Routing-level materials list (inventory_item_id, quantity, unit)
 quotes               -- Customer quotes (no routing_id)
 quote_attachments    -- Quote files
 jobs                 -- Work orders (no routing_id; routing auto-resolved from part)
 job_operations       -- Steps in jobs
+job_materials        -- Per-job materials snapshot (expected + actual consumption)
 ```
 
 ---

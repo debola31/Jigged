@@ -27,8 +27,8 @@ class MockAIProvider:
 
         # Map common column names to DB fields
         mapping_rules = {
-            "part number": ("part_number", 0.95),
-            "part_no": ("part_number", 0.90),
+            "part name": ("part_name", 0.95),
+            "part_no": ("part_name", 0.90),
             "customer name": ("customer_name", 0.95),
             "description": ("description", 0.90),
             "notes": ("notes", 0.85),
@@ -155,7 +155,7 @@ class TestPartsAnalyzeEndpoint:
         """Returns 200 with column mappings when AI provider succeeds."""
         request_data = {
             "company_id": "test-company-id",
-            "headers": ["Part Number", "Description", "Material Cost", "Extra Column"],
+            "headers": ["Part Name", "Description", "Material Cost", "Extra Column"],
             "sample_rows": [
                 ["PART001", "Test Part", "10.50", "ignored"],
                 ["PART002", "Another Part", "15.00", "also ignored"],
@@ -187,7 +187,7 @@ class TestPartsAnalyzeEndpoint:
         """Auto-detects pricing column pairs like qty1/price1."""
         request_data = {
             "company_id": "test-company-id",
-            "headers": ["Part Number", "qty1", "price1", "qty2", "price2"],
+            "headers": ["Part Name", "qty1", "price1", "qty2", "price2"],
             "sample_rows": [
                 ["PART001", "1", "10.00", "10", "8.00"],
                 ["PART002", "1", "15.00", "10", "12.00"],
@@ -226,13 +226,13 @@ class TestPartsValidateEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
                 "Description": "description",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "NEW001", "Description": "New Part 1"},
-                {"Part Number": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1"},
+                {"Part Name": "NEW002", "Description": "New Part 2"},
             ],
             "customer_match_mode": "all_generic",
         }
@@ -255,18 +255,18 @@ class TestPartsValidateEndpoint:
         assert data["error_rows_count"] == 0
 
     @pytest.mark.unit
-    async def test_validate_detects_missing_part_number(self, test_client):
-        """Detects missing part_number validation error."""
+    async def test_validate_detects_missing_part_name(self, test_client):
+        """Detects missing part_name validation error."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
                 "Description": "description",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "", "Description": "Part Without Number"},
-                {"Part Number": "VALID001", "Description": "Valid Part"},
+                {"Part Name": "", "Description": "Part Without Name"},
+                {"Part Name": "VALID001", "Description": "Valid Part"},
             ],
             "customer_match_mode": "all_generic",
         }
@@ -285,21 +285,21 @@ class TestPartsValidateEndpoint:
 
         assert data["error_rows_count"] == 1
         assert len(data["validation_errors"]) == 1
-        assert data["validation_errors"][0]["error_type"] == "missing_part_number"
+        assert data["validation_errors"][0]["error_type"] == "missing_part_name"
         assert data["validation_errors"][0]["row_number"] == 1
 
     @pytest.mark.unit
-    async def test_validate_detects_duplicate_part_number_in_csv(self, test_client):
-        """Detects duplicate part_number within CSV file."""
+    async def test_validate_detects_duplicate_part_name_in_csv(self, test_client):
+        """Detects duplicate part_name within CSV file."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "DUPE001"},
-                {"Part Number": "DUPE001"},  # Duplicate
+                {"Part Name": "DUPE001"},
+                {"Part Name": "DUPE001"},  # Duplicate
             ],
             "customer_match_mode": "all_generic",
         }
@@ -328,9 +328,9 @@ class TestPartsValidateEndpoint:
         """Returns 400 when customer_match_mode is all_to_one but no customer_id provided."""
         request_data = {
             "company_id": "test-company-id",
-            "mappings": {"Part Number": "part_number"},
+            "mappings": {"Part Name": "part_name"},
             "pricing_columns": [],
-            "rows": [{"Part Number": "PART001"}],
+            "rows": [{"Part Name": "PART001"}],
             "customer_match_mode": "all_to_one",
             # Missing selected_customer_id
         }
@@ -357,12 +357,12 @@ class TestPartsValidateEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
                 "Customer Name": "customer_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "PART001", "Customer Name": "Nonexistent Co"},
+                {"Part Name": "PART001", "Customer Name": "Nonexistent Co"},
             ],
             "customer_match_mode": "by_column",
         }
@@ -395,13 +395,13 @@ class TestPartsExecuteEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
                 "Description": "description",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "NEW001", "Description": "New Part 1"},
-                {"Part Number": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1"},
+                {"Part Name": "NEW002", "Description": "New Part 2"},
             ],
             "customer_match_mode": "all_generic",
             "skip_conflicts": False,
@@ -429,14 +429,14 @@ class TestPartsExecuteEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
             },
             "pricing_columns": [
                 {"qty_column": "qty1", "price_column": "price1"},
                 {"qty_column": "qty2", "price_column": "price2"},
             ],
             "rows": [
-                {"Part Number": "PART001", "qty1": "1", "price1": "10.00", "qty2": "10", "price2": "8.00"},
+                {"Part Name": "PART001", "qty1": "1", "price1": "10.00", "qty2": "10", "price2": "8.00"},
             ],
             "customer_match_mode": "all_generic",
             "skip_conflicts": False,
@@ -461,18 +461,18 @@ class TestPartsExecuteEndpoint:
     async def test_execute_skips_conflicts_when_skip_conflicts_true(self, test_client):
         """Skips conflicting rows when skip_conflicts is True."""
         existing_parts = [
-            {"id": "existing-1", "part_number": "EXIST001", "customer_id": None},
+            {"id": "existing-1", "part_name": "EXIST001", "customer_id": None},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "EXIST001"},  # Will be skipped (duplicate)
-                {"Part Number": "NEW001"},    # Will be imported
+                {"Part Name": "EXIST001"},  # Will be skipped (duplicate)
+                {"Part Name": "NEW001"},    # Will be imported
             ],
             "customer_match_mode": "all_generic",
             "skip_conflicts": True,
@@ -504,12 +504,12 @@ class TestPartsExecuteEndpoint:
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
-                "Part Number": "part_number",
+                "Part Name": "part_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Number": "PART001"},
-                {"Part Number": "PART002"},
+                {"Part Name": "PART001"},
+                {"Part Name": "PART002"},
             ],
             "customer_match_mode": "all_to_one",
             "selected_customer_id": "customer-123",

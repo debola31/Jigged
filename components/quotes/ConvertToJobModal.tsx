@@ -127,7 +127,7 @@ export default function ConvertToJobModal({
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
               <strong>Part:</strong>{' '}
-              {quote.parts?.part_number || '\u2014'}
+              {quote.parts?.part_name || '\u2014'}
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
               <strong>Quantity:</strong> {quote.quantity}

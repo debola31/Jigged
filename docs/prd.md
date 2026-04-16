@@ -52,7 +52,7 @@ Success looks like:
 | Routing | A workflow diagram defining how a part is manufactured. Each part has exactly one routing (1:1). Managed from the part detail page. |
 | Operation | A single step in a routing (e.g., CNC Turning). |
 | Operation Type | A category of operation (e.g., Machining, QC). |
-| Part | A company-wide product with part number and optional category. Cost derived from routing or manual entry. Not tied to a specific customer. |
+| Part | A company-wide product with part name and optional category. Cost derived from routing when one exists. Not tied to a specific customer. |
 | Part Category | A classification for parts (e.g., "Precision Machined", "Tooling") that carries a default markup percentage for quoting. |
 | Quote | A cost-plus price estimate. Base cost + markup = quoted price. Approved quotes become jobs. |
 
@@ -259,7 +259,7 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 
-- **Part**: id, company_id, part_number, description, category_id, manual_cost, cost_source, notes, created_at, updated_at (company-wide entity, no customer_id. Pricing is cost-plus: base cost from routing or manual entry, markup from category default with per-quote override.)
+- **Part**: id, company_id, part_name, description, category_id, notes, created_at, updated_at (company-wide entity, no customer_id. Pricing is cost-plus: base cost auto-populated from routing when available, markup from category default with per-quote override.)
 
 - **Part Category**: id, company_id, name, default_markup_percent, description, created_at, updated_at
 

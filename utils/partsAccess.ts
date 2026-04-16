@@ -8,7 +8,7 @@ import type { Part, PartFormData } from '@/types/part';
 export async function getAllParts(
   companyId: string,
   search: string = '',
-  sortField: string = 'part_number',
+  sortField: string = 'part_name',
   sortDirection: 'asc' | 'desc' = 'asc'
 ): Promise<Part[]> {
   const supabase = getSupabase();
@@ -26,7 +26,7 @@ export async function getAllParts(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
     }
 
     const { data, error } = await query;
@@ -48,11 +48,9 @@ export async function getAllParts(
     return {
       id: part.id as string,
       company_id: part.company_id as string,
-      part_number: part.part_number as string,
+      part_name: part.part_name as string,
       description: part.description as string | null,
       category_id: part.category_id as string | null,
-      manual_cost: part.manual_cost as number | null,
-      cost_source: part.cost_source as Part['cost_source'],
       created_at: part.created_at as string,
       updated_at: part.updated_at as string,
       part_category: partCategory || null,
@@ -71,7 +69,7 @@ export async function getPartsPaginated(
   offset: number,
   limit: number,
   search: string = '',
-  sortField: string = 'part_number',
+  sortField: string = 'part_name',
   sortDirection: 'asc' | 'desc' = 'asc'
 ): Promise<Part[]> {
   const supabase = getSupabase();
@@ -84,7 +82,7 @@ export async function getPartsPaginated(
     .range(offset, offset + limit - 1);
 
   if (search.trim()) {
-    query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
+    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
   }
 
   const { data, error } = await query;
@@ -99,11 +97,9 @@ export async function getPartsPaginated(
     return {
       id: part.id as string,
       company_id: part.company_id as string,
-      part_number: part.part_number as string,
+      part_name: part.part_name as string,
       description: part.description as string | null,
       category_id: part.category_id as string | null,
-      manual_cost: part.manual_cost as number | null,
-      cost_source: part.cost_source as Part['cost_source'],
       created_at: part.created_at as string,
       updated_at: part.updated_at as string,
       part_category: partCategory || null,
@@ -126,7 +122,7 @@ export async function getPartsCount(
     .eq('company_id', companyId);
 
   if (search.trim()) {
-    query = query.or(`part_number.ilike.%${search}%,description.ilike.%${search}%`);
+    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
   }
 
   const { count, error } = await query;
@@ -245,17 +241,15 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 
 /**
  * Lightweight parts query for dropdowns.
- * Returns id, part_number, description, category info, and whether the part has a routing.
+ * Returns id, part name, description, category info, and whether the part has a routing.
  */
 export async function getPartsForSelect(
   companyId: string
 ): Promise<Array<{
   id: string;
-  part_number: string;
+  part_name: string;
   description: string | null;
   category_id: string | null;
-  manual_cost: number | null;
-  cost_source: string | null;
   has_routing: boolean;
   part_category: { id: string; name: string; default_markup_percent: number | null } | null;
 }>> {
@@ -265,16 +259,14 @@ export async function getPartsForSelect(
     .from('parts')
     .select(`
       id,
-      part_number,
+      part_name,
       description,
       category_id,
-      manual_cost,
-      cost_source,
       part_categories(id, name, default_markup_percent),
       routings(id)
     `)
     .eq('company_id', companyId)
-    .order('part_number', { ascending: true });
+    .order('part_name', { ascending: true });
 
   if (error) {
     console.error('Error fetching parts for select:', error);
@@ -286,11 +278,9 @@ export async function getPartsForSelect(
     const partCategory = p.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
     return {
       id: p.id as string,
-      part_number: p.part_number as string,
+      part_name: p.part_name as string,
       description: p.description as string | null,
       category_id: p.category_id as string | null,
-      manual_cost: p.manual_cost as number | null,
-      cost_source: p.cost_source as string | null,
       has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
       part_category: partCategory || null,
     };
@@ -298,11 +288,11 @@ export async function getPartsForSelect(
 }
 
 /**
- * Check if a part number already exists for a company.
+ * Check if a part name already exists for a company.
  */
-export async function checkPartNumberExists(
+export async function checkPartNameExists(
   companyId: string,
-  partNumber: string,
+  partName: string,
   excludeId?: string
 ): Promise<boolean> {
   const supabase = getSupabase();
@@ -311,7 +301,7 @@ export async function checkPartNumberExists(
     .from('parts')
     .select('id')
     .eq('company_id', companyId)
-    .ilike('part_number', partNumber);
+    .ilike('part_name', partName);
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -320,7 +310,7 @@ export async function checkPartNumberExists(
   const { data, error } = await query.limit(1);
 
   if (error) {
-    console.error('Error checking part number:', error);
+    console.error('Error checking part name:', error);
     throw error;
   }
 
@@ -333,17 +323,13 @@ export async function checkPartNumberExists(
 export async function createPart(companyId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
 
-  const manualCost = formData.manual_cost.trim() ? parseFloat(formData.manual_cost) : null;
-
   const { data, error } = await supabase
     .from('parts')
     .insert({
       company_id: companyId,
-      part_number: formData.part_number.trim(),
+      part_name: formData.part_name.trim(),
       description: formData.description.trim() || null,
       category_id: formData.category_id || null,
-      manual_cost: manualCost,
-      cost_source: formData.cost_source || (manualCost !== null ? 'manual' : null),
     })
     .select()
     .single();
@@ -362,31 +348,12 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
 export async function updatePart(partId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
 
-  const manualCost = formData.manual_cost.trim() ? parseFloat(formData.manual_cost) : null;
-
-  // Determine cost_source based on manual cost and routing existence.
-  // If manual cost is set, use form's cost_source or default to 'manual'.
-  // If manual cost is cleared, check if part has a routing to revert to 'routing'.
-  let costSource: string | null;
-  if (manualCost !== null) {
-    costSource = formData.cost_source || 'manual';
-  } else {
-    const { data: routings } = await supabase
-      .from('routings')
-      .select('id')
-      .eq('part_id', partId)
-      .limit(1);
-    costSource = (routings && routings.length > 0) ? 'routing' : null;
-  }
-
   const { data, error } = await supabase
     .from('parts')
     .update({
-      part_number: formData.part_number.trim(),
+      part_name: formData.part_name.trim(),
       description: formData.description.trim() || null,
       category_id: formData.category_id || null,
-      manual_cost: manualCost,
-      cost_source: costSource,
       updated_at: new Date().toISOString(),
     })
     .eq('id', partId)

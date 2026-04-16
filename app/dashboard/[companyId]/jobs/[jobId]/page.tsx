@@ -352,7 +352,7 @@ export default function JobDetailPage() {
                       href={`/dashboard/${companyId}/parts/${job.part_id}`}
                       sx={{ fontWeight: 500 }}
                     >
-                      {job.parts.part_number}
+                      {job.parts.part_name}
                     </MuiLink>
                   ) : (
                     <Typography>—</Typography>
@@ -448,7 +448,7 @@ export default function JobDetailPage() {
               <JobQRCode
                 jobId={jobId}
                 jobNumber={job.job_number}
-                partName={job.parts?.part_number}
+                partName={job.parts?.part_name}
                 companyId={companyId}
               />
             </CardContent>

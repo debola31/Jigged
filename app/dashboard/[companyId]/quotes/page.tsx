@@ -22,7 +22,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import CircularProgress from '@mui/material/CircularProgress';
 import MuiLink from '@mui/material/Link';
-import Chip from '@mui/material/Chip';
+
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -256,7 +256,7 @@ export default function QuotesPage() {
       flex: 1,
       minWidth: 150,
       valueGetter: (params) =>
-        params.data?.parts?.part_number || '—',
+        params.data?.parts?.part_name || '—',
     },
     {
       field: 'quantity',
@@ -265,34 +265,10 @@ export default function QuotesPage() {
       type: 'numericColumn',
     },
     {
-      field: 'markup_percent',
-      headerName: 'Markup',
-      width: 90,
-      valueFormatter: (params: ValueFormatterParams) =>
-        params.value !== null && params.value !== undefined ? `${params.value}%` : '—',
-    },
-    {
       field: 'total_price',
       headerName: 'Total',
       width: 120,
       valueFormatter: (params: ValueFormatterParams) => formatCurrency(params.value),
-    },
-    {
-      field: 'cost_source',
-      headerName: 'Cost Source',
-      width: 120,
-      cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
-        if (!params.data?.cost_source) return '—';
-        const source = params.data.cost_source;
-        return (
-          <Chip
-            label={source === 'routing' ? 'Routing' : source === 'manual' ? 'Manual' : 'Estimate'}
-            size="small"
-            color={source === 'routing' ? 'primary' : 'default'}
-            variant="outlined"
-          />
-        );
-      },
     },
     {
       field: 'status',

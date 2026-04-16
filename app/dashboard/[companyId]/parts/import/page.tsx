@@ -297,8 +297,8 @@ export default function ImportPartsPage() {
 
     // Check required fields
     const mappedFields = new Set(mappings.filter((m) => m.db_field).map((m) => m.db_field));
-    if (!mappedFields.has('part_number')) {
-      setError('Part Number must be mapped');
+    if (!mappedFields.has('part_name')) {
+      setError('Part Name must be mapped');
       return;
     }
 
@@ -813,13 +813,13 @@ export default function ImportPartsPage() {
         onConfirm={() => executeImport(true)}
         entityName="Parts"
         conflictColumns={[
-          { key: 'csv_part_number', label: 'Part Number' },
+          { key: 'csv_part_name', label: 'Part Name' },
           { key: 'csv_customer_name', label: 'Customer Name' },
         ]}
         getConflictLabel={(conflict) => {
           switch (conflict.conflict_type) {
-            case 'duplicate_part_number':
-              return 'Duplicate Part Number';
+            case 'duplicate_part_name':
+              return 'Duplicate Part Name';
             case 'customer_not_found':
               return 'Customer Not Found';
             case 'csv_duplicate':

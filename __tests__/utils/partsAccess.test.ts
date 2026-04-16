@@ -53,7 +53,7 @@ import {
   getAllParts,
   getPart,
   getPartWithRelations,
-  checkPartNumberExists,
+  checkPartNameExists,
   createPart,
   updatePart,
   deletePart,
@@ -80,11 +80,9 @@ describe('partsAccess utilities', () => {
   const mockPart: Part = {
     id: 'part-1',
     company_id: 'company-1',
-    part_number: 'PART001',
+    part_name: 'PART001',
     description: 'Test Part',
     category_id: null,
-    manual_cost: 10.0,
-    cost_source: 'manual',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -92,7 +90,7 @@ describe('partsAccess utilities', () => {
   const mockPart2: Part = {
     ...mockPart,
     id: 'part-2',
-    part_number: 'GENERIC001',
+    part_name: 'GENERIC001',
   };
 
   describe('getAllParts', () => {
@@ -121,7 +119,7 @@ describe('partsAccess utilities', () => {
       await getAllParts('company-1', 'PART001');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'part_number.ilike.%PART001%,description.ilike.%PART001%'
+        'part_name.ilike.%PART001%,description.ilike.%PART001%'
       );
     });
 
@@ -234,23 +232,23 @@ describe('partsAccess utilities', () => {
     });
   });
 
-  describe('checkPartNumberExists', () => {
-    it('returns true when part number exists', async () => {
+  describe('checkPartNameExists', () => {
+    it('returns true when part name exists', async () => {
       mockQueryBuilder.data = [{ id: 'existing-part' }];
       mockQueryBuilder.error = null;
 
-      const result = await checkPartNumberExists('company-1', 'PART001');
+      const result = await checkPartNameExists('company-1', 'PART001');
 
-      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('part_number', 'PART001');
+      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('part_name', 'PART001');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
       expect(result).toBe(true);
     });
 
-    it('returns false when part number does not exist', async () => {
+    it('returns false when part name does not exist', async () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      const result = await checkPartNumberExists('company-1', 'NONEXISTENT');
+      const result = await checkPartNameExists('company-1', 'NONEXISTENT');
 
       expect(result).toBe(false);
     });
@@ -259,7 +257,7 @@ describe('partsAccess utilities', () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      await checkPartNumberExists('company-1', 'PART001', 'exclude-this-id');
+      await checkPartNameExists('company-1', 'PART001', 'exclude-this-id');
 
       expect(mockQueryBuilder.neq).toHaveBeenCalledWith('id', 'exclude-this-id');
     });
@@ -267,22 +265,18 @@ describe('partsAccess utilities', () => {
 
   describe('createPart', () => {
     const mockFormData: PartFormData = {
-      part_number: 'NEW001',
+      part_name: 'NEW001',
       description: 'New Part',
       category_id: '',
-      manual_cost: '15.00',
-      cost_source: 'manual',
     };
 
     it('inserts part and returns data', async () => {
       const mockCreatedPart: Part = {
         id: 'new-part-uuid',
         company_id: 'company-1',
-        part_number: 'NEW001',
+        part_name: 'NEW001',
         description: 'New Part',
         category_id: null,
-        manual_cost: 15.0,
-        cost_source: 'manual',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -312,18 +306,15 @@ describe('partsAccess utilities', () => {
 
   describe('updatePart', () => {
     const mockFormData: PartFormData = {
-      part_number: 'PART001',
+      part_name: 'PART001',
       description: 'Updated Part',
       category_id: '',
-      manual_cost: '20.00',
-      cost_source: 'manual',
     };
 
     it('updates part and returns data', async () => {
       const mockUpdatedPart: Part = {
         ...mockPart,
         description: 'Updated Part',
-        manual_cost: 20.0,
       };
 
       mockQueryBuilder.data = mockUpdatedPart;

@@ -336,16 +336,16 @@ async def validate_import(
         # Get existing parts for this company
         parts_response = (
             supabase.table("parts")
-            .select("id, part_number, customer_id")
+            .select("id, part_name, customer_id")
             .eq("company_id", request.company_id)
             .execute()
         )
         existing_parts = parts_response.data or []
 
-        # Build lookup: (part_number_lower, customer_id) -> part
+        # Build lookup: (part_name_lower, customer_id) -> part
         existing_parts_lookup: dict[tuple[str, Optional[str]], dict] = {}
         for part in existing_parts:
-            key = (part["part_number"].lower(), part["customer_id"])
+            key = (part["part_name"].lower(), part["customer_id"])
             existing_parts_lookup[key] = part
 
         # Get customers for this company (for name lookup)
@@ -385,16 +385,16 @@ async def validate_import(
 
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
-        part_number_column = reverse_mappings.get("part_number")
+        part_name_column = reverse_mappings.get("part_name")
         customer_name_column = reverse_mappings.get("customer_name")
 
-        # First pass: track part_number occurrences for CSV duplicate detection
+        # First pass: track part_name occurrences for CSV duplicate detection
         part_occurrences: dict[tuple[str, Optional[str]], list[int]] = {}
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
-            part_number = (
-                row.get(part_number_column, "").strip() if part_number_column else ""
+            part_name = (
+                row.get(part_name_column, "").strip() if part_name_column else ""
             )
 
             # Determine customer_id based on match mode
@@ -412,8 +412,8 @@ async def validate_import(
                     # Note: customer_id will be None if customer not found (handled in validation)
             # ALL_GENERIC: customer_id stays None
 
-            if part_number:
-                key = (part_number.lower(), customer_id)
+            if part_name:
+                key = (part_name.lower(), customer_id)
                 if key not in part_occurrences:
                     part_occurrences[key] = []
                 part_occurrences[key].append(row_number)
@@ -429,18 +429,18 @@ async def validate_import(
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
-            part_number = (
-                row.get(part_number_column, "").strip() if part_number_column else ""
+            part_name = (
+                row.get(part_name_column, "").strip() if part_name_column else ""
             )
 
-            # Check required field: part_number
-            if not part_number:
+            # Check required field: part_name
+            if not part_name:
                 validation_errors.append(
                     PartValidationError(
                         row_number=row_number,
-                        error_type="missing_part_number",
-                        field="part_number",
-                        message="Part number is required",
+                        error_type="missing_part_name",
+                        field="part_name",
+                        message="Part name is required",
                     )
                 )
                 validation_error_rows.add(row_number)
@@ -465,7 +465,7 @@ async def validate_import(
                         conflicts.append(
                             PartConflictInfo(
                                 row_number=row_number,
-                                csv_part_number=part_number,
+                                csv_part_name=part_name,
                                 csv_customer_code=customer_name,
                                 conflict_type="customer_not_found",
                                 existing_part_id="",
@@ -477,14 +477,14 @@ async def validate_import(
             # ALL_GENERIC: customer_id stays None
 
             # Check for CSV duplicates
-            key = (part_number.lower(), customer_id)
+            key = (part_name.lower(), customer_id)
             if key in csv_duplicates:
                 other_rows = [r for r in csv_duplicates[key] if r != row_number]
                 if other_rows:  # Don't flag if this is the first occurrence
                     conflicts.append(
                         PartConflictInfo(
                             row_number=row_number,
-                            csv_part_number=part_number,
+                            csv_part_name=part_name,
                             csv_customer_code=customer_name,
                             conflict_type="csv_duplicate",
                             existing_part_id="",
@@ -494,17 +494,17 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            # Check for existing part with same part_number + customer_id
+            # Check for existing part with same part_name + customer_id
             if key in existing_parts_lookup:
                 existing = existing_parts_lookup[key]
                 conflicts.append(
                     PartConflictInfo(
                         row_number=row_number,
-                        csv_part_number=part_number,
+                        csv_part_name=part_name,
                         csv_customer_code=customer_name,
-                        conflict_type="duplicate_part_number",
+                        conflict_type="duplicate_part_name",
                         existing_part_id=existing["id"],
-                        existing_value=f"Part '{part_number}' already exists for this customer",
+                        existing_value=f"Part '{part_name}' already exists for this customer",
                     )
                 )
                 conflict_rows.add(row_number)
@@ -631,7 +631,7 @@ async def execute_import(
             }
 
             # Map standard fields
-            for db_field in ["part_number", "description"]:
+            for db_field in ["part_name", "description"]:
                 csv_column = reverse_mappings.get(db_field)
                 if csv_column and csv_column in row:
                     value = row[csv_column].strip()
@@ -672,7 +672,7 @@ async def execute_import(
                 if "23505" in error_str or "duplicate key" in error_str.lower():
                     raise HTTPException(
                         status_code=400,
-                        detail="Import failed: A part with this number already exists. Please check your CSV for duplicate part numbers.",
+                        detail="Import failed: A part with this name already exists. Please check your CSV for duplicate part names.",
                     )
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(

@@ -11,7 +11,7 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
-import Chip from '@mui/material/Chip';
+
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -197,10 +197,10 @@ export default function PartDetailPage() {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
-                    Part Number
+                    Part Name
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>
-                    {part.part_number}
+                    {part.part_name}
                   </Typography>
                 </Box>
                 <Box>
@@ -303,28 +303,6 @@ export default function PartDetailPage() {
               </Box>
               <Divider sx={{ mb: 2 }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Cost Source
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                    <Chip
-                      label={
-                        part.cost_source === 'routing'
-                          ? 'From Routing'
-                          : part.cost_source === 'manual'
-                            ? 'Manual'
-                            : part.cost_source === 'estimate'
-                              ? 'Estimate'
-                              : 'Not Set'
-                      }
-                      size="small"
-                      color={part.cost_source === 'routing' ? 'primary' : 'default'}
-                      variant="outlined"
-                    />
-                  </Box>
-                </Box>
-
                 {/* Routing Cost (calculated live) */}
                 {costBreakdown && (
                   <Box>
@@ -337,14 +315,11 @@ export default function PartDetailPage() {
                   </Box>
                 )}
 
-                <Box>
+                {!costBreakdown && !costLoading && (
                   <Typography variant="body2" color="text.secondary">
-                    Manual Estimate
+                    No routing defined — cost will be estimated when quoting.
                   </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatCurrency(part.manual_cost)}
-                  </Typography>
-                </Box>
+                )}
               </Box>
 
               {/* Warnings for missing data */}
@@ -474,7 +449,7 @@ export default function PartDetailPage() {
         <DialogTitle>Delete Part?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{part.part_number}</strong>? This action cannot
+            Are you sure you want to delete <strong>{part.part_name}</strong>? This action cannot
             be undone.
           </Typography>
           {hasRelatedRecords && (

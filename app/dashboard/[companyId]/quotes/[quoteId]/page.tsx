@@ -29,17 +29,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 
-import Chip from '@mui/material/Chip';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
+
 
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -53,13 +43,10 @@ import {
   deleteQuote,
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
-  refreshQuoteCost,
   updateQuote,
 } from '@/utils/quotesAccess';
 import { quoteToFormData, calculateUnitPriceFromMarkup, calculateTotalPrice } from '@/types/quote';
 import type { QuoteWithRelations, QuoteAttachment } from '@/types/quote';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
-import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
@@ -80,10 +67,6 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  const [costOutdated, setCostOutdated] = useState(false);
-  const [refreshingCost, setRefreshingCost] = useState(false);
-
   // Markup editing state (for pending_approval status)
   const [editingMarkup, setEditingMarkup] = useState(false);
   const [markupDraft, setMarkupDraft] = useState('');
@@ -103,40 +86,6 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load quote');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Check if routing cost is outdated for pending_approval/rejected quotes
-  useEffect(() => {
-    if (!quote || !quote.part_id || !quote.base_cost) return;
-    if (quote.status !== 'pending_approval' && quote.status !== 'rejected') return;
-    if (quote.cost_source !== 'routing') return;
-
-    calculateRoutingCost(quote.part_id).then((breakdown) => {
-      setCostBreakdown(breakdown);
-      if (breakdown && Math.abs(breakdown.total_cost - (quote.base_cost ?? 0)) > 0.01) {
-        setCostOutdated(true);
-      } else {
-        setCostOutdated(false);
-      }
-    }).catch(() => {
-      setCostBreakdown(null);
-      setCostOutdated(false);
-    });
-  }, [quote]);
-
-  const handleRefreshCost = async () => {
-    if (!quote) return;
-    setRefreshingCost(true);
-    setError(null);
-    try {
-      await refreshQuoteCost(quoteId, companyId);
-      await fetchQuote();
-      setCostOutdated(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh cost');
-    } finally {
-      setRefreshingCost(false);
     }
   };
 
@@ -450,7 +399,7 @@ export default function QuoteDetailPage() {
                     href={`/dashboard/${companyId}/parts/${quote.part_id}`}
                     sx={{ fontWeight: 500 }}
                   >
-                    {quote.parts.part_number}
+                    {quote.parts.part_name}
                   </MuiLink>
                   {quote.parts.description && (
                     <Typography variant="body2" color="text.secondary">
@@ -550,38 +499,8 @@ export default function QuoteDetailPage() {
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   Cost & Pricing
                 </Typography>
-                {quote.cost_source && (
-                  <Chip
-                    label={
-                      quote.cost_source === 'routing'
-                        ? 'From Routing'
-                        : quote.cost_source === 'manual'
-                          ? 'Manual Estimate'
-                          : 'Estimate'
-                    }
-                    size="small"
-                    color={quote.cost_source === 'routing' ? 'primary' : 'default'}
-                    variant="outlined"
-                  />
-                )}
-                {(quote.status === 'pending_approval' || quote.status === 'rejected') && quote.cost_source === 'routing' && (
-                  <Button
-                    size="small"
-                    startIcon={refreshingCost ? <CircularProgress size={14} /> : <RefreshIcon />}
-                    onClick={handleRefreshCost}
-                    disabled={refreshingCost}
-                  >
-                    Refresh Cost
-                  </Button>
-                )}
               </Box>
               <Divider sx={{ mb: 2 }} />
-
-              {costOutdated && (
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  The routing for this part has changed since this quote was created. Click &quot;Refresh Cost&quot; to update.
-                </Alert>
-              )}
 
               <Grid container spacing={2}>
                 <Grid size={{ xs: 6, sm: 3 }}>
@@ -681,75 +600,30 @@ export default function QuoteDetailPage() {
                 </Typography>
               </Box>
 
-              {/* Cost Breakdown (if routing-based) */}
-              {costBreakdown && (costBreakdown.labor_items.length > 0 || costBreakdown.material_items.length > 0) && (
-                <Accordion sx={{ mt: 2, bgcolor: 'transparent', boxShadow: 'none', '&:before': { display: 'none' } }}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
-                    <Typography variant="body2" fontWeight={500}>
-                      Cost Breakdown
-                    </Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 0 }}>
-                    {costBreakdown.labor_items.length > 0 && (
-                      <>
-                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Labor</Typography>
-                        <Table size="small" sx={{ mb: 2 }}>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Operation</TableCell>
-                              <TableCell align="right">Time (min)</TableCell>
-                              <TableCell align="right">Rate ($/hr)</TableCell>
-                              <TableCell align="right">Cost</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {costBreakdown.labor_items.map((item, i) => (
-                              <TableRow key={i}>
-                                <TableCell>{item.operation_name}</TableCell>
-                                <TableCell align="right">{item.run_time_minutes}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.labor_rate)}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow>
-                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_labor_cost)}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </>
-                    )}
-                    {costBreakdown.material_items.length > 0 && (
-                      <>
-                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Materials</Typography>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Item</TableCell>
-                              <TableCell align="right">Qty</TableCell>
-                              <TableCell align="right">Unit Cost</TableCell>
-                              <TableCell align="right">Cost</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {costBreakdown.material_items.map((item, i) => (
-                              <TableRow key={i}>
-                                <TableCell>{item.item_name}</TableCell>
-                                <TableCell align="right">{item.quantity} {item.unit}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost_per_unit)}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow>
-                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_material_cost)}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </>
-                    )}
-                  </AccordionDetails>
-                </Accordion>
+              {/* Snapshot of labor/material costs at quote creation time */}
+              {(quote.estimated_labor_cost !== null || quote.estimated_material_cost !== null) && (
+                <Box sx={{ mt: 2, display: 'flex', gap: 4 }}>
+                  {quote.estimated_labor_cost !== null && (
+                    <Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Labor Cost (snapshot)
+                      </Typography>
+                      <Typography variant="body1" fontWeight={500}>
+                        {formatCurrency(quote.estimated_labor_cost)}
+                      </Typography>
+                    </Box>
+                  )}
+                  {quote.estimated_material_cost !== null && (
+                    <Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Material Cost (snapshot)
+                      </Typography>
+                      <Typography variant="body1" fontWeight={500}>
+                        {formatCurrency(quote.estimated_material_cost)}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
               )}
             </CardContent>
           </Card>

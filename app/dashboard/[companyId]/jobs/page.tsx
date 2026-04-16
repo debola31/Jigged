@@ -256,7 +256,7 @@ export default function JobsPage() {
       valueGetter: (params) => {
         if (!params.data) return '';
         if (!params.data.parts) return '—';
-        return params.data.parts.part_number;
+        return params.data.parts.part_name;
       },
     },
     {

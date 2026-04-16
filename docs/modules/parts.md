@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default markup configuration and can have a routing defining their manufacturing process. Part cost is derived from the routing when one exists, or entered manually.
+The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default markup configuration and can have a routing defining their manufacturing process. If a routing exists, cost is calculated from it (labor + materials). Cost determination happens at quote creation time, not on the part itself.
 
 **Priority:** Must Have (Build Second)
 
@@ -17,9 +17,9 @@ The Parts module manages the catalog of products/parts that a company manufactur
 | As a... | I want to... | So that... |
 |---|---|---|
 | Owner/Admin | View a list of all parts | I can see our product catalog |
-| Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
+| Owner/Admin | Search parts by part name or description | I can quickly find a specific part |
 | Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default markups |
-| Owner/Admin | Edit part information | I can update descriptions or cost data |
+| Owner/Admin | Edit part information | I can update descriptions or other details |
 | Owner/Admin | Manage part categories with default markups | I can standardize markup expectations across similar parts |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
@@ -34,18 +34,16 @@ The Parts module manages the catalog of products/parts that a company manufactur
 |---|---|---|---|
 | id | UUID | Yes | Primary key (auto-generated) |
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
-| part_number | Text | Yes | Part number (e.g., "AE36589E-RT") |
+| part_name | Text | Yes | Part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
 | category_id | UUID (FK) | No | Link to part_categories table |
-| manual_cost | Decimal(12,4) | No | Base cost per unit (used when no routing exists) |
-| cost_source | Text | No | How base cost is determined: 'routing', 'manual', 'estimate', or null |
 | notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, part_number)`
+**Unique Constraint:** `(company_id, part_name)`
 
-Part numbers must be unique within a company.
+Part names must be unique within a company.
 
 ### Part Categories Table (`part_categories`)
 
@@ -63,27 +61,13 @@ Part categories classify parts for default markup configuration during quoting. 
 
 **Unique Constraint:** `(company_id, name)`
 
-### Cost Source
-
-The `cost_source` field indicates how the part's base cost is determined:
-
-| Value | Description |
-|---|---|
-| `routing` | Auto-calculated from routing operations (sum of labor + materials). This is raw manufacturing cost — **markup is applied** during quoting. |
-| `manual` | User entered the cost directly. This is the owner's intended unit price — **markup is already included**. |
-| `estimate` | A rough estimate. Like manual, this is the owner's intended price — **markup is already included**. |
-| `null` | No cost information available yet. |
-
-**Cost priority for quoting:** When `manual_cost` is set, it takes priority over routing cost regardless of whether a routing exists. This allows the owner to override the calculated routing cost with an intentional price. When `manual_cost` is not set and a routing exists, the routing cost is used as the base with markup applied from the part category.
-
 ### Pricing Tier Migration
 
 The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** by the cost-plus model. This is a clean break with no deprecation period:
 
 **Migration steps (single migration):**
-1. For each part with pricing tiers: copy the qty=1 tier price to `manual_cost`, set `cost_source = 'estimate'`
-2. Drop the `pricing` column entirely
-3. Drop the `validate_pricing_json` function, `idx_parts_pricing` GIN index, and `parts_valid_pricing` CHECK constraint
+1. Drop the `pricing` column entirely
+2. Drop the `validate_pricing_json` function, `idx_parts_pricing` GIN index, and `parts_valid_pricing` CHECK constraint
 
 **Code changes (same PR):**
 - Remove `getUnitPrice`, `calculateUnitPrice`, `sortPricingTiers`, `validatePricingTiers` from `types/part.ts`
@@ -100,9 +84,9 @@ The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** b
 
 **Features:**
 
-- Table showing: Part Number, Description, Category, Cost (routing-calculated or manual)
+- Table showing: Part Name, Description, Category, Cost (from routing if available)
 
-- Search box (searches part number and description)
+- Search box (searches part name and description)
 
 - "+ New Part" button
 
@@ -122,7 +106,7 @@ The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** b
 
 ▸ **Basic Information**
 
-- Part Number (required)
+- Part Name (required)
 
 - Description
 
@@ -135,16 +119,8 @@ The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** b
 
 ▸ **Cost Information**
 
-- Cost Source (read-only indicator)
-  - If routing exists: "Calculated from routing" (read-only, with cost value)
-  - If no routing: shows current cost_source or "No cost data"
-- Manual Cost per Unit (editable only when cost_source is not 'routing')
-  - Disabled/greyed out if part has a routing
-  - Hint: "Auto-calculated from routing when a routing exists"
-
-**Validation:**
-
-- Manual cost must be a valid number ≥ 0 if provided
+- If routing exists: "Calculated from routing" (read-only, with cost value)
+- If no routing: "No cost data — create a routing to calculate cost"
 
 ▸ **Other**
 
@@ -183,20 +159,20 @@ The part detail page includes a routing info card that shows:
 
 ## Cost Determination Logic
 
-A part's effective base cost is determined by its `cost_source`:
+A part's cost is determined solely by its routing:
 
 ```javascript
 function getPartBaseCost(part: Part): number | null {
-  if (part.cost_source === 'routing' && part.routing) {
+  if (part.routing) {
     // Calculated from routing — see routings.md for formula
     return calculateRoutingCost(part.routing);
   }
-  // For 'manual', 'estimate', or null — use manual_cost if set
-  return part.manual_cost ?? null;
+  // No routing — no cost data available
+  return null;
 }
 ```
 
-When creating a quote for a part, the base cost flows into the quote's `base_cost` field and the part category's `default_markup_percent` pre-fills the markup. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
+Cost determination happens at **quote creation time**, not on the part itself. When creating a quote for a part, the routing cost (if available) flows into the quote's `base_cost` field and the part category's `default_markup_percent` pre-fills the markup. Parts without a routing have no cost data until a routing is created. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
 
 ---
 
@@ -214,7 +190,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 3. **Review Mappings** - Display with confidence indicators
 
-4. **Validate** - Check for duplicate part numbers within company
+4. **Validate** - Check for duplicate part names within company
 
 5. **Execute** - Import with results summary
 
@@ -226,7 +202,7 @@ If the CSV contains a "Category" column, the import will:
 
 ### Conflict Detection
 
-- **Duplicate part_number** within company → Conflict
+- **Duplicate part_name** within company → Conflict
 
 ### API Endpoints
 
@@ -238,9 +214,9 @@ If the CSV contains a "Category" column, the import will:
 
 ### Validation Rules
 
-- part_number is required
+- part_name is required
 
-- part_number must be unique within the company
+- part_name must be unique within the company
 
 ---
 
@@ -264,9 +240,7 @@ If the CSV contains a "Category" column, the import will:
 
 - [ ] Parts with routings show calculated cost (read-only)
 
-- [ ] Parts without routings allow manual cost entry
-
-- [ ] Cost source indicator shown on part detail and part list
+- [ ] Parts without routings show "No cost data" indicator
 
 - [ ] Can delete a part (hard delete with confirmation)
 
@@ -288,7 +262,7 @@ If the CSV contains a "Category" column, the import will:
 
 - [ ] Confidence scores displayed with color coding
 
-- [ ] Detects duplicate part numbers within company
+- [ ] Detects duplicate part names within company
 
 - [ ] Can skip conflicts and import valid rows
 

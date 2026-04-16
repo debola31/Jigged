@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "part_number" text NOT NULL,
+    "part_name" text NOT NULL,
     "description" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "manual_cost" numeric(12,4),
     "cost_source" text,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
-    CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_number),
+    CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
     CONSTRAINT "parts_cost_source_check" CHECK (((cost_source IS NULL) OR (cost_source = ANY (ARRAY['routing'::text, 'manual'::text, 'estimate'::text]))))
 );
 
@@ -1603,7 +1603,7 @@ CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_ses
 CREATE INDEX IF NOT EXISTS idx_part_categories_company ON public.part_categories USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_category ON public.parts USING btree (category_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_parts_part_number ON public.parts USING btree (company_id, part_number);
+CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_company ON public.quote_attachments USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_quote ON public.quote_attachments USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (company_id);
@@ -2231,10 +2231,10 @@ BEGIN
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-            INSERT INTO parts (id, company_id, part_number, description,
+            INSERT INTO parts (id, company_id, part_name, description,
                                category_id, manual_cost, cost_source, created_at)
             VALUES (v_new_id, p_company_id,
-                    v_item->>'part_number',
+                    v_item->>'part_name',
                     v_item->>'description',
                     CASE WHEN v_item->>'category_ref' IS NOT NULL
                          THEN (v_ref_map->>(v_item->>'category_ref'))::UUID
@@ -3019,7 +3019,7 @@ COMMENT ON COLUMN "public"."jobs"."customer_id"
     IS 'FK to customers. Required - every job must have a customer. RESTRICT on delete.';
 
 COMMENT ON COLUMN "public"."jobs"."part_id"
-    IS 'FK to parts. Optional - use part_number_text for one-off jobs. SET NULL if part deleted.';
+    IS 'FK to parts. Optional - use part_name_text for one-off jobs. SET NULL if part deleted.';
 
 COMMENT ON COLUMN "public"."jobs"."description"
     IS 'Description of work to be performed.';
@@ -3114,7 +3114,7 @@ COMMENT ON COLUMN "public"."parts"."id"
 COMMENT ON COLUMN "public"."parts"."company_id"
     IS 'FK to companies. Cascades on delete. Isolates parts per tenant.';
 
-COMMENT ON COLUMN "public"."parts"."part_number"
+COMMENT ON COLUMN "public"."parts"."part_name"
     IS 'Part identifier, typically customer-assigned. Unique per customer within company. Example: "AE36589E-RT", "WIDGET-001"';
 
 COMMENT ON COLUMN "public"."parts"."description"
@@ -3172,7 +3172,7 @@ COMMENT ON COLUMN "public"."quotes"."customer_id"
     IS 'FK to customers. RESTRICT on delete - cannot delete customer with quotes.';
 
 COMMENT ON COLUMN "public"."quotes"."part_id"
-    IS 'FK to parts. Optional - use part_number_text for one-off quotes. SET NULL if part deleted.';
+    IS 'FK to parts. Optional - use part_name_text for one-off quotes. SET NULL if part deleted.';
 
 COMMENT ON COLUMN "public"."quotes"."description"
     IS 'Description of quoted work. May differ from part description for custom work.';

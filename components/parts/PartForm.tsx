@@ -16,12 +16,15 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
 import Snackbar from '@mui/material/Snackbar';
-import Autocomplete from '@mui/material/Autocomplete';
+import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
-import Chip from '@mui/material/Chip';
 import type { Part, PartFormData } from '@/types/part';
-import { createPart, updatePart, deletePart, checkPartNumberExists } from '@/utils/partsAccess';
-import { getPartCategoriesForSelect } from '@/utils/partCategoriesAccess';
+import { createPart, updatePart, deletePart, checkPartNameExists } from '@/utils/partsAccess';
+import { getPartCategoriesForSelect, createPartCategory } from '@/utils/partCategoriesAccess';
+
+type CategoryOption = { id: string; name: string; default_markup_percent: number | null; isNew?: boolean };
+
+const categoryFilter = createFilterOptions<CategoryOption>();
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -49,6 +52,10 @@ export default function PartForm({
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Array<{ id: string; name: string; default_markup_percent: number | null }>>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pendingNewCategory, setPendingNewCategory] = useState<{ name: string; markup: string } | null>(null);
+  const [markupDialogOpen, setMarkupDialogOpen] = useState(false);
+  const [pendingCategoryName, setPendingCategoryName] = useState('');
+  const [newCategoryMarkup, setNewCategoryMarkup] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({
     open: false,
@@ -70,36 +77,26 @@ export default function PartForm({
       }
     };
 
-  const hasRouting = part?.routing != null;
-
   const validateForm = async (): Promise<boolean> => {
     const errors: Record<string, string> = {};
 
-    if (!formData.part_number.trim()) {
-      errors.part_number = 'Part number is required';
+    if (!formData.part_name.trim()) {
+      errors.part_name = 'Part name is required';
     }
 
-    if (formData.part_number.trim() && !errors.part_number) {
+    if (formData.part_name.trim() && !errors.part_name) {
       try {
-        const exists = await checkPartNumberExists(
+        const exists = await checkPartNameExists(
           companyId,
-          formData.part_number,
+          formData.part_name,
           mode === 'edit' ? partId : undefined
         );
         if (exists) {
-          errors.part_number = 'Part number already exists';
+          errors.part_name = 'Part name already exists';
         }
       } catch {
-        setError('Error validating part number');
+        setError('Error validating part name');
         return false;
-      }
-    }
-
-    // Validate manual cost if provided
-    if (formData.manual_cost.trim()) {
-      const cost = parseFloat(formData.manual_cost);
-      if (isNaN(cost) || cost < 0) {
-        errors.manual_cost = 'Cost must be a positive number';
       }
     }
 
@@ -118,15 +115,26 @@ export default function PartForm({
     setLoading(true);
 
     try {
+      // Create new category first if pending
+      const submitData = { ...formData };
+      if (pendingNewCategory) {
+        const newCat = await createPartCategory(companyId, {
+          name: pendingNewCategory.name,
+          default_markup_percent: pendingNewCategory.markup,
+          description: '',
+        });
+        submitData.category_id = newCat.id;
+      }
+
       if (mode === 'create') {
-        const newPart = await createPart(companyId, formData);
+        const newPart = await createPart(companyId, submitData);
         if (onSuccess) {
           onSuccess(newPart);
         } else {
           router.push(`/dashboard/${companyId}/parts/${newPart.id}`);
         }
       } else if (partId) {
-        const updatedPart = await updatePart(partId, formData);
+        const updatedPart = await updatePart(partId, submitData);
         if (onSuccess) {
           onSuccess(updatedPart);
         } else {
@@ -192,11 +200,11 @@ export default function PartForm({
               <TextField
                 fullWidth
                 required
-                label="Part Number"
-                value={formData.part_number}
-                onChange={handleChange('part_number')}
-                error={!!fieldErrors.part_number}
-                helperText={fieldErrors.part_number || 'Unique identifier for this part'}
+                label="Part Name"
+                value={formData.part_name}
+                onChange={handleChange('part_name')}
+                error={!!fieldErrors.part_name}
+                helperText={fieldErrors.part_name || 'Name for this part (must be unique)'}
                 disabled={loading}
               />
             </Grid>
@@ -222,73 +230,69 @@ export default function PartForm({
           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
             Category
           </Typography>
-          <Autocomplete
-            options={[{ id: '', name: 'None', default_markup_percent: null }, ...categories]}
+          <Autocomplete<CategoryOption, false, false, true>
+            freeSolo
+            selectOnFocus
+            clearOnBlur
+            handleHomeEndKeys
+            options={categories}
             getOptionLabel={(option) => {
-              if (!option.id) return 'None';
+              if (typeof option === 'string') return option;
+              if (option.isNew) return `Add "${option.name}"`;
               const markup = option.default_markup_percent !== null ? ` (${option.default_markup_percent}% markup)` : '';
               return `${option.name}${markup}`;
             }}
-            value={categories.find((c) => c.id === formData.category_id) || null}
+            value={
+              pendingNewCategory
+                ? { id: '', name: pendingNewCategory.name, default_markup_percent: pendingNewCategory.markup ? parseFloat(pendingNewCategory.markup) : null, isNew: true }
+                : categories.find((c) => c.id === formData.category_id) || null
+            }
             onChange={(_, newValue) => {
-              setFormData((prev) => ({ ...prev, category_id: newValue?.id || '' }));
+              if (typeof newValue === 'string') {
+                // User typed and pressed Enter
+                setPendingCategoryName(newValue);
+                setNewCategoryMarkup('');
+                setMarkupDialogOpen(true);
+              } else if (newValue && newValue.isNew) {
+                // User selected "Add ..." option
+                setPendingCategoryName(newValue.name);
+                setNewCategoryMarkup('');
+                setMarkupDialogOpen(true);
+              } else if (newValue) {
+                // Selected existing category
+                setFormData((prev) => ({ ...prev, category_id: newValue.id }));
+                setPendingNewCategory(null);
+              } else {
+                // Cleared
+                setFormData((prev) => ({ ...prev, category_id: '' }));
+                setPendingNewCategory(null);
+              }
+            }}
+            filterOptions={(options, params) => {
+              const filtered = categoryFilter(options, params);
+              const { inputValue } = params;
+              const isExisting = options.some((option) => option.name.toLowerCase() === inputValue.toLowerCase());
+              if (inputValue !== '' && !isExisting) {
+                filtered.push({ id: '', name: inputValue, default_markup_percent: null, isNew: true });
+              }
+              return filtered;
             }}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             renderInput={(params) => (
               <TextField
                 {...params}
                 label="Part Category"
-                placeholder="Select a category"
-                helperText="Optional — categories set default markup for quoting"
+                placeholder="Select or type a new category"
+                helperText={
+                  pendingNewCategory
+                    ? `New category "${pendingNewCategory.name}" will be created${pendingNewCategory.markup ? ` with ${pendingNewCategory.markup}% markup` : ''}`
+                    : 'Optional — categories set default markup for quoting'
+                }
                 disabled={loading}
               />
             )}
             disabled={loading}
           />
-        </CardContent>
-      </Card>
-
-      {/* Cost Information */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Cost Information
-            </Typography>
-            {part?.cost_source && (
-              <Chip
-                label={part.cost_source === 'routing' ? 'From Routing' : part.cost_source === 'manual' ? 'Manual' : 'Estimate'}
-                size="small"
-                color={part.cost_source === 'routing' ? 'primary' : 'default'}
-                variant="outlined"
-              />
-            )}
-          </Box>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Manual Estimate"
-                type="number"
-                value={formData.manual_cost}
-                onChange={handleChange('manual_cost')}
-                error={!!fieldErrors.manual_cost}
-                helperText={
-                  fieldErrors.manual_cost ||
-                  (hasRouting
-                    ? 'Manual cost takes priority over routing cost when set'
-                    : 'Cost per unit for quoting')
-                }
-                disabled={loading}
-                slotProps={{
-                  input: {
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  },
-                  htmlInput: { min: 0, step: 0.01 },
-                }}
-              />
-            </Grid>
-          </Grid>
         </CardContent>
       </Card>
 
@@ -318,12 +322,50 @@ export default function PartForm({
         </Button>
       </Box>
 
+      {/* New Category Markup Dialog */}
+      <Dialog open={markupDialogOpen} onClose={() => setMarkupDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>New Category: {pendingCategoryName}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Set a default markup percentage for this category. This will be used when creating quotes.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Default Markup"
+            type="number"
+            value={newCategoryMarkup}
+            onChange={(e) => setNewCategoryMarkup(e.target.value)}
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">%</InputAdornment>,
+              },
+              htmlInput: { min: -100, max: 1000, step: 0.5 },
+            }}
+            helperText="Optional — e.g. 25 for 25% markup"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMarkupDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setPendingNewCategory({ name: pendingCategoryName, markup: newCategoryMarkup });
+              setFormData((prev) => ({ ...prev, category_id: '' }));
+              setMarkupDialogOpen(false);
+            }}
+          >
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Part?</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>
-            {`Are you sure you want to delete "${formData.part_number}"?`}
+            {`Are you sure you want to delete "${formData.part_name}"?`}
           </Typography>
           {part && ((part.quotes_count ?? 0) > 0 || (part.jobs_count ?? 0) > 0) && (
             <Alert severity="error">

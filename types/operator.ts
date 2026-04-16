@@ -103,7 +103,8 @@ export interface OperatorJobDetail {
   // Job progress
   operations_total: number;
   operations_completed: number;
-  // Material requirements for current operation
+  // Material requirements for the job as a whole (sourced from job_materials,
+  // not per-operation — materials are routing/job-level, not operation-level).
   materials: Array<{ name: string; quantity: number; unit: string }>;
 }
 

@@ -18,25 +18,27 @@ Phase 0 Inventory module providing basic inventory tracking with flexible units 
 
 - **Operator View** - Material consumption logging creates inventory transactions (Inventory must be built first)
 
-- **Routings module** - Routing nodes define expected materials per operation
+- **Routings module** - `routing_materials` defines the expected materials for each routing
+
+- **Jobs module** - `job_materials` tracks expected and actual consumption per job
 
 **Build Order for Material Consumption Flow:**
 
-1. Routings module (defines routing_nodes with materials JSONB)
+1. Inventory module (tracks `inventory_items` referenced by routings and jobs)
 
-2. Jobs module (creates jobs linked to routings)
+2. Routings module (defines `routing_materials` — one list per routing)
 
-3. Inventory module (tracks materials, provides inventory_items for materials JSONB)
+3. Jobs module (creates jobs; job creation snapshots `routing_materials` into `job_materials`)
 
-4. Operator View (logs material consumption → creates inventory transactions)
+4. Operator View (operator marks `job_materials` consumed → creates inventory_transactions)
 
 **Material Definitions:**
 
-- Materials are defined in `routing_nodes.materials` (JSONB column in Routings module)
+- Materials are defined once per routing in the `routing_materials` table (see Routings module)
 
-- Each entry references an `inventory_item_id` from this module
+- Each row references an `inventory_item_id` from this module
 
-- No separate routing_node_materials table needed - using JSONB approach
+- `routing_materials` is a dedicated relational table — there is no JSONB column for materials
 
 ---
 
@@ -239,17 +241,23 @@ See `utils/inventoryAccess.ts` for implementation details.
 
 ---
 
+## Material Consumption Flow
+
+Material tracking flows from routing → job → inventory:
+
+1. **Routing setup.** A designer defines the materials needed for a part in `routing_materials` (see Routings module). Each row specifies an `inventory_item_id`, expected `quantity`, and `unit`.
+
+2. **Job creation.** When a job is created for a part with a routing, `create_job_operations_from_routing()` copies every `routing_materials` row into `job_materials` with `status = 'pending'` and `expected_quantity` snapshotted from the routing. The snapshot lets the job keep its original shopping list even if the routing is later edited.
+
+3. **Operator consumption.** On the shop floor, an operator opens the job and, via the `JobMaterialsCard`, marks each `job_materials` row as `consumed` (recording `actual_quantity`, which may differ from `expected_quantity`) or `skipped` (with a reason). Marking a row `consumed` records `consumed_at` and `consumed_by`.
+
+4. **Inventory depletion.** Marking a `job_materials` row as `consumed` creates a corresponding `inventory_transactions` row of type `depletion`, linked back to the job via `job_id`, so the inventory balance stays in sync with the shop floor.
+
+Materials live at the job (and routing) level — not per operation. A job has a single materials list, regardless of how many operations the routing has.
+
+---
+
 ## Additional Requirements
-
-### Job Operation Tracking
-
-The inventory_transactions table should include a job_operation_id column (UUID FK to job_operations) to track which specific operation consumed materials. This enables:
-
-- Linking material consumption to the exact operation step
-
-- Comparing actual vs expected materials per operation
-
-- Detailed audit trail for manufacturing traceability
 
 ### Quantity Validation Rules
 

@@ -2,9 +2,10 @@
  * Routings Components - Barrel Exports
  */
 
-export { default as RoutingWorkflowBuilder, type PendingNode, type PendingEdge } from './RoutingWorkflowBuilder';
-export { default as OperationNode } from './OperationNode';
-export { default as NodeEditModal } from './NodeEditModal';
-export { default as OperationsSidebar } from './OperationsSidebar';
 export { default as RoutingWizard } from './RoutingWizard';
-export { default as RoutingWorkflowViewer } from './RoutingWorkflowViewer';
+export { default as RoutingBuilder } from './RoutingBuilder';
+export { default as RoutingOperationsList } from './RoutingOperationsList';
+export { default as RoutingOperationRow, type OperationRowData } from './RoutingOperationRow';
+export { default as RoutingMaterialsList } from './RoutingMaterialsList';
+export { default as RoutingMaterialRow, type MaterialRowData } from './RoutingMaterialRow';
+export { default as RoutingViewer } from './RoutingViewer';

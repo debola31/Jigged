@@ -7,13 +7,14 @@ import {
   Button,
   Alert,
   CircularProgress,
-  Card,
 } from '@mui/material';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
-import RoutingWorkflowBuilder, { type PendingNode, type PendingEdge } from './RoutingWorkflowBuilder';
+import RoutingBuilder from './RoutingBuilder';
+import type { OperationRowData } from './RoutingOperationRow';
+import type { MaterialRowData } from './RoutingMaterialRow';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 
 interface RoutingWizardProps {
@@ -24,9 +25,9 @@ interface RoutingWizardProps {
 }
 
 /**
- * Workflow builder for creating/editing routings.
- * Goes straight to the workflow builder (operations and connections).
- * Routing name is auto-generated as "Routing - {part_name}".
+ * Linear routing builder wizard.
+ *  - Operations + Materials are edited in-memory and saved atomically.
+ *  - Routing name is auto-generated as "Routing - {part_name}".
  */
 export default function RoutingWizard({ companyId, partId, mode, returnTo }: RoutingWizardProps) {
   const router = useRouter();
@@ -34,23 +35,20 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isEditMode = mode === 'edit';
 
-  // Workflow state
-  const [pendingNodes, setPendingNodes] = useState<PendingNode[]>([]);
-  const [pendingEdges, setPendingEdges] = useState<PendingEdge[]>([]);
+  // In-memory state
+  const [operations, setOperations] = useState<OperationRowData[]>([]);
+  const [materials, setMaterials] = useState<MaterialRowData[]>([]);
 
-  // For edit mode: track original IDs to detect deletions
+  // Track which IDs existed when we loaded (used to compute deletions on save)
   const [originalNodeIds, setOriginalNodeIds] = useState<Set<string>>(new Set());
-  const [originalEdgeIds, setOriginalEdgeIds] = useState<Set<string>>(new Set());
+  const [originalMaterialIds, setOriginalMaterialIds] = useState<Set<string>>(new Set());
 
-  // The routing ID discovered in edit mode
   const [routingId, setRoutingId] = useState<string | null>(null);
 
-  // Loading and error state
   const [loading, setLoading] = useState(isEditMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load existing routing data (edit mode) by looking up routing for the part
   useEffect(() => {
     if (!isEditMode) return;
 
@@ -60,30 +58,29 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
         if (data) {
           setRoutingId(data.id);
 
-          // Convert existing nodes to pending format
-          const nodes: PendingNode[] = data.nodes.map((n) => ({
-            tempId: n.id, // Use real ID as tempId for existing nodes
+          const opsRows: OperationRowData[] = data.nodes.map((n) => ({
+            tempId: n.id,
             operationTypeId: n.operation_type_id,
             operationName: n.operation_type?.name || 'Unknown',
             resourceGroupName: n.operation_type?.resource_group?.name || null,
             laborRate: n.operation_type?.labor_rate || null,
             runTimePerUnit: n.run_time_per_unit,
+            setupTime: n.setup_time || 0,
             instructions: n.instructions,
-            materials: n.materials || [],
           }));
-          setPendingNodes(nodes);
+          setOperations(opsRows);
 
-          // Convert existing edges to pending format
-          const edges: PendingEdge[] = data.edges.map((e) => ({
-            tempId: e.id, // Use real ID as tempId for existing edges
-            sourceNodeId: e.source_node_id,
-            targetNodeId: e.target_node_id,
+          const matRows: MaterialRowData[] = data.materials.map((m) => ({
+            tempId: m.id,
+            inventoryItemId: m.inventory_item_id,
+            itemName: m.inventory_item?.name || 'Unknown item',
+            quantity: m.quantity,
+            unit: m.unit,
           }));
-          setPendingEdges(edges);
+          setMaterials(matRows);
 
-          // Track original IDs
           setOriginalNodeIds(new Set(data.nodes.map((n) => n.id)));
-          setOriginalEdgeIds(new Set(data.edges.map((e) => e.id)));
+          setOriginalMaterialIds(new Set(data.materials.map((m) => m.id)));
         }
       } catch (err) {
         console.error('Failed to load routing:', err);
@@ -95,16 +92,34 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
     loadRouting();
   }, [isEditMode, partId]);
 
-  // Validate workflow - must have at least one operation
-  const validateWorkflow = (): boolean => {
-    if (pendingNodes.length === 0) {
-      setError('At least one operation is required. Add an operation to the workflow before saving.');
+  const validate = (): boolean => {
+    if (operations.length === 0) {
+      setError('At least one operation is required.');
       return false;
+    }
+    for (const op of operations) {
+      if (!op.operationTypeId) {
+        setError('Every operation must have an operation type selected.');
+        return false;
+      }
+    }
+    for (const mat of materials) {
+      if (!mat.inventoryItemId) {
+        setError('Every material must have an inventory item selected.');
+        return false;
+      }
+      if (!(mat.quantity > 0)) {
+        setError('Every material must have a quantity greater than 0.');
+        return false;
+      }
+      if (!mat.unit) {
+        setError('Every material must have a unit.');
+        return false;
+      }
     }
     return true;
   };
 
-  // Handle cancel
   const handleCancel = () => {
     if (returnTo) {
       router.push(returnTo);
@@ -113,26 +128,38 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
     }
   };
 
-  // Handle save
   const handleSave = async () => {
     setError(null);
-
-    if (!validateWorkflow()) return;
+    if (!validate()) return;
 
     setSaving(true);
     try {
-      const { saveRoutingWithGraph } = await import('@/utils/routingsAccess');
-      await saveRoutingWithGraph(
+      const { saveRoutingWithOperationsAndMaterials } = await import('@/utils/routingsAccess');
+      await saveRoutingWithOperationsAndMaterials(
         companyId,
         partId,
         routingId,
-        pendingNodes,
-        pendingEdges,
+        operations.map((o) => ({
+          tempId: o.tempId,
+          operationTypeId: o.operationTypeId,
+          operationName: o.operationName,
+          resourceGroupName: o.resourceGroupName,
+          laborRate: o.laborRate,
+          runTimePerUnit: o.runTimePerUnit,
+          setupTime: o.setupTime,
+          instructions: o.instructions,
+        })),
+        materials.map((m) => ({
+          tempId: m.tempId,
+          inventoryItemId: m.inventoryItemId,
+          itemName: m.itemName,
+          quantity: m.quantity,
+          unit: m.unit,
+        })),
         isEditMode ? originalNodeIds : new Set(),
-        isEditMode ? originalEdgeIds : new Set()
+        isEditMode ? originalMaterialIds : new Set()
       );
 
-      // Navigate to returnTo URL if provided, otherwise to the part detail page
       if (returnTo) {
         router.push(returnTo);
       } else {
@@ -145,35 +172,24 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
     }
   };
 
-  // Handle pending nodes change from workflow builder
-  const handlePendingNodesChange = useCallback((nodes: PendingNode[]) => {
-    setPendingNodes(nodes);
+  const handleOperationsChange = useCallback((next: OperationRowData[]) => {
+    setOperations(next);
   }, []);
-
-  // Handle pending edges change from workflow builder
-  const handlePendingEdgesChange = useCallback((edges: PendingEdge[]) => {
-    setPendingEdges(edges);
+  const handleMaterialsChange = useCallback((next: MaterialRowData[]) => {
+    setMaterials(next);
   }, []);
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: 400,
-        }}
-      >
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: isMobile ? 'calc(100vh - 80px)' : 'calc(100vh - 120px)' }}>
-      {/* Header with Back button and action buttons */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
         <Button
           startIcon={<ArrowBackIcon />}
           onClick={handleCancel}
@@ -181,64 +197,43 @@ export default function RoutingWizard({ companyId, partId, mode, returnTo }: Rou
         >
           Back
         </Button>
-
-        {/* Spacer */}
         <Box sx={{ flex: 1 }} />
-
         {!isMobile && (
           <Button variant="outlined" onClick={handleCancel} disabled={saving}>
             Cancel
           </Button>
         )}
-
         <Button
           variant="contained"
           onClick={handleSave}
           disabled={saving}
           startIcon={saving ? <CircularProgress size={16} /> : <SaveIcon />}
         >
-          {saving ? 'Saving...' : isMobile ? 'Save' : 'Save Routing'}
+          {saving ? 'Saving…' : isMobile ? 'Save' : 'Save Routing'}
         </Button>
       </Box>
 
-      {/* Return-to context banner */}
       {returnTo && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Create a routing for this part to continue with job creation. You&apos;ll return to the {returnTo.includes('/quotes/') ? 'quote' : 'job form'} after saving.
+        <Alert severity="info">
+          Create a routing for this part to continue with job creation. You&apos;ll return to the{' '}
+          {returnTo.includes('/quotes/') ? 'quote' : 'job form'} after saving.
         </Alert>
       )}
 
-      {/* Error Alert */}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Workflow Builder */}
-      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <Card
-          elevation={2}
-          sx={{
-            flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            '&:hover': { transform: 'none' }  // Disable hover lift for workspace
-          }}
-        >
-          <RoutingWorkflowBuilder
-            routingId={routingId || ''}
-            companyId={companyId}
-            mode="memory"
-            pendingNodes={pendingNodes}
-            pendingEdges={pendingEdges}
-            onPendingNodesChange={handlePendingNodesChange}
-            onPendingEdgesChange={handlePendingEdgesChange}
-          />
-        </Card>
-      </Box>
+      <RoutingBuilder
+        companyId={companyId}
+        operations={operations}
+        materials={materials}
+        onOperationsChange={handleOperationsChange}
+        onMaterialsChange={handleMaterialsChange}
+        disabled={saving}
+      />
     </Box>
   );
 }

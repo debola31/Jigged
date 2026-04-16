@@ -67,19 +67,32 @@ SCHEMA_CONTEXT = """
 - description: TEXT
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
-### routing_nodes (steps in a routing -- NO company_id, join via routings)
+### routing_nodes (operations in a routing, ordered by `sequence` -- NO company_id, join via routings)
 - id: UUID (PK)
 - routing_id: UUID (FK -> routings.id)
 - operation_type_id: UUID (FK -> operation_types.id)
-- run_time_per_unit: NUMERIC
+- run_time_per_unit: NUMERIC (minutes per unit)
+- setup_time: NUMERIC (one-time setup minutes per batch)
 - instructions: TEXT
-- materials: JSONB (array)
+- sequence: INTEGER (linear order within routing, lower runs first)
 
-### routing_edges (connections between routing nodes -- NO company_id, join via routings)
+### routing_materials (materials for the routing as a whole -- NO company_id, join via routings)
 - id: UUID (PK)
 - routing_id: UUID (FK -> routings.id)
-- source_node_id: UUID (FK -> routing_nodes.id)
-- target_node_id: UUID (FK -> routing_nodes.id)
+- inventory_item_id: UUID (FK -> inventory_items.id)
+- quantity: NUMERIC (> 0)
+- unit: TEXT
+- sequence: INTEGER (display order)
+
+### job_materials (materials snapshot for a specific job -- NO company_id, join via jobs)
+- id: UUID (PK)
+- job_id: UUID (FK -> jobs.id)
+- routing_material_id: UUID (FK -> routing_materials.id, nullable if source deleted)
+- inventory_item_id: UUID (FK -> inventory_items.id)
+- expected_quantity: NUMERIC, actual_quantity: NUMERIC (nullable until consumed)
+- unit: TEXT
+- status: TEXT -- one of: 'pending', 'consumed', 'skipped'
+- consumed_at: TIMESTAMPTZ, consumed_by: UUID (nullable)
 
 ### jobs
 - id: UUID (PK)
@@ -189,13 +202,17 @@ SCHEMA_CONTEXT = """
 - routings.part_id -> parts.id (1:1)
 - routing_nodes.routing_id -> routings.id
 - routing_nodes.operation_type_id -> operation_types.id
-- routing_edges.routing_id -> routings.id
+- routing_materials.routing_id -> routings.id
+- routing_materials.inventory_item_id -> inventory_items.id
+- job_materials.job_id -> jobs.id
+- job_materials.routing_material_id -> routing_materials.id
+- job_materials.inventory_item_id -> inventory_items.id
 - inventory_transactions.inventory_item_id -> inventory_items.id
 - inventory_unit_conversions.inventory_item_id -> inventory_items.id
 - operator_sessions.job_id -> jobs.id
 
 ## Important Notes
-- Tables WITHOUT company_id: job_operations, routing_nodes, routing_edges, inventory_unit_conversions. Filter these via JOIN to their parent table.
+- Tables WITHOUT company_id: job_operations, job_materials, routing_nodes, routing_materials, inventory_unit_conversions. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
 - Revenue = quotes.total_price for shipped jobs (jobs.status = 'shipped', joined via jobs.quote_id)
 - A "started" job means started_at IS NOT NULL or status = 'in_progress'
@@ -252,9 +269,10 @@ ALLOWED_TABLES = frozenset({
     "parts",
     "routings",
     "routing_nodes",
-    "routing_edges",
+    "routing_materials",
     "jobs",
     "job_operations",
+    "job_materials",
     "job_attachments",
     "operation_types",
     "resource_groups",

@@ -83,7 +83,7 @@ JOB (shipped)
 
 - [x] **Jobs module** (Job workflow, operations tracking, status transitions)
 
-- [x] **Routings module** (Visual workflow builder, DAG-based operation sequences)
+- [x] **Routings module** (Linear operation list + routing-level materials)
 
 - [x] **Dashboard module** (Summary cards, recent activity, quick actions)
 
@@ -240,19 +240,19 @@ Phase 0 is complete when Shane can:
 [Routings Module](modules/routings.md)
 ## Overview
 
-  The Routings module provides a **visual workflow diagram builder** for defining manufacturing processes. Unlike traditional linear operation lists, routings in Jigged are **node-based workflow diagrams** where operations can run in **parallel** or **series**.
-
-  Users build routings by dragging operations onto a canvas and connecting them with edges to define execution flow. This enables complex manufacturing processes where multiple operations can happen simultaneously on different machines, reducing total production time.
+  The Routings module provides a **linear, reorderable operation list** for defining manufacturing processes. A routing is an ordered sequence of operations (plus a routing-level list of materials) that describes how a part is manufactured.
 
   **Priority:** Must Have (Build after Operations, before Jobs)
 
   **Dependencies:**
 
-  - Parts module (routings are linked to parts)
+  - Parts module (routings are linked 1:1 to parts)
 
   - Operations module (routings reference operation types)
 
-  **Database Tables:** `routings`, `routing_nodes`, `routing_edges`
+  - Inventory module (routing materials reference inventory items)
+
+  **Database Tables:** `routings`, `routing_nodes`, `routing_materials`
 
   ---
 
@@ -260,52 +260,33 @@ Phase 0 is complete when Shane can:
 
   | Term | Description |
   |---|---|
-  | **Routing** | A workflow diagram defining how a part is manufactured, consisting of nodes (operations) and edges (connections) |
-  | **Workflow Node** | An operation represented as a card on the canvas, containing setup time, run time, and resource assignment |
-  | **Edge/Connection** | A link between nodes showing execution dependency - the source must complete before the target starts |
-  | **Parallel Branch** | Multiple nodes that can execute simultaneously because they have no dependencies on each other |
-  | **Series Path** | Nodes that execute sequentially, one after another, where each depends on the previous |
-  | **Start Node** | The entry point of the workflow - operations with no incoming edges |
-  | **End Node** | The final operation(s) before completion - operations with no outgoing edges |
+  | **Routing** | The ordered list of operations plus the list of materials that defines how a part is manufactured |
+  | **Routing Operation (Node)** | A single operation step, stored in `routing_nodes` with a `sequence` that determines its position |
+  | **Sequence** | Integer defining linear execution order. Saved in steps of 10 (10, 20, 30, ...) so new rows can be inserted between existing ones without renumbering |
+  | **Routing Material** | An inventory item expected to be consumed for the whole routing, stored in `routing_materials` |
 
   ---
 
-## Visual Workflow Builder
+## Linear Routing Builder
 
-  The routing editor provides a drag-and-drop canvas for building manufacturing workflows:
+  The routing editor is a two-section page, not a canvas:
 
-  - **Canvas** - Drag and drop operations as nodes onto an infinite canvas
+  - **Operations list** - A sortable list of operation rows. Each row is inline-editable (operation type, setup time, run time per unit, instructions). Drag-to-reorder updates each row's `sequence`.
 
-  - **Operations Toolbar** - Select operations from your operations library to add to the workflow
+  - **Materials list** - A separate sortable list of materials for the routing. Each row picks an inventory item, quantity, and unit. Materials are routing-level — not attached to individual operations.
 
-  - **Node Cards** - Each node displays operation name, resource group, and estimated time
+  - **Minimum Operations** - At least one operation is required to save a routing.
 
-  - **Connections** - Draw edges between nodes by dragging from output to input handles
-
-  - **Parallel Patterns** - Create branches by connecting one node to multiple targets
-
-  - **Validation** - System ensures valid workflow (no cycles, all nodes connected)
+  Components live under `components/routings/`: `RoutingBuilder`, `RoutingOperationsList`, `RoutingOperationRow`, `RoutingMaterialsList`, `RoutingMaterialRow`, and `RoutingViewer`.
 
   ---
 
-## Workflow Examples
+## Execution Order
 
-### Series Workflow (Sequential Operations)
-
-  Operations execute one after another. Total time = sum of all operation times.
+  Operations run one after another in ascending `sequence` order. There is no DAG, no edges, and no parallel branches in the routing structure.
 
   ```plain text
-  [Start] → [CNC Mill] → [Deburr] → [Inspect] → [End]
-  ```
-
-### Parallel Workflow (Simultaneous Operations)
-
-  Multiple operations run at the same time on different machines, then converge.
-
-  ```plain text
-                ┌→ [CNC Mill Op1] ─┐
-  [Start] ──────┼→ [CNC Mill Op2] ─┼→ [Deburr] → [Inspect] → [End]
-                └→ [Manual Drill] ─┘
+  Seq 10: [CNC Mill] → Seq 20: [Deburr] → Seq 30: [Inspect]
   ```
 
   ---
@@ -318,31 +299,33 @@ Phase 0 is complete when Shane can:
   |---|---|---|---|
   | id | uuid | Yes | Primary key |
   | company_id | uuid | Yes | FK to companies |
-  | part_id | uuid | Yes | FK to parts |
-  | name | text | No | Optional routing name |
-  | is_default | boolean | Yes | Default routing for this part |
+  | part_id | uuid | Yes | FK to parts (unique — one routing per part) |
+  | name | text | Yes | Auto-generated from part number |
 
 ### Routing Nodes Table (`routing_nodes`)
-
-  Node positions are **auto-calculated** using a DAG layout algorithm (dagre) when rendering. Positions are presentation-layer, not business logic - the workflow is defined by edges.
 
   | Column | Type | Required | Description |
   |---|---|---|---|
   | id | uuid | Yes | Primary key |
   | routing_id | uuid | Yes | FK to routings |
   | operation_type_id | uuid | Yes | FK to operation_types |
-  | setup_time | float | No | Setup time in minutes |
-  | cycle_time | float | No | Run time per unit in minutes |
-  | metadata | jsonb | No | Optional JSON (can store position hints for custom layouts) |
+  | sequence | integer | Yes | Linear order (steps of 10). Unique within a routing. |
+  | setup_time | numeric | No | Setup time in minutes |
+  | run_time_per_unit | numeric | No | Run time per unit in minutes |
+  | instructions | text | No | Optional per-operation instructions |
 
-### Routing Edges Table (`routing_edges`)
+### Routing Materials Table (`routing_materials`)
+
+  Routing-level materials — a "shopping list" for the whole job.
 
   | Column | Type | Required | Description |
   |---|---|---|---|
   | id | uuid | Yes | Primary key |
-  | routing_id | uuid | Yes | FK to routings |
-  | source_node_id | uuid | Yes | FK to routing_nodes (start of edge) |
-  | target_node_id | uuid | Yes | FK to routing_nodes (end of edge) |
+  | routing_id | uuid | Yes | FK to routings (cascade delete) |
+  | inventory_item_id | uuid | Yes | FK to inventory_items (restricted delete) |
+  | quantity | numeric | Yes | Expected quantity per job (> 0) |
+  | unit | text | Yes | Unit of measure |
+  | sequence | integer | Yes | Display order (steps of 10) |
 
   ---
 
@@ -350,74 +333,19 @@ Phase 0 is complete when Shane can:
 
   | As a... | I want to... | So that... |
   |---|---|---|
-  | Owner/Admin | Build a routing by dragging operations onto a canvas | I can visually design manufacturing workflows |
-  | Owner/Admin | Connect operations with edges to define execution order | I can specify which operations depend on others |
-  | Owner/Admin | Create parallel branches for simultaneous operations | Multiple operations can run at the same time |
+  | Owner/Admin | Build a routing as a list of operations | I can define how the part is manufactured |
+  | Owner/Admin | Drag operations to reorder them | I can adjust the sequence as my process evolves |
+  | Owner/Admin | Inline-edit operation, setup time, and run time per unit on each row | I can make small changes without opening a dialog |
+  | Owner/Admin | Define a single list of materials for the whole routing | I can see the shopping list for the job without hunting through operations |
   | Owner/Admin | View estimated total time (sum of all operations) | I can accurately quote jobs |
-  | Owner/Admin | Clone an existing routing | I can quickly create similar workflows |
-  | Owner/Admin | Set a default routing for a part | Jobs are auto-populated with correct operations |
-  | Owner/Admin | Validate my workflow has no cycles | I avoid invalid routing configurations |
 
   ---
 
-## Material Definitions per Routing Node
+## Routing Materials
 
-  Routing nodes can optionally define expected materials for each operation. This enables:
+  Materials are defined once per routing. When a job is created, each `routing_materials` row is snapshotted into `job_materials` with `expected_quantity`. Operators mark each `job_materials` row `consumed` or `skipped`; deleting a routing material later sets `job_materials.routing_material_id` to `NULL` without affecting the job's snapshot.
 
-  - Routing designers to specify expected materials per operation step
-
-  - Operator View to pre-populate material logging when completing operations
-
-  - Actual vs expected material consumption comparison
-
-### routing_nodes.materials Column
-
-  Add the following column to the routing_nodes table:
-
-  | Column | Type | Required | Description |
-  |---|---|---|---|
-  | materials | jsonb | No | Expected materials for this operation |
-
-### materials JSONB Structure
-
-  The materials field is an array of material specifications:
-
-  ```json
-  [
-    {
-      "inventory_item_id": "uuid",
-      "quantity": 0.5,
-      "unit": "lbs"
-    },
-    {
-      "inventory_item_id": "uuid",
-      "quantity": 12,
-      "unit": "inches"
-    }
-  ]
-  ```
-
-  **Field Descriptions:**
-
-  - `inventory_item_id` - UUID FK to inventory_items table
-
-  - `quantity` - Expected quantity to be consumed
-
-  - `unit` - Unit of measure (must be primary or configured secondary unit)
-
-### UI Addition: Material Input
-
-  When editing a routing node, add a "Materials" section:
-
-  - "+Add Material" button opens inventory item picker
-
-  - For each material: inventory item dropdown, quantity input, unit dropdown
-
-  - Materials can be reordered or removed
-
-### User Story Addition
-
-  - As a routing designer, I want to specify expected materials for each operation so that operators know what materials to log when completing work
+  - As a routing designer, I want to specify the materials needed for the whole routing so that operators and cost calculations have a single, authoritative shopping list per job.
 
 [Quotes Module](modules/quotes.md)
 ## Overview
@@ -2995,7 +2923,7 @@ Phase 0 is complete when Shane can:
 
   2. Job has an uncompleted job_operation matching the operator's operation_type
 
-  3. All predecessor nodes in the routing DAG must be complete (node is "ready" to work)
+  3. All earlier-sequence operations on the same job must be `completed` or `skipped` (the operation is "ready" to work)
 
   4. Sorted by due date (urgent first), then by job number
 
@@ -3033,11 +2961,9 @@ Phase 0 is complete when Shane can:
 
   4. System checks if ALL job_operations for this job are now complete
 
-  5. If all nodes complete → Job status automatically transitions to COMPLETE
+  5. If all operations complete → Job status automatically transitions to COMPLETE
 
-  6. Downstream nodes (successors in the DAG) become "ready" for operators at those stations
-
-  **Note:** For parallel routing branches, multiple nodes can be in progress simultaneously on different stations.
+  6. The next operation (next-higher `sequence` that is still pending) becomes "ready" for operators at that operation's station
 
   ---
 
@@ -3380,25 +3306,27 @@ Phase 0 is complete when Shane can:
 
   - **Operator View** - Material consumption logging creates inventory transactions (Inventory must be built first)
 
-  - **Routings module** - Routing nodes define expected materials per operation
+  - **Routings module** - `routing_materials` defines expected materials per routing
+
+  - **Jobs module** - `job_materials` tracks expected and actual consumption per job
 
   **Build Order for Material Consumption Flow:**
 
-  1. Routings module (defines routing_nodes with materials JSONB)
+  1. Inventory module (tracks `inventory_items` referenced by routings and jobs)
 
-  2. Jobs module (creates jobs linked to routings)
+  2. Routings module (defines `routing_materials` — one list per routing)
 
-  3. Inventory module (tracks materials, provides inventory_items for materials JSONB)
+  3. Jobs module (creates jobs; job creation snapshots `routing_materials` into `job_materials`)
 
-  4. Operator View (logs material consumption → creates inventory transactions)
+  4. Operator View (operator marks `job_materials` consumed → creates inventory_transactions)
 
   **Material Definitions:**
 
-  - Materials are defined in `routing_nodes.materials` (JSONB column in Routings module)
+  - Materials are defined once per routing in the `routing_materials` table (see Routings module)
 
-  - Each entry references an `inventory_item_id` from this module
+  - Each row references an `inventory_item_id` from this module
 
-  - No separate routing_node_materials table needed - using JSONB approach
+  - `routing_materials` is a dedicated relational table — there is no JSONB column for materials
 
   ---
 

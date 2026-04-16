@@ -163,13 +163,23 @@ All app routes include a `companyId` to ensure data isolation:
 │   ├── no-access/           # No access page
 │   └── dashboard/[companyId]/ # Dashboard (protected)
 │       ├── parts/
-│       │   └── [partId]/routing/  # Routing editor (1:1 with part)
+│       │   └── [partId]/routing/  # Linear routing editor (1:1 with part)
 │       ├── quotes/
 │       ├── jobs/
 │       └── operations/
 ├── components/
 │   ├── auth/                # Auth-related components
-│   └── providers/           # Context providers
+│   ├── providers/           # Context providers
+│   ├── routings/            # Linear routing builder (no React Flow, no DAG)
+│   │   ├── RoutingBuilder.tsx         # Top-level editor: operations + materials
+│   │   ├── RoutingOperationsList.tsx  # Sortable list of operation rows
+│   │   ├── RoutingOperationRow.tsx    # Inline-editable operation row
+│   │   ├── RoutingMaterialsList.tsx   # Sortable list of routing-level materials
+│   │   ├── RoutingMaterialRow.tsx     # Inline-editable material row
+│   │   └── RoutingViewer.tsx          # Read-only routing display
+│   └── jobs/
+│       ├── JobMaterialsCard.tsx  # Job-level materials (expected + actual consumption)
+│       └── ...                   # OperationsPanel, OperationCard, etc.
 ├── lib/
 │   ├── theme.ts            # MUI theme configuration
 │   ├── agGridTheme.ts      # AG Grid theme (matches MUI theme)
@@ -179,6 +189,8 @@ All app routes include a `companyId` to ensure data isolation:
 └── api/                     # FastAPI backend
     └── index.py
 ```
+
+Routings are a linear, reorderable list of operations. The routing builder uses a sortable list (drag-to-reorder) with inline-editable rows — it is not a DAG/canvas and does not use `@xyflow/react`. Materials are defined once at the routing level (`routing_materials` table) and snapshotted into `job_materials` when a job is created.
 
 ---
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -8,11 +9,15 @@ import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import CircularProgress from '@mui/material/CircularProgress';
+import Alert from '@mui/material/Alert';
 import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
 import Link from 'next/link';
 
-import RoutingWorkflowViewer from '@/components/routings/RoutingWorkflowViewer';
+import RoutingViewer from '@/components/routings/RoutingViewer';
+import { getRoutingWithGraph } from '@/utils/routingsAccess';
+import type { RoutingWithGraph } from '@/types/routings';
 
 interface ViewRoutingModalProps {
   open: boolean;
@@ -24,8 +29,7 @@ interface ViewRoutingModalProps {
 }
 
 /**
- * Modal dialog to view a routing workflow diagram.
- * Provides read-only visualization with option to navigate to edit page.
+ * Read-only modal showing a routing's operations and materials.
  */
 export default function ViewRoutingModal({
   open,
@@ -35,22 +39,33 @@ export default function ViewRoutingModal({
   companyId,
   partId,
 }: ViewRoutingModalProps) {
+  const [routing, setRouting] = useState<RoutingWithGraph | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !routingId) return;
+    setLoading(true);
+    setError(null);
+    getRoutingWithGraph(routingId)
+      .then(setRouting)
+      .catch((err) => {
+        console.error('Failed to load routing:', err);
+        setError('Failed to load routing.');
+      })
+      .finally(() => setLoading(false));
+  }, [open, routingId]);
+
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="lg"
+      maxWidth="md"
       fullWidth
       PaperProps={{
-        sx: {
-          height: '80vh',
-          maxHeight: '800px',
-          display: 'flex',
-          flexDirection: 'column',
-        },
+        sx: { maxHeight: '85vh', display: 'flex', flexDirection: 'column' },
       }}
     >
-      {/* Header */}
       <DialogTitle
         sx={{
           display: 'flex',
@@ -62,14 +77,9 @@ export default function ViewRoutingModal({
       >
         <Box>
           <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
-            Routing Workflow
+            Routing
           </Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            component="span"
-            sx={{ ml: 2 }}
-          >
+          <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 2 }}>
             {routingName}
           </Typography>
         </Box>
@@ -78,18 +88,24 @@ export default function ViewRoutingModal({
         </IconButton>
       </DialogTitle>
 
-      {/* Content - Workflow Viewer */}
-      <DialogContent sx={{ p: 0, flex: 1, overflow: 'hidden' }}>
-        <RoutingWorkflowViewer routingId={routingId} companyId={companyId} />
+      <DialogContent sx={{ p: 2, flex: 1, overflow: 'auto' }}>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Alert severity="error">{error}</Alert>
+        ) : routing ? (
+          <RoutingViewer routing={routing} />
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            No routing found.
+          </Typography>
+        )}
       </DialogContent>
 
-      {/* Footer */}
       <DialogActions
-        sx={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          px: 3,
-          py: 1.5,
-        }}
+        sx={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', px: 3, py: 1.5 }}
       >
         <Button
           component={Link}

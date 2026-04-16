@@ -27,7 +27,6 @@ import type {
   JobCompleteResponse,
   MaterialConfirmation,
 } from '@/types/operator';
-import type { RoutingNodeMaterial } from '@/types/routings';
 import type { InventoryItemWithRelations } from '@/types/inventory';
 import { removeStockGraceful } from '@/utils/inventoryAccess';
 
@@ -145,13 +144,13 @@ export async function getCurrentOperator(companyId: string): Promise<{
 }
 
 // ============================================================================
-// DAG READINESS HELPERS
+// READINESS HELPERS (sequence-based)
 // ============================================================================
 
 /**
- * Get ready operations for a specific station using DAG-aware logic.
- * Calls the get_ready_operations_for_station DB function which checks
- * routing_edges to ensure all predecessor operations are completed/skipped.
+ * Get ready operations for a specific station using sequence-based logic.
+ * Calls the get_ready_operations_for_station DB function which checks that
+ * every job_operation with a lower sequence is completed/skipped.
  */
 async function getReadyOperationsForStation(
   companyId: string,
@@ -182,33 +181,33 @@ async function getReadyOperationsForStation(
 }
 
 /**
- * Check if a specific job operation is ready to start by verifying
- * all predecessor nodes in the routing DAG are completed/skipped.
- * Returns true if no routing is linked (backward compat).
+ * Check if a specific job operation is ready to start. With the linear
+ * routing model, an operation is ready when every job_operation with a lower
+ * sequence in the same job is completed or skipped.
+ *
+ * Pass the operation's id; we look up its sequence and check predecessors.
  */
 async function isJobOperationReady(
   jobId: string,
-  routingNodeId: string | null
+  jobOperationId: string | null
 ): Promise<boolean> {
-  if (!routingNodeId) return true;
+  if (!jobOperationId) return true;
 
   const supabase = getSupabase();
 
-  // Find predecessor edges
-  const { data: edges } = await supabase
-    .from('routing_edges')
-    .select('source_node_id')
-    .eq('target_node_id', routingNodeId);
+  const { data: op } = await supabase
+    .from('job_operations')
+    .select('sequence')
+    .eq('id', jobOperationId)
+    .single();
 
-  if (!edges || edges.length === 0) return true; // root node
+  if (!op) return true;
 
-  // Check if any predecessor job_operations are NOT completed/skipped
-  const sourceNodeIds = edges.map((e: { source_node_id: string }) => e.source_node_id);
   const { data: unfinishedPreds } = await supabase
     .from('job_operations')
     .select('id')
     .eq('job_id', jobId)
-    .in('routing_node_id', sourceNodeIds)
+    .lt('sequence', op.sequence)
     .not('status', 'in', '("completed","skipped")');
 
   return !unfinishedPreds || unfinishedPreds.length === 0;
@@ -377,11 +376,12 @@ export async function getOperatorJobDetail(
 
   if (error || !job) return null;
 
-  // Get operations for this job
+  // Get operations for this job (ordered by sequence so we pick the earliest active op)
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
-    .eq('job_id', jobId);
+    .select('id, sequence, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
+    .eq('job_id', jobId)
+    .order('sequence', { ascending: true });
 
   if (operationTypeId) {
     opsQuery = opsQuery.eq('operation_type_id', operationTypeId);
@@ -389,15 +389,15 @@ export async function getOperatorJobDetail(
 
   const { data: ops } = await opsQuery;
 
-  let currentOp = ops?.find((op: { id: string; operation_name: string; status: string; instructions: string | null; estimated_setup_minutes: number | null; estimated_run_minutes_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
+  let currentOp = ops?.find((op: { id: string; sequence: number; operation_name: string; status: string; instructions: string | null; estimated_setup_minutes: number | null; estimated_run_minutes_per_unit: number | null; operation_type_id: string; routing_node_id: string | null }) =>
     op.status === 'pending' || op.status === 'in_progress'
   ) || null;
 
-  // Check DAG readiness: if the operation is pending, verify predecessors are done
+  // Sequence-based readiness: pending op is hidden if earlier ops aren't done
   if (currentOp && currentOp.status === 'pending') {
-    const ready = await isJobOperationReady(jobId, currentOp.routing_node_id);
+    const ready = await isJobOperationReady(jobId, currentOp.id);
     if (!ready) {
-      currentOp = null; // Not ready — hide from operator
+      currentOp = null;
     }
   }
 
@@ -451,40 +451,23 @@ export async function getOperatorJobDetail(
     (op: { status: string }) => op.status === 'completed' || op.status === 'skipped'
   ).length || 0;
 
-  // Fetch material requirements for current operation
+  // Materials are now job-level (job_materials), not per-operation. Always
+  // surface the full job material list regardless of which operation is current.
   let materials: Array<{ name: string; quantity: number; unit: string }> = [];
-  if (currentOp?.routing_node_id) {
-    const { data: routingNode } = await supabase
-      .from('routing_nodes')
-      .select('materials')
-      .eq('id', currentOp.routing_node_id)
-      .single();
+  const { data: jobMats } = await supabase
+    .from('job_materials')
+    .select('expected_quantity, unit, inventory_item:inventory_items(name)')
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: true });
 
-    if (routingNode?.materials) {
-      const rawMaterials = routingNode.materials as Array<{
-        inventory_item_id: string;
-        quantity: number;
-        unit: string;
-      }>;
-      if (rawMaterials.length > 0) {
-        const itemIds = rawMaterials.map((m) => m.inventory_item_id);
-        const { data: items } = await supabase
-          .from('inventory_items')
-          .select('id, name')
-          .in('id', itemIds);
-
-        const nameMap = new Map(
-          (items || []).map((i: { id: string; name: string }) => [i.id, i.name])
-        );
-        materials = rawMaterials
-          .filter((m) => nameMap.has(m.inventory_item_id))
-          .map((m) => ({
-            name: nameMap.get(m.inventory_item_id) as string,
-            quantity: m.quantity,
-            unit: m.unit,
-          }));
-      }
-    }
+  if (jobMats) {
+    materials = jobMats
+      .filter((m: { inventory_item: { name: string } | null }) => !!m.inventory_item)
+      .map((m: { expected_quantity: number; unit: string; inventory_item: { name: string } | null }) => ({
+        name: m.inventory_item!.name,
+        quantity: m.expected_quantity,
+        unit: m.unit,
+      }));
   }
 
   return {
@@ -532,9 +515,9 @@ export async function startJob(
     throw new Error('No pending operation found for this job and station');
   }
 
-  // 1b. Verify DAG predecessors are satisfied before starting
+  // 1b. Verify earlier-sequence predecessors are done before starting
   if (jobOp.status === 'pending') {
-    const ready = await isJobOperationReady(jobId, jobOp.routing_node_id);
+    const ready = await isJobOperationReady(jobId, jobOp.id);
     if (!ready) {
       throw new Error('Cannot start this operation: predecessor operations are not yet completed');
     }
@@ -642,72 +625,66 @@ export async function stopJob(
 }
 
 /**
- * Get expected materials for a job operation from its routing node.
- * Also fetches current inventory levels for each material.
+ * Get expected materials for a job, joined with current inventory levels.
+ * Materials are job-level (job_materials), not per-operation. Pending and
+ * already-consumed entries are both returned so the operator can see history.
+ */
+export async function getJobMaterialsForCompletion(
+  jobId: string
+): Promise<MaterialConfirmation[]> {
+  const supabase = getSupabase();
+
+  const { data: jobMats, error } = await supabase
+    .from('job_materials')
+    .select(`
+      id, inventory_item_id, expected_quantity, actual_quantity, unit, status,
+      inventory_item:inventory_items(name, primary_unit, quantity)
+    `)
+    .eq('job_id', jobId)
+    .order('created_at', { ascending: true });
+
+  if (error || !jobMats) return [];
+
+  return jobMats
+    .filter((m: { inventory_item: { name: string; primary_unit: string; quantity: number } | null }) => !!m.inventory_item)
+    .map((m: {
+      id: string;
+      inventory_item_id: string;
+      expected_quantity: number;
+      actual_quantity: number | null;
+      unit: string;
+      status: string;
+      inventory_item: { name: string; primary_unit: string; quantity: number } | null;
+    }) => {
+      const item = m.inventory_item!;
+      return {
+        inventory_item_id: m.inventory_item_id,
+        item_name: item.name,
+        expected_quantity: Number(m.expected_quantity),
+        confirmed_quantity: m.actual_quantity != null ? Number(m.actual_quantity) : Number(m.expected_quantity),
+        unit: m.unit,
+        current_stock: Number(item.quantity),
+        primary_unit: item.primary_unit,
+      };
+    });
+}
+
+/**
+ * @deprecated Use getJobMaterialsForCompletion(jobId) instead. Materials are
+ * now job-level rather than per-operation. Kept as a thin alias so existing
+ * callers compile while they migrate.
  */
 export async function getOperationMaterials(
   jobOperationId: string
 ): Promise<MaterialConfirmation[]> {
   const supabase = getSupabase();
-
-  // 1. Get the routing_node_id from job_operations
-  const { data: jobOp, error: opError } = await supabase
+  const { data: op } = await supabase
     .from('job_operations')
-    .select('routing_node_id')
+    .select('job_id')
     .eq('id', jobOperationId)
     .single();
-
-  if (opError || !jobOp?.routing_node_id) {
-    return []; // No routing linked
-  }
-
-  // 2. Get materials from the routing node
-  const { data: routingNode, error: rnError } = await supabase
-    .from('routing_nodes')
-    .select('materials')
-    .eq('id', jobOp.routing_node_id)
-    .single();
-
-  if (rnError || !routingNode?.materials) {
-    return [];
-  }
-
-  const materials = routingNode.materials as RoutingNodeMaterial[];
-  if (materials.length === 0) {
-    return [];
-  }
-
-  // 3. Batch-fetch inventory items for current stock and names
-  const itemIds = materials.map((m) => m.inventory_item_id);
-  const { data: items } = await supabase
-    .from('inventory_items')
-    .select('id, name, primary_unit, quantity')
-    .in('id', itemIds);
-
-  const itemMap = new Map<string, { name: string; primary_unit: string; quantity: number }>();
-  for (const item of items || []) {
-    itemMap.set(item.id, {
-      name: item.name,
-      primary_unit: item.primary_unit,
-      quantity: item.quantity,
-    });
-  }
-
-  // 4. Build MaterialConfirmation array
-  return materials
-    .filter((m) => itemMap.has(m.inventory_item_id))
-    .map((m) => {
-      const item = itemMap.get(m.inventory_item_id)!;
-      return {
-        inventory_item_id: m.inventory_item_id,
-        item_name: item.name,
-        expected_quantity: m.quantity,
-        confirmed_quantity: m.quantity, // Pre-filled with expected
-        unit: m.unit,
-        current_stock: item.quantity,
-        primary_unit: item.primary_unit,
-      };
-    });
+  if (!op?.job_id) return [];
+  return getJobMaterialsForCompletion(op.job_id);
 }
 
 /**
@@ -788,20 +765,45 @@ export async function completeJob(
       .eq('id', jobId);
   }
 
-  // 5. Deplete inventory for confirmed materials
-  if (request.materials && request.materials.length > 0) {
+  // 5. Deplete inventory for confirmed materials AND mark job_materials consumed
+  // Materials are now job-level — we only consume on the FINAL operation so
+  // we don't double-deplete. If this operation is the last to complete, the
+  // jobCompleted flag is true; record consumption then.
+  if (jobCompleted && request.materials && request.materials.length > 0) {
     for (const material of request.materials) {
       if (material.confirmed_quantity > 0) {
         await removeStockGraceful(
           material.inventory_item_id,
           material.confirmed_quantity,
           material.unit,
-          `Operation completion`,
+          `Job completion`,
           jobId,
           session.job_operation_id || undefined,
           operatorId,
           operatorId
         );
+
+        // Mark the matching job_material row as consumed (find by inv_item_id + unit)
+        const { data: jobMatRows } = await supabase
+          .from('job_materials')
+          .select('id')
+          .eq('job_id', jobId)
+          .eq('inventory_item_id', material.inventory_item_id)
+          .eq('unit', material.unit)
+          .eq('status', 'pending')
+          .limit(1);
+
+        if (jobMatRows && jobMatRows.length > 0) {
+          await supabase
+            .from('job_materials')
+            .update({
+              actual_quantity: material.confirmed_quantity,
+              status: 'consumed',
+              consumed_at: now,
+              consumed_by: operatorId,
+            })
+            .eq('id', jobMatRows[0].id);
+        }
       }
     }
   }
@@ -983,13 +985,14 @@ export async function getStationsForJob(
 
   const { data: ops } = await supabase
     .from('job_operations')
-    .select('operation_type_id, routing_node_id, status, operation_types(name)')
+    .select('id, operation_type_id, status, operation_types(name)')
     .eq('job_id', jobId)
-    .in('status', ['pending', 'in_progress']);
+    .in('status', ['pending', 'in_progress'])
+    .order('sequence', { ascending: true });
 
   if (!ops || ops.length === 0) return [];
 
-  // Filter to only DAG-ready operations
+  // Filter to only sequence-ready operations
   const seen = new Set<string>();
   const stations: Array<{ id: string; name: string }> = [];
   for (const op of ops) {
@@ -997,7 +1000,7 @@ export async function getStationsForJob(
 
     // In-progress operations are always ready (already started)
     if (op.status === 'pending') {
-      const ready = await isJobOperationReady(jobId, op.routing_node_id);
+      const ready = await isJobOperationReady(jobId, op.id);
       if (!ready) continue;
     }
 

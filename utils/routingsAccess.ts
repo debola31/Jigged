@@ -1,34 +1,34 @@
 /**
  * Routings Data Access Layer
  *
- * Functions for CRUD operations on routings, nodes, and edges.
- * Each part has exactly one routing (1:1 relationship).
- * Routing names are auto-generated from the part number.
+ * Linear routing model: a routing is an ordered list of operations
+ * (routing_nodes, ordered by `sequence`) plus a routing-level material list
+ * (routing_materials). Each part has exactly one routing (1:1).
  */
 
 import { getSupabase } from '@/lib/supabase';
 import type {
   Routing,
   RoutingNode,
-  RoutingEdge,
+  RoutingMaterial,
+  RoutingMaterialWithItem,
   RoutingWithPart,
   RoutingWithStats,
   RoutingWithGraph,
   RoutingNodeFormData,
+  RoutingMaterialFormData,
 } from '@/types/routings';
 
 // ============================================
-// Routing CRUD Operations
+// Routing CRUD
 // ============================================
 
 /**
- * Get the routing for a specific part (1:1 relationship).
- * Returns null if the part has no routing.
+ * Get the routing for a part (1:1). Returns null if the part has no routing.
  */
 export async function getRoutingForPart(partId: string): Promise<RoutingWithGraph | null> {
   const supabase = getSupabase();
 
-  // Fetch routing for this part
   const { data: routing, error: routingError } = await supabase
     .from('routings')
     .select(`
@@ -45,47 +45,11 @@ export async function getRoutingForPart(partId: string): Promise<RoutingWithGrap
 
   if (!routing) return null;
 
-  // Fetch nodes with operation types
-  const { data: nodes, error: nodesError } = await supabase
-    .from('routing_nodes')
-    .select(`
-      *,
-      operation_type:operation_types(
-        id,
-        name,
-        labor_rate,
-        resource_group_id,
-        resource_group:resource_groups(id, name)
-      )
-    `)
-    .eq('routing_id', routing.id)
-    .order('created_at', { ascending: true });
-
-  if (nodesError) {
-    console.error('Error fetching routing nodes:', nodesError);
-    throw nodesError;
-  }
-
-  // Fetch edges
-  const { data: edges, error: edgesError } = await supabase
-    .from('routing_edges')
-    .select('*')
-    .eq('routing_id', routing.id);
-
-  if (edgesError) {
-    console.error('Error fetching routing edges:', edgesError);
-    throw edgesError;
-  }
-
-  return {
-    ...routing,
-    nodes: nodes || [],
-    edges: edges || [],
-  };
+  return await loadRoutingGraph(routing);
 }
 
 /**
- * Get routing summary for a part (lightweight, for display).
+ * Lightweight routing summary for a part (for list/detail displays).
  */
 export async function getRoutingSummaryForPart(
   partId: string
@@ -119,7 +83,7 @@ export async function getRoutingSummaryForPart(
 }
 
 /**
- * Get all routings for a company (for admin/listing purposes).
+ * List all routings for a company with stats.
  */
 export async function getRoutings(
   companyId: string,
@@ -213,7 +177,7 @@ export async function getRouting(routingId: string): Promise<RoutingWithPart | n
 }
 
 /**
- * Get a routing with full graph data (nodes and edges) for the workflow builder.
+ * Get a routing with full operations + materials data.
  */
 export async function getRoutingWithGraph(routingId: string): Promise<RoutingWithGraph | null> {
   const supabase = getSupabase();
@@ -233,6 +197,17 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
     throw routingError;
   }
 
+  return await loadRoutingGraph(routing);
+}
+
+/**
+ * Internal helper: given a routing row, fetch its nodes and materials.
+ */
+async function loadRoutingGraph(
+  routing: Routing & { part: { id: string; part_name: string; description: string | null } | null }
+): Promise<RoutingWithGraph> {
+  const supabase = getSupabase();
+
   const { data: nodes, error: nodesError } = await supabase
     .from('routing_nodes')
     .select(`
@@ -245,7 +220,8 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
         resource_group:resource_groups(id, name)
       )
     `)
-    .eq('routing_id', routingId)
+    .eq('routing_id', routing.id)
+    .order('sequence', { ascending: true })
     .order('created_at', { ascending: true });
 
   if (nodesError) {
@@ -253,31 +229,33 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
     throw nodesError;
   }
 
-  const { data: edges, error: edgesError } = await supabase
-    .from('routing_edges')
-    .select('*')
-    .eq('routing_id', routingId);
+  const { data: materials, error: materialsError } = await supabase
+    .from('routing_materials')
+    .select(`
+      *,
+      inventory_item:inventory_items(id, name, primary_unit, cost_per_unit)
+    `)
+    .eq('routing_id', routing.id)
+    .order('sequence', { ascending: true });
 
-  if (edgesError) {
-    console.error('Error fetching routing edges:', edgesError);
-    throw edgesError;
+  if (materialsError) {
+    console.error('Error fetching routing materials:', materialsError);
+    throw materialsError;
   }
 
   return {
     ...routing,
     nodes: nodes || [],
-    edges: edges || [],
+    materials: (materials as RoutingMaterialWithItem[]) || [],
   };
 }
 
 /**
- * Delete a routing (cascades to nodes and edges).
+ * Delete a routing (cascades to nodes and materials).
  */
 export async function deleteRouting(routingId: string): Promise<void> {
   const supabase = getSupabase();
-
   const { error } = await supabase.from('routings').delete().eq('id', routingId);
-
   if (error) {
     console.error('Error deleting routing:', error);
     throw error;
@@ -285,17 +263,38 @@ export async function deleteRouting(routingId: string): Promise<void> {
 }
 
 // ============================================
-// Node CRUD Operations
+// Routing Node CRUD
 // ============================================
 
 /**
- * Create a new routing node.
+ * Internal helper: compute the next sequence value for a routing.
+ * Returns 10 for the first node, then 20, 30, ...
  */
+async function getNextNodeSequence(routingId: string): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('routing_nodes')
+    .select('sequence')
+    .eq('routing_id', routingId)
+    .order('sequence', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching max node sequence:', error);
+    throw error;
+  }
+
+  return (data?.sequence ?? 0) + 10;
+}
+
 export async function createRoutingNode(
   routingId: string,
-  formData: RoutingNodeFormData
+  formData: RoutingNodeFormData,
+  sequence?: number
 ): Promise<RoutingNode> {
   const supabase = getSupabase();
+  const seq = sequence ?? (await getNextNodeSequence(routingId));
 
   const { data, error } = await supabase
     .from('routing_nodes')
@@ -305,12 +304,10 @@ export async function createRoutingNode(
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
-      setup_time: formData.setup_time
-        ? parseFloat(formData.setup_time)
-        : 0,
+      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
       instructions: formData.instructions.trim() || null,
       metadata: {},
-      materials: formData.materials || [],
+      sequence: seq,
     })
     .select()
     .single();
@@ -323,9 +320,6 @@ export async function createRoutingNode(
   return data;
 }
 
-/**
- * Update a routing node.
- */
 export async function updateRoutingNode(
   nodeId: string,
   formData: RoutingNodeFormData
@@ -339,11 +333,8 @@ export async function updateRoutingNode(
       run_time_per_unit: formData.run_time_per_unit
         ? parseFloat(formData.run_time_per_unit)
         : null,
-      setup_time: formData.setup_time
-        ? parseFloat(formData.setup_time)
-        : 0,
+      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
       instructions: formData.instructions.trim() || null,
-      materials: formData.materials || [],
       updated_at: new Date().toISOString(),
     })
     .eq('id', nodeId)
@@ -358,14 +349,9 @@ export async function updateRoutingNode(
   return data;
 }
 
-/**
- * Delete a routing node (cascades to edges).
- */
 export async function deleteRoutingNode(nodeId: string): Promise<void> {
   const supabase = getSupabase();
-
   const { error } = await supabase.from('routing_nodes').delete().eq('id', nodeId);
-
   if (error) {
     console.error('Error deleting routing node:', error);
     throw error;
@@ -373,204 +359,142 @@ export async function deleteRoutingNode(nodeId: string): Promise<void> {
 }
 
 // ============================================
-// Edge CRUD Operations
+// Routing Material CRUD
 // ============================================
 
-/**
- * Create a new edge between two nodes.
- */
-export async function createRoutingEdge(
-  routingId: string,
-  sourceNodeId: string,
-  targetNodeId: string
-): Promise<RoutingEdge> {
+async function getNextMaterialSequence(routingId: string): Promise<number> {
   const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('routing_materials')
+    .select('sequence')
+    .eq('routing_id', routingId)
+    .order('sequence', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching max material sequence:', error);
+    throw error;
+  }
+
+  return (data?.sequence ?? 0) + 10;
+}
+
+export async function createRoutingMaterial(
+  routingId: string,
+  formData: RoutingMaterialFormData,
+  sequence?: number
+): Promise<RoutingMaterial> {
+  const supabase = getSupabase();
+  const seq = sequence ?? (await getNextMaterialSequence(routingId));
 
   const { data, error } = await supabase
-    .from('routing_edges')
+    .from('routing_materials')
     .insert({
       routing_id: routingId,
-      source_node_id: sourceNodeId,
-      target_node_id: targetNodeId,
+      inventory_item_id: formData.inventory_item_id,
+      quantity: parseFloat(formData.quantity),
+      unit: formData.unit,
+      sequence: seq,
     })
     .select()
     .single();
 
   if (error) {
-    if (error.code === '23505') {
-      throw new Error('This connection already exists');
-    }
-    console.error('Error creating routing edge:', error);
+    console.error('Error creating routing material:', error);
     throw error;
   }
 
   return data;
 }
 
-/**
- * Delete an edge.
- */
-export async function deleteRoutingEdge(edgeId: string): Promise<void> {
+export async function updateRoutingMaterial(
+  materialId: string,
+  formData: RoutingMaterialFormData
+): Promise<RoutingMaterial> {
   const supabase = getSupabase();
 
-  const { error } = await supabase.from('routing_edges').delete().eq('id', edgeId);
+  const { data, error } = await supabase
+    .from('routing_materials')
+    .update({
+      inventory_item_id: formData.inventory_item_id,
+      quantity: parseFloat(formData.quantity),
+      unit: formData.unit,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', materialId)
+    .select()
+    .single();
 
   if (error) {
-    console.error('Error deleting routing edge:', error);
+    console.error('Error updating routing material:', error);
+    throw error;
+  }
+
+  return data;
+}
+
+export async function deleteRoutingMaterial(materialId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.from('routing_materials').delete().eq('id', materialId);
+  if (error) {
+    console.error('Error deleting routing material:', error);
     throw error;
   }
 }
 
 // ============================================
-// Bulk Operations for Workflow Builder
+// Wizard Save Operations (atomic)
 // ============================================
 
 /**
- * Save the entire graph from React Flow.
+ * Pending operation row from the linear builder.
+ *  - tempId: synthetic id for new rows (prefix `temp-node-`); real uuid for existing rows.
+ *  - All other fields mirror routing_nodes.
  */
-export async function saveRoutingGraph(
-  routingId: string,
-  nodes: Array<{
-    id: string;
-    isNew?: boolean;
-    operationTypeId: string;
-    runTimePerUnit: number | null;
-    setupTime?: number;
-    instructions: string | null;
-    materials: unknown[];
-  }>,
-  edges: Array<{
-    id: string;
-    isNew?: boolean;
-    sourceNodeId: string;
-    targetNodeId: string;
-  }>,
-  deletedNodeIds: string[],
-  deletedEdgeIds: string[]
-): Promise<void> {
-  const supabase = getSupabase();
-
-  if (deletedEdgeIds.length > 0) {
-    const { error: deleteEdgesError } = await supabase
-      .from('routing_edges')
-      .delete()
-      .in('id', deletedEdgeIds);
-    if (deleteEdgesError) throw deleteEdgesError;
-  }
-
-  if (deletedNodeIds.length > 0) {
-    const { error: deleteNodesError } = await supabase
-      .from('routing_nodes')
-      .delete()
-      .in('id', deletedNodeIds);
-    if (deleteNodesError) throw deleteNodesError;
-  }
-
-  const nodeIdMap = new Map<string, string>();
-
-  for (const node of nodes) {
-    if (node.isNew) {
-      const { data, error } = await supabase
-        .from('routing_nodes')
-        .insert({
-          routing_id: routingId,
-          operation_type_id: node.operationTypeId,
-          run_time_per_unit: node.runTimePerUnit,
-          setup_time: node.setupTime ?? 0,
-          instructions: node.instructions,
-          metadata: {},
-          materials: node.materials || [],
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      nodeIdMap.set(node.id, data.id);
-    } else {
-      const { error } = await supabase
-        .from('routing_nodes')
-        .update({
-          operation_type_id: node.operationTypeId,
-          run_time_per_unit: node.runTimePerUnit,
-          setup_time: node.setupTime ?? 0,
-          instructions: node.instructions,
-          materials: node.materials || [],
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', node.id);
-      if (error) throw error;
-      nodeIdMap.set(node.id, node.id);
-    }
-  }
-
-  const newEdges = edges.filter((e) => e.isNew);
-  if (newEdges.length > 0) {
-    const edgesToInsert = newEdges.map((edge) => ({
-      routing_id: routingId,
-      source_node_id: nodeIdMap.get(edge.sourceNodeId) || edge.sourceNodeId,
-      target_node_id: nodeIdMap.get(edge.targetNodeId) || edge.targetNodeId,
-    }));
-
-    const { error: insertEdgesError } = await supabase
-      .from('routing_edges')
-      .insert(edgesToInsert);
-    if (insertEdgesError) throw insertEdgesError;
-  }
-}
-
-// ============================================
-// Wizard Save Operations
-// ============================================
-
-/**
- * Pending node data for wizard memory mode.
- */
-interface PendingNode {
+export interface PendingNode {
   tempId: string;
   operationTypeId: string;
   operationName: string;
   resourceGroupName: string | null;
   laborRate: number | null;
   runTimePerUnit: number | null;
-  setupTime?: number;
+  setupTime: number;
   instructions: string | null;
-  materials: unknown[];
 }
 
 /**
- * Pending edge data for wizard memory mode.
+ * Pending material row from the linear builder.
+ *  - tempId: synthetic id for new rows (prefix `temp-material-`); real uuid for existing rows.
  */
-interface PendingEdge {
+export interface PendingMaterial {
   tempId: string;
-  sourceNodeId: string;
-  targetNodeId: string;
+  inventoryItemId: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
 }
 
 /**
- * Save a routing with its complete graph from the wizard.
- * Handles both create and edit modes.
- * Routing name is auto-generated as "Routing - {part_name}".
+ * Save a routing's full state from the wizard. Handles create + edit modes.
+ * Routing name is auto-generated from the part name.
  *
- * @param companyId - Company ID
- * @param partId - Part ID (required, 1:1 relationship)
- * @param routingId - Existing routing ID (null for create mode)
- * @param pendingNodes - Nodes from the workflow builder
- * @param pendingEdges - Edges from the workflow builder
- * @param originalNodeIds - Original node IDs to track deletions (edit mode only)
- * @param originalEdgeIds - Original edge IDs to track deletions (edit mode only)
+ * Operations and materials are saved with `sequence` matching their position
+ * in the input arrays (steps of 10).
  */
-export async function saveRoutingWithGraph(
+export async function saveRoutingWithOperationsAndMaterials(
   companyId: string,
   partId: string,
   routingId: string | null,
   pendingNodes: PendingNode[],
-  pendingEdges: PendingEdge[],
+  pendingMaterials: PendingMaterial[],
   originalNodeIds: Set<string>,
-  originalEdgeIds: Set<string>
+  originalMaterialIds: Set<string>
 ): Promise<Routing> {
   const supabase = getSupabase();
   const isEditMode = !!routingId;
 
-  // Get the part number for auto-naming
+  // Get the part name for auto-naming
   const { data: partData, error: partError } = await supabase
     .from('parts')
     .select('part_name')
@@ -580,15 +504,12 @@ export async function saveRoutingWithGraph(
   if (partError) throw partError;
   const autoName = `Routing - ${partData.part_name}`;
 
-  // Step 1: Create or update the routing
+  // Step 1: Create or update the routing row
   let routing: Routing;
   if (isEditMode) {
     const { data, error } = await supabase
       .from('routings')
-      .update({
-        name: autoName,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ name: autoName, updated_at: new Date().toISOString() })
       .eq('id', routingId)
       .select()
       .single();
@@ -597,34 +518,20 @@ export async function saveRoutingWithGraph(
   } else {
     const { data, error } = await supabase
       .from('routings')
-      .insert({
-        company_id: companyId,
-        part_id: partId,
-        name: autoName,
-      })
+      .insert({ company_id: companyId, part_id: partId, name: autoName })
       .select()
       .single();
     if (error) throw error;
     routing = data;
   }
 
-  // Step 2: Determine which nodes/edges to delete, create, or update
+  // Step 2: Diff against the original sets to find deletions
   const currentNodeIds = new Set(pendingNodes.map((n) => n.tempId));
-  const currentEdgeIds = new Set(pendingEdges.map((e) => e.tempId));
+  const currentMaterialIds = new Set(pendingMaterials.map((m) => m.tempId));
 
   const nodesToDelete = [...originalNodeIds].filter((id) => !currentNodeIds.has(id));
-  const edgesToDelete = [...originalEdgeIds].filter((id) => !currentEdgeIds.has(id));
+  const materialsToDelete = [...originalMaterialIds].filter((id) => !currentMaterialIds.has(id));
 
-  // Step 3: Delete removed edges first
-  if (edgesToDelete.length > 0) {
-    const { error } = await supabase
-      .from('routing_edges')
-      .delete()
-      .in('id', edgesToDelete);
-    if (error) throw error;
-  }
-
-  // Step 4: Delete removed nodes
   if (nodesToDelete.length > 0) {
     const { error } = await supabase
       .from('routing_nodes')
@@ -633,62 +540,114 @@ export async function saveRoutingWithGraph(
     if (error) throw error;
   }
 
-  // Step 5: Create/update nodes and track ID mappings
-  const nodeIdMap = new Map<string, string>();
+  if (materialsToDelete.length > 0) {
+    const { error } = await supabase
+      .from('routing_materials')
+      .delete()
+      .in('id', materialsToDelete);
+    if (error) throw error;
+  }
 
-  for (const node of pendingNodes) {
-    const isTempId = node.tempId.startsWith('temp-');
-    const isExisting = originalNodeIds.has(node.tempId);
+  // Step 3: Operations — two-phase update so the (routing_id, sequence) unique
+  //   constraint isn't violated while reordering. We push existing rows to
+  //   a temporary high-sequence range first, then assign the final sequences.
+  //   New rows can be inserted at their final sequence directly (no conflict).
+  if (pendingNodes.length > 0) {
+    const existingRows = pendingNodes.filter((n) => originalNodeIds.has(n.tempId));
+    if (existingRows.length > 0) {
+      // Park existing rows at sequences 100000+ so the final write below has
+      // a clean slot to write into. Constraint is DEFERRED so even without
+      // this, a single statement update would work — but updating per-row
+      // is the simpler path.
+      let temp = 100000;
+      for (const node of existingRows) {
+        const { error } = await supabase
+          .from('routing_nodes')
+          .update({ sequence: temp })
+          .eq('id', node.tempId);
+        if (error) throw error;
+        temp += 10;
+      }
+    }
 
-    if (isTempId || !isExisting) {
-      const { data, error } = await supabase
-        .from('routing_nodes')
-        .insert({
-          routing_id: routing.id,
-          operation_type_id: node.operationTypeId,
-          run_time_per_unit: node.runTimePerUnit,
-          setup_time: node.setupTime ?? 0,
-          instructions: node.instructions,
-          metadata: {},
-          materials: node.materials || [],
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      nodeIdMap.set(node.tempId, data.id);
-    } else {
-      const { error } = await supabase
-        .from('routing_nodes')
-        .update({
-          operation_type_id: node.operationTypeId,
-          run_time_per_unit: node.runTimePerUnit,
-          setup_time: node.setupTime ?? 0,
-          instructions: node.instructions,
-          materials: node.materials || [],
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', node.tempId);
-      if (error) throw error;
-      nodeIdMap.set(node.tempId, node.tempId);
+    let seq = 10;
+    for (const node of pendingNodes) {
+      const isExisting = originalNodeIds.has(node.tempId);
+      if (isExisting) {
+        const { error } = await supabase
+          .from('routing_nodes')
+          .update({
+            operation_type_id: node.operationTypeId,
+            run_time_per_unit: node.runTimePerUnit,
+            setup_time: node.setupTime ?? 0,
+            instructions: node.instructions,
+            sequence: seq,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', node.tempId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('routing_nodes')
+          .insert({
+            routing_id: routing.id,
+            operation_type_id: node.operationTypeId,
+            run_time_per_unit: node.runTimePerUnit,
+            setup_time: node.setupTime ?? 0,
+            instructions: node.instructions,
+            metadata: {},
+            sequence: seq,
+          });
+        if (error) throw error;
+      }
+      seq += 10;
     }
   }
 
-  // Step 6: Create new edges with mapped node IDs
-  const newEdges = pendingEdges.filter(
-    (e) => e.tempId.startsWith('temp-') || !originalEdgeIds.has(e.tempId)
-  );
+  // Step 4: Materials — same two-phase approach
+  if (pendingMaterials.length > 0) {
+    const existingRows = pendingMaterials.filter((m) => originalMaterialIds.has(m.tempId));
+    if (existingRows.length > 0) {
+      let temp = 100000;
+      for (const mat of existingRows) {
+        const { error } = await supabase
+          .from('routing_materials')
+          .update({ sequence: temp })
+          .eq('id', mat.tempId);
+        if (error) throw error;
+        temp += 10;
+      }
+    }
 
-  if (newEdges.length > 0) {
-    const edgesToInsert = newEdges.map((edge) => ({
-      routing_id: routing.id,
-      source_node_id: nodeIdMap.get(edge.sourceNodeId) || edge.sourceNodeId,
-      target_node_id: nodeIdMap.get(edge.targetNodeId) || edge.targetNodeId,
-    }));
-
-    const { error } = await supabase
-      .from('routing_edges')
-      .insert(edgesToInsert);
-    if (error) throw error;
+    let seq = 10;
+    for (const mat of pendingMaterials) {
+      const isExisting = originalMaterialIds.has(mat.tempId);
+      if (isExisting) {
+        const { error } = await supabase
+          .from('routing_materials')
+          .update({
+            inventory_item_id: mat.inventoryItemId,
+            quantity: mat.quantity,
+            unit: mat.unit,
+            sequence: seq,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', mat.tempId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('routing_materials')
+          .insert({
+            routing_id: routing.id,
+            inventory_item_id: mat.inventoryItemId,
+            quantity: mat.quantity,
+            unit: mat.unit,
+            sequence: seq,
+          });
+        if (error) throw error;
+      }
+      seq += 10;
+    }
   }
 
   return routing;

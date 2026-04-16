@@ -267,11 +267,11 @@ NOT_STARTED ──► IN_PROGRESS ──► COMPLETED ──► SHIPPED
 
 - [ ] Quote-to-job conversion requires the part to have a routing; blocked with link to create one if missing
 
-- [ ] Jobs list shows "Current Op" column with DAG-aware next operation
+- [ ] Jobs list shows "Current Op" column with sequence-aware next operation
 
 - [ ] Current Op column shows in-progress operation name when one is active
 
-- [ ] Current Op column shows parallel ready ops with "+N" notation
+- [ ] Current Op column shows the next ready (lowest-sequence pending) operation when no op is in progress
 
 - [ ] Current Op column shows "Done" for completed/shipped jobs and "--" for cancelled jobs
 
@@ -301,17 +301,17 @@ Jobs automatically have operations copied from the part's routing when created. 
 
 **Database Table: **`job_operations`
 
-- `sequence` - Execution order (10, 20, 30...)
+- `sequence` - Execution order (10, 20, 30...), copied from `routing_nodes.sequence`
 
 - `operation_name` - Name from operation type
 
-- `routing_node_id` - FK to routing_nodes, links back to the DAG node this operation was created from
+- `routing_node_id` - FK to routing_nodes, links back to the routing operation this was created from
 
 - `status` - pending | in_progress | completed | skipped
 
-- `estimated_setup_hours` / `estimated_run_hours_per_unit` - Copied from routing
+- `estimated_setup_minutes` / `estimated_run_minutes_per_unit` - Copied from routing
 
-- `actual_setup_hours` / `actual_run_hours` - Recorded when completing
+- `actual_setup_minutes` / `actual_run_minutes` - Recorded when completing
 
 - `started_at` / `completed_at` - Timestamps for tracking
 
@@ -319,61 +319,67 @@ Jobs automatically have operations copied from the part's routing when created. 
 
 ## Current Operation Column
 
-The jobs list includes a "Current Op" column that shows the next ready operation for each job. This is DAG-aware, meaning it respects the routing's dependency graph to determine which operations are ready.
+The jobs list includes a "Current Op" column that shows the next ready operation for each job. Readiness is sequence-based: a pending operation is ready when every earlier-sequence operation on the same job is `completed` or `skipped`.
 
 **Display Logic:**
 
 - **In-progress operation exists:** Shows that operation's name (takes priority over pending/ready ops)
 
-- **Single ready operation:** Shows the operation name
-
-- **Multiple parallel ready operations:** Shows the first operation name alphabetically, plus a "+N" chip indicating additional parallel operations (e.g., "CNC Mill +2")
+- **Next ready operation:** Shows the lowest-sequence pending operation whose predecessors are all completed or skipped
 
 - **Completed/Shipped job:** Shows "Done" in italic secondary text
 
 - **Cancelled job or no routing data:** Shows "--"
 
-**DAG Readiness Logic:**
+**Sequence-Based Readiness Logic:**
 
-A pending operation is considered "ready" when all of its predecessor nodes in the routing graph have corresponding job_operations in `completed` or `skipped` status. Start nodes (no incoming edges) are ready immediately if they are `pending`.
+A pending operation is considered "ready" when no earlier-sequence `job_operation` on the same job is still `pending` or `in_progress` — that is, every op with a lower `sequence` is already `completed` or `skipped`. The first operation in a routing (lowest sequence) is ready immediately if it is `pending`.
 
-**Implementation:** Uses the `get_ready_operations_batch()` database function for efficient batch querying across all visible jobs.
+**Implementation:** Uses the `get_ready_operations_batch()` database function for efficient batch querying across all visible jobs. The station-side variant `get_ready_operations_for_station()` uses the same sequence-based rule.
 
 ---
 
-## Material Tracking on Job Operations
+## Job Creation from Routing
 
-Job operations include expected material definitions copied from the routing when the job is created. This enables operators to know what materials are expected for each operation.
+When a job is created for a part that has a routing, the DB function `create_job_operations_from_routing(p_job_id, p_routing_id)` runs and:
 
-### job_operations.materials Column
+1. Inserts one `job_operations` row per `routing_nodes` row, ordered by `routing_nodes.sequence`. The new rows get fresh sequences of 10, 20, 30, ... and carry over `operation_type_id`, `instructions`, `setup_time`, and `run_time_per_unit`.
 
-Add the following column to the job_operations table:
+2. Copies the routing's materials into `job_materials` — one row per `routing_materials` row — capturing each material as a snapshot for this job.
 
-Column: materials | Type: jsonb | Required: No | Description: Expected materials for this operation (copied from routing_node.materials)
+3. Sets `jobs.current_operation_sequence = 10` so the job is primed to start at the first operation.
 
-### materials JSONB Structure
+If the routing is later edited, existing jobs are not retroactively updated. They keep their snapshot in `job_operations` and `job_materials`.
 
-The materials field is an array of material specifications:
+---
 
-```json
-[
-  {
-    "inventory_item_id": "uuid",
-    "quantity": 0.5,
-    "unit": "lbs",
-    "inventory_item_name": "4140 Steel Bar"
-  }
-]
-```
+## Material Tracking
 
-### Job Creation from Routing
+Jobs carry a routing-level materials list (not per-operation). When a job is created, each routing material is snapshotted into `job_materials`. Operators mark materials as consumed (or skipped) and can record an actual quantity that differs from the expected quantity.
 
-When a job is created with a routing:
+### `job_materials` Table
 
-- For each routing_node, create a job_operation
+| Column | Type | Required | Description |
+|---|---|---|---|
+| id | uuid | Yes | Primary key |
+| job_id | uuid | Yes | FK to jobs (cascade delete) |
+| routing_material_id | uuid | No | FK to routing_materials; set to NULL if the source routing material is deleted |
+| inventory_item_id | uuid | Yes | FK to inventory_items (restricted delete) |
+| expected_quantity | numeric | Yes | Snapshot of `routing_materials.quantity` at job creation (>= 0) |
+| actual_quantity | numeric | No | Quantity actually consumed, recorded by the operator on consumption. NULL until consumed. |
+| unit | text | Yes | Unit of measure (snapshot from routing material) |
+| status | text | Yes | `pending`, `consumed`, or `skipped` |
+| consumed_at | timestamptz | No | Timestamp when status moved to `consumed` |
+| consumed_by | uuid | No | FK to `auth.users` — who marked it consumed |
+| created_at | timestamptz | Yes | Record creation |
+| updated_at | timestamptz | Yes | Last update |
 
-- Copy routing_node.materials to job_operation.materials
+### UI
 
-- Include inventory_item_name snapshot in case item is later deleted
+The Job Detail page includes a `JobMaterialsCard` (`components/jobs/JobMaterialsCard.tsx`) that lists the job's materials with their expected quantity, actual quantity, and status, and exposes the actions to mark a material consumed or skipped.
 
-- Operators can then log actual materials used when completing the operation
+### User Flow
+
+- Designer defines materials once on the routing (`routing_materials`).
+- Job creation copies those materials into `job_materials` with `status = 'pending'` and `expected_quantity` snapshotted from the routing.
+- Operator marks each material `consumed` (recording `actual_quantity` and optionally differing from expected) or `skipped` (with a reason). This is what drives the inventory depletion transaction — see [Inventory Module — Material Consumption Flow](inventory.md#material-consumption-flow).

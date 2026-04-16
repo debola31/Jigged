@@ -1,10 +1,10 @@
-import { getSupabase } from '@/lib/supabase';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 
 export interface CostWarning {
   type: 'missing_run_time' | 'missing_labor_rate' | 'missing_material_cost' | 'no_operations';
   message: string;
   node_id?: string;
+  material_id?: string;
 }
 
 export interface LaborItem {
@@ -37,9 +37,9 @@ export interface RoutingCostBreakdown {
 /**
  * Calculate the full cost breakdown for a part's routing.
  *
- * Fetches the routing and inventory item costs, then computes:
- * - Labor: (run_time_per_unit / 60) × labor_rate per node
- * - Materials: Σ(quantity × cost_per_unit) per node
+ * Labor: per operation, (run_time_per_unit / 60) × labor_rate, plus setup.
+ * Materials: routing-level (not per-operation) — Σ(quantity × cost_per_unit)
+ * across the routing's material list.
  *
  * Returns null if the part has no routing.
  */
@@ -67,43 +67,10 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
     };
   }
 
-  // Collect all unique inventory_item_ids from all nodes' materials
-  const allItemIds = new Set<string>();
-  for (const node of routing.nodes) {
-    for (const mat of node.materials || []) {
-      if (mat.inventory_item_id) {
-        allItemIds.add(mat.inventory_item_id);
-      }
-    }
-  }
-
-  // Batch-fetch inventory items for cost lookup
-  let inventoryMap = new Map<string, { name: string; cost_per_unit: number | null; primary_unit: string }>();
-  if (allItemIds.size > 0) {
-    const supabase = getSupabase();
-    const { data: items, error } = await supabase
-      .from('inventory_items')
-      .select('id, name, cost_per_unit, primary_unit')
-      .in('id', Array.from(allItemIds));
-
-    if (error) {
-      console.error('Error fetching inventory items for cost calculation:', error);
-    } else if (items) {
-      for (const item of items) {
-        inventoryMap.set(item.id, {
-          name: item.name,
-          cost_per_unit: item.cost_per_unit,
-          primary_unit: item.primary_unit,
-        });
-      }
-    }
-  }
-
-  // Calculate costs per node
+  // Labor cost per operation
   for (const node of routing.nodes) {
     const operationName = node.operation_type?.name || 'Unknown Operation';
 
-    // Labor cost
     if (node.run_time_per_unit === null || node.run_time_per_unit === undefined) {
       warnings.push({
         type: 'missing_run_time',
@@ -128,37 +95,37 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
         setup_cost: Math.round(setupCost * 100) / 100,
       });
     }
+  }
 
-    // Material costs
-    for (const mat of node.materials || []) {
-      const invItem = inventoryMap.get(mat.inventory_item_id);
-      if (!invItem) {
-        warnings.push({
-          type: 'missing_material_cost',
-          message: `${operationName}: inventory item not found (${mat.inventory_item_id})`,
-          node_id: node.id,
-        });
-        continue;
-      }
-
-      if (invItem.cost_per_unit === null || invItem.cost_per_unit === undefined) {
-        warnings.push({
-          type: 'missing_material_cost',
-          message: `${operationName}: ${invItem.name} has no cost per unit`,
-          node_id: node.id,
-        });
-        continue;
-      }
-
-      const materialCost = mat.quantity * invItem.cost_per_unit;
-      materialItems.push({
-        item_name: invItem.name,
-        quantity: mat.quantity,
-        unit: mat.unit || invItem.primary_unit,
-        cost_per_unit: invItem.cost_per_unit,
-        cost: Math.round(materialCost * 100) / 100,
+  // Material cost across the routing (joined inventory item already loaded)
+  for (const mat of routing.materials) {
+    const invItem = mat.inventory_item;
+    if (!invItem) {
+      warnings.push({
+        type: 'missing_material_cost',
+        message: `Material: inventory item not found (${mat.inventory_item_id})`,
+        material_id: mat.id,
       });
+      continue;
     }
+
+    if (invItem.cost_per_unit === null || invItem.cost_per_unit === undefined) {
+      warnings.push({
+        type: 'missing_material_cost',
+        message: `${invItem.name}: no cost per unit set`,
+        material_id: mat.id,
+      });
+      continue;
+    }
+
+    const materialCost = mat.quantity * invItem.cost_per_unit;
+    materialItems.push({
+      item_name: invItem.name,
+      quantity: mat.quantity,
+      unit: mat.unit || invItem.primary_unit,
+      cost_per_unit: invItem.cost_per_unit,
+      cost: Math.round(materialCost * 100) / 100,
+    });
   }
 
   const totalLaborCost = Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;

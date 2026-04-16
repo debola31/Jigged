@@ -19,7 +19,7 @@ import Fade from '@mui/material/Fade';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import { completeJob, getOperationMaterials } from '@/utils/operatorAccess';
+import { completeJob, getJobMaterialsForCompletion } from '@/utils/operatorAccess';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
@@ -93,16 +93,12 @@ export default function JobCompleteModal({
     setCompleted(false);
     setShowAddMaterial(false);
 
-    if (jobOperationId) {
-      setLoadingMaterials(true);
-      getOperationMaterials(jobOperationId)
-        .then((mats) => setMaterials(mats))
-        .catch(() => setMaterials([]))
-        .finally(() => setLoadingMaterials(false));
-    } else {
-      setMaterials([]);
-    }
-  }, [open, jobOperationId]);
+    setLoadingMaterials(true);
+    getJobMaterialsForCompletion(jobId)
+      .then((mats) => setMaterials(mats))
+      .catch(() => setMaterials([]))
+      .finally(() => setLoadingMaterials(false));
+  }, [open, jobId]);
 
   const handleConfirmedQtyChange = (index: number, value: number) => {
     setMaterials((prev) => {

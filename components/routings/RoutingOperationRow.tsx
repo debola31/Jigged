@@ -5,15 +5,14 @@ import {
   IconButton,
   Typography,
   Chip,
-  Stack,
   Tooltip,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import SpeedIcon from '@mui/icons-material/Speed';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import { formatTime } from '@/types/routings';
 
 export interface OperationRowData {
@@ -40,10 +39,10 @@ interface RoutingOperationRowProps {
 
 /**
  * Compact one-line operation row.
- *   [↑] [↓] | N. Operation Name (group) | [Setup chip] [Run chip] | ✏️ | 🗑
+ *   [↑] [↓] | N. Operation Name (group) | Setup 10 min · Run 2 min/unit | ✏️ | 🗑
  *
- * Time chips turn warning-colored when missing, so a routing with
- * incomplete data is visually obvious. Click ✏️ to open the edit modal.
+ * Times are subtle caption text; the individual fragment turns amber
+ * (warning color) when its value isn't set.
  */
 export default function RoutingOperationRow({
   row,
@@ -55,9 +54,18 @@ export default function RoutingOperationRow({
   onDelete,
   disabled = false,
 }: RoutingOperationRowProps) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   const placeholder = !row.operationTypeId;
   const setupSet = row.setupTime > 0;
   const runSet = row.runTimePerUnit !== null && row.runTimePerUnit > 0;
+
+  const setupLabel = setupSet ? `Setup ${formatTime(row.setupTime)}` : 'No setup';
+  const runLabel = runSet ? `Run ${formatTime(row.runTimePerUnit)}/unit` : 'No run time';
+
+  const setupSx = { color: setupSet ? 'text.secondary' : 'warning.main' };
+  const runSx = { color: runSet ? 'text.secondary' : 'warning.main' };
 
   return (
     <Box
@@ -117,29 +125,30 @@ export default function RoutingOperationRow({
             <Chip size="small" label={row.resourceGroupName} variant="outlined" />
           )}
         </Box>
+        {!placeholder && !isMobile && (
+          <Typography variant="caption" component="div">
+            <Box component="span" sx={setupSx}>
+              {setupLabel}
+            </Box>
+            <Box component="span" sx={{ color: 'text.secondary', mx: 0.5 }}>
+              ·
+            </Box>
+            <Box component="span" sx={runSx}>
+              {runLabel}
+            </Box>
+          </Typography>
+        )}
       </Box>
 
-      {!placeholder && (
-        <Stack direction="row" spacing={0.75} sx={{ flexShrink: 0 }}>
-          <Tooltip title={setupSet ? 'Setup time' : 'Setup time not set'}>
-            <Chip
-              size="small"
-              icon={<AccessTimeIcon sx={{ fontSize: 14 }} />}
-              label={setupSet ? `Setup ${formatTime(row.setupTime)}` : 'No setup'}
-              variant="outlined"
-              color={setupSet ? 'default' : 'warning'}
-            />
-          </Tooltip>
-          <Tooltip title={runSet ? 'Run time per unit' : 'Run time per unit not set'}>
-            <Chip
-              size="small"
-              icon={<SpeedIcon sx={{ fontSize: 14 }} />}
-              label={runSet ? `Run ${formatTime(row.runTimePerUnit)}/unit` : 'No run time'}
-              variant="outlined"
-              color={runSet ? 'default' : 'warning'}
-            />
-          </Tooltip>
-        </Stack>
+      {!placeholder && isMobile && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mr: 0.5 }}>
+          <Typography variant="caption" sx={setupSx}>
+            {setupLabel}
+          </Typography>
+          <Typography variant="caption" sx={runSx}>
+            {runLabel}
+          </Typography>
+        </Box>
       )}
 
       <Tooltip title="Edit">

@@ -47,20 +47,6 @@ export default function RoutingMaterialsList({
       .finally(() => setLoading(false));
   }, [companyId]);
 
-  const handleMoveUp = useCallback((index: number) => {
-    if (index <= 0) return;
-    const copy = [...rows];
-    [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]];
-    onChange(copy);
-  }, [rows, onChange]);
-
-  const handleMoveDown = useCallback((index: number) => {
-    if (index >= rows.length - 1) return;
-    const copy = [...rows];
-    [copy[index + 1], copy[index]] = [copy[index], copy[index + 1]];
-    onChange(copy);
-  }, [rows, onChange]);
-
   const handleDelete = useCallback((index: number) => {
     onChange(rows.filter((_, i) => i !== index));
   }, [rows, onChange]);
@@ -157,10 +143,6 @@ export default function RoutingMaterialsList({
           <RoutingMaterialRow
             key={row.tempId}
             row={row}
-            index={idx}
-            totalRows={rows.length}
-            onMoveUp={() => handleMoveUp(idx)}
-            onMoveDown={() => handleMoveDown(idx)}
             onEdit={() => setModalState({ mode: 'edit', rowIndex: idx })}
             onDelete={() => handleDelete(idx)}
             disabled={disabled}

@@ -4,7 +4,6 @@ import {
   Box,
   IconButton,
   Typography,
-  Chip,
   Tooltip,
 } from '@mui/material';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -19,7 +18,6 @@ export interface OperationRowData {
   tempId: string;
   operationTypeId: string;
   operationName: string;
-  resourceGroupName: string | null;
   laborRate: number | null;
   runTimePerUnit: number | null;
   setupTime: number;
@@ -121,9 +119,6 @@ export default function RoutingOperationRow({
           >
             {placeholder ? 'Click pencil to choose an operation' : row.operationName}
           </Typography>
-          {row.resourceGroupName && (
-            <Chip size="small" label={row.resourceGroupName} variant="outlined" />
-          )}
         </Box>
         {!placeholder && !isMobile && (
           <Typography variant="caption" component="div">

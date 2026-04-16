@@ -15,10 +15,10 @@ import {
   CircularProgress,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import type { OperationWithGroup } from '@/types/operations';
+import type { Operation } from '@/types/operations';
 
 export interface OperationModalValue {
-  operation: OperationWithGroup | null;
+  operation: Operation | null;
   setupTime: number;
   runTimePerUnit: number | null;
 }
@@ -27,7 +27,7 @@ interface AddOperationModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (value: OperationModalValue) => void;
-  operations: OperationWithGroup[];
+  operations: Operation[];
   /** When provided, the modal is in edit mode (title + initial values). */
   initial?: OperationModalValue;
   saving?: boolean;
@@ -35,7 +35,7 @@ interface AddOperationModalProps {
 
 /**
  * Modal for adding (or editing) a routing operation. Single screen with:
- *   - Operation picker (Autocomplete, grouped by resource group)
+ *   - Operation picker (Autocomplete, flat list)
  *   - Setup time (text input, no spinner arrows)
  *   - Run time per unit (text input, no spinner arrows)
  *
@@ -51,7 +51,7 @@ export default function AddOperationModal({
   initial,
   saving = false,
 }: AddOperationModalProps) {
-  const [operation, setOperation] = useState<OperationWithGroup | null>(null);
+  const [operation, setOperation] = useState<Operation | null>(null);
   const [setupStr, setSetupStr] = useState('');
   const [runStr, setRunStr] = useState('');
   const [touched, setTouched] = useState(false);
@@ -106,7 +106,6 @@ export default function AddOperationModal({
             <Autocomplete
               size="small"
               options={operations}
-              groupBy={(op) => op.resource_group?.name || 'Ungrouped'}
               getOptionLabel={(op) => op.name}
               value={operation}
               onChange={(_, newValue) => setOperation(newValue)}

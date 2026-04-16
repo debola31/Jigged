@@ -8,8 +8,6 @@ import {
   List,
   ListItem,
   ListItemText,
-  Chip,
-  Divider,
 } from '@mui/material';
 import BuildIcon from '@mui/icons-material/Build';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
@@ -59,18 +57,9 @@ export default function RoutingViewer({ routing }: RoutingViewerProps) {
                   </Box>
                   <ListItemText
                     primary={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                          {node.operation_type?.name || 'Unknown Operation'}
-                        </Typography>
-                        {node.operation_type?.resource_group?.name && (
-                          <Chip
-                            size="small"
-                            label={node.operation_type.resource_group.name}
-                            variant="outlined"
-                          />
-                        )}
-                      </Box>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {node.operation_type?.name || 'Unknown Operation'}
+                      </Typography>
                     }
                     secondary={
                       <Typography variant="caption" color="text.secondary">

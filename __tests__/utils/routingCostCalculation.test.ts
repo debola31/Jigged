@@ -75,7 +75,6 @@ function makeNode(overrides: Partial<RoutingWithGraph['nodes'][0]> = {}): Routin
       id: 'op-1',
       name: 'CNC Milling',
       labor_rate: 80,
-      resource_group_id: null,
     },
     ...overrides,
   };
@@ -107,12 +106,12 @@ describe('calculateRoutingCost', () => {
       makeNode({
         id: 'node-1',
         run_time_per_unit: 30,
-        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 80, resource_group_id: null },
+        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 80 },
       }),
       makeNode({
         id: 'node-2',
         run_time_per_unit: 15,
-        operation_type: { id: 'op-2', name: 'Grinding', labor_rate: 60, resource_group_id: null },
+        operation_type: { id: 'op-2', name: 'Grinding', labor_rate: 60 },
       }),
     ];
 
@@ -135,7 +134,7 @@ describe('calculateRoutingCost', () => {
       makeNode({
         id: 'node-1',
         run_time_per_unit: 60,
-        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 100, resource_group_id: null },
+        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 100 },
       }),
     ];
 
@@ -177,7 +176,7 @@ describe('calculateRoutingCost', () => {
   it('warns on missing labor_rate', async () => {
     const nodes = [
       makeNode({
-        operation_type: { id: 'op-1', name: 'Manual', labor_rate: null, resource_group_id: null },
+        operation_type: { id: 'op-1', name: 'Manual', labor_rate: null },
       }),
     ];
 
@@ -249,7 +248,7 @@ describe('calculateRoutingCost', () => {
       makeNode({
         run_time_per_unit: 30,
         setup_time: 60,
-        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 80, resource_group_id: null },
+        operation_type: { id: 'op-1', name: 'CNC Milling', labor_rate: 80 },
       }),
     ];
 
@@ -270,7 +269,7 @@ describe('calculateRoutingCost', () => {
       makeNode({
         run_time_per_unit: 30,
         setup_time: 0,
-        operation_type: { id: 'op-1', name: 'Manual Deburring', labor_rate: 50, resource_group_id: null },
+        operation_type: { id: 'op-1', name: 'Manual Deburring', labor_rate: 50 },
       }),
     ];
 

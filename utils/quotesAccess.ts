@@ -364,7 +364,7 @@ export async function createQuote(
 
   const partId = formData.part_type === 'existing' && formData.part_id ? formData.part_id : null;
 
-  // created_by is the current authenticated user — used to surface "prepared by"
+  // created_by is the current authenticated user — used to surface "created by"
   const { data: { user } } = await supabase.auth.getUser();
 
   const { data, error } = await supabase
@@ -761,7 +761,6 @@ export interface ConvertToJobResult {
 
 export interface ConvertToJobOptions {
   leadTimeDays?: number | null;
-  notes?: string | null;
 }
 
 /**
@@ -837,7 +836,6 @@ export async function convertQuoteToJob(
       quote_id: quoteId,
       customer_id: quote.customer_id,
       part_id: quote.part_id,
-      description: options.notes ?? null,
       status: 'not_started',
       due_date: dueDate,
       lead_time_days: resolvedLeadTime,

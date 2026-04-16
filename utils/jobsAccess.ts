@@ -73,9 +73,15 @@ export async function getAllJobs(
 
     if (filters.search?.trim()) {
       const sanitized = sanitizeSearchString(filters.search.trim());
-      query = query.or(
-        `job_number.ilike.%${sanitized}%,description.ilike.%${sanitized}%`
-      );
+      query = query.or(`job_number.ilike.%${sanitized}%`);
+    }
+
+    if (filters.overdue) {
+      const today = new Date().toISOString().slice(0, 10);
+      query = query
+        .not('due_date', 'is', null)
+        .lt('due_date', today)
+        .not('status', 'in', '(completed,shipped,cancelled)');
     }
 
     const { data, error } = await query;
@@ -251,7 +257,6 @@ export async function createJob(
       company_id: companyId,
       customer_id: formData.customer_id,
       part_id: formData.part_id,
-      description: formData.description.trim() || null,
       status: 'not_started',
       due_date: formData.due_date || null,
       lead_time_days: leadTimeDays,
@@ -317,7 +322,6 @@ export async function updateJob(jobId: string, formData: JobFormData): Promise<J
   if (canEditAllFields) {
     updatePatch.customer_id = formData.customer_id;
     updatePatch.part_id = formData.part_id || null;
-    updatePatch.description = formData.description.trim() || null;
   }
 
   const { data, error } = await supabase

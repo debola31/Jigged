@@ -402,12 +402,6 @@ export default function JobDetailPage() {
                 </Box>
               </Box>
 
-              {job.description && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Description</Typography>
-                  <Typography sx={{ whiteSpace: 'pre-wrap' }}>{job.description}</Typography>
-                </Box>
-              )}
             </CardContent>
           </Card>
         </Grid>

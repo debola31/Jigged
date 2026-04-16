@@ -123,7 +123,7 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 
 ### Allowed Tables (17 business tables)
 
-`companies`, `customers`, `quotes`, `quote_attachments`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `resource_groups`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
+`companies`, `customers`, `quotes`, `quote_attachments`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
 
 ### Excluded Tables (auth/system/AI)
 
@@ -153,7 +153,6 @@ These live in `insights_service.py` as chat fallbacks. They are registered in `M
 | `get_job_cycle_times` | Avg days from created -> shipped | `period_type`, `num_periods` | `[{period, avg_days, job_count}]` |
 | `get_customer_revenue_breakdown` | Revenue ranked by customer | `period_type`, `num_periods`, `limit` (default: 10) | `[{customer_name, revenue, job_count, pct_of_total}]` |
 | `get_part_profitability` | Revenue vs estimated labor cost by part | `limit` (default: 10) | `[{part_name, description, revenue, estimated_cost, margin_pct}]` |
-| `get_resource_utilization` | Booked hours by resource group | `period_type`, `num_periods` | `[{resource_group, booked_hours, job_count}]` |
 | `get_revenue_forecast` | Pipeline value from open quotes | — | `{total_pipeline, weighted_pipeline, quote_count, avg_conversion_rate}` |
 
 All functions implicitly receive `company_id` from the authenticated request context.

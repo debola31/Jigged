@@ -55,8 +55,7 @@ Sample data within the same company provides the same exploration value with zer
 |--------|-------|---------|
 | Customers | 3 | Acme Manufacturing, Ajax Industries, Precision Corp |
 | Parts | 6 | With pricing tiers across customers |
-| Resource Groups | 4 | CNC, Manual, Quality, Finishing |
-| Operation Types | 8 | With labor rates, linked to resource groups |
+| Operation Types | 8 | With labor rates |
 | Routings | 3 | With nodes and edges |
 | Quotes | 5 | pending_approval, accepted statuses |
 | Jobs | 4 | Pending, in_progress, completed statuses |
@@ -144,7 +143,6 @@ Add `is_sample BOOLEAN DEFAULT FALSE` to all data tables:
 ```sql
 ALTER TABLE customers ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
 ALTER TABLE parts ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
-ALTER TABLE resource_groups ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
 ALTER TABLE operation_types ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
 ALTER TABLE routings ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
 ALTER TABLE routing_nodes ADD COLUMN is_sample BOOLEAN DEFAULT FALSE;
@@ -221,11 +219,8 @@ Same structure as the previous demo company template — template-local `_ref` I
       "country": "USA"
     }
   ],
-  "resource_groups": [
-    { "_ref": "rg-1", "name": "CNC", "description": "CNC Machining" }
-  ],
   "operation_types": [
-    { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00, "resource_group_ref": "rg-1" }
+    { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00 }
   ],
   "parts": [
     { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
@@ -245,7 +240,7 @@ Same structure as the previous demo company template — template-local `_ref` I
   ],
   "jobs": [
     {
-      "_ref": "job-1", "job_number": "J-SAMPLE-001", "customer_ref": "cust-1", "part_ref": "part-1", "quote_ref": "quote-1", "routing_ref": "routing-1", "status": "in_progress", "description": "Precision Brackets - 50 units",
+      "_ref": "job-1", "job_number": "J-SAMPLE-001", "customer_ref": "cust-1", "part_ref": "part-1", "quote_ref": "quote-1", "routing_ref": "routing-1", "status": "in_progress",
       "operations": [
         { "_ref": "jop-1", "sequence": 1, "operation_name": "CNC Milling", "operation_type_ref": "op-1", "estimated_run_hours_per_unit": 0.5, "quantity_completed": 20, "status": "in_progress" }
       ]
@@ -319,30 +314,19 @@ BEGIN
                 COALESCE(v_item->>'country', 'USA'), TRUE);
     END LOOP;
 
-    -- 4. Insert resource_groups
-    FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
-    LOOP
-        v_new_id := gen_random_uuid();
-        v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-        INSERT INTO resource_groups (id, company_id, name, description, is_sample)
-        VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description', TRUE);
-    END LOOP;
-
-    -- 5. Insert operation_types (depends on resource_groups)
+    -- 4. Insert operation_types
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
     LOOP
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description, is_sample)
+        INSERT INTO operation_types (id, company_id, name, labor_rate, description, is_sample)
         VALUES (v_new_id, p_company_id,
-                (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
                 v_item->>'name', (v_item->>'labor_rate')::NUMERIC,
                 v_item->>'description', TRUE);
     END LOOP;
 
-    -- 6. Insert parts (depends on customers)
+    -- 5. Insert parts (depends on customers)
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
     LOOP
         v_new_id := gen_random_uuid();
@@ -498,7 +482,6 @@ BEGIN
     DELETE FROM parts WHERE company_id = p_company_id AND is_sample = TRUE;
     DELETE FROM inventory_items WHERE company_id = p_company_id AND is_sample = TRUE;
     DELETE FROM operation_types WHERE company_id = p_company_id AND is_sample = TRUE;
-    DELETE FROM resource_groups WHERE company_id = p_company_id AND is_sample = TRUE;
     DELETE FROM customers WHERE company_id = p_company_id AND is_sample = TRUE;
 
     -- Mark company as no longer having sample data

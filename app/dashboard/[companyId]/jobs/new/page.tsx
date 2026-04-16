@@ -12,7 +12,6 @@ export default function NewJobPage() {
     ...EMPTY_JOB_FORM,
     customer_id: searchParams.get('customer_id') || '',
     part_id: searchParams.get('part_id') || '',
-    description: searchParams.get('description') || '',
   };
 
   return <JobForm mode="create" initialData={initialData} />;

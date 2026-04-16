@@ -21,10 +21,10 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
-import { getOperationWithGroup, deleteOperation } from '@/utils/operationsAccess';
+import { getOperation, deleteOperation } from '@/utils/operationsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import StationQRCode from '@/components/operations/StationQRCode';
-import type { OperationWithGroup } from '@/types/operations';
+import type { Operation } from '@/types/operations';
 
 export default function OperationDetailPage() {
   const params = useParams();
@@ -32,7 +32,7 @@ export default function OperationDetailPage() {
   const companyId = params.companyId as string;
   const operationId = params.operationId as string;
 
-  const [operation, setOperation] = useState<OperationWithGroup | null>(null);
+  const [operation, setOperation] = useState<Operation | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -47,7 +47,7 @@ export default function OperationDetailPage() {
     try {
       setLoading(true);
       const [operationData, companyData] = await Promise.all([
-        getOperationWithGroup(operationId),
+        getOperation(operationId),
         getCompany(companyId),
       ]);
       setOperation(operationData);
@@ -189,14 +189,6 @@ export default function OperationDetailPage() {
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>
                     {operation.name}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Resource Group
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {operation.resource_group?.name ?? 'Ungrouped'}
                   </Typography>
                 </Box>
                 <Box>

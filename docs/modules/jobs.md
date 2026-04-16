@@ -67,7 +67,6 @@ Overdue surfaces as:
 | quote_id | UUID (FK) | No | Link to source quote (if created from quote) |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | part_id | UUID (FK) | Yes | Link to part (routing is auto-resolved from the part's routing) |
-| description | Text | No | Job/part description |
 | status | Text | Yes | not_started, in_progress, completed, shipped, cancelled |
 | due_date | Date | No | Date the job is due to ship. Used to derive the "Overdue" badge |
 | lead_time_days | Integer | No | Lead time in days, typically copied from the source quote. Editable on the job |
@@ -88,7 +87,7 @@ Overdue surfaces as:
 
 **Features:**
 
-- Table showing: Job #, Customer, Part, Current Op, Description, Status, Created
+- Table showing: Job #, Customer, Part, Current Op, Status, Created
 
 - Search box (searches job number, customer name, part number)
 

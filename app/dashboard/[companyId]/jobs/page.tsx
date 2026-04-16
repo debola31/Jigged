@@ -16,10 +16,9 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -45,7 +44,8 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { JobStatusChip } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import Chip from '@mui/material/Chip';
-import type { JobWithRelations, JobFilters } from '@/types/job';
+import type { JobWithRelations, JobFilters, JobStatus } from '@/types/job';
+import { JOB_STATUS_CONFIG } from '@/types/job';
 
 export default function JobsPage() {
   const router = useRouter();
@@ -58,6 +58,7 @@ export default function JobsPage() {
   const [searchDebounced, setSearchDebounced] = useState('');
   const [statusFilter, setStatusFilter] = useState<JobFilters['status']>('all');
   const [customerFilter, setCustomerFilter] = useState<string>('');
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',
@@ -110,6 +111,7 @@ export default function JobsPage() {
         status: statusFilter,
         customerId: customerFilter || undefined,
         search: searchDebounced,
+        overdue: overdueOnly || undefined,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
 
@@ -136,7 +138,7 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, statusFilter, customerFilter, searchDebounced, sortModel]);
+  }, [companyId, statusFilter, customerFilter, searchDebounced, sortModel, overdueOnly]);
 
   useEffect(() => {
     fetchJobs();
@@ -148,7 +150,7 @@ export default function JobsPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, statusFilter, customerFilter]);
+  }, [searchDebounced, statusFilter, customerFilter, overdueOnly]);
 
   const gridHeight = useMemo(() => {
     if (loading || jobs.length === 0) return 600;
@@ -313,13 +315,6 @@ export default function JobsPage() {
       },
     },
     {
-      field: 'description',
-      headerName: 'Description',
-      flex: 1,
-      minWidth: 200,
-      valueFormatter: (params) => params.value || '—',
-    },
-    {
       field: 'status',
       headerName: 'Status',
       width: 180,
@@ -347,14 +342,15 @@ export default function JobsPage() {
     },
   ];
 
-  const statusOptions: Array<{ value: JobFilters['status']; label: string }> = [
-    { value: 'all', label: 'All Jobs' },
-    { value: 'not_started', label: 'Not Started' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'shipped', label: 'Shipped' },
-    { value: 'cancelled', label: 'Cancelled' },
-  ];
+  const statusOptions: SelectOption[] = (Object.keys(JOB_STATUS_CONFIG) as JobStatus[]).map((key) => ({
+    id: key,
+    label: JOB_STATUS_CONFIG[key].label,
+  }));
+
+  const customerOptions: SelectOption[] = customers.map((c) => ({
+    id: c.id,
+    label: c.name,
+  }));
 
   return (
     <Box>
@@ -385,36 +381,41 @@ export default function JobsPage() {
           }}
         />
 
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel>Status</InputLabel>
-          <Select
-            value={statusFilter}
+        <Box sx={{ minWidth: 180 }}>
+          <SearchableSelect
+            options={statusOptions}
+            value={statusFilter === 'all' ? '' : (statusFilter ?? '')}
+            onChange={(value) => setStatusFilter((value || 'all') as JobFilters['status'])}
             label="Status"
-            onChange={(e) => setStatusFilter(e.target.value as JobFilters['status'])}
-          >
-            {statusOptions.map((opt) => (
-              <MenuItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+            allowNone
+            noneLabel="All Jobs"
+            size="small"
+          />
+        </Box>
 
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>Customer</InputLabel>
-          <Select
+        <Box sx={{ minWidth: 220 }}>
+          <SearchableSelect
+            options={customerOptions}
             value={customerFilter}
+            onChange={setCustomerFilter}
             label="Customer"
-            onChange={(e) => setCustomerFilter(e.target.value)}
-          >
-            <MenuItem value="">All Customers</MenuItem>
-            {customers.map((c) => (
-              <MenuItem key={c.id} value={c.id}>
-                {c.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+            allowNone
+            noneLabel="All Customers"
+            size="small"
+          />
+        </Box>
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={overdueOnly}
+              onChange={(e) => setOverdueOnly(e.target.checked)}
+              size="small"
+            />
+          }
+          label="Overdue only"
+          sx={{ ml: 0 }}
+        />
 
         {selectedIds.length > 0 && (
           <>
@@ -454,11 +455,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || customerFilter || statusFilter !== 'all'
+              {searchDebounced || customerFilter || statusFilter !== 'all' || overdueOnly
                 ? 'No jobs match your filters.'
                 : 'Create your first job to get started.'}
             </Typography>
-            {!searchDebounced && !customerFilter && statusFilter === 'all' && (
+            {!searchDebounced && !customerFilter && statusFilter === 'all' && !overdueOnly && (
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}

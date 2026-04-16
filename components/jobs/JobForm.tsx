@@ -282,17 +282,6 @@ export default function JobForm({
 
             <Divider />
 
-            {/* Description */}
-            <TextField
-              label="Description"
-              value={formData.description}
-              onChange={(e) => handleChange('description', e.target.value)}
-              multiline
-              rows={3}
-              disabled={loading}
-              placeholder="Optional job description or special instructions"
-            />
-
             {/* Scheduling: lead time + due date */}
             <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
               <TextField

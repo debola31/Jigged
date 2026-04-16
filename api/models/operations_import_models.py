@@ -28,7 +28,6 @@ class OperationConflictInfo(BaseModel):
 
     row_number: int
     csv_name: Optional[str]
-    csv_resource_group: Optional[str]
     conflict_type: str  # "duplicate_name" | "csv_duplicate"
     existing_operation_id: str  # Empty string for non-DB conflicts
     existing_value: str  # Additional conflict info
@@ -49,7 +48,6 @@ class OperationValidateRequest(BaseModel):
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # All parsed CSV rows
-    create_groups: bool = True  # Auto-create resource groups
 
 
 class OperationValidateResponse(BaseModel):
@@ -62,7 +60,6 @@ class OperationValidateResponse(BaseModel):
     conflict_rows_count: int
     error_rows_count: int
     skipped_rows_count: int
-    groups_to_create: list[str]  # New groups that will be created
 
 
 class OperationImportError(BaseModel):
@@ -80,7 +77,6 @@ class OperationExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
-    create_groups: bool = True  # Auto-create resource groups
 
 
 class OperationExecuteResponse(BaseModel):
@@ -89,7 +85,6 @@ class OperationExecuteResponse(BaseModel):
     success: bool
     imported_count: int
     skipped_count: int
-    groups_created: int
     errors: list[OperationImportError]
 
 
@@ -104,11 +99,6 @@ OPERATION_SCHEMA = {
         "type": "number",
         "required": False,
         "description": "Hourly labor rate in dollars (e.g., 135.00)",
-    },
-    "resource_group": {
-        "type": "string",
-        "required": False,
-        "description": "Group/category name (e.g., 'CNC', 'LATHE&MILL', 'EDM')",
     },
     "description": {
         "type": "string",

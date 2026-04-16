@@ -135,15 +135,8 @@ SCHEMA_CONTEXT = """
 ### operation_types (e.g. "CNC Milling", "Lathe", "Grinding")
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
-- resource_group_id: UUID (FK -> resource_groups.id, nullable)
 - name: TEXT (unique per company)
 - labor_rate: NUMERIC(10,2) (cost per hour)
-- description: TEXT
-
-### resource_groups (e.g. "3-Axis Mills", "Lathes", "Manual")
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- name: TEXT (unique per company)
 - description: TEXT
 
 ### operator_sessions (time tracking for operators working on jobs)
@@ -196,7 +189,6 @@ SCHEMA_CONTEXT = """
 - jobs.part_id -> parts.id
 - job_operations.job_id -> jobs.id (a job has many operations)
 - job_operations.operation_type_id -> operation_types.id
-- operation_types.resource_group_id -> resource_groups.id
 - quotes.customer_id -> customers.id
 - quotes.part_id -> parts.id
 - routings.part_id -> parts.id (1:1)
@@ -275,7 +267,6 @@ ALLOWED_TABLES = frozenset({
     "job_materials",
     "job_attachments",
     "operation_types",
-    "resource_groups",
     "operator_sessions",
     "inventory_items",
     "inventory_unit_conversions",

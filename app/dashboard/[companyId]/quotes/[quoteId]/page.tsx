@@ -197,7 +197,7 @@ export default function QuoteDetailPage() {
             </Typography>
             {(quote.created_by_member?.name || quote.created_by_member?.email) && (
               <Typography variant="body2" color="text.secondary">
-                Prepared by{' '}
+                Created by{' '}
                 <Typography component="span" variant="body2" color="text.primary" sx={{ fontWeight: 500 }}>
                   {quote.created_by_member.name || quote.created_by_member.email}
                 </Typography>

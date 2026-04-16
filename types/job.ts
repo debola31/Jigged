@@ -67,9 +67,25 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   shipped_at: string | null;
+  due_date: string | null;
+  lead_time_days: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * True when a job's due date has passed and it isn't done yet.
+ * Cancelled/completed/shipped jobs are never "overdue" — the clock stops.
+ */
+export function isJobOverdue(job: Pick<Job, 'due_date' | 'status'>): boolean {
+  if (!job.due_date) return false;
+  if (job.status === 'completed' || job.status === 'shipped' || job.status === 'cancelled') {
+    return false;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(job.due_date) < today;
 }
 
 /**
@@ -147,6 +163,8 @@ export interface JobFormData {
   customer_id: string;
   part_id: string;
   description: string;
+  due_date: string; // ISO date (YYYY-MM-DD), '' when not set
+  lead_time_days: string;
 }
 
 /**
@@ -165,6 +183,8 @@ export const EMPTY_JOB_FORM: JobFormData = {
   customer_id: '',
   part_id: '',
   description: '',
+  due_date: '',
+  lead_time_days: '',
 };
 
 /**
@@ -175,6 +195,8 @@ export function jobToFormData(job: Job): JobFormData {
     customer_id: job.customer_id,
     part_id: job.part_id || '',
     description: job.description || '',
+    due_date: job.due_date || '',
+    lead_time_days: job.lead_time_days !== null ? String(job.lead_time_days) : '',
   };
 }
 

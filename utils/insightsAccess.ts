@@ -23,10 +23,6 @@ export interface ChartConfig {
   y_label?: string;
 }
 
-export interface DashboardInsightsResponse {
-  insights: InsightCard[];
-}
-
 export interface ChatResponse {
   answer: string;
   chart_config: ChartConfig | null;
@@ -77,61 +73,6 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 // ============================================================
 // API Functions
 // ============================================================
-
-/**
- * Get the 5 pre-built dashboard insight cards.
- * Serves from cache if available, otherwise computes fresh.
- */
-export async function getDashboardInsights(
-  companyId: string
-): Promise<InsightCard[]> {
-  const headers = await getAuthHeaders();
-
-  const response = await fetch(
-    `${API_BASE_URL}/api/insights/${companyId}/dashboard`,
-    {
-      method: 'GET',
-      headers,
-    }
-  );
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Failed to fetch insights (${response.status})`
-    );
-  }
-
-  const data: DashboardInsightsResponse = await response.json();
-  return data.insights;
-}
-
-/**
- * Force-refresh all cached insights for a company.
- */
-export async function refreshInsights(
-  companyId: string
-): Promise<InsightCard[]> {
-  const headers = await getAuthHeaders();
-
-  const response = await fetch(
-    `${API_BASE_URL}/api/insights/${companyId}/refresh`,
-    {
-      method: 'POST',
-      headers,
-    }
-  );
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Failed to refresh insights (${response.status})`
-    );
-  }
-
-  const data: DashboardInsightsResponse = await response.json();
-  return data.insights;
-}
 
 /**
  * Submit a natural language question about company data.

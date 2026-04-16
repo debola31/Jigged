@@ -2,13 +2,12 @@
 API routes for AI Insights & Charts feature.
 
 Endpoints:
-- GET  /{company_id}/dashboard   - Get 5 pre-built insight cards
-- POST /{company_id}/refresh     - Force-refresh all cached insights
 - POST /{company_id}/chat        - Submit natural language question
 - GET  /{company_id}/chat/history - Get last 20 chat queries
 
 Note: Saved insights CRUD (get/save/delete) is handled client-side
-via direct Supabase queries with RLS policies.
+via direct Supabase queries with RLS policies. Per-company alerts
+(at-risk jobs, low inventory) are also client-side via utils/alertsAccess.ts.
 """
 
 import json
@@ -27,13 +26,8 @@ from models.insights_models import (
     ChatHistoryResponse,
     ChatRequest,
     ChatResponse,
-    DashboardInsightsResponse,
-    InsightCard,
 )
-from services.insights_service import (
-    _build_chat_system_prompt,
-    compute_dashboard_insights,
-)
+from services.insights_service import _build_chat_system_prompt
 from tools.metric_tools import CHAT_TOOLS
 
 logger = logging.getLogger(__name__)
@@ -77,49 +71,6 @@ def _check_chat_rate_limit(company_id: str) -> None:
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e}")
         # If rate limit check fails, allow the request through
-
-
-# ============================================================
-# Dashboard Insights
-# ============================================================
-
-
-@router.get("/{company_id}/dashboard", response_model=DashboardInsightsResponse)
-async def get_dashboard_insights(company_id: str):
-    """
-    Get the 5 pre-built dashboard insight cards.
-    Serves from cache if available and not expired, otherwise computes fresh.
-    """
-    try:
-        insights_data = await compute_dashboard_insights(company_id)
-        insights = [InsightCard(**insight) for insight in insights_data]
-        return DashboardInsightsResponse(insights=insights)
-    except Exception as e:
-        logger.error(f"Error getting dashboard insights: {e}", exc_info=True)
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
-
-
-@router.post("/{company_id}/refresh", response_model=DashboardInsightsResponse)
-async def refresh_insights(company_id: str):
-    """
-    Force-refresh all cached insights for a company.
-    Bypasses cache and recomputes all 5 insight types.
-    """
-    try:
-        insights_data = await compute_dashboard_insights(company_id, force_refresh=True)
-        insights = [InsightCard(**insight) for insight in insights_data]
-        return DashboardInsightsResponse(insights=insights)
-    except Exception as e:
-        logger.error(f"Error refreshing insights: {e}", exc_info=True)
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
 
 
 # ============================================================

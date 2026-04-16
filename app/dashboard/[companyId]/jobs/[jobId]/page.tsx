@@ -42,6 +42,7 @@ import {
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
 import type { JobWithRelations, JobOperation, JobAttachment } from '@/types/job';
 import { JobStatusChip, OperationsPanel, ViewRoutingModal, JobQRCode } from '@/components/jobs';
+import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -211,9 +212,20 @@ export default function JobDetailPage() {
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <JobStatusChip status={job.status} size="medium" />
+            <JobOverdueBadge job={job} size="medium" />
             <Typography variant="body2" color="text.secondary">
               Created {formatDate(job.created_at)}
             </Typography>
+            {job.due_date && (
+              <Typography variant="body2" color="text.secondary">
+                Due {formatDate(job.due_date)}
+              </Typography>
+            )}
+            {job.lead_time_days !== null && (
+              <Typography variant="body2" color="text.secondary">
+                Lead: {job.lead_time_days}d
+              </Typography>
+            )}
           </Box>
         </Box>
 

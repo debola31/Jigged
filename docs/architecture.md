@@ -198,7 +198,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 **Status Workflows:**
 
-- Quote: pending_approval → approved/rejected/expired
+- Quote: active → expired (convertible any time; `converted_to_job_id` marks conversion)
 
 - Job: not_started → in_progress → completed → shipped / cancelled
 

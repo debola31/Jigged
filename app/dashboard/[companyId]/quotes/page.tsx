@@ -47,11 +47,13 @@ import {
   getAllQuotes,
   deleteQuote,
   bulkDeleteQuotes,
+  sweepExpiredQuotes,
 } from '@/utils/quotesAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
+import { getCompanyMembers } from '@/utils/companyAccess';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
-import type { QuoteWithRelations, QuoteStatus, QuoteFilters } from '@/types/quote';
+import type { QuoteWithRelations, QuoteStatus, QuoteFilters, CompanyMember } from '@/types/quote';
 import type { Customer } from '@/types/customer';
 
 export default function QuotesPage() {
@@ -65,6 +67,7 @@ export default function QuotesPage() {
   const [searchDebounced, setSearchDebounced] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>('all');
   const [customerFilter, setCustomerFilter] = useState<string>('');
+  const [createdByFilter, setCreatedByFilter] = useState<string>('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',
     sort: 'desc',
@@ -72,6 +75,8 @@ export default function QuotesPage() {
 
   // Customer list for filter
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // Team member list for "Prepared By" filter
+  const [members, setMembers] = useState<CompanyMember[]>([]);
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -107,9 +112,12 @@ export default function QuotesPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Load customers for filter dropdown
+  // Load customers + team members for filter dropdowns; also kick off a
+  // fire-and-forget sweep to flip any active-but-past-expiration quotes.
   useEffect(() => {
     getAllCustomers(companyId).then(setCustomers).catch(console.error);
+    getCompanyMembers(companyId).then(setMembers).catch(console.error);
+    sweepExpiredQuotes(companyId).catch(console.error);
   }, [companyId]);
 
   const fetchQuotes = useCallback(async () => {
@@ -118,6 +126,7 @@ export default function QuotesPage() {
       const filters: QuoteFilters = {};
       if (statusFilter !== 'all') filters.status = statusFilter;
       if (customerFilter) filters.customerId = customerFilter;
+      if (createdByFilter) filters.createdBy = createdByFilter;
       if (searchDebounced) filters.search = searchDebounced;
 
       const data = await getAllQuotes(companyId, filters, sortModel.field, sortModel.sort);
@@ -127,7 +136,7 @@ export default function QuotesPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, searchDebounced, statusFilter, customerFilter, sortModel]);
+  }, [companyId, searchDebounced, statusFilter, customerFilter, createdByFilter, sortModel]);
 
   useEffect(() => {
     fetchQuotes();
@@ -139,7 +148,7 @@ export default function QuotesPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, statusFilter, customerFilter]);
+  }, [searchDebounced, statusFilter, customerFilter, createdByFilter]);
 
   // Grid height calculation
   const gridHeight = useMemo(() => {
@@ -247,22 +256,8 @@ export default function QuotesPage() {
       colId: 'customer',
       headerName: 'Customer',
       flex: 1,
-      minWidth: 150,
+      minWidth: 160,
       valueGetter: (params) => params.data?.customers?.name || '—',
-    },
-    {
-      colId: 'part',
-      headerName: 'Part',
-      flex: 1,
-      minWidth: 150,
-      valueGetter: (params) =>
-        params.data?.parts?.part_name || '—',
-    },
-    {
-      field: 'quantity',
-      headerName: 'Qty',
-      width: 80,
-      type: 'numericColumn',
     },
     {
       field: 'total_price',
@@ -273,11 +268,27 @@ export default function QuotesPage() {
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 110,
       cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
         if (!params.data) return null;
         return <QuoteStatusChip status={params.data.status} />;
       },
+    },
+    {
+      colId: 'prepared_by',
+      headerName: 'Prepared By',
+      width: 160,
+      valueGetter: (params) =>
+        params.data?.created_by_member?.name ||
+        params.data?.created_by_member?.email ||
+        '—',
+    },
+    {
+      field: 'expiration_date',
+      headerName: 'Expires',
+      width: 120,
+      valueFormatter: (params: ValueFormatterParams) =>
+        params.value ? formatDate(params.value) : '—',
     },
     {
       field: 'created_at',
@@ -347,9 +358,7 @@ export default function QuotesPage() {
             onChange={(e) => setStatusFilter(e.target.value as QuoteStatus | 'all')}
           >
             <MenuItem value="all">All Statuses</MenuItem>
-            <MenuItem value="pending_approval">Pending Approval</MenuItem>
-            <MenuItem value="approved">Approved</MenuItem>
-            <MenuItem value="rejected">Rejected</MenuItem>
+            <MenuItem value="active">Active</MenuItem>
             <MenuItem value="expired">Expired</MenuItem>
           </Select>
         </FormControl>
@@ -365,6 +374,23 @@ export default function QuotesPage() {
             label="Customer"
             allowNone
             noneLabel="All Customers"
+            size="small"
+          />
+        </Box>
+
+        <Box sx={{ minWidth: 200 }}>
+          <SearchableSelect
+            options={members
+              .filter((m) => m.name || m.email)
+              .map((m): SelectOption => ({
+                id: m.user_id,
+                label: m.name || m.email || 'Unknown',
+              }))}
+            value={createdByFilter}
+            onChange={setCreatedByFilter}
+            label="Created By"
+            allowNone
+            noneLabel="All Users"
             size="small"
           />
         </Box>
@@ -403,11 +429,11 @@ export default function QuotesPage() {
               No quotes yet
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || statusFilter !== 'all' || customerFilter
+              {searchDebounced || statusFilter !== 'all' || customerFilter || createdByFilter
                 ? 'No quotes match your filters.'
                 : 'Create your first quote to get started.'}
             </Typography>
-            {!searchDebounced && statusFilter === 'all' && !customerFilter && (
+            {!searchDebounced && statusFilter === 'all' && !customerFilter && !createdByFilter && (
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}

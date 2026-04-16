@@ -6,25 +6,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class InsightCard(BaseModel):
-    """A single dashboard insight card with metric data and AI summary."""
-
-    type: str = Field(..., description="Insight type identifier (e.g. 'revenue_trend')")
-    summary: str = Field(..., description="AI-generated summary text (1-3 sentences)")
-    metric_data: dict = Field(..., description="Raw metric data for the insight")
-    chart_config: Optional[dict] = Field(
-        None, description="Chart configuration for rendering (chart_type, data, x_key, y_key, etc.)"
-    )
-    computed_at: datetime = Field(..., description="When this insight was computed")
-    is_cached: bool = Field(False, description="Whether this was served from cache")
-
-
-class DashboardInsightsResponse(BaseModel):
-    """Response containing all dashboard insight cards."""
-
-    insights: list[InsightCard]
-
-
 class ChatRequest(BaseModel):
     """Request to submit a natural language question."""
 

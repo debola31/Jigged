@@ -27,7 +27,7 @@ The Dashboard is the home screen after login - a high-level overview of the shop
 
 ### Card 1: Open Quotes
 
-**Query:** Count quotes where status IN ('draft', 'pending_approval')
+**Query:** Count quotes where status = 'active'
 
 **Display:**
 
@@ -163,7 +163,7 @@ Activity is derived from `created_at`, `started_at`, `completed_at`, `shipped_at
 
 - [ ] Dashboard loads as home page after login
 
-- [ ] Shows count of open quotes (draft + pending_approval)
+- [ ] Shows count of open quotes (status = active)
 
 - [ ] Shows count of jobs not started and jobs in progress as separate tiles
 

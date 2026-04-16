@@ -8,7 +8,7 @@ The AI Insights module gives shop owners and administrators an intelligent data 
 
 **Dependencies:** Dashboard, Jobs, Quotes, Customers, Parts, Operations, Inventory modules
 
-**Database Tables:** `ai_insight_cache`, `ai_chat_queries`, `ai_config` (existing), `saved_insights`
+**Database Tables:** `ai_chat_queries`, `ai_config` (existing), `saved_insights`
 
 **Chart Library:** `@mui/x-charts` (MUI's native charting — seamless dark theme integration)
 
@@ -27,7 +27,6 @@ The AI Insights module gives shop owners and administrators an intelligent data 
 | Admin | Get AI-generated summaries explaining my metrics | I understand the "so what" behind the numbers |
 | Admin | See inventory items that need reordering | I can prevent stockouts before they delay jobs |
 | User | Click example prompts to quickly ask common questions | I can get answers without knowing what to type |
-| Admin | Have insights cached so the page loads fast | I'm not waiting for AI every time I open the dashboard |
 | Admin | Pin AI-generated charts to my dashboard | I build a personalized view of the metrics I care about |
 | Admin | Remove pinned charts I no longer need | I can keep my dashboard focused and relevant |
 | Admin | See starter prompts when my chart grid is empty | I know how to get started without reading docs |
@@ -54,16 +53,9 @@ The AI chat uses a **text-to-SQL** approach: the AI generates SQL queries agains
 6. **Row limit** — 200 rows max, enforced programmatically
 7. **Self-correction** — AI sees SQL errors as tool results and can retry (up to 5 iterations)
 
-### Two Code Paths: Chat vs Dashboard Cache
+### Single Code Path: Text-to-SQL via Chat
 
-| | Chat (Ask Bar) | Dashboard Cache |
-|---|---|---|
-| **How it works** | AI generates SQL via `execute_sql` tool | Direct Python metric functions |
-| **Tools** | `CHAT_TOOLS` (text-to-SQL) | `METRIC_TOOLS` (predefined functions) |
-| **Flexibility** | Any question | Fixed 5 insight types |
-| **Speed** | 3-8 seconds (AI + SQL) | < 1 second (cached) |
-
-The dashboard cache path (`compute_dashboard_insights`) still uses the 10 predefined metric functions for fast, predictable card rendering. Only the chat path uses text-to-SQL.
+The dashboard page is user-driven: the ask bar is the only way to generate insights, and users pin the results they want to keep (`saved_insights`). There is no pre-built "5 cached cards" panel — that pipeline was removed along with the `ai_insight_cache` table because nothing read the AI summaries it generated and it burned Anthropic credits on every dashboard load. The header `AlertBadge` (at-risk jobs + low inventory) is pure Supabase aggregation; see [utils/alertsAccess.ts](../../utils/alertsAccess.ts).
 
 ### Chat Flow
 
@@ -135,7 +127,7 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 
 ### Excluded Tables (auth/system/AI)
 
-`user_company_access`, `user_preferences`, `system_admins`, `ai_chat_queries`, `ai_insight_cache`, `ai_config`, `saved_insights`, `demo_data_templates`
+`user_company_access`, `user_preferences`, `system_admins`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`
 
 ### Adding a New Table to AI Scope
 
@@ -149,9 +141,9 @@ When a new business table is added to the database and should be queryable by th
 
 ---
 
-## Pre-defined Metric Functions (Dashboard Cache Only)
+## Pre-defined Metric Functions
 
-These functions are used by `compute_dashboard_insights()` for the 5 cached dashboard cards. They are **not** used by the chat path (which uses text-to-SQL instead).
+These live in `insights_service.py` as chat fallbacks. They are registered in `METRIC_TOOLS` but not passed to the model in `CHAT_TOOLS` (which is `execute_sql` only). The predefined dispatcher in `claude_provider.chat_with_tools` still routes any predefined tool the model emits to these functions, so they stay callable if a predefined tool is ever re-enabled.
 
 | Function | Description | Parameters | Returns |
 |---|---|---|---|
@@ -161,25 +153,12 @@ These functions are used by `compute_dashboard_insights()` for the 5 cached dash
 | `get_job_cycle_times` | Avg days from created -> shipped | `period_type`, `num_periods` | `[{period, avg_days, job_count}]` |
 | `get_customer_revenue_breakdown` | Revenue ranked by customer | `period_type`, `num_periods`, `limit` (default: 10) | `[{customer_name, revenue, job_count, pct_of_total}]` |
 | `get_part_profitability` | Revenue vs estimated labor cost by part | `limit` (default: 10) | `[{part_name, description, revenue, estimated_cost, margin_pct}]` |
-| `get_inventory_alerts` | Items at or below reorder point | — | `[{item_name, sku, quantity, reorder_point, unit}]` |
-| `get_at_risk_jobs` | Jobs behind schedule | — | `[{job_number, customer_name, pct_complete, estimated_completion, severity}]` |
 | `get_resource_utilization` | Booked hours by resource group | `period_type`, `num_periods` | `[{resource_group, booked_hours, job_count}]` |
 | `get_revenue_forecast` | Pipeline value from open quotes | — | `{total_pipeline, weighted_pipeline, quote_count, avg_conversion_rate}` |
 
 All functions implicitly receive `company_id` from the authenticated request context.
 
-### At-Risk Job Severity Calculation
-
-```
-severity = based on:
-  - % complete vs % of estimated time elapsed
-  - "critical" if < 50% complete and > 80% of estimated time used
-  - "warning" if < 75% complete and > 75% of estimated time used
-  - "on_track" otherwise
-
-Estimated time = sum of (estimated_run_hours_per_unit x job quantity) across job_operations
-Actual progress = sum of quantity_completed / job quantity across job_operations
-```
+At-risk jobs and low-inventory alerts are **not** in this list — they are computed client-side in [utils/alertsAccess.ts](../../utils/alertsAccess.ts) and consumed by the header `AlertBadge` popover. They use Supabase RLS directly (no service-role, no AI).
 
 ---
 
@@ -187,20 +166,9 @@ Actual progress = sum of quantity_completed / job quantity across job_operations
 
 > **Migration files:** `supabase/migrations/20260305000000_create_ai_insights_tables.sql` and `supabase/migrations/20260305000001_create_ai_readonly_role.sql`
 
-### Table: `ai_insight_cache`
+### Removed: `ai_insight_cache`
 
-Caches pre-computed dashboard insight cards to avoid calling the AI on every page load.
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| id | UUID | Yes | Primary key, `gen_random_uuid()` |
-| company_id | UUID | Yes | FK to `companies` |
-| insight_type | VARCHAR(50) | Yes | `'revenue_trend'`, `'job_pipeline'`, `'quote_conversion'`, `'at_risk_jobs'`, `'inventory_alerts'` |
-| metric_data | JSONB | Yes | Raw output from the metric function |
-| ai_summary | TEXT | Yes | AI-generated one-liner interpretation |
-| chart_config | JSONB | No | `{chart_type, data, x_axis, y_axis, ...}` for frontend rendering |
-| computed_at | TIMESTAMPTZ | Yes | When this insight was computed |
-| expires_at | TIMESTAMPTZ | Yes | Cache expiry (default: `computed_at + 1 hour`) |
+Previously cached pre-built dashboard insight cards. Dropped in `20260416_drop_ai_insight_cache.sql` — the 5-card panel was removed, so nothing read or wrote the table.
 
 ### Table: `ai_chat_queries`
 
@@ -347,42 +315,6 @@ All charts use the MUI theme palette — no hardcoded colors.
 
 All endpoints require a valid Supabase JWT and verify the user has `owner`, `admin`, or `user` role for the company. Operators are excluded.
 
-### `GET /api/insights/{company_id}/dashboard`
-
-Returns all 5 pre-built insight cards. Serves from cache if not expired; otherwise computes fresh.
-
-**Response:**
-
-```json
-{
-  "insights": [
-    {
-      "type": "revenue_trend",
-      "summary": "Revenue is up 12% this week ($14,200 vs $12,680 last week), driven by Acme Manufacturing's bracket order.",
-      "metric_data": [
-        {"period": "2026-02-02", "amount": 8500, "job_count": 3},
-        {"period": "2026-02-09", "amount": 12680, "job_count": 5}
-      ],
-      "chart_config": {
-        "chart_type": "area",
-        "x_key": "period",
-        "y_key": "amount",
-        "x_label": "Week",
-        "y_label": "Revenue ($)"
-      },
-      "computed_at": "2026-03-02T10:30:00Z",
-      "is_cached": true
-    }
-  ]
-}
-```
-
-### `POST /api/insights/{company_id}/refresh`
-
-Force-refresh all cached insights. Returns updated insights.
-
-**Response:** Same structure as `GET /dashboard`.
-
 ### `POST /api/insights/{company_id}/chat`
 
 Submit a natural language question. The AI generates SQL to query the database and returns a natural language answer with an optional chart.
@@ -458,8 +390,6 @@ Delete a saved insight. Verifies ownership.
 | Max tokens per chat query | 4,000 | Keeps individual responses bounded |
 | SQL statement timeout | 5 seconds | Prevents long-running queries |
 | SQL row limit | 200 rows | Bounds data transfer and AI context |
-| Insight cache TTL | 1 hour | Balance freshness vs AI cost |
-| Max concurrent insight refreshes per company | 1 | Prevents duplicate computation |
 
 Rate limiting is enforced at the API layer by counting recent `ai_chat_queries` rows:
 
@@ -483,7 +413,7 @@ if count.count >= 20:
 ```
 api/
 +-- routes/
-|   +-- insights_routes.py          # All endpoints (dashboard, chat, saved CRUD)
+|   +-- insights_routes.py          # Chat endpoints (submit + history)
 +-- services/
 |   +-- ai/
 |   |   +-- base_provider.py        # chat_with_tools() abstract method
@@ -491,11 +421,11 @@ api/
 |   |   +-- openai_provider.py      # Future: chat_with_tools() for OpenAI
 |   |   +-- gemini_provider.py      # Future: chat_with_tools() for Gemini
 |   |   +-- factory.py              # 'insights_chat' feature support
-|   +-- insights_service.py         # Metric functions (dashboard cache) + chat system prompt + execute_sql_tool()
+|   +-- insights_service.py         # Metric functions (chat fallback) + chat system prompt + execute_sql_tool()
 +-- models/
-|   +-- insights_models.py          # Pydantic request/response schemas
+|   +-- insights_models.py          # Pydantic chat request/response schemas
 +-- tools/
-    +-- metric_tools.py             # METRIC_TOOLS (dashboard) + CHAT_TOOLS (text-to-SQL)
+    +-- metric_tools.py             # METRIC_TOOLS (schemas) + CHAT_TOOLS (execute_sql only)
     +-- schema_context.py           # Database schema string for AI system prompt (17 tables)
     +-- sql_validator.py            # SQL validation before execution
     +-- sql_executor.py             # asyncpg connection pool + parameterized query execution
@@ -515,7 +445,9 @@ components/
     +-- InsightChart.tsx            # MUI X Charts wrapper rendering from chart_config
 
 utils/
-+-- insightsAccess.ts              # Insights API helpers (chat, save, delete, fetch)
++-- insightsAccess.ts              # Chat API helpers
++-- alertsAccess.ts                # Client-side at-risk jobs + inventory alerts (AlertBadge)
++-- savedInsightsAccess.ts         # Saved insights CRUD via Supabase (RLS scoped)
 +-- dashboardAccess.ts             # Metric values + pinned metric keys (localStorage)
 ```
 
@@ -583,8 +515,6 @@ Guidelines:
 ### Phase 0 — MVP
 
 - [x] `@mui/x-charts` integration with dark theme
-- [x] 10 metric tool functions in FastAPI (for dashboard cache)
-- [x] `ai_insight_cache` table with 1-hour TTL
 - [x] `ai_chat_queries` table with rate limiting
 - [x] Rate limiting: 20 queries/company/hour
 - [x] PinnedMetrics component with customizable KPI strip (1-4 metrics)
@@ -603,7 +533,7 @@ Guidelines:
 
 ### Phase 1 — Enhanced
 
-- [ ] Header alert badge for at-risk jobs and low inventory (AlertBadge popover)
+- [x] Header alert badge for at-risk jobs and low inventory (AlertBadge popover) — Supabase-first, no AI
 - [ ] Additional chart types (scatter, heatmap for schedule visualization)
 - [ ] Multi-turn conversation history in chat
 - [ ] Predefined tools for complex business logic queries (based on user behavior)
@@ -627,12 +557,10 @@ Guidelines:
 
 | Metric | Target |
 |---|---|
-| Dashboard insight cards (cached) | < 500ms |
-| Dashboard insight cards (fresh computation) | < 3 seconds |
 | Individual metric function execution | < 1 second |
 | Chat response end-to-end | < 8 seconds |
 | SQL query execution | < 5 seconds (enforced timeout) |
-| Cache refresh | Background, non-blocking |
+| AlertBadge fetch (at-risk jobs + inventory) | < 500ms (Supabase, no AI) |
 
 These targets assume the small data volumes typical of target shops (1-50 users, hundreds of jobs, not millions).
 
@@ -654,10 +582,9 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 
 | Scenario | Behavior |
 |---|---|
-| AI provider unavailable | Show metric data without AI summary. Fallback text: "AI summary unavailable. Raw metrics shown below." |
-| AI rate limited by provider | Return cached insights if available. Chat returns 503 with retry-after. |
-| Metric function fails | Individual insight card shows error state. Other cards unaffected. |
-| No data available | Card shows empty state: "Not enough data yet. Create some quotes and jobs to see insights here." |
+| AI provider unavailable | Chat returns 503 with retry-after. |
+| AI rate limited by provider | Chat returns 503 with retry-after. |
+| No data available | Chat answer explains the gap; AlertBadge shows "All clear". |
 | Chat question unrelated to data | AI responds: "I can only answer questions about your shop's data. Try asking about revenue, jobs, quotes, customers, or inventory." |
 | SQL validation fails | AI sees the error and can retry with corrected SQL (up to 5 iterations) |
 | SQL execution timeout | Returns error to AI; AI can simplify the query or explain the limitation |
@@ -708,7 +635,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 - [ ] SQL executed via read-only Postgres role (`jigged_ai_readonly`)
 - [ ] Statement timeout (5s) and row limit (200) enforced
 - [ ] Operator role cannot access any insights endpoints
-- [ ] RLS policies on `ai_insight_cache` and `ai_chat_queries`
+- [ ] RLS policies on `ai_chat_queries`
 
 ### AI Provider Integration
 

@@ -11,9 +11,12 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import type { QuoteWithRelations } from '@/types/quote';
+import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
 
@@ -22,6 +25,20 @@ interface ConvertToJobModalProps {
   onClose: () => void;
   quote: QuoteWithRelations;
   onConverted: (jobId: string) => void;
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function computeDueDate(leadTimeDays: number | null): string | null {
+  if (leadTimeDays === null || leadTimeDays === undefined || isNaN(leadTimeDays)) {
+    return null;
+  }
+  const d = new Date();
+  d.setDate(d.getDate() + leadTimeDays);
+  return d.toLocaleDateString();
 }
 
 export default function ConvertToJobModal({
@@ -39,6 +56,18 @@ export default function ConvertToJobModal({
     totalRunTime: number | null;
   } | null>(null);
   const [hasRouting, setHasRouting] = useState(false);
+
+  // Lead time input — pre-fill from quote
+  const [leadTimeInput, setLeadTimeInput] = useState<string>(
+    quote.lead_time_days !== null ? String(quote.lead_time_days) : ''
+  );
+
+  // Reset lead time when modal re-opens for a different quote
+  useEffect(() => {
+    if (open) {
+      setLeadTimeInput(quote.lead_time_days !== null ? String(quote.lead_time_days) : '');
+    }
+  }, [open, quote.lead_time_days]);
 
   // Check routing status when modal opens
   useEffect(() => {
@@ -64,12 +93,19 @@ export default function ConvertToJobModal({
     checkRouting();
   }, [open, quote.part_id]);
 
+  const leadTimeNumber = leadTimeInput !== '' ? parseInt(leadTimeInput, 10) : null;
+  const leadTimeValid =
+    leadTimeInput === '' || (!isNaN(leadTimeNumber!) && leadTimeNumber! >= 0 && leadTimeNumber! <= 3650);
+  const duePreview = leadTimeValid ? computeDueDate(leadTimeNumber) : null;
+
   const handleConvert = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await convertQuoteToJob(quote.id);
+      const result = await convertQuoteToJob(quote.id, {
+        leadTimeDays: leadTimeValid ? leadTimeNumber : null,
+      });
       onConverted(result.job.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to convert quote to job');
@@ -90,10 +126,11 @@ export default function ConvertToJobModal({
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
   };
 
-  // Routing is now edited inline on the part page — no dedicated wizard.
   const createRoutingUrl = quote.part_id
     ? `/dashboard/${quote.company_id}/parts/${quote.part_id}`
     : null;
+
+  const expired = isQuoteExpired(quote);
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -103,6 +140,13 @@ export default function ConvertToJobModal({
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
+            </Alert>
+          )}
+
+          {expired && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              This quote expired on <strong>{formatDate(quote.expiration_date)}</strong>. Pricing
+              may no longer be accurate — double-check before creating the job.
             </Alert>
           )}
 
@@ -124,8 +168,7 @@ export default function ConvertToJobModal({
               <strong>Customer:</strong> {quote.customers?.name || '\u2014'}
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Part:</strong>{' '}
-              {quote.parts?.part_name || '\u2014'}
+              <strong>Part:</strong> {quote.parts?.part_name || '\u2014'}
             </Typography>
             <Typography variant="body2" sx={{ mb: 0.5 }}>
               <strong>Quantity:</strong> {quote.quantity}
@@ -133,6 +176,33 @@ export default function ConvertToJobModal({
             <Typography variant="body2">
               <strong>Total:</strong> {formatCurrency(quote.total_price)}
             </Typography>
+          </Box>
+
+          {/* Lead time input */}
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              label="Lead time"
+              type="number"
+              size="small"
+              fullWidth
+              value={leadTimeInput}
+              onChange={(e) => setLeadTimeInput(e.target.value)}
+              disabled={loading}
+              error={!leadTimeValid}
+              helperText={
+                !leadTimeValid
+                  ? 'Enter a number between 0 and 3,650'
+                  : duePreview
+                  ? `Due date: ${duePreview}`
+                  : 'Leave blank for no due date'
+              }
+              slotProps={{
+                input: {
+                  endAdornment: <InputAdornment position="end">days</InputAdornment>,
+                },
+                htmlInput: { min: 0, step: 1 },
+              }}
+            />
           </Box>
 
           {/* Routing Status */}
@@ -192,7 +262,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || !hasRouting || !quote.part_id || checkingRouting}
+          disabled={loading || !hasRouting || !quote.part_id || checkingRouting || !leadTimeValid}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating...' : 'Create Job'}

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Quotes module handles the sales quoting process - the entry point for work into the shop. Quotes capture what a customer wants, at what price, and track whether the customer & the shop owner accepts or declines. Approved quotes convert into Jobs. Quotes use a **cost-plus pricing model** where the quoted price is derived from base cost plus a markup percentage.
+The Quotes module handles the sales quoting process — the entry point for work into the shop. Quotes capture what a customer wants, at what price, and when they need it. A quote can be converted directly into a job at any time; there is no separate approval step. Quotes use a **cost-plus pricing model** where the quoted price is derived from base cost plus a markup percentage, with an optional override.
 
 **Priority:** Must Have (Build Third)
 
@@ -12,33 +12,30 @@ The Quotes module handles the sales quoting process - the entry point for work i
 
 - Parts module (quotes reference parts)
 
-**Database Table:** `quotes`
+**Database Table:** `quotes` (plus `quote_operations`, `quote_materials`, `quote_attachments`)
 
 ---
 
 ## Quote Status Workflow
 
-```javascript
- PENDING APPROVAL  ───────────▶  REJECTED
-     │
-     ▼
-  APPROVED
-     │
-     ▼
-━━━━━━━━━━━━━━━━━━
- Convert to Job
-━━━━━━━━━━━━━━━━━━
+```
+ ACTIVE ──(date > expiration_date)──▶ EXPIRED
+   │                                     │
+   └──────────── Convert to Job ─────────┘
+                     │
+                     ▼
+              (quote stays in its status;
+               converted_to_job_id set)
 ```
 
 **Status Definitions:**
 
-- **Pending Approval** - Quote has been created and sent to Customer & Shop Owner, awaiting response
+- **Active** — the quote is open. Editable, attachable, convertible.
+- **Expired** — past `expiration_date`. Read-only, but can still be converted with a warning (the price is no longer guaranteed).
 
-- **Approved** - Customer & Shop Owner Approved the quote, ready to convert to job
+**Conversion flag:** `converted_to_job_id` is set when the quote becomes a job. It is *not* a status — a quote can be `active` + `converted`, or `expired` + `converted`.
 
-- Rejected - Customer or Shop Owner Rejected the quote
-
-- **Expired** - Quote passed its valid_until date without response
+The pending-approval / approved / rejected states were removed in April 2026. For small shops the salesperson and the approver are the same person; the state machine added friction without adding value.
 
 ---
 
@@ -48,13 +45,13 @@ The Quotes module handles the sales quoting process - the entry point for work i
 |---|---|---|
 | Salesperson | Create a quote for a customer | I can respond to customer inquiries |
 | Salesperson | Select an existing part and see its cost with a default markup | I can quickly quote repeat orders |
-| Salesperson | Enter an ad-hoc part for one-off jobs | I can quote new work without creating a part first |
-| Salesperson | Mark a quote as sent for approval | I can track that the customer has received it |
-| Salesperson | Mark a quote as Approved or Rejected | I can track the outcome |
-| Salesperson | Convert an Approved quote to a job | Production can begin on the work |
-| Owner | View all open quotes | I can see the sales pipeline |
-| Owner | Filter quotes by status and customer | I can focus on specific opportunities |
-| Owner | Approve or reject quotes | Work can be started on quotes or quotes can be sent back to sales people for revision |
+| Salesperson | Set a lead time and expiration date | The customer knows when and for how long |
+| Salesperson | Expand a cost breakdown to see per-op / per-material costs | I can explain the price if asked |
+| Salesperson | Override the unit price on top of the computed cost | I can adjust for one-off negotiations |
+| Salesperson | Convert a quote directly to a job | Production can begin without a ceremony step |
+| Owner | View all active quotes | I can see the sales pipeline |
+| Owner | Filter quotes by active/expired and customer | I can focus on what's still live |
+| Owner | See when a quote was overridden off the base + markup | I know the markup wasn't just blindly adjusted |
 
 ---
 
@@ -66,23 +63,26 @@ The Quotes module handles the sales quoting process - the entry point for work i
 | legacy_quote_number | Text | No | Original quote number from legacy system (for migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | part_id | UUID (FK) | No | Link to existing part (optional) |
-| part_name_text | Text | No | Ad-hoc part name (when part_id is null) |
-| description | Text | No | Part/job description |
 | quantity | Integer | Yes | Number of units quoted |
-| base_cost | Decimal(12,4) | No | Cost per unit (from routing calculation at creation time, or manual entry) |
+| base_cost | Decimal(12,4) | No | Cost per unit (from routing calculation at creation time) |
 | markup_percent | Decimal(5,2) | No | Markup percentage (pre-filled from part category, overridable) |
-| estimated_labor_cost | Decimal(12,4) | No | Labor cost breakdown from routing (for display) |
-| estimated_material_cost | Decimal(12,4) | No | Material cost breakdown from routing (for display) |
-| unit_price | Decimal | No | Price per unit (`base_cost × (1 + markup_percent / 100)`) |
-| total_price | Decimal | No | Total quoted price (quantity × unit_price) |
-| estimated_lead_time_days | Integer | No | Estimated days to complete |
-| valid_until | Date | No | Quote expiration date |
-| status | Text | Yes | pending_approval, approved, rejected, expired |
+| estimated_labor_cost | Decimal(12,4) | No | Rolled-up labor cost from routing (snapshot) |
+| estimated_material_cost | Decimal(12,4) | No | Rolled-up material cost from routing (snapshot) |
+| unit_price | Decimal | No | Price per unit. Defaults to `base_cost × (1 + markup_percent / 100)` but can be overridden |
+| total_price | Decimal | No | `quantity × unit_price` |
+| lead_time_days | Integer | No | Days to deliver; copied to `jobs.lead_time_days` on conversion |
+| expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
+| status | Text | Yes | `active` or `expired` |
 | converted_to_job_id | UUID (FK) | No | Link to job when converted |
-| converted_at | Timestamp | No | When quote was converted to job |
-| notes | Text | No | Internal notes |
+| converted_at | Timestamp | No | When the quote was converted to a job |
 
-**Immutable Snapshot Behavior:** `base_cost`, `markup_percent`, `estimated_labor_cost`, and `estimated_material_cost` are **immutable snapshot fields** — captured at quote creation time. They never auto-update if the part's routing changes later. Quotes represent a point-in-time cost snapshot and there is no mechanism to refresh or recalculate costs after creation.
+**Note:** The free-text `description` field was removed in April 2026. The part itself carries descriptive detail; the quote no longer needs a separate narrative.
+
+### Cost Breakdown Snapshots
+
+`quote_operations` and `quote_materials` are per-row snapshots of the part's routing taken at quote creation. They are immutable after creation so the breakdown survives later routing edits. Columns roughly mirror `calculateRoutingCost()`'s output: operation name, run/setup minutes, labor rate, computed run/setup cost; material name, quantity, unit, cost-per-unit, line cost.
+
+Snapshots are refreshed if the user edits the quote and changes `part_id`, `base_cost`, or `markup_percent`. Other edits (e.g. changing only the quantity) preserve the snapshot.
 
 ---
 

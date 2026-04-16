@@ -140,33 +140,6 @@ METRIC_TOOLS: list[dict] = [
         },
     },
     {
-        "name": "get_inventory_alerts",
-        "description": (
-            "Get inventory items that are at or below their reorder point. "
-            "Only returns items where reorder_point is set and quantity <= reorder_point. "
-            "Returns a list of alerts (no chart)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "get_at_risk_jobs",
-        "description": (
-            "Get jobs that are potentially at risk of missing deadlines. "
-            "Analyzes not_started and in_progress jobs, comparing percentage of operations "
-            "completed vs percentage of estimated time elapsed. Returns a list of at-risk "
-            "jobs with severity levels (high, medium, low)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
         "name": "get_resource_utilization",
         "description": (
             "Get resource group utilization showing booked hours by resource group "

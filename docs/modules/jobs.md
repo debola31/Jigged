@@ -29,14 +29,18 @@ NOT_STARTED ──► IN_PROGRESS ──► COMPLETED ──► SHIPPED
 **Status Definitions:**
 
 - **Not Started** - Job created, no operations have begun
-
 - **In Progress** - Work has begun on the shop floor
-
 - **Completed** - All work finished, ready to ship
-
 - **Shipped** - Job shipped to customer
-
 - **Cancelled** - Job cancelled (can happen from any status)
+
+### Overdue (derived)
+
+A job is considered **overdue** when `due_date < today` and the job is not yet `completed`, `shipped`, or `cancelled`. Overdue is *not stored* as a status — it's derived at read time via `isJobOverdue(job)` in `types/job.ts`. This preserves the real progress state (a job can be both "in progress" and "overdue" simultaneously) and avoids a cron job to flip statuses.
+
+Overdue surfaces as:
+- A red "Overdue" chip next to the normal status chip on the jobs list, job detail header, and job cards.
+- The `overdue_jobs` dashboard metric tile (counted via `getOverdueJobsCount`).
 
 ---
 
@@ -65,10 +69,14 @@ NOT_STARTED ──► IN_PROGRESS ──► COMPLETED ──► SHIPPED
 | part_id | UUID (FK) | Yes | Link to part (routing is auto-resolved from the part's routing) |
 | description | Text | No | Job/part description |
 | status | Text | Yes | not_started, in_progress, completed, shipped, cancelled |
+| due_date | Date | No | Date the job is due to ship. Used to derive the "Overdue" badge |
+| lead_time_days | Integer | No | Lead time in days, typically copied from the source quote. Editable on the job |
 | started_at | Timestamp | No | When job moved to in_progress |
 | completed_at | Timestamp | No | When job moved to complete |
 | shipped_at | Timestamp | No | When job moved to shipped |
 | notes | Text | No | Internal notes |
+
+**Due date & conversion:** When a quote is converted to a job via `convert_quote_to_job()`, the caller can pass `p_lead_time_days` to override the quote's value. If a lead time is present, `jobs.due_date = CURRENT_DATE + lead_time_days`. Both fields remain editable on the job after creation.
 
 ---
 

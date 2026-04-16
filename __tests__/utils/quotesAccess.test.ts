@@ -83,9 +83,6 @@ import {
   updateQuote,
   deleteQuote,
   bulkDeleteQuotes,
-  markQuoteAsPendingApproval,
-  markQuoteAsApproved,
-  markQuoteAsRejected,
   convertQuoteToJob,
   getPartWithCostInfo,
 
@@ -754,178 +751,13 @@ describe('quotesAccess utilities', () => {
   });
 
   // ============== Status Transition Tests ==============
+  //
+  // Approval flow was removed — quotes now move through (active) → (expired)
+  // → (converted via converted_to_job_id). The dedicated
+  // markQuoteAsApproved/Rejected/PendingApproval functions no longer exist.
+  // Tests for the new lazy-expire sweep / manual expire / cost-breakdown
+  // snapshot flow should be added in a follow-up.
 
-  describe('markQuoteAsPendingApproval', () => {
-    it('transitions rejected quote to pending_approval', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsPendingApproval('quote-1');
-
-      expect(result.status).toBe('pending_approval');
-    });
-
-    it('rejects invalid status transition from approved', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'approved' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(markQuoteAsPendingApproval('quote-1')).rejects.toThrow(
-        'Cannot change status from approved to pending_approval'
-      );
-    });
-  });
-
-  describe('markQuoteAsApproved', () => {
-    it('transitions pending_approval quote to approved', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'approved' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsApproved('quote-1');
-
-      expect(result.status).toBe('approved');
-    });
-
-    it('rejects invalid transition from rejected', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'rejected' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(markQuoteAsApproved('quote-1')).rejects.toThrow(
-        'Cannot change status from rejected to approved'
-      );
-    });
-  });
-
-  describe('markQuoteAsRejected', () => {
-    it('transitions pending_approval quote to rejected', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsRejected('quote-1');
-
-      expect(result.status).toBe('rejected');
-    });
-  });
 
   // ============== Convert to Job Tests ==============
 

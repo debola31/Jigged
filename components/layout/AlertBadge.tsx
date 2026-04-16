@@ -16,26 +16,15 @@ import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import { getDashboardInsights, type InsightCard } from '@/utils/insightsAccess';
+import {
+  getAtRiskJobs,
+  getInventoryAlerts,
+  type AtRiskJob,
+  type InventoryAlert,
+} from '@/utils/alertsAccess';
 
 interface AlertBadgeProps {
   companyId: string;
-}
-
-interface AtRiskJob {
-  job_number: string;
-  customer_name: string;
-  severity: string;
-  pct_complete: number;
-  pct_time_elapsed: number;
-}
-
-interface InventoryAlert {
-  item_name: string;
-  severity: string;
-  quantity: number;
-  reorder_point: number;
-  unit: string;
 }
 
 function severityColor(severity: string): 'error' | 'warning' | 'default' {
@@ -55,16 +44,12 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
   const fetchAlerts = useCallback(async () => {
     if (!companyId) return;
     try {
-      const insights = await getDashboardInsights(companyId);
-      const jobInsight = insights.find((i: InsightCard) => i.type === 'at_risk_jobs');
-      const invInsight = insights.find((i: InsightCard) => i.type === 'inventory_alerts');
-
-      setAtRiskJobs(
-        (jobInsight?.metric_data?.at_risk_jobs as AtRiskJob[]) || []
-      );
-      setInventoryAlerts(
-        (invInsight?.metric_data?.alerts as InventoryAlert[]) || []
-      );
+      const [jobs, inventory] = await Promise.all([
+        getAtRiskJobs(companyId),
+        getInventoryAlerts(companyId),
+      ]);
+      setAtRiskJobs(jobs);
+      setInventoryAlerts(inventory);
     } catch {
       // Silently fail — alerts are non-critical
     }

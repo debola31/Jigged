@@ -43,6 +43,7 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { JobStatusChip } from '@/components/jobs';
+import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import Chip from '@mui/material/Chip';
 import type { JobWithRelations, JobFilters } from '@/types/job';
 
@@ -321,11 +322,22 @@ export default function JobsPage() {
     {
       field: 'status',
       headerName: 'Status',
-      width: 130,
+      width: 180,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data?.status) return null;
-        return <JobStatusChip status={params.data.status} size="small" />;
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, height: '100%' }}>
+            <JobStatusChip status={params.data.status} size="small" />
+            <JobOverdueBadge job={params.data} size="small" />
+          </Box>
+        );
       },
+    },
+    {
+      field: 'due_date',
+      headerName: 'Due',
+      width: 110,
+      valueFormatter: (params) => (params.value ? formatDate(params.value) : '—'),
     },
     {
       field: 'created_at',

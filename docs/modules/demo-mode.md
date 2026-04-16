@@ -432,7 +432,6 @@ BEGIN
 
     -- Delete AI data for demo company
     DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
-    DELETE FROM ai_insight_cache WHERE company_id = v_demo_company_id;
 
     -- Re-seed from template
     PERFORM seed_demo_data(v_demo_company_id, p_user_id);

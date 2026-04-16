@@ -52,8 +52,8 @@ test.describe('Quote to Job workflow', () => {
     // Fill quantity
     await page.getByLabel(/Quantity/i).fill('10');
 
-    // Send for approval (creates as pending_approval)
-    await page.getByRole('button', { name: /Send for Approval/i }).click();
+    // Create the quote (approval flow is gone — quotes are now 'active' by default)
+    await page.getByRole('button', { name: /Create Quote/i }).click();
 
     // Should redirect to the quote detail page
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
@@ -61,15 +61,10 @@ test.describe('Quote to Job workflow', () => {
     // Verify the quote was created — quote number should be visible
     await expect(page.getByText(/Q-\d+/)).toBeVisible();
 
-    // Quote is created as "Pending Approval" — verify status
-    await expect(page.getByText(/Pending Approval/i)).toBeVisible({ timeout: 10_000 });
+    // Quote is created as "Active" — verify status
+    await expect(page.getByText(/^Active$/i)).toBeVisible({ timeout: 10_000 });
 
-    // ── Step 2: Approve the quote ──
-
-    await page.getByRole('button', { name: /Approve/i }).click();
-    await expect(page.getByText(/Approved/i)).toBeVisible({ timeout: 10_000 });
-
-    // ── Step 3: Convert to job ──
+    // ── Step 2: Convert to job (approval step is gone) ──
 
     await page.getByRole('button', { name: /Convert to Job/i }).click();
 
@@ -99,10 +94,10 @@ test.describe('Quote to Job workflow', () => {
     // Verify job was created
     await expect(page.getByText(/J-\d+/)).toBeVisible();
 
-    // ── Step 4: Start the job ──
+    // ── Step 3: Start the job ──
 
-    // Job should be in "Pending" status initially
-    await expect(page.getByText(/Pending/i).first()).toBeVisible();
+    // Job should be in "Not Started" status initially
+    await expect(page.getByText(/Not Started/i).first()).toBeVisible();
 
     // If there are operations, the job might auto-start. Check for operations panel.
     const hasOperations = await page.getByText(/Operations/i).isVisible();

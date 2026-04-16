@@ -23,6 +23,37 @@ Jigged is a web-based ERP system designed for small-scale precision manufacturin
 
 ---
 
+## Engineering principles
+
+### AI calls require an explicit user action
+
+Anthropic calls cost real credits. Never invoke an AI endpoint (Claude, OpenAI, Gemini — anything that bills per token) from a `useEffect`, page load, route mount, auto-refresh, or polling loop. The user must have taken a deliberate action — clicked a button, submitted a question, explicitly requested a refresh.
+
+This applies to every layer:
+- Frontend: no `getDashboardInsights`-style fetches on mount. A bell icon, a dashboard page, a header component — none of them should trigger AI work just by rendering.
+- Backend: no endpoint that generates AI summaries "on read" as a side effect. If an endpoint is called by a mounting component, it must not be able to reach a paid AI provider.
+- Background jobs: fine, but must be infrequent (e.g. hourly or daily) and rate-limited per company. Never wire a background job to "on user login" or "on page view".
+
+**Why:** we previously had `AlertBadge` → `/api/insights/{id}/dashboard` firing 5 Anthropic calls on every dashboard page load. Users never saw the AI summaries — the bell icon only read the raw metric arrays. Credits ran out in days. Every new AI feature must pass the "what user action triggered this?" test before merging.
+
+**How to apply:** when adding an AI feature, the entry point must be a button, form submit, or explicit refresh gesture — not a lifecycle hook. If you need fresh data for a passive UI (badge counts, dashboards), compute it from Supabase without AI, or cache it in a dedicated table populated by a scheduled job. If you're unsure whether a code path can fire on mount, grep for `useEffect`/`onMount` callers and trace up from the AI call site.
+
+---
+
+### No silent runtime fallbacks for data-at-rest issues
+
+If a schema change leaves existing rows in an inconsistent state (e.g. a new snapshot table that's empty for pre-existing records), **fix the data at rest** with a backfill migration. Do NOT paper over it with a "if empty, compute live" fallback in the access layer or UI. Fallbacks:
+
+- Hide data-quality problems — you stop seeing the cases where the invariant was broken.
+- Multiply sources of truth — two code paths to the same answer that can silently diverge.
+- Accumulate as tech debt — each one "works" alone but they compound over time.
+
+**The rule:** after a schema change, every existing row must satisfy the new invariant by the time the migration finishes. The read path should have a single clean shape with no branching on "what if the snapshot is missing."
+
+If a backfill is genuinely impossible (truly lost history), prefer an explicit "no data available" UI state over a silent recomputation — it surfaces the gap rather than hiding it.
+
+---
+
 ## Design System: Jigged Manufacturing ERP (Material-UI)
 
 > **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.

@@ -44,6 +44,8 @@ The Customers module manages the master list of companies that Contour does busi
 | country | Text | No | Country (default: USA) |
 | notes | Text | No | Internal notes |
 
+> **Note:** Contact and address fields (`contact_name`, `contact_phone`, `contact_email`, `address_line1`/`line2`, `city`, `state`, `postal_code`, `country`) appear on printed quote PDFs in the **Bill To** block. Keep them filled in for customers you send quotes to. Missing fields are skipped cleanly — no "null" placeholders.
+
 ---
 
 ## UI Screens

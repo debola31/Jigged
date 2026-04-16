@@ -32,6 +32,8 @@ import {
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
 } from '@/utils/quotesAccess';
+import { getCompany } from '@/utils/companyAccess';
+import { generateQuotePdf } from '@/utils/quotePdf';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -59,6 +61,7 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     fetchQuote();
@@ -111,6 +114,23 @@ export default function QuoteDetailPage() {
       window.open(url, '_blank');
     } catch {
       setError('Failed to download attachment');
+    }
+  };
+
+  const handlePrintPdf = async () => {
+    if (!quote) return;
+    setError(null);
+    setPrinting(true);
+    try {
+      const company = await getCompany(companyId);
+      if (!company) {
+        throw new Error('Company info unavailable — cannot generate PDF.');
+      }
+      await generateQuotePdf(quote, company);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate PDF');
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -247,6 +267,15 @@ export default function QuoteDetailPage() {
               Convert to Job
             </Button>
           )}
+
+          <Button
+            variant="outlined"
+            startIcon={printing ? <CircularProgress size={16} /> : <PictureAsPdfIcon />}
+            onClick={handlePrintPdf}
+            disabled={printing || actionLoading}
+          >
+            Print PDF
+          </Button>
 
           <Box sx={{ flex: 1 }} />
 

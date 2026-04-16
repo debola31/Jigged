@@ -4,6 +4,7 @@ import type { CompanyMember } from '@/types/quote';
 export interface Company {
   id: string;
   name: string;
+  logo_url?: string | null;
   is_demo?: boolean;
   demo_company_id?: string | null;
 }
@@ -217,7 +218,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
 
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, is_demo, demo_company_id')
+    .select('id, name, logo_url, is_demo, demo_company_id')
     .eq('id', companyId)
     .single();
 
@@ -227,4 +228,25 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   }
 
   return data;
+}
+
+/**
+ * Update the company's logo storage path (or clear it by passing null).
+ * The caller is responsible for uploading/removing the file in storage.
+ */
+export async function updateCompanyLogo(
+  companyId: string,
+  logoPath: string | null
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error } = await supabase
+    .from('companies')
+    .update({ logo_url: logoPath, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error updating company logo:', error);
+    throw new Error(`Failed to update company logo: ${error.message}`);
+  }
 }

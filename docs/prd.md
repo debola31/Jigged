@@ -117,8 +117,8 @@ Role restrictions are enforced at **two levels**:
 |---|---|---|---|---|
 | FR-1 | Flexible Inventory Units | System must support multiple units of measurement per inventory item (e.g., a steel bar can be measured in both pounds and inches). When depleting inventory, users can specify the quantity in any supported unit and the system converts accordingly. | Must | Given a steel bar tracked in lbs, when an operator depletes 6 inches, then the system converts to lbs and decrements inventory correctly. |
 | FR-2 | Reorder Threshold Alerts | System must display visual alerts when inventory items fall below their configured reorder threshold. Alerts appear on the inventory dashboard and can trigger email notifications to designated users. | Must | Given an item with reorder threshold of 50 units, when quantity drops to 49, then a reorder alert is displayed and optional email sent. |
-| FR-3 | Work Order Creation from Quote | Salesperson can create a quote by selecting a customer and part, reviewing cost and markup (or entering them manually), and attaching files. Quote goes directly to "Pending Approval" status on creation and proceeds through approval workflow. | Must | Given a new customer order, when salesperson creates quote with cost and markup, then it appears in the quotes pipeline for owner approval. |
-| FR-4 | Work Order Approval Workflow | Owner can view all Requested work orders and approve or reject them. Approved work orders move to "Approved" status and become visible to operators. Rejected work orders are archived with notes. | Must | Given a Requested work order, when owner clicks Approve, then status changes to Approved and operators can see it. |
+| FR-3 | Work Order Creation from Quote | Salesperson can create a quote by selecting a customer and part, reviewing cost and markup (or entering them manually), setting lead time and expiration, and attaching files. Quotes are created as "Active" and can be converted directly to jobs — there is no approval ceremony. | Must | Given a new customer order, when salesperson creates quote with cost, markup, and lead time, then it appears in the quotes pipeline with an expiration date and can be converted to a job in one click. |
+| FR-4 | Quote Lifecycle | A quote is "Active" until its expiration date passes, at which point it flips to "Expired" (read-only but still convertible with a warning). A quote becomes a job via the Convert action, which copies lead time and computes the job due date. The pending-approval / approved / rejected states were removed in April 2026. | Must | Given an active quote with 14-day lead time, when the owner converts it, then a job is created with due_date = today + 14 and the quote links to that job via converted_to_job_id. |
 | FR-5 | Station QR Code Login | Operators scan a QR code at a station to log in. The QR code encodes the station ID. After scanning, operator enters their PIN or scans their personal QR badge to identify themselves. | Must | Given an operator at Station 3, when they scan station QR and enter PIN, then they are logged into Station 3 and can assign work orders. |
 | FR-6 | Work Order Assignment to Station | Logged-in operator can enter a work order number to begin working on it. System records start time, associates operator with the work order, and tracks time until operator logs out or assigns a different work order. | Must | Given an operator logged into Station 3, when they enter WO-1234, then time tracking begins and WO-1234 shows "In Progress at Station 3". |
 | FR-7 | File Attachment Support | Work orders support PDF and CAD file attachments. Files can be uploaded by salesperson or admin. Operators can view attachments from the work order detail page on any device. | Must | Given a work order with attached PDF drawing, when operator views work order on phone, then they can open and zoom the PDF. |
@@ -142,9 +142,9 @@ Flow 1: job Happy Path
 
 1. Customer requests quote from Salesperson
 
-2. Salesperson creates job from quote (status: Requested)
+2. Salesperson creates quote with lead time & expiration (status: Active)
 
-3. Owner reviews and approves job (status: Approved)
+3. Salesperson/Owner converts quote directly into a job (job.due_date = today + lead_time)
 
 4. Operator scans operation type QR, enters job number (status: In Progress)
 

@@ -24,7 +24,11 @@ import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
-import RoutingCostModal from '@/components/quotes/RoutingCostModal';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import QuoteCostBreakdownView from '@/components/quotes/QuoteCostBreakdownView';
 import type { Customer } from '@/types/customer';
 import type { Part } from '@/types/part';
 import AddIcon from '@mui/icons-material/Add';
@@ -106,7 +110,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // Cost breakdown from routing (if available)
   const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
   const [loadingCost, setLoadingCost] = useState(false);
-  const [costModalOpen, setCostModalOpen] = useState(false);
 
   // Load customers on mount
   useEffect(() => {
@@ -625,25 +628,93 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               ))}
             </Alert>
           )}
+
+          {/* Expandable cost breakdown — only when we have live routing data */}
+          {costBreakdown && (costBreakdown.labor_items.length > 0 || costBreakdown.material_items.length > 0) && (
+            <Accordion
+              elevation={0}
+              sx={{
+                mt: 2,
+                bgcolor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                '&:before': { display: 'none' },
+              }}
+            >
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Cost Breakdown
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <QuoteCostBreakdownView
+                  operations={costBreakdown.labor_items.map((item, i) => ({
+                    key: `op-${i}`,
+                    operation_name: item.operation_name,
+                    run_time_minutes: item.run_time_minutes,
+                    setup_time_minutes: item.setup_time_minutes,
+                    labor_rate: item.labor_rate,
+                    run_cost: item.cost,         // per-unit run labor
+                    setup_cost: item.setup_cost, // one-time total for this op
+                  }))}
+                  materials={costBreakdown.material_items.map((item, i) => ({
+                    key: `mat-${i}`,
+                    item_name: item.item_name,
+                    quantity: item.quantity,
+                    unit: item.unit,
+                    cost_per_unit: item.cost_per_unit,
+                    line_cost: item.cost,
+                  }))}
+                  quantity={quantity || 1}
+                  baseCost={formData.base_cost ? parseFloat(formData.base_cost) : 0}
+                  markupPercent={formData.markup_percent ? parseFloat(formData.markup_percent) : null}
+                  computedUnitPrice={
+                    formData.base_cost && formData.markup_percent
+                      ? calculateUnitPriceFromMarkup(
+                          parseFloat(formData.base_cost),
+                          parseFloat(formData.markup_percent)
+                        )
+                      : null
+                  }
+                  actualUnitPrice={formData.unit_price ? parseFloat(formData.unit_price) : null}
+                />
+              </AccordionDetails>
+            </Accordion>
+          )}
         </CardContent>
       </Card>
 
-      {/* Description */}
+      {/* Timeline: lead time + expiration */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Description
+            Timeline
           </Typography>
-          <TextField
-            fullWidth
-            label="Quote Description"
-            value={formData.description}
-            onChange={handleChange('description')}
-            disabled={loading}
-            multiline
-            rows={3}
-            placeholder="Describe the work to be quoted"
-          />
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Lead Time (days)"
+                type="number"
+                value={formData.lead_time_days}
+                onChange={handleChange('lead_time_days')}
+                disabled={loading}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                helperText="Days from job start to promised delivery. Copied to the job on conversion."
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Expiration Date"
+                type="date"
+                value={formData.expiration_date}
+                onChange={handleChange('expiration_date')}
+                disabled={loading}
+                slotProps={{ inputLabel: { shrink: true } }}
+                helperText="Quote price is honored until this date. Defaults to 10 days from creation."
+              />
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 
@@ -661,7 +732,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             tempAttachments={tempAttachments}
             onAttachmentChange={loadAttachments}
             onTempAttachmentsChange={setTempAttachments}
-            disabled={mode === 'edit' && formData.status !== 'pending_approval' && formData.status !== 'rejected'}
+            disabled={mode === 'edit' && formData.status !== 'active'}
           />
         </CardContent>
       </Card>
@@ -677,7 +748,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           disabled={loading}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
-          {loading ? 'Sending...' : mode === 'create' ? 'Send for Approval' : 'Save'}
+          {loading ? 'Saving...' : mode === 'create' ? 'Create Quote' : 'Save'}
         </Button>
       </Box>
 
@@ -697,16 +768,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         companyId={companyId}
       />
 
-      {/* Routing Cost Breakdown Modal */}
-      {selectedPart && (
-        <RoutingCostModal
-          open={costModalOpen}
-          onClose={() => setCostModalOpen(false)}
-          breakdown={costBreakdown}
-          partId={selectedPart.id}
-          companyId={companyId}
-        />
-      )}
     </Box>
   );
 }

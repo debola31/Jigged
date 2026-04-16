@@ -44,7 +44,7 @@ export const DEFAULT_PINNED_METRICS: MetricKey[] = [
   'open_quotes',
   'not_started_jobs',
   'in_progress_jobs',
-  'completed_jobs',
+  'overdue_jobs',
 ];
 
 // Legacy key migration map
@@ -299,7 +299,7 @@ export async function getMetricValue(
 ): Promise<number> {
   switch (key) {
     case 'open_quotes':
-      return getCount('quotes', companyId, { status: ['pending_approval'] });
+      return getCount('quotes', companyId, { status: ['active'] });
     case 'not_started_jobs':
       return getCount('jobs', companyId, { status: ['not_started'] });
     case 'in_progress_jobs':

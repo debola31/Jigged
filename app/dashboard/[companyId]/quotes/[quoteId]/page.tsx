@@ -14,9 +14,6 @@ import Grid from '@mui/material/Grid';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
-import SendIcon from '@mui/icons-material/Send';
-import CheckIcon from '@mui/icons-material/Check';
-import CloseIcon from '@mui/icons-material/Close';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -29,27 +26,22 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 
-
-
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
-import SaveIcon from '@mui/icons-material/Save';
-
 import {
   getQuoteWithRelations,
-  markQuoteAsPendingApproval,
-  markQuoteAsApproved,
-  markQuoteAsRejected,
   deleteQuote,
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
-  updateQuote,
 } from '@/utils/quotesAccess';
-import { quoteToFormData, calculateUnitPriceFromMarkup, calculateTotalPrice } from '@/types/quote';
+import {
+  quoteToFormData,
+  isQuoteExpired,
+  daysUntilExpiration,
+} from '@/types/quote';
 import type { QuoteWithRelations, QuoteAttachment } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
+import QuoteCostBreakdownAccordion from '@/components/quotes/QuoteCostBreakdown';
 
 export default function QuoteDetailPage() {
   const params = useParams();
@@ -67,10 +59,6 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  // Markup editing state (for pending_approval status)
-  const [editingMarkup, setEditingMarkup] = useState(false);
-  const [markupDraft, setMarkupDraft] = useState('');
-  const [savingMarkup, setSavingMarkup] = useState(false);
 
   useEffect(() => {
     fetchQuote();
@@ -86,48 +74,6 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load quote');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleStartEditMarkup = () => {
-    if (!quote) return;
-    setMarkupDraft(quote.markup_percent !== null ? String(quote.markup_percent) : '');
-    setEditingMarkup(true);
-  };
-
-  const handleSaveMarkup = async () => {
-    if (!quote) return;
-    setSavingMarkup(true);
-    setError(null);
-    try {
-      const markupNum = parseFloat(markupDraft);
-      const baseCost = quote.base_cost ?? 0;
-      const newUnitPrice = !isNaN(markupNum) ? calculateUnitPriceFromMarkup(baseCost, markupNum) : quote.unit_price;
-      const newTotal = calculateTotalPrice(quote.quantity, newUnitPrice);
-
-      const formData = quoteToFormData(quote);
-      formData.markup_percent = markupDraft;
-      formData.unit_price = newUnitPrice !== null ? String(newUnitPrice) : '';
-      await updateQuote(quoteId, formData);
-      setEditingMarkup(false);
-      await fetchQuote();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update markup');
-    } finally {
-      setSavingMarkup(false);
-    }
-  };
-
-  const handleAction = async (action: () => Promise<unknown>) => {
-    setActionLoading(true);
-    setError(null);
-    try {
-      await action();
-      await fetchQuote();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Action failed');
-    } finally {
-      setActionLoading(false);
     }
   };
 
@@ -163,7 +109,7 @@ export default function QuoteDetailPage() {
     try {
       const url = await getQuoteAttachmentUrl(attachment.file_path);
       window.open(url, '_blank');
-    } catch (err) {
+    } catch {
       setError('Failed to download attachment');
     }
   };
@@ -196,8 +142,12 @@ export default function QuoteDetailPage() {
     );
   }
 
-  // If in edit mode and quote is pending_approval or rejected, show the form
-  if (editMode && (quote.status === 'pending_approval' || quote.status === 'rejected')) {
+  const expired = isQuoteExpired(quote);
+  const convertedLocked = !!quote.converted_to_job_id;
+  const isEditable = !convertedLocked && quote.status === 'active';
+  const daysLeft = daysUntilExpiration(quote.expiration_date);
+
+  if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
       setEditMode(false);
       await fetchQuote();
@@ -240,70 +190,53 @@ export default function QuoteDetailPage() {
           <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
             {quote.quote_number || 'Quote'}
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <QuoteStatusChip status={quote.status} size="medium" />
             <Typography variant="body2" color="text.secondary">
               Created {formatDate(quote.created_at)}
             </Typography>
+            {(quote.created_by_member?.name || quote.created_by_member?.email) && (
+              <Typography variant="body2" color="text.secondary">
+                Prepared by{' '}
+                <Typography component="span" variant="body2" color="text.primary" sx={{ fontWeight: 500 }}>
+                  {quote.created_by_member.name || quote.created_by_member.email}
+                </Typography>
+              </Typography>
+            )}
+            {quote.expiration_date && (
+              <Typography
+                variant="body2"
+                color={expired ? 'warning.main' : daysLeft !== null && daysLeft <= 3 ? 'warning.main' : 'text.secondary'}
+              >
+                {expired
+                  ? `Expired ${formatDate(quote.expiration_date)}`
+                  : daysLeft !== null && daysLeft >= 0
+                  ? `Expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} (${formatDate(quote.expiration_date)})`
+                  : `Expires ${formatDate(quote.expiration_date)}`}
+              </Typography>
+            )}
+            {quote.lead_time_days !== null && (
+              <Typography variant="body2" color="text.secondary">
+                Lead time: {quote.lead_time_days} day{quote.lead_time_days === 1 ? '' : 's'}
+              </Typography>
+            )}
           </Box>
         </Box>
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {quote.status === 'pending_approval' && (
-            <>
-              <Button
-                variant="outlined"
-                startIcon={<EditIcon />}
-                onClick={() => setEditMode(true)}
-                disabled={actionLoading}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="contained"
-                color="success"
-                startIcon={<CheckIcon />}
-                onClick={() => handleAction(() => markQuoteAsApproved(quoteId))}
-                disabled={actionLoading}
-              >
-                Approve
-              </Button>
-              <Button
-                variant="contained"
-                color="warning"
-                startIcon={<CloseIcon />}
-                onClick={() => handleAction(() => markQuoteAsRejected(quoteId))}
-                disabled={actionLoading}
-                sx={{ color: 'white' }}
-              >
-                Reject
-              </Button>
-            </>
+          {isEditable && (
+            <Button
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => setEditMode(true)}
+              disabled={actionLoading}
+            >
+              Edit
+            </Button>
           )}
 
-          {quote.status === 'rejected' && (
-            <>
-              <Button
-                variant="outlined"
-                startIcon={<EditIcon />}
-                onClick={() => setEditMode(true)}
-                disabled={actionLoading}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<SendIcon />}
-                onClick={() => handleAction(() => markQuoteAsPendingApproval(quoteId))}
-                disabled={actionLoading}
-              >
-                Re-submit for Approval
-              </Button>
-            </>
-          )}
-
-          {quote.status === 'approved' && !quote.converted_to_job_id && (
+          {!convertedLocked && (
             <Button
               variant="contained"
               color="primary"
@@ -315,10 +248,8 @@ export default function QuoteDetailPage() {
             </Button>
           )}
 
-          {/* Spacer to push delete to far right */}
           <Box sx={{ flex: 1 }} />
 
-          {/* Delete Icon Button */}
           <Tooltip title="Delete Quote">
             <IconButton
               onClick={() => setDeleteDialogOpen(true)}
@@ -368,15 +299,13 @@ export default function QuoteDetailPage() {
               </Typography>
               <Divider sx={{ mb: 2 }} />
               {quote.customers ? (
-                <>
-                  <MuiLink
-                    component={Link}
-                    href={`/dashboard/${companyId}/customers/${quote.customer_id}`}
-                    sx={{ fontWeight: 500 }}
-                  >
-                    {quote.customers.name}
-                  </MuiLink>
-                </>
+                <MuiLink
+                  component={Link}
+                  href={`/dashboard/${companyId}/customers/${quote.customer_id}`}
+                  sx={{ fontWeight: 500 }}
+                >
+                  {quote.customers.name}
+                </MuiLink>
               ) : (
                 <Typography color="text.secondary">Customer not found</Typography>
               )}
@@ -413,23 +342,6 @@ export default function QuoteDetailPage() {
             </CardContent>
           </Card>
         </Grid>
-
-        {/* Description */}
-        {quote.description && (
-          <Grid size={{ xs: 12 }}>
-            <Card elevation={2}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Description
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-                <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {quote.description}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
 
         {/* Attachments */}
         {quote.quote_attachments && quote.quote_attachments.length > 0 && (
@@ -474,7 +386,7 @@ export default function QuoteDetailPage() {
                     >
                       Download
                     </Button>
-                    {(quote.status === 'pending_approval' || quote.status === 'rejected') && (
+                    {isEditable && (
                       <IconButton
                         color="error"
                         onClick={() => handleDeleteAttachment(attachment.id)}
@@ -491,87 +403,17 @@ export default function QuoteDetailPage() {
           </Grid>
         )}
 
-        {/* Cost & Pricing */}
+        {/* Pricing summary */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Cost & Pricing
-                </Typography>
-              </Box>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                Pricing
+              </Typography>
               <Divider sx={{ mb: 2 }} />
 
               <Grid container spacing={2}>
-                <Grid size={{ xs: 6, sm: 3 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Base Cost
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatCurrency(quote.base_cost)}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Markup
-                    </Typography>
-                    {quote.status === 'pending_approval' && !editingMarkup && (
-                      <Tooltip title="Edit markup">
-                        <IconButton size="small" onClick={handleStartEditMarkup} sx={{ color: 'text.secondary' }}>
-                          <EditIcon sx={{ fontSize: 14 }} />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </Box>
-                  {editingMarkup && quote.status === 'pending_approval' ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <TextField
-                        size="small"
-                        type="number"
-                        value={markupDraft}
-                        onChange={(e) => setMarkupDraft(e.target.value)}
-                        disabled={savingMarkup}
-                        sx={{ width: 100 }}
-                        slotProps={{
-                          input: {
-                            endAdornment: <InputAdornment position="end">%</InputAdornment>,
-                          },
-                          htmlInput: { step: 0.1 },
-                        }}
-                      />
-                      <Button
-                        size="small"
-                        variant="contained"
-                        onClick={handleSaveMarkup}
-                        disabled={savingMarkup}
-                        startIcon={savingMarkup ? <CircularProgress size={14} /> : <SaveIcon sx={{ fontSize: 14 }} />}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => setEditingMarkup(false)}
-                        disabled={savingMarkup}
-                      >
-                        Cancel
-                      </Button>
-                    </Box>
-                  ) : (
-                    <Typography variant="body1" fontWeight={500}>
-                      {quote.markup_percent !== null ? `${quote.markup_percent}%` : '—'}
-                    </Typography>
-                  )}
-                  {/* Live preview of recalculated values when editing */}
-                  {editingMarkup && markupDraft && (
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
-                      Unit price: {formatCurrency(calculateUnitPriceFromMarkup(quote.base_cost ?? 0, parseFloat(markupDraft)))}
-                      {' · '}
-                      Total: {formatCurrency(calculateTotalPrice(quote.quantity, calculateUnitPriceFromMarkup(quote.base_cost ?? 0, parseFloat(markupDraft))))}
-                    </Typography>
-                  )}
-                </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, sm: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     Unit Price
                   </Typography>
@@ -579,7 +421,7 @@ export default function QuoteDetailPage() {
                     {formatCurrency(quote.unit_price)}
                   </Typography>
                 </Grid>
-                <Grid size={{ xs: 6, sm: 3 }}>
+                <Grid size={{ xs: 6, sm: 4 }}>
                   <Typography variant="body2" color="text.secondary">
                     Quantity
                   </Typography>
@@ -587,46 +429,26 @@ export default function QuoteDetailPage() {
                     {quote.quantity}
                   </Typography>
                 </Grid>
+                <Grid size={{ xs: 12, sm: 4 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Total
+                  </Typography>
+                  <Typography variant="h5" color="primary" fontWeight={600}>
+                    {formatCurrency(quote.total_price)}
+                  </Typography>
+                </Grid>
               </Grid>
-
-              <Divider sx={{ my: 2 }} />
-
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 1 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total
-                </Typography>
-                <Typography variant="h5" color="primary" fontWeight={600}>
-                  {formatCurrency(quote.total_price)}
-                </Typography>
-              </Box>
-
-              {/* Snapshot of labor/material costs at quote creation time */}
-              {(quote.estimated_labor_cost !== null || quote.estimated_material_cost !== null) && (
-                <Box sx={{ mt: 2, display: 'flex', gap: 4 }}>
-                  {quote.estimated_labor_cost !== null && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Labor Cost (snapshot)
-                      </Typography>
-                      <Typography variant="body1" fontWeight={500}>
-                        {formatCurrency(quote.estimated_labor_cost)}
-                      </Typography>
-                    </Box>
-                  )}
-                  {quote.estimated_material_cost !== null && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Material Cost (snapshot)
-                      </Typography>
-                      <Typography variant="body1" fontWeight={500}>
-                        {formatCurrency(quote.estimated_material_cost)}
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-              )}
             </CardContent>
           </Card>
+        </Grid>
+
+        {/* Cost breakdown accordion */}
+        <Grid size={{ xs: 12 }}>
+          <QuoteCostBreakdownAccordion
+            quoteId={quote.id}
+            companyId={companyId}
+            quantity={quote.quantity}
+          />
         </Grid>
       </Grid>
 

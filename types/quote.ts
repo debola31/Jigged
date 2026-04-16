@@ -1,7 +1,7 @@
 /**
  * Quote status values
  */
-export type QuoteStatus = 'pending_approval' | 'approved' | 'rejected' | 'expired';
+export type QuoteStatus = 'active' | 'expired';
 
 /**
  * Quote record from database
@@ -12,7 +12,6 @@ export interface Quote {
   quote_number: string;
   customer_id: string;
   part_id: string | null;
-  description: string | null;
   quantity: number;
   base_cost: number | null;
   markup_percent: number | null;
@@ -20,6 +19,8 @@ export interface Quote {
   estimated_material_cost: number | null;
   unit_price: number | null;
   total_price: number | null;
+  lead_time_days: number | null;
+  expiration_date: string | null;
   status: QuoteStatus;
   status_changed_at: string | null;
   converted_to_job_id: string | null;
@@ -59,6 +60,9 @@ export interface QuoteWithRelations extends Quote {
   } | null;
   // Joined attachments
   quote_attachments?: QuoteAttachment[];
+  // Resolved creator profile from user_company_access (populated client-side
+  // via a second query — keeps the main PostgREST query simple).
+  created_by_member?: CompanyMember | null;
 }
 
 /**
@@ -68,11 +72,12 @@ export interface QuoteFormData {
   customer_id: string;
   part_type: 'existing' | 'adhoc';
   part_id: string;
-  description: string;
   quantity: string;
   base_cost: string;
   markup_percent: string;
   unit_price: string;
+  lead_time_days: string;
+  expiration_date: string; // ISO date (YYYY-MM-DD)
   status?: QuoteStatus;
 }
 
@@ -82,21 +87,43 @@ export interface QuoteFormData {
 export interface QuoteFilters {
   status?: QuoteStatus | 'all';
   customerId?: string;
+  createdBy?: string;
   search?: string;
 }
 
 /**
- * Empty form defaults for NEW quotes only
+ * Minimal shape for "who prepared this quote?" lookups.
+ * Pulled from user_company_access for the company.
  */
+export interface CompanyMember {
+  user_id: string;
+  name: string | null;
+  email: string | null;
+}
+
+/**
+ * Empty form defaults for NEW quotes only.
+ * expiration_date defaults to today + 10 days.
+ */
+export const DEFAULT_QUOTE_LEAD_DAYS = 14;
+export const DEFAULT_QUOTE_VALIDITY_DAYS = 10;
+
+function defaultExpirationDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + DEFAULT_QUOTE_VALIDITY_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
 export const EMPTY_QUOTE_FORM: QuoteFormData = {
   customer_id: '',
   part_type: 'existing',
   part_id: '',
-  description: '',
   quantity: '1',
   base_cost: '',
   markup_percent: '',
   unit_price: '',
+  lead_time_days: '',
+  expiration_date: defaultExpirationDate(),
 };
 
 /**
@@ -107,11 +134,12 @@ export function quoteToFormData(quote: Quote): QuoteFormData {
     customer_id: quote.customer_id,
     part_type: quote.part_id ? 'existing' : 'adhoc',
     part_id: quote.part_id || '',
-    description: quote.description || '',
     quantity: String(quote.quantity),
     base_cost: quote.base_cost !== null ? String(quote.base_cost) : '',
     markup_percent: quote.markup_percent !== null ? String(quote.markup_percent) : '',
     unit_price: quote.unit_price !== null ? String(quote.unit_price) : '',
+    lead_time_days: quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
+    expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,
   };
 }
@@ -147,15 +175,39 @@ export function calculateTotalPrice(quantity: number, unitPrice: number | null):
 }
 
 /**
+ * True when a quote has already expired (by status OR by date).
+ * We compute from both so that the badge is correct even if the
+ * lazy-expire sweep hasn't run yet.
+ */
+export function isQuoteExpired(quote: Pick<Quote, 'status' | 'expiration_date'>): boolean {
+  if (quote.status === 'expired') return true;
+  if (!quote.expiration_date) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(quote.expiration_date) < today;
+}
+
+/**
+ * Days remaining until expiration. Negative if already expired.
+ */
+export function daysUntilExpiration(expirationDate: string | null): number | null {
+  if (!expirationDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const exp = new Date(expirationDate);
+  exp.setHours(0, 0, 0, 0);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((exp.getTime() - today.getTime()) / msPerDay);
+}
+
+/**
  * Status display configuration
  */
 export const QUOTE_STATUS_CONFIG: Record<
   QuoteStatus,
   { label: string; color: 'default' | 'primary' | 'success' | 'error' | 'warning' }
 > = {
-  pending_approval: { label: 'Pending Approval', color: 'primary' },
-  approved: { label: 'Approved', color: 'success' },
-  rejected: { label: 'Rejected', color: 'error' },
+  active: { label: 'Active', color: 'primary' },
   expired: { label: 'Expired', color: 'warning' },
 };
 
@@ -182,4 +234,56 @@ export interface TempAttachment {
   file_path: string;
   file_size: number;
   mime_type: string;
+}
+
+/**
+ * Per-operation cost snapshot captured at quote creation.
+ */
+export interface QuoteOperationSnapshot {
+  id: string;
+  quote_id: string;
+  company_id: string;
+  sequence: number;
+  operation_name: string;
+  run_time_minutes: number | null;
+  setup_time_minutes: number | null;
+  labor_rate: number | null;
+  run_cost: number | null;
+  setup_cost: number | null;
+  created_at: string;
+}
+
+/**
+ * Per-material cost snapshot captured at quote creation.
+ */
+export interface QuoteMaterialSnapshot {
+  id: string;
+  quote_id: string;
+  company_id: string;
+  sequence: number;
+  inventory_item_id: string | null;
+  item_name: string;
+  quantity: number;
+  unit: string | null;
+  cost_per_unit: number | null;
+  line_cost: number | null;
+  created_at: string;
+}
+
+/**
+ * Full cost breakdown read back from the snapshot tables,
+ * with the computed vs. actual price so the UI can show overrides.
+ */
+export interface QuoteCostBreakdown {
+  operations: QuoteOperationSnapshot[];
+  materials: QuoteMaterialSnapshot[];
+  total_run_cost: number;
+  total_setup_cost: number;
+  total_labor_cost: number;
+  total_material_cost: number;
+  base_cost: number;
+  markup_percent: number | null;
+  computed_unit_price: number | null;
+  actual_unit_price: number | null;
+  override_per_unit: number | null; // actual - computed (null if either missing)
 }

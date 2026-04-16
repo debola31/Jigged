@@ -293,6 +293,28 @@ export default function JobForm({
               placeholder="Optional job description or special instructions"
             />
 
+            {/* Scheduling: lead time + due date */}
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <TextField
+                label="Lead Time (days)"
+                type="number"
+                value={formData.lead_time_days}
+                onChange={(e) => handleChange('lead_time_days', e.target.value)}
+                disabled={loading}
+                sx={{ flex: 1, minWidth: 180 }}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }}
+              />
+              <TextField
+                label="Due Date"
+                type="date"
+                value={formData.due_date}
+                onChange={(e) => handleChange('due_date', e.target.value)}
+                disabled={loading}
+                sx={{ flex: 1, minWidth: 180 }}
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+            </Box>
+
             <Divider />
 
             {/* Actions */}

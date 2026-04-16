@@ -5,12 +5,21 @@ import type {
   QuoteWithRelations,
   QuoteFormData,
   QuoteFilters,
-  QuoteStatus,
   QuoteAttachment,
+  QuoteCostBreakdown,
+  QuoteOperationSnapshot,
+  QuoteMaterialSnapshot,
   TempAttachment,
+  CompanyMember,
 } from '@/types/quote';
-import { calculateTotalPrice } from '@/types/quote';
+import {
+  calculateTotalPrice,
+  calculateUnitPriceFromMarkup,
+  isQuoteExpired,
+} from '@/types/quote';
 import type { JobAttachment } from '@/types/job';
+import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import { getCompanyMembers } from '@/utils/companyAccess';
 import {
   generateStoragePath,
   uploadFileToStorage,
@@ -37,6 +46,30 @@ function sanitizeSearchString(search: string): string {
     .replace(/%/g, '\\%')    // Escape percent signs
     .replace(/_/g, '\\_')    // Escape underscores
     .substring(0, 100);      // Limit length
+}
+
+/**
+ * A quote is editable while it's still active and hasn't been converted.
+ * Expired quotes are read-only; converted quotes are read-only.
+ */
+function isQuoteEditable(row: { status: string; converted_to_job_id: string | null }): boolean {
+  return row.status === 'active' && !row.converted_to_job_id;
+}
+
+/**
+ * Attach the creator's profile to each quote using the company member directory.
+ * Done client-side because auth.users isn't reachable via PostgREST joins.
+ */
+function hydrateCreators<T extends QuoteWithRelations>(
+  rows: T[],
+  members: CompanyMember[]
+): T[] {
+  const map = new Map<string, CompanyMember>();
+  for (const m of members) map.set(m.user_id, m);
+  for (const row of rows) {
+    row.created_by_member = row.created_by ? map.get(row.created_by) ?? null : null;
+  }
+  return rows;
 }
 
 // ============== CRUD Operations ==============
@@ -70,7 +103,6 @@ export async function getQuotes(
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
-  // Apply filters
   if (filters.status && filters.status !== 'all') {
     query = query.eq('status', filters.status);
   }
@@ -79,21 +111,30 @@ export async function getQuotes(
     query = query.eq('customer_id', filters.customerId);
   }
 
-  if (filters.search?.trim()) {
-    const sanitized = sanitizeSearchString(filters.search.trim());
-    query = query.or(
-      `quote_number.ilike.%${sanitized}%,description.ilike.%${sanitized}%`
-    );
+  if (filters.createdBy) {
+    query = query.eq('created_by', filters.createdBy);
   }
 
-  const { data, error, count } = await query;
+  if (filters.search?.trim()) {
+    const sanitized = sanitizeSearchString(filters.search.trim());
+    query = query.ilike('quote_number', `%${sanitized}%`);
+  }
+
+  const [{ data, error, count }, members] = await Promise.all([
+    query,
+    getCompanyMembers(companyId).catch((err) => {
+      console.warn('getCompanyMembers failed; creator names will be blank:', err);
+      return [] as CompanyMember[];
+    }),
+  ]);
 
   if (error) {
     console.error('Error fetching quotes:', error);
     throw error;
   }
 
-  return { data: (data || []) as QuoteWithRelations[], total: count || 0 };
+  const rows = hydrateCreators((data || []) as QuoteWithRelations[], members);
+  return { data: rows, total: count || 0 };
 }
 
 /**
@@ -128,7 +169,6 @@ export async function getAllQuotes(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    // Apply filters
     if (filters.status && filters.status !== 'all') {
       query = query.eq('status', filters.status);
     }
@@ -137,10 +177,13 @@ export async function getAllQuotes(
       query = query.eq('customer_id', filters.customerId);
     }
 
+    if (filters.createdBy) {
+      query = query.eq('created_by', filters.createdBy);
+    }
+
     if (filters.search?.trim()) {
-      query = query.or(
-        `quote_number.ilike.%${filters.search}%,description.ilike.%${filters.search}%`
-      );
+      const sanitized = sanitizeSearchString(filters.search.trim());
+      query = query.ilike('quote_number', `%${sanitized}%`);
     }
 
     const { data, error } = await query;
@@ -155,7 +198,11 @@ export async function getAllQuotes(
     offset += BATCH_SIZE;
   }
 
-  return allData;
+  const members = await getCompanyMembers(companyId).catch((err) => {
+    console.warn('getCompanyMembers failed; creator names will be blank:', err);
+    return [] as CompanyMember[];
+  });
+  return hydrateCreators(allData, members);
 }
 
 /**
@@ -182,9 +229,7 @@ export async function getQuotesCount(
 
   if (filters.search?.trim()) {
     const sanitized = sanitizeSearchString(filters.search.trim());
-    query = query.or(
-      `quote_number.ilike.%${sanitized}%,description.ilike.%${sanitized}%`
-    );
+    query = query.ilike('quote_number', `%${sanitized}%`);
   }
 
   const { count, error } = await query;
@@ -198,10 +243,28 @@ export async function getQuotesCount(
 }
 
 /**
+ * Lazy-expire sweep: flips any active quote whose expiration_date has passed
+ * to 'expired'. Runs as a fire-and-forget side-effect on page loads — no cron.
+ */
+export async function sweepExpiredQuotes(companyId: string): Promise<void> {
+  const supabase = getSupabase();
+  const today = new Date().toISOString().slice(0, 10);
+  const { error } = await supabase
+    .from('quotes')
+    .update({ status: 'expired', status_changed_at: new Date().toISOString() })
+    .eq('company_id', companyId)
+    .eq('status', 'active')
+    .lt('expiration_date', today);
+
+  if (error) {
+    // Don't throw — this is best-effort. Surface to Sentry if available.
+    console.warn('sweepExpiredQuotes failed:', error);
+    Sentry.captureException(error, { level: 'warning' });
+  }
+}
+
+/**
  * Get a single quote by ID
- * @param quoteId - The quote ID
- * @param companyId - The company ID for security validation
- * @returns Quote if found, null if not found (PGRST116)
  */
 export async function getQuote(quoteId: string, companyId: string): Promise<Quote | null> {
   const supabase = getSupabase();
@@ -223,9 +286,6 @@ export async function getQuote(quoteId: string, companyId: string): Promise<Quot
 
 /**
  * Get a quote with all relations
- * @param quoteId - The quote ID
- * @param companyId - The company ID for security validation
- * @returns Quote with relations if found, null if not found (PGRST116)
  */
 export async function getQuoteWithRelations(quoteId: string, companyId: string): Promise<QuoteWithRelations | null> {
   const supabase = getSupabase();
@@ -250,11 +310,28 @@ export async function getQuoteWithRelations(quoteId: string, companyId: string):
     throw error;
   }
 
-  return data as QuoteWithRelations | null;
+  if (!data) return null;
+
+  const quote = data as QuoteWithRelations;
+  if (quote.created_by) {
+    const { data: member } = await supabase
+      .from('user_company_access')
+      .select('user_id, name, email')
+      .eq('company_id', companyId)
+      .eq('user_id', quote.created_by)
+      .maybeSingle();
+    quote.created_by_member = (member as CompanyMember | null) ?? null;
+  } else {
+    quote.created_by_member = null;
+  }
+
+  return quote;
 }
 
 /**
- * Create a new quote (starts as pending_approval)
+ * Create a new quote (starts as active).
+ * If the quote has a part with a routing, the per-op/per-material cost
+ * breakdown is snapshotted into quote_operations + quote_materials.
  */
 export async function createQuote(
   companyId: string,
@@ -263,7 +340,6 @@ export async function createQuote(
 ): Promise<{ quote: Quote; attachmentErrors: string[] }> {
   const supabase = getSupabase();
 
-  // Input validation
   const quantity = parseInt(formData.quantity, 10);
   if (isNaN(quantity) || quantity < 1 || quantity > 1000000) {
     throw new Error('Quantity must be between 1 and 1,000,000');
@@ -274,28 +350,38 @@ export async function createQuote(
     throw new Error('Unit price must be between 0 and 999,999.99');
   }
 
-  if (formData.description && formData.description.length > 5000) {
-    throw new Error('Description cannot exceed 5000 characters');
+  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
+  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
+    throw new Error('Lead time must be between 0 and 3,650 days');
   }
+
+  const expirationDate = formData.expiration_date || null;
 
   const totalPrice = calculateTotalPrice(quantity, unitPrice);
 
   const baseCost = formData.base_cost ? parseFloat(formData.base_cost) : null;
   const markupPercent = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
 
+  const partId = formData.part_type === 'existing' && formData.part_id ? formData.part_id : null;
+
+  // created_by is the current authenticated user — used to surface "prepared by"
+  const { data: { user } } = await supabase.auth.getUser();
+
   const { data, error } = await supabase
     .from('quotes')
     .insert({
       company_id: companyId,
       customer_id: formData.customer_id,
-      part_id: formData.part_type === 'existing' && formData.part_id ? formData.part_id : null,
-      description: formData.description.trim() || null,
+      part_id: partId,
       quantity,
       base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
       markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
-      status: 'pending_approval',
+      lead_time_days: leadTimeDays,
+      expiration_date: expirationDate,
+      status: 'active',
+      created_by: user?.id ?? null,
       // quote_number is auto-generated by database trigger
     })
     .select()
@@ -306,7 +392,17 @@ export async function createQuote(
     throw error;
   }
 
-  // If there are temp attachments, move them to permanent location
+  // Snapshot cost breakdown from the part's routing (best-effort)
+  if (partId) {
+    try {
+      await writeCostSnapshots(data.id, companyId, partId);
+    } catch (snapshotError) {
+      console.warn('Failed to write cost snapshot:', snapshotError);
+      Sentry.captureException(snapshotError, { level: 'warning' });
+      // Don't fail the quote creation — the quote is still valid without the detailed breakdown
+    }
+  }
+
   const attachmentErrors: string[] = [];
   if (tempAttachments && tempAttachments.length > 0 && data.id) {
     for (const tempAttachment of tempAttachments) {
@@ -323,28 +419,28 @@ export async function createQuote(
 }
 
 /**
- * Update an existing quote (pending_approval or rejected only)
+ * Update an existing quote.
+ * Editable while status === 'active' && !converted_to_job_id.
+ * Re-snapshots the cost breakdown if part_id, base_cost or markup_percent change.
  */
 export async function updateQuote(quoteId: string, formData: QuoteFormData): Promise<Quote> {
   const supabase = getSupabase();
 
-  // First check if quote is in an editable status
   const { data: existing, error: checkError } = await supabase
     .from('quotes')
-    .select('status')
+    .select('status, converted_to_job_id, part_id, base_cost, markup_percent, company_id')
     .eq('id', quoteId)
     .single();
 
   if (checkError) {
-    console.error('Error checking quote status:', checkError);
+    console.error('Error checking quote:', checkError);
     throw checkError;
   }
 
-  if (existing.status !== 'pending_approval' && existing.status !== 'rejected') {
-    throw new Error('Only pending approval or rejected quotes can be edited');
+  if (!isQuoteEditable(existing)) {
+    throw new Error('This quote cannot be edited. Expired or converted quotes are read-only.');
   }
 
-  // Input validation
   const quantity = parseInt(formData.quantity, 10);
   if (isNaN(quantity) || quantity < 1 || quantity > 1000000) {
     throw new Error('Quantity must be between 1 and 1,000,000');
@@ -355,26 +451,29 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw new Error('Unit price must be between 0 and 999,999.99');
   }
 
-  if (formData.description && formData.description.length > 5000) {
-    throw new Error('Description cannot exceed 5000 characters');
+  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
+  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
+    throw new Error('Lead time must be between 0 and 3,650 days');
   }
 
   const totalPrice = calculateTotalPrice(quantity, unitPrice);
 
   const baseCost = formData.base_cost ? parseFloat(formData.base_cost) : null;
   const markupPercent = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
+  const partId = formData.part_type === 'existing' && formData.part_id ? formData.part_id : null;
 
   const { data, error } = await supabase
     .from('quotes')
     .update({
       customer_id: formData.customer_id,
-      part_id: formData.part_type === 'existing' && formData.part_id ? formData.part_id : null,
-      description: formData.description.trim() || null,
+      part_id: partId,
       quantity,
       base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
       markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
+      lead_time_days: leadTimeDays,
+      expiration_date: formData.expiration_date || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', quoteId)
@@ -386,6 +485,24 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw error;
   }
 
+  // Refresh cost snapshot if the part or cost inputs changed.
+  const partChanged = existing.part_id !== partId;
+  const baseChanged = (existing.base_cost ?? null) !== (baseCost ?? null);
+  const markupChanged = (existing.markup_percent ?? null) !== (markupPercent ?? null);
+
+  if (partId && (partChanged || baseChanged || markupChanged)) {
+    try {
+      await writeCostSnapshots(quoteId, existing.company_id, partId);
+    } catch (snapshotError) {
+      console.warn('Failed to refresh cost snapshot:', snapshotError);
+      Sentry.captureException(snapshotError, { level: 'warning' });
+    }
+  } else if (!partId && partChanged) {
+    // Part was removed — clear snapshots
+    await supabase.from('quote_operations').delete().eq('quote_id', quoteId);
+    await supabase.from('quote_materials').delete().eq('quote_id', quoteId);
+  }
+
   return data;
 }
 
@@ -395,14 +512,12 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
 export async function deleteQuote(quoteId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Get quote's attachments for storage cleanup
   const { data: attachments } = await supabase
     .from('quote_attachments')
     .select('file_path')
     .eq('quote_id', quoteId)
     .eq('company_id', companyId);
 
-  // 2. Delete storage files (best effort - don't fail if cleanup fails)
   if (attachments && attachments.length > 0) {
     for (const attachment of attachments) {
       try {
@@ -410,12 +525,10 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
       } catch (storageError) {
         console.warn('Failed to delete storage file:', attachment.file_path, storageError);
         Sentry.captureException(storageError, { level: 'warning' });
-        // Continue with deletion even if storage cleanup fails
       }
     }
   }
 
-  // 3. Delete the quote record (cascade will delete attachments from DB)
   const { error } = await supabase
     .from('quotes')
     .delete()
@@ -439,14 +552,12 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
 
   const supabase = getSupabase();
 
-  // 1. Get all attachments for these quotes
   const { data: attachments } = await supabase
     .from('quote_attachments')
     .select('file_path')
     .in('quote_id', validIds)
     .eq('company_id', companyId);
 
-  // 2. Delete storage files (best effort)
   if (attachments && attachments.length > 0) {
     for (const attachment of attachments) {
       try {
@@ -458,7 +569,6 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
     }
   }
 
-  // 3. Delete quotes in batches
   const BATCH_SIZE = 100;
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
@@ -482,75 +592,161 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
   }
 }
 
-// ============== Status Transitions ==============
+// ============== Cost Breakdown Snapshots ==============
 
 /**
- * Helper to update quote status with validation
+ * Write (or overwrite) per-op + per-material cost snapshots for a quote,
+ * reading the live routing via calculateRoutingCost.
+ * Safe to re-call: deletes existing rows first.
  */
-async function updateQuoteStatus(
+async function writeCostSnapshots(
   quoteId: string,
-  expectedCurrentStatus: QuoteStatus | QuoteStatus[],
-  newStatus: QuoteStatus
-): Promise<Quote> {
+  companyId: string,
+  partId: string
+): Promise<void> {
   const supabase = getSupabase();
 
-  const { data: existing, error: checkError } = await supabase
+  const breakdown = await calculateRoutingCost(partId);
+  if (!breakdown) return;
+
+  // Clear any existing snapshot rows (keeps the function idempotent)
+  await supabase.from('quote_operations').delete().eq('quote_id', quoteId);
+  await supabase.from('quote_materials').delete().eq('quote_id', quoteId);
+
+  if (breakdown.labor_items.length > 0) {
+    const opRows = breakdown.labor_items.map((item, index) => ({
+      quote_id: quoteId,
+      company_id: companyId,
+      sequence: index,
+      operation_name: item.operation_name,
+      run_time_minutes: item.run_time_minutes,
+      setup_time_minutes: item.setup_time_minutes,
+      labor_rate: item.labor_rate,
+      run_cost: item.cost,
+      setup_cost: item.setup_cost,
+    }));
+    const { error } = await supabase.from('quote_operations').insert(opRows);
+    if (error) throw error;
+  }
+
+  if (breakdown.material_items.length > 0) {
+    const matRows = breakdown.material_items.map((item, index) => ({
+      quote_id: quoteId,
+      company_id: companyId,
+      sequence: index,
+      inventory_item_id: null,
+      item_name: item.item_name,
+      quantity: item.quantity,
+      unit: item.unit,
+      cost_per_unit: item.cost_per_unit,
+      line_cost: item.cost,
+    }));
+    const { error } = await supabase.from('quote_materials').insert(matRows);
+    if (error) throw error;
+  }
+}
+
+/**
+ * Read the cost-breakdown for a quote and compute override info.
+ * Snapshot tables are the single source of truth — pre-existing quotes
+ * are backfilled by migration 20260416_backfill_quote_cost_snapshots.sql,
+ * so the read path never falls back to a live recomputation.
+ */
+export async function getQuoteCostBreakdown(
+  quoteId: string,
+  companyId: string
+): Promise<QuoteCostBreakdown | null> {
+  const supabase = getSupabase();
+
+  const { data: quote, error: quoteError } = await supabase
     .from('quotes')
-    .select('status')
+    .select('base_cost, markup_percent, unit_price')
     .eq('id', quoteId)
+    .eq('company_id', companyId)
     .single();
 
-  if (checkError) {
-    console.error('Error checking quote status:', checkError);
-    throw checkError;
+  if (quoteError) {
+    console.error('Error fetching quote for breakdown:', quoteError);
+    throw quoteError;
   }
 
-  const allowedStatuses = Array.isArray(expectedCurrentStatus)
-    ? expectedCurrentStatus
-    : [expectedCurrentStatus];
+  const [opsResp, matsResp] = await Promise.all([
+    supabase
+      .from('quote_operations')
+      .select('*')
+      .eq('quote_id', quoteId)
+      .order('sequence', { ascending: true }),
+    supabase
+      .from('quote_materials')
+      .select('*')
+      .eq('quote_id', quoteId)
+      .order('sequence', { ascending: true }),
+  ]);
 
-  if (!allowedStatuses.includes(existing.status as QuoteStatus)) {
-    throw new Error(`Cannot change status from ${existing.status} to ${newStatus}`);
-  }
+  if (opsResp.error) throw opsResp.error;
+  if (matsResp.error) throw matsResp.error;
+
+  const operations = (opsResp.data || []) as QuoteOperationSnapshot[];
+  const materials = (matsResp.data || []) as QuoteMaterialSnapshot[];
+
+  const totalRunCost = operations.reduce((sum, o) => sum + (o.run_cost ?? 0), 0);
+  const totalSetupCost = operations.reduce((sum, o) => sum + (o.setup_cost ?? 0), 0);
+  const totalLaborCost = totalRunCost + totalSetupCost;
+  const totalMaterialCost = materials.reduce((sum, m) => sum + (m.line_cost ?? 0), 0);
+
+  const baseCost = quote.base_cost ?? 0;
+  const markupPercent = quote.markup_percent;
+  const actualUnitPrice = quote.unit_price;
+  const computedUnitPrice =
+    markupPercent !== null ? calculateUnitPriceFromMarkup(baseCost, markupPercent) : null;
+
+  const overridePerUnit =
+    computedUnitPrice !== null && actualUnitPrice !== null
+      ? Math.round((actualUnitPrice - computedUnitPrice) * 100) / 100
+      : null;
+
+  return {
+    operations,
+    materials,
+    total_run_cost: Math.round(totalRunCost * 100) / 100,
+    total_setup_cost: Math.round(totalSetupCost * 100) / 100,
+    total_labor_cost: Math.round(totalLaborCost * 100) / 100,
+    total_material_cost: Math.round(totalMaterialCost * 100) / 100,
+    base_cost: baseCost,
+    markup_percent: markupPercent,
+    computed_unit_price: computedUnitPrice,
+    actual_unit_price: actualUnitPrice,
+    override_per_unit: overridePerUnit,
+  };
+}
+
+// ============== Manual expire ==============
+
+/**
+ * Manually mark an active quote as expired.
+ */
+export async function expireQuote(quoteId: string, companyId: string): Promise<Quote> {
+  const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('quotes')
     .update({
-      status: newStatus,
+      status: 'expired',
       status_changed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', quoteId)
+    .eq('company_id', companyId)
+    .eq('status', 'active')
     .select()
     .single();
 
   if (error) {
-    console.error('Error updating quote status:', error);
+    console.error('Error expiring quote:', error);
     throw error;
   }
 
   return data;
-}
-
-/**
- * Mark quote as pending approval (rejected → pending_approval)
- */
-export async function markQuoteAsPendingApproval(quoteId: string): Promise<Quote> {
-  return updateQuoteStatus(quoteId, 'rejected', 'pending_approval');
-}
-
-/**
- * Mark quote as approved (pending_approval → approved)
- */
-export async function markQuoteAsApproved(quoteId: string): Promise<Quote> {
-  return updateQuoteStatus(quoteId, 'pending_approval', 'approved');
-}
-
-/**
- * Mark quote as rejected (pending_approval → rejected)
- */
-export async function markQuoteAsRejected(quoteId: string): Promise<Quote> {
-  return updateQuoteStatus(quoteId, 'pending_approval', 'rejected');
 }
 
 // ============== Convert to Job ==============
@@ -563,16 +759,21 @@ export interface ConvertToJobResult {
   };
 }
 
+export interface ConvertToJobOptions {
+  leadTimeDays?: number | null;
+  notes?: string | null;
+}
+
 /**
- * Convert an approved quote to a job.
- * Routing is auto-resolved from the part (1:1 relationship).
+ * Convert a quote to a job. No approval gate: expiration is informational only.
+ * Caller may override the lead time; otherwise we use the quote's lead_time_days.
  */
 export async function convertQuoteToJob(
-  quoteId: string
+  quoteId: string,
+  options: ConvertToJobOptions = {}
 ): Promise<ConvertToJobResult> {
   const supabase = getSupabase();
 
-  // 1. Get quote with full details and attachments
   const { data: quote, error: quoteError } = await supabase
     .from('quotes')
     .select(`
@@ -587,16 +788,10 @@ export async function convertQuoteToJob(
     throw quoteError;
   }
 
-  // 2. Validate quote status
-  if (quote.status !== 'approved') {
-    throw new Error('Only approved quotes can be converted to jobs');
-  }
-
   if (quote.converted_to_job_id) {
     throw new Error('This quote has already been converted to a job');
   }
 
-  // 3. Auto-resolve routing from part (1:1 relationship)
   let routingId: string | null = null;
   if (quote.part_id) {
     const { data: routing, error: routingError } = await supabase
@@ -617,13 +812,24 @@ export async function convertQuoteToJob(
     routingId = routing.id;
   }
 
-  // 4. Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) {
     throw new Error('Authentication required. Please log in and try again.');
   }
 
-  // 5. Create job
+  // Lead time resolution: explicit override > quote value > null
+  const resolvedLeadTime =
+    options.leadTimeDays !== undefined && options.leadTimeDays !== null
+      ? options.leadTimeDays
+      : quote.lead_time_days;
+
+  let dueDate: string | null = null;
+  if (resolvedLeadTime !== null && resolvedLeadTime !== undefined) {
+    const d = new Date();
+    d.setDate(d.getDate() + resolvedLeadTime);
+    dueDate = d.toISOString().slice(0, 10);
+  }
+
   const { data: job, error: jobError } = await supabase
     .from('jobs')
     .insert({
@@ -631,8 +837,10 @@ export async function convertQuoteToJob(
       quote_id: quoteId,
       customer_id: quote.customer_id,
       part_id: quote.part_id,
-      description: quote.description,
-      status: 'pending',
+      description: options.notes ?? null,
+      status: 'not_started',
+      due_date: dueDate,
+      lead_time_days: resolvedLeadTime,
       created_by: user.id,
     })
     .select('id, job_number')
@@ -643,7 +851,6 @@ export async function convertQuoteToJob(
     throw jobError;
   }
 
-  // 6. Copy operations from routing
   if (routingId) {
     const { error: rpcError } = await supabase.rpc('create_job_operations_from_routing', {
       p_job_id: job.id,
@@ -655,7 +862,6 @@ export async function convertQuoteToJob(
     }
   }
 
-  // 7. Copy attachment if exists (non-critical — log but don't block)
   const quoteAttachment = quote.quote_attachments?.[0];
   if (quoteAttachment) {
     try {
@@ -670,7 +876,6 @@ export async function convertQuoteToJob(
     }
   }
 
-  // 8. Update quote with job reference
   const { data: updatedQuote, error: updateError } = await supabase
     .from('quotes')
     .update({
@@ -732,9 +937,6 @@ export async function getPartWithCostInfo(
 
 // ============== Attachment Operations ==============
 
-/**
- * Get attachments for a quote
- */
 export async function getQuoteAttachments(
   quoteId: string
 ): Promise<QuoteAttachment[]> {
@@ -754,9 +956,6 @@ export async function getQuoteAttachments(
   return data || [];
 }
 
-/**
- * Get count of attachments for a quote (for UI limit enforcement)
- */
 export async function getQuoteAttachmentCount(quoteId: string): Promise<number> {
   const supabase = getSupabase();
 
@@ -774,7 +973,8 @@ export async function getQuoteAttachmentCount(quoteId: string): Promise<number> 
 }
 
 /**
- * Upload a PDF attachment for a quote (pending_approval or rejected only)
+ * Upload a PDF attachment. Allowed while the quote is still editable
+ * (active and not converted).
  */
 export async function uploadQuoteAttachment(
   quoteId: string,
@@ -783,20 +983,17 @@ export async function uploadQuoteAttachment(
 ): Promise<QuoteAttachment> {
   const supabase = getSupabase();
 
-  // 1. Validate file type
   if (file.type !== 'application/pdf') {
     throw new Error('Only PDF files are allowed');
   }
 
-  // 2. Validate file size (50MB)
   if (file.size > MAX_FILE_SIZE) {
     throw new Error('File size must be 50MB or less');
   }
 
-  // 3. Check quote status (must be pending_approval or rejected)
   const { data: quote, error: quoteError } = await supabase
     .from('quotes')
-    .select('status')
+    .select('status, converted_to_job_id')
     .eq('id', quoteId)
     .single();
 
@@ -804,11 +1001,10 @@ export async function uploadQuoteAttachment(
     throw new Error('Quote not found');
   }
 
-  if (quote.status !== 'pending_approval' && quote.status !== 'rejected') {
-    throw new Error('Attachments can only be added to pending approval or rejected quotes');
+  if (!isQuoteEditable(quote)) {
+    throw new Error('Attachments can only be added to active quotes that have not been converted.');
   }
 
-  // 4. Check attachment limit
   const existingCount = await getQuoteAttachmentCount(quoteId);
   if (existingCount >= MAX_ATTACHMENTS_PER_QUOTE) {
     throw new Error(
@@ -816,16 +1012,11 @@ export async function uploadQuoteAttachment(
     );
   }
 
-  // 5. Get current user
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 6. Generate storage path
   const filePath = generateStoragePath(companyId, 'quotes', quoteId, file.name);
-
-  // 7. Upload to storage
   await uploadFileToStorage(filePath, file);
 
-  // 8. Create database record
   const { data: attachment, error: insertError } = await supabase
     .from('quote_attachments')
     .insert({
@@ -841,7 +1032,6 @@ export async function uploadQuoteAttachment(
     .single();
 
   if (insertError) {
-    // Cleanup: try to delete uploaded file
     await deleteFileFromStorage(filePath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     console.error('Error creating attachment record:', insertError);
     throw new Error('Failed to save attachment');
@@ -851,9 +1041,7 @@ export async function uploadQuoteAttachment(
 }
 
 /**
- * Delete attachment for a quote (pending_approval or rejected only)
- * @param attachmentId - The attachment ID
- * @param companyId - The company ID for security validation
+ * Delete attachment. Allowed while the parent quote is still editable.
  */
 export async function deleteQuoteAttachment(
   attachmentId: string,
@@ -861,13 +1049,12 @@ export async function deleteQuoteAttachment(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Get attachment with quote status, validating company ownership
   const { data: attachment, error: fetchError } = await supabase
     .from('quote_attachments')
     .select(`
       id,
       file_path,
-      quotes!inner (status)
+      quotes!inner (status, converted_to_job_id)
     `)
     .eq('id', attachmentId)
     .eq('company_id', companyId)
@@ -877,16 +1064,13 @@ export async function deleteQuoteAttachment(
     throw new Error('Attachment not found');
   }
 
-  // 2. Verify quote is in an editable status
-  const quoteStatus = (attachment.quotes as { status: string }).status;
-  if (quoteStatus !== 'pending_approval' && quoteStatus !== 'rejected') {
-    throw new Error('Attachments can only be deleted from pending approval or rejected quotes');
+  const parentQuote = attachment.quotes as { status: string; converted_to_job_id: string | null };
+  if (!isQuoteEditable(parentQuote)) {
+    throw new Error('Attachments can only be deleted from active quotes that have not been converted.');
   }
 
-  // 3. Delete from storage
   await deleteFileFromStorage(attachment.file_path);
 
-  // 4. Delete database record
   const { error: dbError } = await supabase
     .from('quote_attachments')
     .delete()
@@ -910,7 +1094,6 @@ export async function replaceQuoteAttachment(
 ): Promise<QuoteAttachment> {
   const supabase = getSupabase();
 
-  // 1. Validate file type and size
   if (newFile.type !== 'application/pdf') {
     throw new Error('Only PDF files are allowed');
   }
@@ -919,12 +1102,11 @@ export async function replaceQuoteAttachment(
     throw new Error('File size must be 50MB or less');
   }
 
-  // 2. Get existing attachment info with quote status, validating company ownership
   const { data: existing, error: fetchError } = await supabase
     .from('quote_attachments')
     .select(`
       file_path,
-      quotes!inner (status)
+      quotes!inner (status, converted_to_job_id)
     `)
     .eq('id', attachmentId)
     .eq('company_id', companyId)
@@ -934,21 +1116,18 @@ export async function replaceQuoteAttachment(
     throw new Error('Attachment not found');
   }
 
-  const quoteStatus = (existing.quotes as { status: string }).status;
-  if (quoteStatus !== 'pending_approval' && quoteStatus !== 'rejected') {
-    throw new Error('Attachments can only be replaced in pending approval or rejected quotes');
+  const parentQuote = existing.quotes as { status: string; converted_to_job_id: string | null };
+  if (!isQuoteEditable(parentQuote)) {
+    throw new Error('Attachments can only be replaced on active quotes that have not been converted.');
   }
 
   const oldFilePath = existing.file_path;
 
-  // 3. Upload NEW file first (if this fails, old file is still intact)
   const newPath = generateStoragePath(companyId, 'quotes', quoteId, newFile.name);
   await uploadFileToStorage(newPath, newFile);
 
-  // 4. Get current user
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 5. Update database record
   const { data: updated, error: updateError } = await supabase
     .from('quote_attachments')
     .update({
@@ -963,12 +1142,10 @@ export async function replaceQuoteAttachment(
     .single();
 
   if (updateError) {
-    // Cleanup: delete newly uploaded file
     await deleteFileFromStorage(newPath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     throw new Error('Failed to update attachment');
   }
 
-  // 6. Delete old file from storage (best effort - orphaned files can be cleaned up later)
   if (oldFilePath) {
     await deleteFileFromStorage(oldFilePath)
       .catch(err => { console.warn('Failed to delete old file:', err); Sentry.captureException(err, { level: 'warning' }); });
@@ -977,35 +1154,24 @@ export async function replaceQuoteAttachment(
   return updated;
 }
 
-/**
- * Get signed URL for attachment download (fetch fresh each time)
- */
 export async function getQuoteAttachmentUrl(filePath: string): Promise<string> {
   return getSignedUrl(filePath, 3600);
 }
 
-/**
- * Upload a PDF attachment to temporary storage (before quote is created)
- */
 export async function uploadTempQuoteAttachment(
   companyId: string,
   sessionId: string,
   file: File
 ): Promise<TempAttachment> {
-  // 1. Validate file type
   if (file.type !== 'application/pdf') {
     throw new Error('Only PDF files are allowed');
   }
 
-  // 2. Validate file size (50MB)
   if (file.size > MAX_FILE_SIZE) {
     throw new Error('File size must be 50MB or less');
   }
 
-  // 3. Generate temp storage path
   const filePath = generateTempStoragePath(companyId, sessionId, file.name);
-
-  // 4. Upload to storage
   await uploadFileToStorage(filePath, file);
 
   return {
@@ -1016,16 +1182,10 @@ export async function uploadTempQuoteAttachment(
   };
 }
 
-/**
- * Delete temporary attachment
- */
 export async function deleteTempQuoteAttachment(filePath: string): Promise<void> {
   await deleteFileFromStorage(filePath);
 }
 
-/**
- * Move temporary attachment to permanent location (internal helper for createQuote)
- */
 async function moveTempAttachmentToPermanent(
   tempAttachment: TempAttachment,
   quoteId: string,
@@ -1033,7 +1193,6 @@ async function moveTempAttachmentToPermanent(
 ): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Generate permanent path
   const permanentPath = generateStoragePath(
     companyId,
     'quotes',
@@ -1041,13 +1200,10 @@ async function moveTempAttachmentToPermanent(
     tempAttachment.file_name
   );
 
-  // 2. Move file in storage
   await moveFileInStorage(tempAttachment.file_path, permanentPath);
 
-  // 3. Get current user
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 4. Create database record
   const { error: insertError } = await supabase
     .from('quote_attachments')
     .insert({
@@ -1066,9 +1222,6 @@ async function moveTempAttachmentToPermanent(
   }
 }
 
-/**
- * Copy attachment from quote to job (internal helper)
- */
 async function copyAttachmentToJob(
   quoteAttachment: QuoteAttachment,
   jobId: string,
@@ -1077,10 +1230,8 @@ async function copyAttachmentToJob(
 ): Promise<JobAttachment> {
   const supabase = getSupabase();
 
-  // 1. Download file from quote attachment
   const fileData = await downloadFileFromStorage(quoteAttachment.file_path);
 
-  // 2. Generate new path for job
   const newPath = generateStoragePath(
     companyId,
     'jobs',
@@ -1088,10 +1239,8 @@ async function copyAttachmentToJob(
     quoteAttachment.file_name
   );
 
-  // 3. Upload to job attachments bucket
   await uploadFileToStorage(newPath, fileData);
 
-  // 4. Create job_attachments record
   const { data: jobAttachment, error: insertError } = await supabase
     .from('job_attachments')
     .insert({
@@ -1109,10 +1258,12 @@ async function copyAttachmentToJob(
 
   if (insertError) {
     console.error('Failed to create job attachment record:', insertError);
-    // Cleanup: delete uploaded file
     await deleteFileFromStorage(newPath).catch((err) => { console.error(err); Sentry.captureException(err, { level: 'warning' }); });
     throw new Error('Failed to copy attachment to job');
   }
 
   return jobAttachment;
 }
+
+// Re-export the expired-status helper so consumers don't need a separate import.
+export { isQuoteExpired };

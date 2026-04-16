@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import type { CompanyMember } from '@/types/quote';
 
 export interface Company {
   id: string;
@@ -11,6 +12,29 @@ export interface UserCompanyAccess {
   company_id: string;
   role: string;
   companies: Company;
+}
+
+/**
+ * Fetch the company's member directory (user_id + display name + email).
+ * Used to resolve `created_by` UUIDs to names. The RLS policy added in
+ * migration 20260416_members_visible_to_company.sql lets any member read
+ * peers in their own company.
+ */
+export async function getCompanyMembers(companyId: string): Promise<CompanyMember[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('user_company_access')
+    .select('user_id, name, email')
+    .eq('company_id', companyId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching company members:', error);
+    throw error;
+  }
+
+  return (data || []) as CompanyMember[];
 }
 
 /**

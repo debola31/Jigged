@@ -83,9 +83,6 @@ import {
   updateQuote,
   deleteQuote,
   bulkDeleteQuotes,
-  markQuoteAsPendingApproval,
-  markQuoteAsApproved,
-  markQuoteAsRejected,
   convertQuoteToJob,
   getPartWithCostInfo,
 
@@ -187,8 +184,10 @@ describe('quotesAccess utilities', () => {
 
       await getQuotes('company-1', { search: 'test%query' });
 
-      // Should escape the % character
-      expect(mockQueryBuilder.or).toHaveBeenCalledWith(
+      // After the description column was removed, search targets only quote_number
+      // via .ilike (not .or). The % wildcard in the input must still be escaped.
+      expect(mockQueryBuilder.ilike).toHaveBeenCalledWith(
+        'quote_number',
         expect.stringContaining('\\%')
       );
     });
@@ -358,13 +357,7 @@ describe('quotesAccess utilities', () => {
       );
     });
 
-    it('validates description length', async () => {
-      const invalidForm = { ...validFormData, description: 'x'.repeat(5001) };
-
-      await expect(createQuote('company-1', invalidForm)).rejects.toThrow(
-        'Description cannot exceed 5000 characters'
-      );
-    });
+    // The description field was removed from quotes in April 2026 — no longer a validation path.
 
     it('creates quote with null part_id for adhoc quotes', async () => {
       const adhocForm = { ...validFormData, part_type: 'adhoc' as const, part_id: '' };
@@ -450,7 +443,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
+                  data: { status: 'active', converted_to_job_id: null, part_id: null, base_cost: null, markup_percent: null, company_id: 'company-1' },
                   error: null,
                 }),
               }),
@@ -481,47 +474,7 @@ describe('quotesAccess utilities', () => {
       expect(result.quantity).toBe(200);
     });
 
-    it('allows updating rejected quotes', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      await expect(updateQuote('quote-1', updateFormData)).resolves.toBeDefined();
-    });
-
-    it('rejects updating approved quotes', async () => {
+    it('rejects updating expired quotes', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
@@ -529,7 +482,7 @@ describe('quotesAccess utilities', () => {
           eq: vi.fn().mockReturnValue({
             ...mockQueryBuilder,
             single: vi.fn().mockReturnValue({
-              data: { status: 'approved' },
+              data: { status: 'expired', converted_to_job_id: null, part_id: null, base_cost: null, markup_percent: null, company_id: 'company-1' },
               error: null,
             }),
           }),
@@ -537,7 +490,27 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
-        'Only pending approval or rejected quotes can be edited'
+        'This quote cannot be edited'
+      );
+    });
+
+    it('rejects updating converted quotes', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        ...mockQueryBuilder,
+        select: vi.fn().mockReturnValue({
+          ...mockQueryBuilder,
+          eq: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            single: vi.fn().mockReturnValue({
+              data: { status: 'active', converted_to_job_id: 'job-1', part_id: null, base_cost: null, markup_percent: null, company_id: 'company-1' },
+              error: null,
+            }),
+          }),
+        }),
+      }));
+
+      await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
+        'This quote cannot be edited'
       );
     });
   });
@@ -754,178 +727,13 @@ describe('quotesAccess utilities', () => {
   });
 
   // ============== Status Transition Tests ==============
+  //
+  // Approval flow was removed — quotes now move through (active) → (expired)
+  // → (converted via converted_to_job_id). The dedicated
+  // markQuoteAsApproved/Rejected/PendingApproval functions no longer exist.
+  // Tests for the new lazy-expire sweep / manual expire / cost-breakdown
+  // snapshot flow should be added in a follow-up.
 
-  describe('markQuoteAsPendingApproval', () => {
-    it('transitions rejected quote to pending_approval', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsPendingApproval('quote-1');
-
-      expect(result.status).toBe('pending_approval');
-    });
-
-    it('rejects invalid status transition from approved', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'approved' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(markQuoteAsPendingApproval('quote-1')).rejects.toThrow(
-        'Cannot change status from approved to pending_approval'
-      );
-    });
-  });
-
-  describe('markQuoteAsApproved', () => {
-    it('transitions pending_approval quote to approved', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'approved' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsApproved('quote-1');
-
-      expect(result.status).toBe('approved');
-    });
-
-    it('rejects invalid transition from rejected', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'rejected' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(markQuoteAsApproved('quote-1')).rejects.toThrow(
-        'Cannot change status from rejected to approved'
-      );
-    });
-  });
-
-  describe('markQuoteAsRejected', () => {
-    it('transitions pending_approval quote to rejected', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, status: 'rejected' },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await markQuoteAsRejected('quote-1');
-
-      expect(result.status).toBe('rejected');
-    });
-  });
 
   // ============== Convert to Job Tests ==============
 
@@ -1014,29 +822,9 @@ describe('quotesAccess utilities', () => {
       expect(result.job.job_number).toBe('J-2024-001');
     });
 
-    it('rejects non-approved quotes', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: {
-                ...mockQuote,
-                status: 'pending_approval',
-                converted_to_job_id: null,
-              },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
-        'Only approved quotes can be converted to jobs'
-      );
-    });
+    // The "only approved quotes can convert" gate was removed in April 2026 —
+    // quotes can be converted from any status (with a warning for expired).
+    // Only the "already-converted" guard remains.
 
     it('rejects already converted quotes', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
@@ -1122,7 +910,7 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('uploadQuoteAttachment', () => {
-    it('uploads PDF attachment to pending approval quote', async () => {
+    it('uploads PDF attachment to active quote', async () => {
       const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
       Object.defineProperty(mockFile, 'size', { value: 1024 });
 
@@ -1137,7 +925,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
+                  data: { status: 'active', converted_to_job_id: null },
                   error: null,
                 }),
               }),
@@ -1202,7 +990,7 @@ describe('quotesAccess utilities', () => {
       );
     });
 
-    it('rejects upload to approved quote', async () => {
+    it('rejects upload to expired quote', async () => {
       const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
       Object.defineProperty(mockFile, 'size', { value: 1024 });
 
@@ -1213,7 +1001,7 @@ describe('quotesAccess utilities', () => {
           eq: vi.fn().mockReturnValue({
             ...mockQueryBuilder,
             single: vi.fn().mockReturnValue({
-              data: { status: 'approved' },
+              data: { status: 'expired', converted_to_job_id: null },
               error: null,
             }),
           }),
@@ -1221,7 +1009,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        'Attachments can only be added to pending approval or rejected quotes'
+        'Attachments can only be added to active quotes that have not been converted'
       );
     });
 
@@ -1240,7 +1028,7 @@ describe('quotesAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 single: vi.fn().mockReturnValue({
-                  data: { status: 'pending_approval' },
+                  data: { status: 'active', converted_to_job_id: null },
                   error: null,
                 }),
               }),
@@ -1269,7 +1057,7 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('deleteQuoteAttachment', () => {
-    it('deletes attachment from pending approval quote', async () => {
+    it('deletes attachment from active quote', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
         if (table === 'quote_attachments') {
           return {
@@ -1284,7 +1072,7 @@ describe('quotesAccess utilities', () => {
                     data: {
                       id: 'attachment-1',
                       file_path: 'path/to/file.pdf',
-                      quotes: { status: 'pending_approval' },
+                      quotes: { status: 'active', converted_to_job_id: null },
                     },
                     error: null,
                   }),
@@ -1311,7 +1099,7 @@ describe('quotesAccess utilities', () => {
       expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith('path/to/file.pdf');
     });
 
-    it('rejects deletion from approved quote', async () => {
+    it('rejects deletion from converted quote', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
@@ -1324,7 +1112,7 @@ describe('quotesAccess utilities', () => {
                 data: {
                   id: 'attachment-1',
                   file_path: 'path/to/file.pdf',
-                  quotes: { status: 'approved' },
+                  quotes: { status: 'active', converted_to_job_id: 'job-1' },
                 },
                 error: null,
               }),
@@ -1334,7 +1122,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(deleteQuoteAttachment('attachment-1', 'company-1')).rejects.toThrow(
-        'Attachments can only be deleted from pending approval or rejected quotes'
+        'Attachments can only be deleted from active quotes that have not been converted'
       );
     });
   });

@@ -203,17 +203,19 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
   }
 
   return (
-    <Box>
-      {/* Save status indicator (right-aligned, no section header — the
-          Operations / Materials card titles are enough) */}
+    <Box sx={{ position: 'relative' }}>
+      {/* Save indicator floats over the top-right corner so it never reserves
+          layout space — the Operations / Materials card titles speak for the
+          section, no header needed. */}
       <Box
         sx={{
+          position: 'absolute',
+          top: -22,
+          right: 0,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'flex-end',
-          mb: 1,
-          minHeight: 24,
           color: 'text.secondary',
+          pointerEvents: 'none',
         }}
       >
         {saving ? (

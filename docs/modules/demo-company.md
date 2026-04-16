@@ -221,7 +221,7 @@ The template stores data for each entity type, keyed by table name. Each entity 
   "parts": [
     {
       "_ref": "part-1",
-      "part_number": "ACM-001",
+      "part_name": "ACM-001",
       "description": "Precision Bracket",
       "customer_ref": "cust-1",
       "pricing": [{"quantity": 1, "unit_price": 150.00}, {"quantity": 100, "unit_price": 120.00}]
@@ -422,10 +422,10 @@ BEGIN
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO parts (id, company_id, customer_id, part_number, description, pricing)
+        INSERT INTO parts (id, company_id, customer_id, part_name, description, pricing)
         VALUES (v_new_id, v_company_id,
                 (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                v_item->>'part_number',
+                v_item->>'part_name',
                 v_item->>'description',
                 COALESCE(v_item->'pricing', '[]'::JSONB));
     END LOOP;

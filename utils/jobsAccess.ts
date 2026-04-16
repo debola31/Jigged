@@ -53,7 +53,7 @@ export async function getAllJobs(
         `
         *,
         customers!left(id, name),
-        parts!left(id, part_number, description),
+        parts!left(id, part_name, description),
         quotes!jobs_quote_id_fkey(id, quote_number, total_price)
       `
       )
@@ -107,7 +107,7 @@ export async function getJobWithRelations(
       `
       *,
       customers!left(id, name),
-      parts!left(id, part_number, description),
+      parts!left(id, part_name, description),
       quotes!jobs_quote_id_fkey(id, quote_number, total_price),
       job_operations(
         *,

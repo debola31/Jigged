@@ -11,30 +11,19 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
-import Chip from '@mui/material/Chip';
+
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import Table from '@mui/material/Table';
-import TableBody from '@mui/material/TableBody';
-import TableCell from '@mui/material/TableCell';
-import TableHead from '@mui/material/TableHead';
-import TableRow from '@mui/material/TableRow';
 
 import { getPartWithRelations, deletePart } from '@/utils/partsAccess';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
-import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import type { Part } from '@/types/part';
 
 export default function PartDetailPage() {
@@ -48,10 +37,6 @@ export default function PartDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  // Routing cost breakdown
-  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  const [costLoading, setCostLoading] = useState(false);
 
   useEffect(() => {
     fetchPart();
@@ -70,24 +55,6 @@ export default function PartDetailPage() {
     }
   };
 
-  // Calculate routing cost when part has a routing
-  useEffect(() => {
-    if (!part?.routing) {
-      setCostBreakdown(null);
-      return;
-    }
-    setCostLoading(true);
-    calculateRoutingCost(partId)
-      .then((breakdown) => {
-        setCostBreakdown(breakdown);
-      })
-      .catch((err) => {
-        console.error('Error calculating routing cost:', err);
-        setCostBreakdown(null);
-      })
-      .finally(() => setCostLoading(false));
-  }, [part, partId]);
-
   const handleDelete = async () => {
     setActionLoading(true);
     try {
@@ -98,11 +65,6 @@ export default function PartDetailPage() {
       setActionLoading(false);
       setDeleteDialogOpen(false);
     }
-  };
-
-  const formatCurrency = (value: number | null): string => {
-    if (value === null) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
   };
 
   const formatDate = (dateStr: string | null): string => {
@@ -197,10 +159,10 @@ export default function PartDetailPage() {
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
-                    Part Number
+                    Part Name
                   </Typography>
                   <Typography variant="body1" fontWeight={500}>
-                    {part.part_number}
+                    {part.part_name}
                   </Typography>
                 </Box>
                 <Box>
@@ -291,145 +253,6 @@ export default function PartDetailPage() {
           </Card>
         </Grid>
 
-        {/* Cost Information Card */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Cost Information
-                </Typography>
-                {costLoading && <CircularProgress size={16} />}
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Cost Source
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                    <Chip
-                      label={
-                        part.cost_source === 'routing'
-                          ? 'From Routing'
-                          : part.cost_source === 'manual'
-                            ? 'Manual'
-                            : part.cost_source === 'estimate'
-                              ? 'Estimate'
-                              : 'Not Set'
-                      }
-                      size="small"
-                      color={part.cost_source === 'routing' ? 'primary' : 'default'}
-                      variant="outlined"
-                    />
-                  </Box>
-                </Box>
-
-                {/* Routing Cost (calculated live) */}
-                {costBreakdown && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Routing Cost (per unit)
-                    </Typography>
-                    <Typography variant="h6" fontWeight={600} color="primary">
-                      {formatCurrency(costBreakdown.total_cost)}
-                    </Typography>
-                  </Box>
-                )}
-
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Manual Estimate
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatCurrency(part.manual_cost)}
-                  </Typography>
-                </Box>
-              </Box>
-
-              {/* Warnings for missing data */}
-              {costBreakdown && costBreakdown.warnings.length > 0 && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  {costBreakdown.warnings.map((w, i) => (
-                    <Typography key={i} variant="body2">{w.message}</Typography>
-                  ))}
-                </Alert>
-              )}
-
-              {/* Cost Breakdown accordion */}
-              {costBreakdown && (costBreakdown.labor_items.length > 0 || costBreakdown.material_items.length > 0) && (
-                <Accordion sx={{ mt: 2, bgcolor: 'transparent', boxShadow: 'none', '&:before': { display: 'none' } }}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
-                    <Typography variant="body2" fontWeight={500}>
-                      Cost Breakdown
-                    </Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 0 }}>
-                    {costBreakdown.labor_items.length > 0 && (
-                      <>
-                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Labor</Typography>
-                        <Table size="small" sx={{ mb: 2 }}>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Operation</TableCell>
-                              <TableCell align="right">Time (min)</TableCell>
-                              <TableCell align="right">Rate ($/hr)</TableCell>
-                              <TableCell align="right">Cost</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {costBreakdown.labor_items.map((item, i) => (
-                              <TableRow key={i}>
-                                <TableCell>{item.operation_name}</TableCell>
-                                <TableCell align="right">{item.run_time_minutes}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.labor_rate)}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow>
-                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_labor_cost)}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </>
-                    )}
-                    {costBreakdown.material_items.length > 0 && (
-                      <>
-                        <Typography variant="subtitle2" sx={{ mb: 1 }}>Materials</Typography>
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Item</TableCell>
-                              <TableCell align="right">Qty</TableCell>
-                              <TableCell align="right">Unit Cost</TableCell>
-                              <TableCell align="right">Cost</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {costBreakdown.material_items.map((item, i) => (
-                              <TableRow key={i}>
-                                <TableCell>{item.item_name}</TableCell>
-                                <TableCell align="right">{item.quantity} {item.unit}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost_per_unit)}</TableCell>
-                                <TableCell align="right">{formatCurrency(item.cost)}</TableCell>
-                              </TableRow>
-                            ))}
-                            <TableRow>
-                              <TableCell colSpan={3} sx={{ fontWeight: 600 }}>Subtotal</TableCell>
-                              <TableCell align="right" sx={{ fontWeight: 600 }}>{formatCurrency(costBreakdown.total_material_cost)}</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </>
-                    )}
-                  </AccordionDetails>
-                </Accordion>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
         {/* Related Card */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
@@ -474,7 +297,7 @@ export default function PartDetailPage() {
         <DialogTitle>Delete Part?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{part.part_number}</strong>? This action cannot
+            Are you sure you want to delete <strong>{part.part_name}</strong>? This action cannot
             be undone.
           </Typography>
           {hasRelatedRecords && (

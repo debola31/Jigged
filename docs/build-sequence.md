@@ -488,7 +488,7 @@ Phase 0 is complete when Shane can:
   | quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, etc. |
   | customer_id | UUID (FK) | Yes | Link to customer |
   | part_id | UUID (FK) | No | Link to existing part (optional) |
-  | part_number_text | Text | No | Ad-hoc part number (when part_id is null) |
+  | part_name_text | Text | No | Ad-hoc part name (when part_id is null) |
   | description | Text | No | Part/job description |
   | quantity | Integer | Yes | Number of units quoted |
   | unit_price | Decimal | No | Price per unit |
@@ -512,7 +512,7 @@ Phase 0 is complete when Shane can:
 
   - Table showing: Quote #, Customer, Part, Quantity, Total, Status, Created
 
-  - Search box (searches quote number, customer name, part number)
+  - Search box (searches quote number, customer name, part name)
 
   - Filter dropdown: Status (All / Pending Approval / Approved / Rejected)
 
@@ -565,12 +565,12 @@ Phase 0 is complete when Shane can:
   - If Existing Part:
     - Part dropdown (filtered by selected customer + generic parts)
 
-    - Shows: part number - description
+    - Shows: part name - description
 
     - Auto-fills description and suggests pricing
 
   - If Ad-hoc Part:
-    - Part Number text field
+    - Part Name text field
 
     - Description text field
 
@@ -742,7 +742,7 @@ Phase 0 is complete when Shane can:
   │                                             │
   │  Customer: Acme Corp (read-only)            │
   │                                             │
-  │  Part Number *      [____________]          │
+  │  Part Name *      [____________]          │
   │  Description        [____________]          │
   │                                             │
   │  ─────── Pricing (Optional) ───────         │
@@ -773,7 +773,7 @@ Phase 0 is complete when Shane can:
 
   **Required Fields:**
 
-  - Part Number (unique per customer within company)
+  - Part Name (unique per customer within company)
 
   **Optional Fields (for quick entry):**
 
@@ -800,7 +800,7 @@ Phase 0 is complete when Shane can:
     └─────────────────────────────────────┘
     
     If Ad-hoc Part:
-    [Part Number field]
+    [Part Name field]
     [Description field]
   ```
 
@@ -810,7 +810,7 @@ Phase 0 is complete when Shane can:
   |---|---|
   | Quick create customer with duplicate code | Show error: "Customer code already exists" |
   | Quick create part without customer selected | "+ New Part" button disabled with tooltip |
-  | Quick create part with duplicate part number | Show error: "Part number already exists for this customer" |
+  | Quick create part with duplicate part name | Show error: "Part number already exists for this customer" |
   | Modal closed without saving | Form state preserved, no changes made |
   | Network error during creation | Show error, keep modal open for retry |
 
@@ -889,7 +889,7 @@ Phase 0 is complete when Shane can:
 
     - part_id from quote
 
-    - part_number_text from quote (if ad-hoc)
+    - part_name_text from quote (if ad-hoc)
 
     - description from quote
 
@@ -1675,7 +1675,7 @@ Phase 0 is complete when Shane can:
   | As a... | I want to... | So that... |
   |---|---|---|
   | Owner/Admin | View a list of all parts | I can see our product catalog |
-  | Owner/Admin | Search parts by part number or description | I can quickly find a specific part |
+  | Owner/Admin | Search parts by part name or description | I can quickly find a specific part |
   | Owner/Admin | Filter parts by customer | I can see all parts for a specific customer |
   | Owner/Admin | Filter parts by active/inactive status | I can focus on current parts |
   | Owner/Admin | Create a new part with pricing tiers | I can quote and track new products |
@@ -1693,7 +1693,7 @@ Phase 0 is complete when Shane can:
   | id | UUID | Yes | Primary key (auto-generated) |
   | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
   | customer_id | UUID (FK) | No | Link to customer (NULL for generic parts) |
-  | part_number | Text | Yes | Customer's part number (e.g., "AE36589E-RT") |
+  | part_name | Text | Yes | Customer's part name (e.g., "AE36589E-RT") |
   | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
   | pricing | JSONB | No | Array of quantity-based price tiers (see below) |
   | material_cost | Decimal | No | Estimated material cost per unit |
@@ -1702,9 +1702,9 @@ Phase 0 is complete when Shane can:
   | created_at | Timestamp | Yes | Auto-generated |
   | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-  **Unique Constraint:** `(company_id, customer_id, part_number)`
+  **Unique Constraint:** `(company_id, customer_id, part_name)`
 
-  This allows the same part number for different customers.
+  This allows the same part name for different customers.
 
 ### Pricing JSONB Structure
 
@@ -1751,9 +1751,9 @@ Phase 0 is complete when Shane can:
 
   **Features:**
 
-  - Table showing: Part Number, Description, Customer, Base Price (qty=1), Status
+  - Table showing: Part Name, Description, Customer, Base Price (qty=1), Status
 
-  - Search box (searches part number and description)
+  - Search box (searches part name and description)
 
   - Filter dropdown: Customer (All / specific customer)
 
@@ -1779,7 +1779,7 @@ Phase 0 is complete when Shane can:
 
   - Customer (dropdown, optional - "Generic Part" if none selected)
 
-  - Part Number (required)
+  - Part Name (required)
 
   - Description
 
@@ -1906,13 +1906,13 @@ Phase 0 is complete when Shane can:
 
     - Leave unassigned (generic parts)
 
-  1. **Validate** - Check for duplicate part numbers per customer
+  1. **Validate** - Check for duplicate part names per customer
 
   2. **Execute** - Import with results summary
 
 ### Conflict Detection
 
-  - **Duplicate part_number** within same customer → Conflict
+  - **Duplicate part_name** within same customer → Conflict
 
   - **Unmatched customer_code** → Warning (can proceed as generic)
 
@@ -1926,9 +1926,9 @@ Phase 0 is complete when Shane can:
 
 ### Validation Rules
 
-  - part_number is required
+  - part_name is required
 
-  - part_number must be unique per customer
+  - part_name must be unique per customer
 
   - If customer_code provided, must match existing customer (or flag as orphan)
 
@@ -1972,7 +1972,7 @@ Phase 0 is complete when Shane can:
 
   - [ ] Can select customer matching strategy
 
-  - [ ] Detects duplicate part numbers per customer
+  - [ ] Detects duplicate part names per customer
 
   - [ ] Flags unmatched customer codes as warnings
 
@@ -2647,7 +2647,7 @@ Phase 0 is complete when Shane can:
 
   - Table showing: Job #, Customer, Part, Qty (completed/ordered), Due Date, Priority, Status
 
-  - Search box (searches job number, customer name, part number)
+  - Search box (searches job number, customer name, part name)
 
   - Filter dropdown: Status (All / Pending / In Progress / Complete / Shipped)
 

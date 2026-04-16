@@ -62,7 +62,7 @@ export default function JobForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
-  const [parts, setParts] = useState<Array<{ id: string; part_number: string; description: string | null; has_routing: boolean }>>([]);
+  const [parts, setParts] = useState<Array<{ id: string; part_name: string; description: string | null; has_routing: boolean }>>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingParts, setLoadingParts] = useState(true);
 
@@ -241,7 +241,7 @@ export default function JobForm({
               >
                 {parts.map((p) => (
                   <MenuItem key={p.id} value={p.id}>
-                    {p.part_number}
+                    {p.part_name}
                     {p.description && ` - ${p.description}`}
                   </MenuItem>
                 ))}

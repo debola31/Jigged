@@ -26,7 +26,7 @@ interface RoutingWizardProps {
 /**
  * Workflow builder for creating/editing routings.
  * Goes straight to the workflow builder (operations and connections).
- * Routing name is auto-generated as "Routing - {part_number}".
+ * Routing name is auto-generated as "Routing - {part_name}".
  */
 export default function RoutingWizard({ companyId, partId, mode, returnTo }: RoutingWizardProps) {
   const router = useRouter();

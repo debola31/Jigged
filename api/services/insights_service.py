@@ -442,7 +442,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
         supabase.table("jobs")
         .select(
             "id, part_id, "
-            "parts!left(part_number, description), "
+            "parts!left(part_name, description), "
             "quotes!jobs_quote_id_fkey(total_price, quantity), "
             "job_operations(estimated_setup_hours, estimated_run_hours_per_unit, "
             "operation_types!left(labor_rate))"
@@ -466,7 +466,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
             if isinstance(part_info, list) and part_info:
                 part_info = part_info[0]
             part_data[part_id] = {
-                "part_number": part_info.get("part_number", "Unknown"),
+                "part_name": part_info.get("part_name", "Unknown"),
                 "description": part_info.get("description", ""),
                 "total_revenue": 0.0,
                 "total_labor_cost": 0.0,
@@ -508,7 +508,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
         margin = (profit / revenue * 100) if revenue > 0 else 0.0
 
         parts_list.append({
-            "part_number": data["part_number"],
+            "part_name": data["part_name"],
             "description": data["description"],
             "revenue": round(revenue, 2),
             "labor_cost": round(cost, 2),

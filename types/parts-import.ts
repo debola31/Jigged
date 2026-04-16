@@ -43,8 +43,8 @@ export interface PartAnalyzeResponse {
  */
 export interface PartConflictInfo {
   row_number: number;
-  csv_part_number: string | null;
-  conflict_type: 'duplicate_part_number' | 'customer_not_found' | 'csv_duplicate';
+  csv_part_name: string | null;
+  conflict_type: 'duplicate_part_name' | 'customer_not_found' | 'csv_duplicate';
   existing_part_id: string; // Empty string for non-DB conflicts
   existing_value: string;
 }
@@ -118,9 +118,9 @@ export interface PartExecuteResponse {
  * Parts database fields and their metadata (for mapping UI).
  */
 export const PART_FIELDS: { key: string; label: string; required: boolean }[] = [
-  { key: 'part_number', label: 'Part Number', required: true },
+  { key: 'part_name', label: 'Part Name', required: true },
   { key: 'description', label: 'Description', required: false },
   { key: 'category', label: 'Category', required: false },
-  { key: 'manual_cost', label: 'Manual Cost', required: false },
+
   { key: 'notes', label: 'Notes', required: false },
 ];

@@ -13,7 +13,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
-import Chip from '@mui/material/Chip';
+
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
 import { calculateTotalPrice, calculateUnitPriceFromMarkup } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
@@ -49,11 +49,9 @@ interface CustomerOption {
 
 interface PartOption {
   id: string;
-  part_number: string;
+  part_name: string;
   description: string | null;
   category_id: string | null;
-  manual_cost: number | null;
-  cost_source: string | null;
   has_routing: boolean;
   part_category: { id: string; name: string; default_markup_percent: number | null } | null;
   isCreateNew?: boolean;
@@ -67,11 +65,9 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 
 const CREATE_NEW_PART: PartOption = {
   id: '__create_new__',
-  part_number: 'Create New Part',
+  part_name: 'Create New Part',
   description: null,
   category_id: null,
-  manual_cost: null,
-  cost_source: null,
   has_routing: false,
   part_category: null,
   isCreateNew: true,
@@ -242,7 +238,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         ...prev,
         part_id: '',
         base_cost: '',
-        cost_source: '',
         markup_percent: '',
         unit_price: '',
       }));
@@ -267,21 +262,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setFormData((prev) => ({
       ...prev,
       base_cost: '',
-      cost_source: '',
       unit_price: '',
     }));
 
-    // Manual/estimate cost already includes markup — use directly as unit_price
-    if (value.manual_cost !== null) {
-      const baseCostStr = String(value.manual_cost);
-      setFormData((prev) => ({
-        ...prev,
-        base_cost: baseCostStr,
-        cost_source: value.cost_source || 'manual',
-        unit_price: baseCostStr,
-        markup_percent: '',
-      }));
-    } else if (value.has_routing && mode === 'create') {
+    if (value.has_routing && mode === 'create') {
+      // Part has routing — auto-populate cost from routing calculation
       setLoadingCost(true);
       try {
         const breakdown = await calculateRoutingCost(value.id);
@@ -299,7 +284,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           setFormData((prev) => ({
             ...prev,
             base_cost: baseCostStr,
-            cost_source: 'routing',
             unit_price: unitPrice,
           }));
         }
@@ -308,6 +292,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       } finally {
         setLoadingCost(false);
       }
+    } else {
+      // No routing — price starts at 0, user enters estimate
+      setFormData((prev) => ({
+        ...prev,
+        base_cost: '0',
+        unit_price: '0',
+        markup_percent: '',
+      }));
     }
   };
 
@@ -328,11 +320,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const handlePartCreated = async (part: Part) => {
     const newOption: PartOption = {
       id: part.id,
-      part_number: part.part_number,
+      part_name: part.part_name,
       description: part.description,
       category_id: part.category_id || null,
-      manual_cost: part.manual_cost || null,
-      cost_source: part.cost_source || null,
       has_routing: !!part.routing,
       part_category: part.part_category || null,
     };
@@ -498,10 +488,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 options={[CREATE_NEW_PART, ...parts]}
                 getOptionLabel={(option) =>
                   option.isCreateNew
-                    ? option.part_number
+                    ? option.part_name
                     : option.description
-                      ? `${option.part_number} - ${option.description}`
-                      : option.part_number
+                      ? `${option.part_name} - ${option.description}`
+                      : option.part_name
                 }
                 value={selectedPart}
                 onChange={handlePartChange}
@@ -513,8 +503,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     .filter((o) => !o.isCreateNew)
                     .filter((o) => {
                       const label = o.description
-                        ? `${o.part_number} - ${o.description}`
-                        : o.part_number;
+                        ? `${o.part_name} - ${o.description}`
+                        : o.part_name;
                       return label.toLowerCase().includes(state.inputValue.toLowerCase());
                     });
                   return createNew ? [createNew, ...filtered] : filtered;
@@ -533,15 +523,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         }}
                       >
                         <AddIcon sx={{ mr: 1, fontSize: 20 }} />
-                        {option.part_number}
+                        {option.part_name}
                       </li>
                     );
                   }
                   return (
                     <li key={key} {...otherProps}>
                       {option.description
-                        ? `${option.part_number} - ${option.description}`
-                        : option.part_number}
+                        ? `${option.part_name} - ${option.description}`
+                        : option.part_name}
                     </li>
                   );
                 }}
@@ -627,38 +617,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             </Grid>
           </Grid>
 
-          {/* Cost source link */}
-          {formData.cost_source && (
-            <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Cost basis:
-              </Typography>
-              {formData.cost_source === 'routing' && selectedPart ? (
-                <Chip
-                  label="Part Routing"
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  onClick={() => setCostModalOpen(true)}
-                  clickable
-                />
-              ) : (
-                <Chip
-                  label={formData.cost_source === 'manual' ? 'Manual Estimate' : 'Estimate'}
-                  size="small"
-                  variant="outlined"
-                />
-              )}
-
-              {/* Cost breakdown warnings */}
-              {costBreakdown && costBreakdown.warnings.length > 0 && (
-                <Alert severity="warning" sx={{ mt: 1 }}>
-                  {costBreakdown.warnings.map((w, i) => (
-                    <Typography key={i} variant="body2">{w.message}</Typography>
-                  ))}
-                </Alert>
-              )}
-            </Box>
+          {/* Cost breakdown warnings */}
+          {costBreakdown && costBreakdown.warnings.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {costBreakdown.warnings.map((w, i) => (
+                <Typography key={i} variant="body2">{w.message}</Typography>
+              ))}
+            </Alert>
           )}
         </CardContent>
       </Card>

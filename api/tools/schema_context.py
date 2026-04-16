@@ -54,7 +54,7 @@ SCHEMA_CONTEXT = """
 ### parts
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
-- part_number: TEXT (unique per company, e.g. "P-001")
+- part_name: TEXT (unique per company, e.g. "P-001")
 - description: TEXT
 - pricing: JSONB (array of pricing tiers)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ

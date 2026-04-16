@@ -61,7 +61,7 @@ export async function getQuotes(
       `
       *,
       customers!left(id, name),
-      parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
+      parts!left(id, part_name, description, category_id, part_categories(id, name, default_markup_percent)),
       jobs:converted_to_job_id!left(id, job_number, status)
     `,
       { count: 'exact' }
@@ -120,7 +120,7 @@ export async function getAllQuotes(
         `
         *,
         customers!left(id, name),
-        parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
+        parts!left(id, part_name, description, category_id, part_categories(id, name, default_markup_percent)),
         jobs:converted_to_job_id!left(id, job_number, status)
       `
       )
@@ -236,7 +236,7 @@ export async function getQuoteWithRelations(quoteId: string, companyId: string):
       `
       *,
       customers!left(id, name),
-      parts!left(id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)),
+      parts!left(id, part_name, description, category_id, part_categories(id, name, default_markup_percent)),
       jobs:converted_to_job_id!left(id, job_number, status),
       quote_attachments(*)
     `
@@ -292,7 +292,6 @@ export async function createQuote(
       description: formData.description.trim() || null,
       quantity,
       base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
-      cost_source: formData.cost_source || null,
       markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
@@ -373,7 +372,6 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
       description: formData.description.trim() || null,
       quantity,
       base_cost: baseCost !== null && !isNaN(baseCost) ? baseCost : null,
-      cost_source: formData.cost_source || null,
       markup_percent: markupPercent !== null && !isNaN(markupPercent) ? markupPercent : null,
       unit_price: unitPrice,
       total_price: totalPrice,
@@ -699,24 +697,22 @@ export async function convertQuoteToJob(
 // ============== Helper Functions ==============
 
 /**
- * Get a single part with cost info and category for quote form
+ * Get a single part with category info for quote form
  */
 export async function getPartWithCostInfo(
   partId: string
 ): Promise<{
   id: string;
-  part_number: string;
+  part_name: string;
   description: string | null;
   category_id: string | null;
-  manual_cost: number | null;
-  cost_source: string | null;
   part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
 } | null> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_number, description, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent)')
+    .select('id, part_name, description, category_id, part_categories(id, name, default_markup_percent)')
     .eq('id', partId)
     .single();
 
@@ -727,105 +723,11 @@ export async function getPartWithCostInfo(
 
   return data as {
     id: string;
-    part_number: string;
+    part_name: string;
     description: string | null;
     category_id: string | null;
-    manual_cost: number | null;
-    cost_source: string | null;
     part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
   } | null;
-}
-
-// ============== Cost Refresh ==============
-
-/**
- * Refresh a quote's cost from the current routing.
- * Only allowed for pending_approval or rejected quotes with a part that has a routing.
- */
-export async function refreshQuoteCost(quoteId: string, companyId: string): Promise<Quote> {
-  const supabase = getSupabase();
-
-  // 1. Get the quote
-  const { data: quote, error: fetchError } = await supabase
-    .from('quotes')
-    .select('*, parts!left(id, category_id, manual_cost, cost_source, part_categories(id, name, default_markup_percent))')
-    .eq('id', quoteId)
-    .eq('company_id', companyId)
-    .single();
-
-  if (fetchError || !quote) {
-    throw new Error('Quote not found');
-  }
-
-  if (quote.status !== 'pending_approval' && quote.status !== 'rejected') {
-    throw new Error('Only pending approval or rejected quotes can have their cost refreshed');
-  }
-
-  if (!quote.part_id) {
-    throw new Error('Quote has no part assigned');
-  }
-
-  // 2. Calculate current routing cost
-  const { calculateRoutingCost } = await import('@/utils/routingCostCalculation');
-  const breakdown = await calculateRoutingCost(quote.part_id);
-
-  let baseCost: number | null = null;
-  let costSource: string | null = null;
-  let estimatedLaborCost: number | null = null;
-  let estimatedMaterialCost: number | null = null;
-
-  // Manual cost takes priority over routing cost when set
-  if (quote.parts?.manual_cost != null) {
-    baseCost = quote.parts.manual_cost;
-    costSource = quote.parts.cost_source || 'manual';
-  } else if (breakdown) {
-    // Amortize one-time setup cost across the quote quantity
-    const qty = quote.quantity || 1;
-    const setupPerUnit = breakdown.total_setup_cost > 0
-      ? Math.round((breakdown.total_setup_cost / qty) * 100) / 100
-      : 0;
-    baseCost = Math.round((breakdown.total_cost + setupPerUnit) * 100) / 100;
-    costSource = 'routing';
-    estimatedLaborCost = breakdown.total_labor_cost;
-    estimatedMaterialCost = breakdown.total_material_cost;
-  }
-
-  // 3. Recalculate unit price
-  let unitPrice = quote.unit_price;
-  if (baseCost !== null) {
-    if (costSource === 'routing' && quote.markup_percent !== null) {
-      // Routing cost is raw manufacturing cost — apply markup
-      unitPrice = Math.round(baseCost * (1 + quote.markup_percent / 100) * 100) / 100;
-    } else {
-      // Manual/estimate cost already includes markup — use directly
-      unitPrice = baseCost;
-    }
-  }
-
-  const totalPrice = calculateTotalPrice(quote.quantity, unitPrice);
-
-  // 4. Update the quote
-  const { data: updated, error: updateError } = await supabase
-    .from('quotes')
-    .update({
-      base_cost: baseCost,
-      cost_source: costSource,
-      estimated_labor_cost: estimatedLaborCost,
-      estimated_material_cost: estimatedMaterialCost,
-      unit_price: unitPrice,
-      total_price: totalPrice,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', quoteId)
-    .select()
-    .single();
-
-  if (updateError) {
-    console.error('Error refreshing quote cost:', updateError);
-    throw updateError;
-  }
-
-  return updated;
 }
 
 // ============== Attachment Operations ==============

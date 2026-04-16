@@ -44,9 +44,9 @@ class PartConflictInfo(BaseModel):
     """Information about a conflicting row."""
 
     row_number: int
-    csv_part_number: Optional[str]
+    csv_part_name: Optional[str]
     csv_customer_code: Optional[str]
-    conflict_type: str  # "duplicate_part_number" | "customer_not_found" | "csv_duplicate"
+    conflict_type: str  # "duplicate_part_name" | "customer_not_found" | "csv_duplicate"
     existing_part_id: str  # Empty string for non-DB conflicts
     existing_value: str  # Additional conflict info
 
@@ -55,7 +55,7 @@ class PartValidationError(BaseModel):
     """A validation error discovered during validation phase."""
 
     row_number: int
-    error_type: str  # "missing_part_number" | "invalid_price" | "invalid_qty"
+    error_type: str  # "missing_part_name" | "invalid_price" | "invalid_qty"
     field: str
     message: str
 
@@ -114,10 +114,10 @@ class PartExecuteResponse(BaseModel):
 
 # Target schema for parts table (for AI mapping)
 PART_SCHEMA = {
-    "part_number": {
+    "part_name": {
         "type": "string",
         "required": True,
-        "description": "Unique part identifier (unique per customer or globally for generic parts)",
+        "description": "Part name identifier (unique per customer or globally for generic parts)",
     },
     "customer_name": {
         "type": "string",

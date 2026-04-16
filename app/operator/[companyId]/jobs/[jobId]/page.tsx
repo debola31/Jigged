@@ -370,7 +370,7 @@ export default function OperatorJobDetailPage() {
           </Typography>
 
           <Typography variant="h6" sx={{ mb: 2 }}>
-            {job.part_name || job.part_number || 'No part specified'}
+            {job.part_name || 'No part specified'}
           </Typography>
 
           {/* Job Progress */}

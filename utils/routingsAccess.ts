@@ -33,7 +33,7 @@ export async function getRoutingForPart(partId: string): Promise<RoutingWithGrap
     .from('routings')
     .select(`
       *,
-      part:parts(id, part_number, description)
+      part:parts(id, part_name, description)
     `)
     .eq('part_id', partId)
     .maybeSingle();
@@ -137,7 +137,7 @@ export async function getRoutings(
     .from('routings')
     .select(`
       *,
-      part:parts(id, part_number, description),
+      part:parts(id, part_name, description),
       nodes:routing_nodes(id, run_time_per_unit)
     `)
     .eq('company_id', companyId);
@@ -168,7 +168,7 @@ export async function getRoutings(
     created_by: string | null;
     created_at: string;
     updated_at: string;
-    part: { id: string; part_number: string; description: string | null } | null;
+    part: { id: string; part_name: string; description: string | null } | null;
     nodes?: Array<{ id: string; run_time_per_unit: number | null }>;
   }
 
@@ -198,7 +198,7 @@ export async function getRouting(routingId: string): Promise<RoutingWithPart | n
     .from('routings')
     .select(`
       *,
-      part:parts(id, part_number, description)
+      part:parts(id, part_name, description)
     `)
     .eq('id', routingId)
     .single();
@@ -222,7 +222,7 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
     .from('routings')
     .select(`
       *,
-      part:parts(id, part_number, description)
+      part:parts(id, part_name, description)
     `)
     .eq('id', routingId)
     .single();
@@ -548,7 +548,7 @@ interface PendingEdge {
 /**
  * Save a routing with its complete graph from the wizard.
  * Handles both create and edit modes.
- * Routing name is auto-generated as "Routing - {part_number}".
+ * Routing name is auto-generated as "Routing - {part_name}".
  *
  * @param companyId - Company ID
  * @param partId - Part ID (required, 1:1 relationship)
@@ -573,12 +573,12 @@ export async function saveRoutingWithGraph(
   // Get the part number for auto-naming
   const { data: partData, error: partError } = await supabase
     .from('parts')
-    .select('part_number')
+    .select('part_name')
     .eq('id', partId)
     .single();
 
   if (partError) throw partError;
-  const autoName = `Routing - ${partData.part_number}`;
+  const autoName = `Routing - ${partData.part_name}`;
 
   // Step 1: Create or update the routing
   let routing: Routing;

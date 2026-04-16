@@ -1171,7 +1171,7 @@ pnpm test:e2e:ui       # Visual runner
           part = supabase_admin.table("parts").insert({
               "company_id": test_company["id"],
               "customer_id": [customer.data](http://customer.data/)[0]["id"],
-              "part_number": "PART-001",
+              "part_name": "PART-001",
               "description": "Test Part"
           }).execute()
           

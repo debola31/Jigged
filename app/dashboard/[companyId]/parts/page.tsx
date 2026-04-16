@@ -80,7 +80,7 @@ export default function PartsPage() {
   const [partsSearch, setPartsSearch] = useState('');
   const [partsSearchDebounced, setPartsSearchDebounced] = useState('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
-    field: 'part_number',
+    field: 'part_name',
     sort: 'asc',
   });
   const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
@@ -200,7 +200,7 @@ export default function PartsPage() {
   // ── Parts grid handlers ──
   const handlePartsGridReady = (event: GridReadyEvent<Part>) => {
     event.api.applyColumnState({
-      state: [{ colId: 'part_number', sort: 'asc' }],
+      state: [{ colId: 'part_name', sort: 'asc' }],
       defaultState: { sort: null },
     });
   };
@@ -210,11 +210,11 @@ export default function PartsPage() {
     const sortedColumn = columnState.find((col) => col.sort !== null);
     if (sortedColumn && sortedColumn.sort) {
       setSortModel({
-        field: sortedColumn.colId || 'part_number',
+        field: sortedColumn.colId || 'part_name',
         sort: sortedColumn.sort as 'asc' | 'desc',
       });
     } else {
-      setSortModel({ field: 'part_number', sort: 'asc' });
+      setSortModel({ field: 'part_name', sort: 'asc' });
     }
   };
 
@@ -341,8 +341,8 @@ export default function PartsPage() {
   // ── Column definitions ──
   const partsColumnDefs: ColDef<Part>[] = [
     {
-      field: 'part_number',
-      headerName: 'Part Number',
+      field: 'part_name',
+      headerName: 'Part Name',
       width: 180,
       pinned: 'left' as const,
     },
@@ -372,18 +372,6 @@ export default function PartsPage() {
             <CheckIcon sx={{ color: 'success.main', fontSize: 20 }} />
           </Box>
         );
-      },
-    },
-    {
-      colId: 'cost',
-      headerName: 'Cost',
-      flex: 0.8,
-      minWidth: 120,
-      sortable: false,
-      cellRenderer: (params: ICellRendererParams<Part>) => {
-        const cost = params.data?.manual_cost;
-        if (cost === null || cost === undefined) return '—';
-        return `$${cost.toFixed(2)}`;
       },
     },
   ];

@@ -33,7 +33,7 @@ function makeRouting(nodes: RoutingWithGraph['nodes']): RoutingWithGraph {
     part_id: 'part-1',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
-    part: { id: 'part-1', part_number: 'P001', description: null },
+    part: { id: 'part-1', part_name: 'P001', description: null },
     nodes,
     edges: [],
   };

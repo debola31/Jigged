@@ -212,7 +212,7 @@ Template-local `_ref` IDs are mapped to real UUIDs during seeding:
     { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00, "resource_group_ref": "rg-1" }
   ],
   "parts": [
-    { "_ref": "part-1", "part_number": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
+    { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
   ],
   "routings": [
     {

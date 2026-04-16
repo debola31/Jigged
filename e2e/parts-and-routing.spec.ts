@@ -9,7 +9,7 @@ import { navigateTo } from './helpers/navigation';
  */
 test.describe('Parts and Routing workflow', () => {
   const uniqueSuffix = Date.now().toString().slice(-6);
-  const partNumber = `E2E-${uniqueSuffix}`;
+  const partName = `E2E-${uniqueSuffix}`;
   const partDescription = `E2E Test Part ${uniqueSuffix}`;
 
   test('create part, add routing with operations, verify cost', async ({ page }) => {
@@ -24,8 +24,8 @@ test.describe('Parts and Routing workflow', () => {
     await page.getByRole('button', { name: /New Part/i }).click();
     await expect(page).toHaveURL(/\/parts\/new/);
 
-    // Fill part number (required)
-    await page.getByLabel(/Part Number/i).fill(partNumber);
+    // Fill part name (required)
+    await page.getByLabel(/Part Name/i).fill(partName);
 
     // Fill description
     await page.getByLabel(/Description/i).fill(partDescription);
@@ -37,7 +37,7 @@ test.describe('Parts and Routing workflow', () => {
     await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });
 
     // Verify the part was created
-    await expect(page.getByText(partNumber)).toBeVisible();
+    await expect(page.getByText(partName)).toBeVisible();
 
     // ── Step 2: Create a routing ──
 
@@ -115,6 +115,6 @@ test.describe('Parts and Routing workflow', () => {
     await expect(page).toHaveURL(/\/parts/);
 
     // The part should appear in the list
-    await expect(page.getByText(partNumber)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(partName)).toBeVisible({ timeout: 10_000 });
   });
 });

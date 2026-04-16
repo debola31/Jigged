@@ -15,7 +15,6 @@ export interface Quote {
   description: string | null;
   quantity: number;
   base_cost: number | null;
-  cost_source: string | null;
   markup_percent: number | null;
   estimated_labor_cost: number | null;
   estimated_material_cost: number | null;
@@ -43,11 +42,9 @@ export interface QuoteWithRelations extends Quote {
   // Joined part data
   parts?: {
     id: string;
-    part_number: string;
+    part_name: string;
     description: string | null;
     category_id: string | null;
-    manual_cost: number | null;
-    cost_source: string | null;
     part_categories?: {
       id: string;
       name: string;
@@ -74,7 +71,6 @@ export interface QuoteFormData {
   description: string;
   quantity: string;
   base_cost: string;
-  cost_source: string;
   markup_percent: string;
   unit_price: string;
   status?: QuoteStatus;
@@ -99,7 +95,6 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   description: '',
   quantity: '1',
   base_cost: '',
-  cost_source: '',
   markup_percent: '',
   unit_price: '',
 };
@@ -115,7 +110,6 @@ export function quoteToFormData(quote: Quote): QuoteFormData {
     description: quote.description || '',
     quantity: String(quote.quantity),
     base_cost: quote.base_cost !== null ? String(quote.base_cost) : '',
-    cost_source: quote.cost_source || '',
     markup_percent: quote.markup_percent !== null ? String(quote.markup_percent) : '',
     unit_price: quote.unit_price !== null ? String(quote.unit_price) : '',
     status: quote.status,

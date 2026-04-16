@@ -68,7 +68,6 @@ export interface OperatorJob {
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
-  part_number: string | null;
   status: string;
   // Current operation for this station
   operation_id: string | null;
@@ -89,7 +88,6 @@ export interface OperatorJobDetail {
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
-  part_number: string | null;
   status: string;
   // Operation details
   operation_id: string | null;

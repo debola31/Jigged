@@ -250,7 +250,7 @@ export default function OperatorJobsPage() {
                 </Typography>
 
                 <Typography variant="body1" sx={{ mb: 1 }}>
-                  {job.part_name || job.part_number || 'No part specified'}
+                  {job.part_name || 'No part specified'}
                 </Typography>
 
                 {job.current_operator_name && (

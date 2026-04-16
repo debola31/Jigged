@@ -4,11 +4,9 @@
 export interface Part {
   id: string;
   company_id: string;
-  part_number: string;
+  part_name: string;
   description: string | null;
   category_id: string | null;
-  manual_cost: number | null;
-  cost_source: 'routing' | 'manual' | 'estimate' | null;
   created_at: string;
   updated_at: string;
   // Optional relation (populated by queries that join part_categories)
@@ -32,22 +30,18 @@ export interface Part {
  * Form data for creating/editing parts
  */
 export interface PartFormData {
-  part_number: string;
+  part_name: string;
   description: string;
   category_id: string;
-  manual_cost: string;
-  cost_source: string;
 }
 
 /**
  * Empty form defaults for NEW parts only
  */
 export const EMPTY_PART_FORM: PartFormData = {
-  part_number: '',
+  part_name: '',
   description: '',
   category_id: '',
-  manual_cost: '',
-  cost_source: '',
 };
 
 /**
@@ -55,10 +49,8 @@ export const EMPTY_PART_FORM: PartFormData = {
  */
 export function partToFormData(part: Part): PartFormData {
   return {
-    part_number: part.part_number,
+    part_name: part.part_name,
     description: part.description || '',
     category_id: part.category_id || '',
-    manual_cost: part.manual_cost !== null ? String(part.manual_cost) : '',
-    cost_source: part.cost_source || '',
   };
 }

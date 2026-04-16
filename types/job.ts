@@ -92,7 +92,7 @@ export interface JobWithRelations extends Job {
   // Joined part data
   parts?: {
     id: string;
-    part_number: string;
+    part_name: string;
     description: string | null;
   } | null;
   // Joined quote data (if created from quote)

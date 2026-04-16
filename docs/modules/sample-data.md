@@ -228,7 +228,7 @@ Same structure as the previous demo company template — template-local `_ref` I
     { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00, "resource_group_ref": "rg-1" }
   ],
   "parts": [
-    { "_ref": "part-1", "part_number": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
+    { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
   ],
   "routings": [
     {
@@ -348,10 +348,10 @@ BEGIN
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO parts (id, company_id, customer_id, part_number, description, pricing, is_sample)
+        INSERT INTO parts (id, company_id, customer_id, part_name, description, pricing, is_sample)
         VALUES (v_new_id, p_company_id,
                 (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                v_item->>'part_number', v_item->>'description',
+                v_item->>'part_name', v_item->>'description',
                 COALESCE(v_item->'pricing', '[]'::JSONB), TRUE);
     END LOOP;
 

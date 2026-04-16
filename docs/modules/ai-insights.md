@@ -160,7 +160,7 @@ These functions are used by `compute_dashboard_insights()` for the 5 cached dash
 | `get_quote_conversion_rate` | Quotes accepted vs total | `period_type`, `num_periods` | `{current_rate, previous_rate, trend_direction, periods: [{period, accepted, total, rate}]}` |
 | `get_job_cycle_times` | Avg days from created -> shipped | `period_type`, `num_periods` | `[{period, avg_days, job_count}]` |
 | `get_customer_revenue_breakdown` | Revenue ranked by customer | `period_type`, `num_periods`, `limit` (default: 10) | `[{customer_name, revenue, job_count, pct_of_total}]` |
-| `get_part_profitability` | Revenue vs estimated labor cost by part | `limit` (default: 10) | `[{part_number, description, revenue, estimated_cost, margin_pct}]` |
+| `get_part_profitability` | Revenue vs estimated labor cost by part | `limit` (default: 10) | `[{part_name, description, revenue, estimated_cost, margin_pct}]` |
 | `get_inventory_alerts` | Items at or below reorder point | — | `[{item_name, sku, quantity, reorder_point, unit}]` |
 | `get_at_risk_jobs` | Jobs behind schedule | — | `[{job_number, customer_name, pct_complete, estimated_completion, severity}]` |
 | `get_resource_utilization` | Booked hours by resource group | `period_type`, `num_periods` | `[{resource_group, booked_hours, job_count}]` |

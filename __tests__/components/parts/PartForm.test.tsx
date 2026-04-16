@@ -10,17 +10,18 @@ import type { PartFormData, Part } from '@/types/part';
 const mockCreatePart = vi.fn();
 const mockUpdatePart = vi.fn();
 const mockDeletePart = vi.fn();
-const mockCheckPartNumberExists = vi.fn();
+const mockCheckPartNameExists = vi.fn();
 
 vi.mock('@/utils/partsAccess', () => ({
   createPart: (...args: unknown[]) => mockCreatePart(...args),
   updatePart: (...args: unknown[]) => mockUpdatePart(...args),
   deletePart: (...args: unknown[]) => mockDeletePart(...args),
-  checkPartNumberExists: (...args: unknown[]) => mockCheckPartNumberExists(...args),
+  checkPartNameExists: (...args: unknown[]) => mockCheckPartNameExists(...args),
 }));
 
 vi.mock('@/utils/partCategoriesAccess', () => ({
   getPartCategoriesForSelect: vi.fn().mockResolvedValue([]),
+  createPartCategory: vi.fn().mockResolvedValue({ id: 'new-cat-id', name: 'New Category' }),
 }));
 
 describe('PartForm', () => {
@@ -29,12 +30,12 @@ describe('PartForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetRouterMocks();
-    // Default: part number doesn't exist (validation passes)
-    mockCheckPartNumberExists.mockResolvedValue(false);
+    // Default: part name doesn't exist (validation passes)
+    mockCheckPartNameExists.mockResolvedValue(false);
   });
 
   describe('Validation', () => {
-    it('shows error when part_number is empty on submit', async () => {
+    it('shows error when part_name is empty on submit', async () => {
       render(
         <PartForm
           mode="create"
@@ -43,80 +44,26 @@ describe('PartForm', () => {
         />
       );
 
-      // Verify the Part Number field exists and is empty
-      const partNumberInput = screen.getByLabelText(/part number/i);
-      expect(partNumberInput).toHaveValue('');
+      // Verify the Part Name field exists and is empty
+      const partNameInput = screen.getByLabelText(/part name/i);
+      expect(partNameInput).toHaveValue('');
 
       // Submit the form
       const form = document.querySelector('form');
       fireEvent.submit(form!);
 
       // Should show validation error
-      expect(await screen.findByText(/part number is required/i)).toBeInTheDocument();
+      expect(await screen.findByText(/part name is required/i)).toBeInTheDocument();
 
       // Should not have called createPart
       expect(mockCreatePart).not.toHaveBeenCalled();
     });
   });
 
-  describe('Cost Information', () => {
-    it('renders cost information card', async () => {
-      render(
-        <PartForm
-          mode="create"
-          companyId="test-company-id"
-          initialData={EMPTY_PART_FORM}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/cost information/i)).toBeInTheDocument();
-      });
-
-      // Manual estimate field should exist
-      expect(screen.getByLabelText(/manual estimate/i)).toBeInTheDocument();
-    });
-
-    it('shows cost source chip in edit mode', async () => {
-      const partWithRouting: Part = {
-        id: 'part-1',
-        company_id: 'test-company-id',
-        part_number: 'P001',
-        description: null,
-        category_id: null,
-        manual_cost: 50,
-        cost_source: 'routing',
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        routing: { id: 'r-1' },
-      };
-
-      render(
-        <PartForm
-          mode="edit"
-          companyId="test-company-id"
-          initialData={{
-            part_number: 'P001',
-            description: '',
-            category_id: '',
-            manual_cost: '50',
-            cost_source: 'routing',
-          }}
-          partId="part-1"
-          part={partWithRouting}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/from routing/i)).toBeInTheDocument();
-      });
-    });
-  });
-
   describe('Create mode', () => {
     const validFormData: PartFormData = {
       ...EMPTY_PART_FORM,
-      part_number: 'NEW-PART-001',
+      part_name: 'NEW-PART-001',
       description: 'Test Part Description',
     };
 
@@ -124,11 +71,9 @@ describe('PartForm', () => {
       const mockPart: Part = {
         id: 'new-part-uuid',
         company_id: 'test-company-id',
-        part_number: 'NEW-PART-001',
+        part_name: 'NEW-PART-001',
         description: 'Test Part Description',
         category_id: null,
-        manual_cost: null,
-        cost_source: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -149,7 +94,7 @@ describe('PartForm', () => {
 
       // Wait for form submission
       await waitFor(() => {
-        expect(mockCheckPartNumberExists).toHaveBeenCalledWith(
+        expect(mockCheckPartNameExists).toHaveBeenCalledWith(
           'test-company-id',
           'NEW-PART-001',
           undefined
@@ -160,7 +105,7 @@ describe('PartForm', () => {
         expect(mockCreatePart).toHaveBeenCalledWith(
           'test-company-id',
           expect.objectContaining({
-            part_number: 'NEW-PART-001',
+            part_name: 'NEW-PART-001',
           })
         );
       });
@@ -173,9 +118,9 @@ describe('PartForm', () => {
       });
     });
 
-    it('shows error for duplicate part_number', async () => {
-      // Part number already exists
-      mockCheckPartNumberExists.mockResolvedValue(true);
+    it('shows error for duplicate part_name', async () => {
+      // Part name already exists
+      mockCheckPartNameExists.mockResolvedValue(true);
 
       render(
         <PartForm
@@ -191,7 +136,7 @@ describe('PartForm', () => {
 
       // Should show duplicate error
       await waitFor(() => {
-        expect(screen.getByText(/part number already exists/i)).toBeInTheDocument();
+        expect(screen.getByText(/part name already exists/i)).toBeInTheDocument();
       });
 
       // Should not have called createPart
@@ -201,21 +146,17 @@ describe('PartForm', () => {
 
   describe('Edit mode', () => {
     const existingPartData: PartFormData = {
-      part_number: 'EXIST-001',
+      part_name: 'EXIST-001',
       description: 'Existing Part',
       category_id: '',
-      manual_cost: '10.00',
-      cost_source: 'manual',
     };
 
     const existingPart: Part = {
       id: 'existing-part-uuid',
       company_id: 'test-company-id',
-      part_number: 'EXIST-001',
+      part_name: 'EXIST-001',
       description: 'Existing Part',
       category_id: null,
-      manual_cost: 10.0,
-      cost_source: 'manual',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
       quotes_count: 2,
@@ -234,7 +175,7 @@ describe('PartForm', () => {
       );
 
       // Check that form fields are pre-filled
-      expect(screen.getByLabelText(/part number/i)).toHaveValue('EXIST-001');
+      expect(screen.getByLabelText(/part name/i)).toHaveValue('EXIST-001');
       expect(screen.getByLabelText(/description/i)).toHaveValue('Existing Part');
 
       // Delete button should be visible in edit mode

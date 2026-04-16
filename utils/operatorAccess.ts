@@ -232,7 +232,7 @@ export async function getOperatorJobs(
     .select(`
       id, job_number, status,
       customers(name),
-      parts(description, part_number)
+      parts(part_name)
     `)
     .eq('company_id', companyId)
     .in('status', ['not_started', 'in_progress'])
@@ -284,8 +284,7 @@ export async function getOperatorJobs(
         id: job.id,
         job_number: job.job_number,
         customer_name: (job.customers as { name: string } | null)?.name || null,
-        part_name: (job.parts as { description: string; part_number: string } | null)?.description || null,
-        part_number: (job.parts as { description: string; part_number: string } | null)?.part_number || null,
+        part_name: (job.parts as { part_name: string } | null)?.part_name || null,
         status: job.status,
         operation_id: readyOp.jobOperationId,
         operation_name: readyOp.operationName,
@@ -341,8 +340,7 @@ export async function getOperatorJobs(
       id: job.id,
       job_number: job.job_number,
       customer_name: (job.customers as { name: string } | null)?.name || null,
-      part_name: (job.parts as { description: string; part_number: string } | null)?.description || null,
-      part_number: (job.parts as { description: string; part_number: string } | null)?.part_number || null,
+      part_name: (job.parts as { part_name: string } | null)?.part_name || null,
       status: job.status,
       operation_id: currentOp?.id || null,
       operation_name: currentOp?.operation_name || null,
@@ -371,7 +369,7 @@ export async function getOperatorJobDetail(
     .select(`
       id, job_number, status,
       customers(name),
-      parts(description, part_number)
+      parts(part_name)
     `)
     .eq('id', jobId)
     .eq('company_id', companyId)
@@ -493,8 +491,7 @@ export async function getOperatorJobDetail(
     id: job.id,
     job_number: job.job_number,
     customer_name: (job.customers as { name: string } | null)?.name || null,
-    part_name: (job.parts as { description: string; part_number: string } | null)?.description || null,
-    part_number: (job.parts as { description: string; part_number: string } | null)?.part_number || null,
+    part_name: (job.parts as { part_name: string } | null)?.part_name || null,
     status: job.status,
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,

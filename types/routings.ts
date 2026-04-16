@@ -74,7 +74,7 @@ export interface RoutingEdge {
 export interface RoutingWithPart extends Routing {
   part: {
     id: string;
-    part_number: string;
+    part_name: string;
     description: string | null;
   } | null;
 }
@@ -109,7 +109,7 @@ export interface RoutingNodeWithOperation extends RoutingNode {
 export interface RoutingWithGraph extends Routing {
   part: {
     id: string;
-    part_number: string;
+    part_name: string;
     description: string | null;
   } | null;
   nodes: RoutingNodeWithOperation[];

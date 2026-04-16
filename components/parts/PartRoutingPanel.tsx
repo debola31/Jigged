@@ -204,37 +204,33 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
 
   return (
     <Box>
-      {/* Save status indicator + error */}
+      {/* Save status indicator (right-aligned, no section header — the
+          Operations / Materials card titles are enough) */}
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          mb: 2,
-          gap: 2,
+          justifyContent: 'flex-end',
+          mb: 1,
           minHeight: 24,
+          color: 'text.secondary',
         }}
       >
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          Routing
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
-          {saving ? (
-            <Fade in>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CloudSyncOutlinedIcon fontSize="small" />
-                <Typography variant="caption">Saving…</Typography>
-              </Box>
-            </Fade>
-          ) : savedAt ? (
-            <Fade in>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CloudDoneOutlinedIcon fontSize="small" color="success" />
-                <Typography variant="caption">All changes saved</Typography>
-              </Box>
-            </Fade>
-          ) : null}
-        </Box>
+        {saving ? (
+          <Fade in>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <CloudSyncOutlinedIcon fontSize="small" />
+              <Typography variant="caption">Saving…</Typography>
+            </Box>
+          </Fade>
+        ) : savedAt ? (
+          <Fade in>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <CloudDoneOutlinedIcon fontSize="small" color="success" />
+              <Typography variant="caption">All changes saved</Typography>
+            </Box>
+          </Fade>
+        ) : null}
       </Box>
 
       {error && (

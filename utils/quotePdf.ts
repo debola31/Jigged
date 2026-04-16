@@ -2,15 +2,15 @@
  * Generate a printable, customer-facing PDF for a quote.
  *
  * Intentionally excludes internal details (routing, operations, cost breakdown,
- * markup %). The customer sees what they're buying and what it costs — nothing
- * more.
+ * markup %). The customer sees what they're buying, what it costs, when they
+ * can get it, and how to accept — nothing more.
  */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 import { downloadFileFromStorage } from '@/utils/storageHelpers';
-import { QUOTE_STATUS_CONFIG } from '@/types/quote';
+import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 
 const MARGIN = 40;
 
@@ -78,6 +78,27 @@ async function loadCompanyLogo(path: string | null | undefined): Promise<LoadedL
   }
 }
 
+function buildFromLines(company: Company, preparedBy: string | null): string[] {
+  const lines: string[] = [];
+  if (company.name) lines.push(company.name);
+
+  if (company.address_line1) lines.push(company.address_line1);
+  if (company.address_line2) lines.push(company.address_line2);
+
+  const cityStateZip = [company.city, company.state].filter(Boolean).join(', ');
+  const cityStateZipFull = [cityStateZip, company.postal_code].filter(Boolean).join(' ').trim();
+  if (cityStateZipFull) lines.push(cityStateZipFull);
+  if (company.country && company.country.toUpperCase() !== 'USA') lines.push(company.country);
+
+  if (company.phone) lines.push(company.phone);
+  if (company.email) lines.push(company.email);
+  if (company.website) lines.push(company.website);
+
+  if (preparedBy) lines.push(`Prepared by: ${preparedBy}`);
+
+  return lines;
+}
+
 function buildBillToLines(customer: QuoteWithRelations['customers']): string[] {
   if (!customer) return ['(No customer)'];
   const lines: string[] = [];
@@ -110,6 +131,8 @@ export async function generateQuotePdf(
   const pageHeight = doc.internal.pageSize.getHeight();
 
   const logo = await loadCompanyLogo(company.logo_url ?? null);
+  const expired = isQuoteExpired(quote);
+  const daysLeft = daysUntilExpiration(quote.expiration_date);
 
   // ---------- Header ----------
   const headerTop = MARGIN;
@@ -117,7 +140,6 @@ export async function generateQuotePdf(
   let companyNameX = MARGIN;
 
   if (logo) {
-    // Preserve aspect ratio, cap by logoMaxSize.
     const scale = Math.min(logoMaxSize / logo.width, logoMaxSize / logo.height, 1);
     const w = logo.width * scale;
     const h = logo.height * scale;
@@ -130,58 +152,101 @@ export async function generateQuotePdf(
   doc.setTextColor(30);
   doc.text(company.name, companyNameX, headerTop + 22);
 
-  // Right side: QUOTE title + meta
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
   doc.setTextColor(30);
   doc.text('QUOTE', pageWidth - MARGIN, headerTop + 20, { align: 'right' });
 
+  // Meta rows — drop internal status, add Valid Until and Lead Time.
+  const metaRows: Array<{ text: string; color?: [number, number, number] }> = [];
+  metaRows.push({ text: `Quote #: ${quote.quote_number}` });
+  metaRows.push({ text: `Date: ${formatDate(quote.created_at)}` });
+  if (quote.expiration_date) {
+    const expiredOrSoon = expired || (daysLeft !== null && daysLeft <= 0);
+    metaRows.push({
+      text: `Valid Until: ${formatDate(quote.expiration_date)}`,
+      color: expiredOrSoon ? [180, 40, 40] : undefined,
+    });
+  }
+  if (quote.lead_time_days !== null && quote.lead_time_days !== undefined) {
+    metaRows.push({
+      text: `Lead Time: ${quote.lead_time_days} day${quote.lead_time_days === 1 ? '' : 's'} ARO`,
+    });
+  }
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.setTextColor(80);
-  const metaLines = [
-    `Quote #: ${quote.quote_number}`,
-    `Date: ${formatDate(quote.created_at)}`,
-    `Status: ${QUOTE_STATUS_CONFIG[quote.status]?.label ?? quote.status}`,
-  ];
-  metaLines.forEach((line, i) => {
-    doc.text(line, pageWidth - MARGIN, headerTop + 40 + i * 14, { align: 'right' });
+  metaRows.forEach((row, i) => {
+    const [r, g, b] = row.color ?? [80, 80, 80];
+    doc.setTextColor(r, g, b);
+    doc.text(row.text, pageWidth - MARGIN, headerTop + 40 + i * 14, { align: 'right' });
   });
 
+  // Base below header is the taller of logo / meta stack
+  const metaBlockBottom = headerTop + 40 + metaRows.length * 14;
+  let cursorY = Math.max(headerTop + (logo ? logoMaxSize : 30), metaBlockBottom) + 12;
+
+  // ---------- EXPIRED banner ----------
+  if (expired) {
+    const bandHeight = 26;
+    doc.setFillColor(250, 230, 230);
+    doc.rect(MARGIN, cursorY, pageWidth - MARGIN * 2, bandHeight, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(180, 40, 40);
+    doc.text(
+      'THIS QUOTE HAS EXPIRED — PRICES SUBJECT TO REQUOTE',
+      pageWidth / 2,
+      cursorY + bandHeight / 2 + 4,
+      { align: 'center' }
+    );
+    cursorY += bandHeight + 8;
+  }
+
   // ---------- Divider ----------
-  const dividerY = headerTop + Math.max(logoMaxSize, 90) + 10;
   doc.setDrawColor(210);
   doc.setLineWidth(0.75);
-  doc.line(MARGIN, dividerY, pageWidth - MARGIN, dividerY);
+  doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
+  cursorY += 24;
 
-  // ---------- Bill To ----------
-  const billToY = dividerY + 28;
+  // ---------- FROM / BILL TO (two columns) ----------
+  const colWidth = (pageWidth - MARGIN * 2) / 2;
+  const fromX = MARGIN;
+  const billToX = MARGIN + colWidth + 8;
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('BILL TO', MARGIN, billToY);
+  doc.text('FROM', fromX, cursorY);
+  doc.text('BILL TO', billToX, cursorY);
 
+  const preparedBy = quote.created_by_member?.name ?? null;
+  const fromLines = buildFromLines(company, preparedBy);
   const billToLines = buildBillToLines(quote.customers);
-  doc.setFont('helvetica', 'normal');
+
   doc.setFontSize(11);
   doc.setTextColor(40);
+  fromLines.forEach((line, i) => {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.text(line, fromX, cursorY + 18 + i * 14);
+  });
   billToLines.forEach((line, i) => {
-    const weight = i === 0 ? 'bold' : 'normal';
-    doc.setFont('helvetica', weight);
-    doc.text(line, MARGIN, billToY + 18 + i * 14);
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.text(line, billToX, cursorY + 18 + i * 14);
   });
 
-  const billToBottom = billToY + 18 + billToLines.length * 14;
+  const blockBottom = cursorY + 18 + Math.max(fromLines.length, billToLines.length) * 14;
+  cursorY = blockBottom + 24;
 
   // ---------- Line items ----------
   const partName = quote.parts?.part_name ?? 'Ad-hoc part';
-  const lineDescription = quote.description?.trim() || quote.parts?.description?.trim() || '';
+  const lineDescription = quote.parts?.description?.trim() ?? '';
   const qty = quote.quantity;
   const unitPrice = quote.unit_price ?? 0;
   const lineTotal = quote.total_price ?? unitPrice * qty;
 
   autoTable(doc, {
-    startY: billToBottom + 24,
+    startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
     head: [['Part', 'Description', 'Qty', 'Unit Price', 'Total']],
     body: [
@@ -214,50 +279,80 @@ export async function generateQuotePdf(
     theme: 'grid',
   });
 
-  // autoTable attaches lastAutoTable to the doc in jspdf-autotable v5.
   const afterTableY =
-    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
-    billToBottom + 60;
+    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 60;
 
   // ---------- Totals ----------
-  const totalsY = afterTableY + 24;
+  cursorY = afterTableY + 24;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(30);
-  doc.text('Total', pageWidth - MARGIN - 90, totalsY, { align: 'right' });
-  doc.text(formatCurrency(lineTotal), pageWidth - MARGIN, totalsY, { align: 'right' });
+  doc.text('Total', pageWidth - MARGIN - 90, cursorY, { align: 'right' });
+  doc.text(formatCurrency(lineTotal), pageWidth - MARGIN, cursorY, { align: 'right' });
 
-  // ---------- Notes ----------
-  let cursorY = totalsY + 40;
-  if (quote.description && quote.description.trim()) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('NOTES', MARGIN, cursorY);
+  cursorY += 40;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(60);
-    const wrapped = doc.splitTextToSize(quote.description.trim(), pageWidth - MARGIN * 2);
-    doc.text(wrapped, MARGIN, cursorY + 16);
-    cursorY += 16 + wrapped.length * 12 + 20;
+  // ---------- Acceptance block ----------
+  const acceptanceHeight = 110;
+  const footerReserve = 50; // footer sits at pageHeight - MARGIN
+
+  if (cursorY + acceptanceHeight > pageHeight - MARGIN - footerReserve) {
+    doc.addPage();
+    cursorY = MARGIN;
   }
 
-  // ---------- Footer ----------
-  const footerY = pageHeight - MARGIN;
-  doc.setDrawColor(230);
-  doc.setLineWidth(0.5);
-  doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text('ACCEPTANCE', MARGIN, cursorY);
+  cursorY += 18;
 
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(60);
+  const acceptCopy = quote.expiration_date
+    ? `To accept, sign below or reply with a PO referencing this quote. Prices valid until ${formatDate(quote.expiration_date)}.`
+    : 'To accept, sign below or reply with a PO referencing this quote.';
+  const wrappedCopy = doc.splitTextToSize(acceptCopy, pageWidth - MARGIN * 2);
+  doc.text(wrappedCopy, MARGIN, cursorY);
+  cursorY += wrappedCopy.length * 12 + 18;
+
+  // Signature line
+  doc.setDrawColor(160);
+  doc.setLineWidth(0.5);
+  const sigLineY = cursorY + 14;
+  doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
+  doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(130);
-  doc.text(
-    `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
-    MARGIN,
-    footerY
-  );
-  doc.text('Page 1 of 1', pageWidth - MARGIN, footerY, { align: 'right' });
+  doc.setTextColor(120);
+  doc.text('Signature', MARGIN, sigLineY + 12);
+  doc.text('Date', MARGIN + 270, sigLineY + 12);
+
+  // PO # line
+  const poLineY = sigLineY + 40;
+  doc.line(MARGIN, poLineY, MARGIN + 430, poLineY);
+  doc.text('PO #', MARGIN, poLineY + 12);
+
+  // ---------- Footer (on every page) ----------
+  const pageCount = doc.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    const footerY = pageHeight - MARGIN;
+    doc.setDrawColor(230);
+    doc.setLineWidth(0.5);
+    doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(130);
+    doc.text(
+      `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
+      MARGIN,
+      footerY
+    );
+    doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
+  }
 
   doc.save(`Quote-${quote.quote_number}.pdf`);
 }

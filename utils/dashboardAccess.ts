@@ -40,12 +40,23 @@ export const AVAILABLE_METRICS: MetricDefinition[] = [
   { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
 ];
 
+// Overdue is always pinned in slot 1 (not user-configurable). The user's
+// picked metrics fill slots 2-4 — so the pinned list holds up to 3 keys.
+export const PINNED_METRIC_SLOTS = 3;
+
 export const DEFAULT_PINNED_METRICS: MetricKey[] = [
   'open_quotes',
   'not_started_jobs',
   'in_progress_jobs',
-  'overdue_jobs',
 ];
+
+// Metrics the user is allowed to pin (Overdue is always pinned separately).
+export const PICKABLE_METRICS: MetricDefinition[] = AVAILABLE_METRICS.filter(
+  (m) => m.key !== 'overdue_jobs'
+);
+
+// The always-pinned alert-class metric.
+export const ALWAYS_PINNED_METRIC: MetricKey = 'overdue_jobs';
 
 // Legacy key migration map
 const LEGACY_KEY_MAP: Record<string, MetricKey> = {
@@ -203,72 +214,66 @@ async function getCount(table: string, companyId: string, filters?: Record<strin
   return count || 0;
 }
 
-async function getDailyRevenue(companyId: string): Promise<number> {
-  const supabase = getSupabase();
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('id, quotes!jobs_quote_id_fkey(total_price)')
-    .eq('company_id', companyId)
-    .eq('status', 'shipped')
-    .gte('shipped_at', startOfDay.toISOString());
-
-  if (error) throw error;
-
-  return (data || []).reduce(
-    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
-      return sum + (job.quotes?.total_price || 0);
-    },
-    0
-  );
-}
-
-async function getWeeklyRevenue(companyId: string): Promise<number> {
-  const supabase = getSupabase();
+/**
+ * Return [currentPeriodStart, nextPeriodStart] as ISO strings.
+ * "today" → midnight today → midnight tomorrow.
+ * "this_week" → Sunday 00:00 → next Sunday 00:00.
+ */
+function periodBounds(period: MetricTimePeriod, offsetPeriods = 0): { start: string; end: string } {
   const now = new Date();
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('id, quotes!jobs_quote_id_fkey(total_price)')
-    .eq('company_id', companyId)
-    .eq('status', 'shipped')
-    .gte('shipped_at', startOfWeek.toISOString());
-
-  if (error) throw error;
-
-  return (data || []).reduce(
-    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
-      return sum + (job.quotes?.total_price || 0);
-    },
-    0
-  );
-}
-
-async function getCompletedJobs(companyId: string, period: MetricTimePeriod): Promise<number> {
-  const supabase = getSupabase();
-  const now = new Date();
-  let startDate: Date;
-
   if (period === 'today') {
-    startDate = new Date(now);
-    startDate.setHours(0, 0, 0, 0);
-  } else {
-    startDate = new Date(now);
-    startDate.setDate(now.getDate() - now.getDay());
-    startDate.setHours(0, 0, 0, 0);
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() + offsetPeriods);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 1);
+    return { start: start.toISOString(), end: end.toISOString() };
   }
+  const start = new Date(now);
+  start.setDate(now.getDate() - now.getDay() + offsetPeriods * 7);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
 
+async function getRevenueInRange(
+  companyId: string,
+  startIso: string,
+  endIso: string
+): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('id, quotes!jobs_quote_id_fkey(total_price)')
+    .eq('company_id', companyId)
+    .eq('status', 'shipped')
+    .gte('shipped_at', startIso)
+    .lt('shipped_at', endIso);
+
+  if (error) throw error;
+
+  return (data || []).reduce(
+    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
+      return sum + (job.quotes?.total_price || 0);
+    },
+    0
+  );
+}
+
+async function getCompletedJobsInRange(
+  companyId: string,
+  startIso: string,
+  endIso: string
+): Promise<number> {
+  const supabase = getSupabase();
   const { count, error } = await supabase
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .in('status', ['completed', 'shipped'])
-    .gte('updated_at', startDate.toISOString());
+    .gte('updated_at', startIso)
+    .lt('updated_at', endIso);
 
   if (error) throw error;
   return count || 0;
@@ -290,48 +295,86 @@ async function getOverdueJobs(companyId: string): Promise<number> {
 }
 
 /**
- * Get the value for a single metric key.
+ * Value + optional prior-period value for a metric. `previousValue` is only
+ * populated for time-aware metrics (revenue, completed_jobs) where a
+ * period-over-period comparison is meaningful. Stateful counts like
+ * open_quotes would need historical snapshots to support a delta and are
+ * returned without one.
+ */
+export interface MetricValue {
+  value: number;
+  previousValue?: number;
+}
+
+async function getMetricValueWithDelta(
+  companyId: string,
+  key: MetricKey,
+  timePeriod?: MetricTimePeriod
+): Promise<MetricValue> {
+  switch (key) {
+    case 'open_quotes':
+      return { value: await getCount('quotes', companyId, { status: ['active'] }) };
+    case 'not_started_jobs':
+      return { value: await getCount('jobs', companyId, { status: ['not_started'] }) };
+    case 'in_progress_jobs':
+      return { value: await getCount('jobs', companyId, { status: ['in_progress'] }) };
+    case 'overdue_jobs':
+      return { value: await getOverdueJobs(companyId) };
+    case 'revenue': {
+      const period = timePeriod ?? 'this_week';
+      const curr = periodBounds(period, 0);
+      const prev = periodBounds(period, -1);
+      const [value, previousValue] = await Promise.all([
+        getRevenueInRange(companyId, curr.start, curr.end),
+        getRevenueInRange(companyId, prev.start, prev.end),
+      ]);
+      return { value, previousValue };
+    }
+    case 'completed_jobs': {
+      const period = timePeriod ?? 'this_week';
+      const curr = periodBounds(period, 0);
+      const prev = periodBounds(period, -1);
+      const [value, previousValue] = await Promise.all([
+        getCompletedJobsInRange(companyId, curr.start, curr.end),
+        getCompletedJobsInRange(companyId, prev.start, prev.end),
+      ]);
+      return { value, previousValue };
+    }
+    default:
+      return { value: 0 };
+  }
+}
+
+/**
+ * Get the value for a single metric key (flat number — no delta).
+ * Kept for callers that don't need period-over-period data.
  */
 export async function getMetricValue(
   companyId: string,
   key: MetricKey,
   timePeriod?: MetricTimePeriod
 ): Promise<number> {
-  switch (key) {
-    case 'open_quotes':
-      return getCount('quotes', companyId, { status: ['active'] });
-    case 'not_started_jobs':
-      return getCount('jobs', companyId, { status: ['not_started'] });
-    case 'in_progress_jobs':
-      return getCount('jobs', companyId, { status: ['in_progress'] });
-    case 'revenue':
-      return timePeriod === 'today' ? getDailyRevenue(companyId) : getWeeklyRevenue(companyId);
-    case 'completed_jobs':
-      return getCompletedJobs(companyId, timePeriod ?? 'this_week');
-    case 'overdue_jobs':
-      return getOverdueJobs(companyId);
-    default:
-      return 0;
-  }
+  const r = await getMetricValueWithDelta(companyId, key, timePeriod);
+  return r.value;
 }
 
 /**
- * Get values for all pinned metrics in parallel.
+ * Get values + deltas for all requested metrics in parallel.
  */
 export async function getPinnedMetricValues(
   companyId: string,
   keys: MetricKey[],
   timePeriods?: Partial<Record<MetricKey, MetricTimePeriod>>
-): Promise<Record<MetricKey, number>> {
+): Promise<Record<MetricKey, MetricValue>> {
   const results = await Promise.all(
     keys.map(async (key) => {
       try {
-        const value = await getMetricValue(companyId, key, timePeriods?.[key]);
-        return [key, value] as const;
+        const v = await getMetricValueWithDelta(companyId, key, timePeriods?.[key]);
+        return [key, v] as const;
       } catch {
-        return [key, 0] as const;
+        return [key, { value: 0 } as MetricValue] as const;
       }
     })
   );
-  return Object.fromEntries(results) as Record<MetricKey, number>;
+  return Object.fromEntries(results) as Record<MetricKey, MetricValue>;
 }

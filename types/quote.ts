@@ -35,10 +35,21 @@ export interface Quote {
  * Quote with joined relation data
  */
 export interface QuoteWithRelations extends Quote {
-  // Joined customer data
+  // Joined customer data — full fields so the printable quote can render
+  // the Bill-To block without a second query.
   customers?: {
     id: string;
     name: string;
+    website?: string | null;
+    contact_name?: string | null;
+    contact_phone?: string | null;
+    contact_email?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postal_code?: string | null;
+    country?: string | null;
   } | null;
   // Joined part data
   parts?: {

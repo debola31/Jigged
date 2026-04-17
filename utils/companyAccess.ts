@@ -4,9 +4,32 @@ import type { CompanyMember } from '@/types/quote';
 export interface Company {
   id: string;
   name: string;
+  logo_url?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
   is_demo?: boolean;
   demo_company_id?: string | null;
 }
+
+export type CompanyProfilePatch = Pick<
+  Company,
+  | 'phone'
+  | 'email'
+  | 'website'
+  | 'address_line1'
+  | 'address_line2'
+  | 'city'
+  | 'state'
+  | 'postal_code'
+  | 'country'
+>;
 
 export interface UserCompanyAccess {
   company_id: string;
@@ -217,7 +240,9 @@ export async function getCompany(companyId: string): Promise<Company | null> {
 
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, is_demo, demo_company_id')
+    .select(
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id'
+    )
     .eq('id', companyId)
     .single();
 
@@ -227,4 +252,54 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   }
 
   return data;
+}
+
+/**
+ * Update the company's logo storage path (or clear it by passing null).
+ * The caller is responsible for uploading/removing the file in storage.
+ */
+export async function updateCompanyLogo(
+  companyId: string,
+  logoPath: string | null
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error } = await supabase
+    .from('companies')
+    .update({ logo_url: logoPath, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error updating company logo:', error);
+    throw new Error(`Failed to update company logo: ${error.message}`);
+  }
+}
+
+/**
+ * Update the company's shop-contact profile (address, phone, email, website).
+ * These fields power the "FROM" block on printable quote PDFs. Any field
+ * passed as empty string is stored as null so downstream renderers can skip it.
+ */
+export async function updateCompanyProfile(
+  companyId: string,
+  patch: CompanyProfilePatch
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const normalized: Record<string, string | null> = {};
+  (Object.keys(patch) as (keyof CompanyProfilePatch)[]).forEach((key) => {
+    const raw = patch[key];
+    const trimmed = typeof raw === 'string' ? raw.trim() : raw;
+    normalized[key] = trimmed ? trimmed : null;
+  });
+
+  const { error } = await supabase
+    .from('companies')
+    .update({ ...normalized, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error updating company profile:', error);
+    throw new Error(`Failed to update company profile: ${error.message}`);
+  }
 }

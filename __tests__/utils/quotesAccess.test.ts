@@ -286,7 +286,20 @@ describe('quotesAccess utilities', () => {
     it('returns quote with customer, part, and attachments', async () => {
       const quoteWithRelations = {
         ...mockQuote,
-        customers: { id: 'customer-1', name: 'Test Customer' },
+        customers: {
+          id: 'customer-1',
+          name: 'Test Customer',
+          contact_name: 'Jane Doe',
+          contact_email: 'jane@example.com',
+          contact_phone: '555-0100',
+          address_line1: '123 Main St',
+          address_line2: null,
+          city: 'Springfield',
+          state: 'IL',
+          postal_code: '62701',
+          country: 'USA',
+          website: null,
+        },
         parts: { id: 'part-1', part_name: 'PART001', description: 'Test Part', pricing: [] },
         jobs: null,
         quote_attachments: [],
@@ -297,6 +310,13 @@ describe('quotesAccess utilities', () => {
       const result = await getQuoteWithRelations('quote-1', 'company-1');
 
       expect(mockQueryBuilder.select).toHaveBeenCalled();
+      // Verify the expanded customer fields are requested so the PDF Bill-To
+      // block has what it needs without a second fetch.
+      const selectCall = (mockQueryBuilder.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(selectCall).toContain('contact_name');
+      expect(selectCall).toContain('contact_email');
+      expect(selectCall).toContain('address_line1');
+      expect(selectCall).toContain('postal_code');
       expect(result).not.toBeNull();
     });
   });

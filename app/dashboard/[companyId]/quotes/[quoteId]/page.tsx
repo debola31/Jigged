@@ -18,6 +18,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import PrintIcon from '@mui/icons-material/Print';
 import DownloadIcon from '@mui/icons-material/Download';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -32,6 +33,8 @@ import {
   getQuoteAttachmentUrl,
   deleteQuoteAttachment,
 } from '@/utils/quotesAccess';
+import { getCompany } from '@/utils/companyAccess';
+import { generateQuotePdf } from '@/utils/quotePdf';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -59,6 +62,7 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     fetchQuote();
@@ -114,6 +118,23 @@ export default function QuoteDetailPage() {
     }
   };
 
+  const handlePrintPdf = async () => {
+    if (!quote) return;
+    setError(null);
+    setPrinting(true);
+    try {
+      const company = await getCompany(companyId);
+      if (!company) {
+        throw new Error('Company info unavailable — cannot generate PDF.');
+      }
+      await generateQuotePdf(quote, company);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate PDF');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const handleDeleteAttachment = async (attachmentId: string) => {
     setActionLoading(true);
     try {
@@ -166,14 +187,34 @@ export default function QuoteDetailPage() {
 
   return (
     <Box>
-      {/* Back Button */}
-      <Button
-        startIcon={<ArrowBackIcon />}
-        onClick={() => router.push(`/dashboard/${companyId}/quotes`)}
-        sx={{ color: 'text.secondary', mb: 2 }}
+      {/* Top toolbar: Back + document-level actions */}
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 2,
+          gap: 2,
+          flexWrap: 'wrap',
+        }}
       >
-        Back to Quotes
-      </Button>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/quotes`)}
+          sx={{ color: 'text.secondary' }}
+        >
+          Back to Quotes
+        </Button>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={printing ? <CircularProgress size={16} color="inherit" /> : <PrintIcon />}
+          onClick={handlePrintPdf}
+          disabled={printing || actionLoading}
+        >
+          Print PDF
+        </Button>
+      </Box>
 
       {/* Header with Actions */}
       <Box

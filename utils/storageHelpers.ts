@@ -36,6 +36,19 @@ export function generateStoragePath(
 }
 
 /**
+ * Generate storage path for a company logo.
+ * A fresh uuid each upload gives automatic cache-busting.
+ */
+export function generateCompanyLogoPath(
+  companyId: string,
+  filename: string
+): string {
+  const uuid = crypto.randomUUID().substring(0, 8);
+  const sanitized = sanitizeFilename(filename);
+  return `${companyId}/company/logo_${uuid}_${sanitized}`;
+}
+
+/**
  * Upload file to Supabase Storage
  */
 export async function uploadFileToStorage(

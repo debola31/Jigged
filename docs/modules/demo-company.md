@@ -61,8 +61,7 @@ Fallback if no first name available: `"Demo Shop"` (rename prompt on first visit
 |--------|-------|---------|
 | Customers | 3 | Acme Manufacturing, Ajax Industries, Precision Corp |
 | Parts | 6 | With pricing tiers across customers |
-| Resource Groups | 4 | CNC, Manual, Quality, Finishing |
-| Operation Types | 8 | With labor rates, linked to resource groups |
+| Operation Types | 8 | With labor rates |
 | Routings | 3 | With nodes and edges |
 | Quotes | 5 | pending_approval, accepted statuses |
 | Jobs | 4 | Not started, in_progress, completed statuses |
@@ -204,18 +203,11 @@ The template stores data for each entity type, keyed by table name. Each entity 
     { "_ref": "cust-2", "name": "Ajax Industries", "..." : "..." },
     { "_ref": "cust-3", "name": "Precision Corp", "..." : "..." }
   ],
-  "resource_groups": [
-    { "_ref": "rg-1", "name": "CNC", "description": "CNC Machining" },
-    { "_ref": "rg-2", "name": "Manual", "description": "Manual Operations" },
-    { "_ref": "rg-3", "name": "Quality", "description": "Quality Inspection" },
-    { "_ref": "rg-4", "name": "Finishing", "description": "Surface Finishing" }
-  ],
   "operation_types": [
     {
       "_ref": "op-1",
       "name": "CNC Milling",
-      "labor_rate": 85.00,
-      "resource_group_ref": "rg-1"
+      "labor_rate": 85.00
     }
   ],
   "parts": [
@@ -277,7 +269,6 @@ The template stores data for each entity type, keyed by table name. Each entity 
       "quote_ref": "quote-1",
       "routing_ref": "routing-1",
       "status": "in_progress",
-      "description": "Precision Brackets - 50 units",
       "operations": [
         {
           "_ref": "jop-1",
@@ -392,31 +383,20 @@ BEGIN
                 COALESCE(v_item->>'country', 'USA'));
     END LOOP;
 
-    -- 6. Insert resource_groups (no FK deps besides company_id)
-    FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups')
-    LOOP
-        v_new_id := gen_random_uuid();
-        v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-        INSERT INTO resource_groups (id, company_id, name, description)
-        VALUES (v_new_id, v_company_id, v_item->>'name', v_item->>'description');
-    END LOOP;
-
-    -- 7. Insert operation_types (depends on resource_groups)
+    -- 6. Insert operation_types (no FK deps besides company_id)
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types')
     LOOP
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description)
+        INSERT INTO operation_types (id, company_id, name, labor_rate, description)
         VALUES (v_new_id, v_company_id,
-                (v_ref_map->>( v_item->>'resource_group_ref'))::UUID,
                 v_item->>'name',
                 (v_item->>'labor_rate')::NUMERIC,
                 v_item->>'description');
     END LOOP;
 
-    -- 8. Insert parts (depends on customers)
+    -- 7. Insert parts (depends on customers)
     FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts')
     LOOP
         v_new_id := gen_random_uuid();
@@ -574,17 +554,16 @@ $$;
 1. companies           (root)
 2. user_company_access  (depends on: companies)
 3. customers            (depends on: companies)
-4. resource_groups      (depends on: companies)
-5. operation_types      (depends on: companies, resource_groups)
-6. parts                (depends on: companies, customers)
-7. inventory_items      (depends on: companies)
-8. routings             (depends on: companies, parts)
-9. routing_nodes        (depends on: routings, operation_types)
-10. routing_edges       (depends on: routings, routing_nodes)
-11. quotes              (depends on: companies, customers, parts, routings)
-12. jobs                (depends on: companies, customers, parts, quotes, routings)
-13. job_operations      (depends on: jobs, operation_types)
-14. operators           (via API — auth.users + user_company_access)
+4. operation_types      (depends on: companies)
+5. parts                (depends on: companies, customers)
+6. inventory_items      (depends on: companies)
+7. routings             (depends on: companies, parts)
+8. routing_nodes        (depends on: routings, operation_types)
+9. routing_edges        (depends on: routings, routing_nodes)
+10. quotes              (depends on: companies, customers, parts, routings)
+11. jobs                (depends on: companies, customers, parts, quotes, routings)
+12. job_operations      (depends on: jobs, operation_types)
+13. operators           (via API — auth.users + user_company_access)
 ```
 
 ### 5.2 `reset_demo_company()`
@@ -626,7 +605,6 @@ BEGIN
     DELETE FROM inventory_items WHERE company_id = p_company_id;
     -- (inventory_unit_conversions cascade-deleted via inventory_items)
     DELETE FROM operation_types WHERE company_id = p_company_id;
-    DELETE FROM resource_groups WHERE company_id = p_company_id;
     DELETE FROM customers WHERE company_id = p_company_id;
 
     -- Delete demo operator user_company_access (but NOT the owner's)

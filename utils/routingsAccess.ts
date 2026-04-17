@@ -215,9 +215,7 @@ async function loadRoutingGraph(
       operation_type:operation_types(
         id,
         name,
-        labor_rate,
-        resource_group_id,
-        resource_group:resource_groups(id, name)
+        labor_rate
       )
     `)
     .eq('routing_id', routing.id)
@@ -456,7 +454,6 @@ export interface PendingNode {
   tempId: string;
   operationTypeId: string;
   operationName: string;
-  resourceGroupName: string | null;
   laborRate: number | null;
   runTimePerUnit: number | null;
   setupTime: number;

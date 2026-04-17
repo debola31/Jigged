@@ -7,7 +7,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
 import AddOperationModal, { type OperationModalValue } from './AddOperationModal';
 import { getAllOperations } from '@/utils/operationsAccess';
-import type { OperationWithGroup } from '@/types/operations';
+import type { Operation } from '@/types/operations';
 import { calculateRoutingTime, formatTime } from '@/types/routings';
 
 const generateTempId = () => `temp-node-${crypto.randomUUID()}`;
@@ -32,7 +32,7 @@ export default function RoutingOperationsList({
   companyId,
   disabled = false,
 }: RoutingOperationsListProps) {
-  const [operations, setOperations] = useState<OperationWithGroup[]>([]);
+  const [operations, setOperations] = useState<Operation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalState, setModalState] = useState<
@@ -76,7 +76,6 @@ export default function RoutingOperationsList({
         tempId: generateTempId(),
         operationTypeId: value.operation.id,
         operationName: value.operation.name,
-        resourceGroupName: value.operation.resource_group?.name || null,
         laborRate: value.operation.labor_rate,
         runTimePerUnit: value.runTimePerUnit,
         setupTime: value.setupTime,
@@ -118,7 +117,7 @@ export default function RoutingOperationsList({
       created_at: '',
       updated_at: '',
       operation_type: r.operationTypeId
-        ? { id: r.operationTypeId, name: r.operationName, labor_rate: r.laborRate, resource_group_id: null }
+        ? { id: r.operationTypeId, name: r.operationName, labor_rate: r.laborRate }
         : null,
     }))
   );

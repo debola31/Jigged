@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ResourceGroupFormData, OperationFormData } from '@/types/operations';
+import type { OperationFormData } from '@/types/operations';
 
 // Use vi.hoisted to define mock variables before vi.mock is called
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
-  // Create a chainable mock query builder
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
 
   const chainMethods = [
@@ -27,7 +26,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
     builder[method] = vi.fn().mockImplementation(() => builder);
   });
 
-  // Terminal values
   builder.data = null;
   builder.error = null;
   builder.count = null;
@@ -39,27 +37,16 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   return { mockQueryBuilder: builder, mockSupabase: supabase };
 });
 
-// Mock the supabase module
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));
 
-// Import functions after mock setup
 import {
-  getResourceGroups,
-  getResourceGroup,
-  createResourceGroup,
-  updateResourceGroup,
-  deleteResourceGroup,
-  getResourceGroupOperationCount,
-  getResourceGroupsWithCounts,
   getAllOperations,
-  getOperationsGrouped,
   getOperationsFlat,
   getOperation,
-  getOperationWithRelations,
   checkOperationNameExists,
   createOperation,
   updateOperation,
@@ -84,166 +71,11 @@ describe('operationsAccess utilities', () => {
     mockQueryBuilder.count = null;
   });
 
-  // ============== Resource Groups Tests ==============
-
-  describe('getResourceGroups', () => {
-    it('returns all resource groups for a company', async () => {
-      const mockGroups = [
-        { id: 'group-1', company_id: 'company-1', name: 'CNC', description: 'CNC machines' },
-        { id: 'group-2', company_id: 'company-1', name: 'Manual', description: 'Manual work' },
-      ];
-      mockQueryBuilder.data = mockGroups;
-      mockQueryBuilder.error = null;
-
-      const result = await getResourceGroups('company-1');
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('resource_groups');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(result).toHaveLength(2);
-    });
-
-    it('throws error when query fails', async () => {
-      mockQueryBuilder.error = { message: 'Database error', code: '500' };
-
-      await expect(getResourceGroups('company-1')).rejects.toEqual({
-        message: 'Database error',
-        code: '500',
-      });
-    });
-  });
-
-  describe('getResourceGroup', () => {
-    it('returns resource group by ID', async () => {
-      const mockGroup = { id: 'group-1', name: 'CNC' };
-      mockQueryBuilder.data = mockGroup;
-      mockQueryBuilder.error = null;
-
-      const result = await getResourceGroup('group-1');
-
-      expect(mockQueryBuilder.single).toHaveBeenCalled();
-      expect(result).toEqual(mockGroup);
-    });
-
-    it('returns null when group not found (PGRST116)', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { code: 'PGRST116', message: 'Not found' };
-
-      const result = await getResourceGroup('nonexistent');
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('createResourceGroup', () => {
-    it('creates a new resource group', async () => {
-      const formData: ResourceGroupFormData = { name: 'CNC', description: 'CNC machines' };
-      const mockCreated = { id: 'new-group', ...formData };
-      mockQueryBuilder.data = mockCreated;
-      mockQueryBuilder.error = null;
-
-      const result = await createResourceGroup('company-1', formData);
-
-      expect(mockQueryBuilder.insert).toHaveBeenCalled();
-      expect(result).toEqual(mockCreated);
-    });
-
-    it('throws error on duplicate name', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { message: 'Duplicate name', code: '23505' };
-
-      const formData: ResourceGroupFormData = { name: 'Existing', description: '' };
-
-      await expect(createResourceGroup('company-1', formData)).rejects.toEqual({
-        message: 'Duplicate name',
-        code: '23505',
-      });
-    });
-  });
-
-  describe('updateResourceGroup', () => {
-    it('updates an existing resource group', async () => {
-      const formData: ResourceGroupFormData = { name: 'Updated CNC', description: 'Updated desc' };
-      const mockUpdated = { id: 'group-1', ...formData };
-      mockQueryBuilder.data = mockUpdated;
-      mockQueryBuilder.error = null;
-
-      const result = await updateResourceGroup('group-1', formData);
-
-      expect(mockQueryBuilder.update).toHaveBeenCalled();
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'group-1');
-      expect(result.name).toBe('Updated CNC');
-    });
-  });
-
-  describe('deleteResourceGroup', () => {
-    it('ungroups operations and deletes group', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = null;
-
-      await deleteResourceGroup('group-1');
-
-      // Should first update operations to ungroup them
-      expect(mockSupabase.from).toHaveBeenCalledWith('operation_types');
-      expect(mockQueryBuilder.update).toHaveBeenCalled();
-      // Then delete the group
-      expect(mockSupabase.from).toHaveBeenCalledWith('resource_groups');
-      expect(mockQueryBuilder.delete).toHaveBeenCalled();
-    });
-
-    it('throws error if ungrouping fails', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'operation_types') {
-          return {
-            ...mockQueryBuilder,
-            update: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                data: null,
-                error: { message: 'Ungroup failed', code: '500' },
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      await expect(deleteResourceGroup('group-1')).rejects.toEqual({
-        message: 'Ungroup failed',
-        code: '500',
-      });
-    });
-  });
-
-  describe('getResourceGroupOperationCount', () => {
-    it('returns count of operations in group', async () => {
-      mockQueryBuilder.count = 5;
-      mockQueryBuilder.error = null;
-
-      const result = await getResourceGroupOperationCount('group-1');
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('resource_group_id', 'group-1');
-      expect(result).toBe(5);
-    });
-
-    it('returns 0 on error', async () => {
-      mockQueryBuilder.count = null;
-      mockQueryBuilder.error = { message: 'Error', code: '500' };
-
-      const result = await getResourceGroupOperationCount('group-1');
-
-      expect(result).toBe(0);
-    });
-  });
-
-  // ============== Operations Tests ==============
-
   describe('getAllOperations', () => {
-    it('returns operations with resource group info', async () => {
+    it('returns operations for a company', async () => {
       const mockOps = [
-        { id: 'op-1', name: 'Milling', resource_group: { id: 'g-1', name: 'CNC' } },
-        { id: 'op-2', name: 'Turning', resource_group: null },
+        { id: 'op-1', name: 'Milling' },
+        { id: 'op-2', name: 'Turning' },
       ];
       mockQueryBuilder.data = mockOps;
       mockQueryBuilder.error = null;
@@ -264,54 +96,6 @@ describe('operationsAccess utilities', () => {
     });
   });
 
-  describe('getOperationsGrouped', () => {
-    it('returns grouped and ungrouped operations', async () => {
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'resource_groups') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                order: vi.fn().mockReturnValue({
-                  data: [{ id: 'g-1', name: 'CNC' }],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'operation_types') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                order: vi.fn().mockReturnValue({
-                  data: [
-                    { id: 'op-1', name: 'Milling', resource_group_id: 'g-1' },
-                    { id: 'op-2', name: 'Manual', resource_group_id: null },
-                  ],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      const result = await getOperationsGrouped('company-1');
-
-      expect(result.groups).toBeDefined();
-      expect(result.ungrouped).toBeDefined();
-    });
-  });
-
   describe('getOperationsFlat', () => {
     it('returns flat list of operations', async () => {
       mockQueryBuilder.data = [{ id: 'op-1', name: 'Milling' }];
@@ -320,15 +104,6 @@ describe('operationsAccess utilities', () => {
       const result = await getOperationsFlat('company-1');
 
       expect(result).toHaveLength(1);
-    });
-
-    it('filters by group ID', async () => {
-      mockQueryBuilder.data = [];
-      mockQueryBuilder.error = null;
-
-      await getOperationsFlat('company-1', { groupId: 'group-1' });
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('resource_group_id', 'group-1');
     });
   });
 
@@ -388,7 +163,6 @@ describe('operationsAccess utilities', () => {
     it('creates a new operation', async () => {
       const formData: OperationFormData = {
         name: 'Milling',
-        resource_group_id: 'group-1',
         labor_rate: '75',
         description: 'CNC milling',
       };
@@ -402,10 +176,9 @@ describe('operationsAccess utilities', () => {
       expect(result.name).toBe('Milling');
     });
 
-    it('handles empty resource_group_id', async () => {
+    it('handles empty optional fields', async () => {
       const formData: OperationFormData = {
         name: 'Manual Work',
-        resource_group_id: '',
         labor_rate: '',
         description: '',
       };
@@ -422,7 +195,6 @@ describe('operationsAccess utilities', () => {
     it('updates an existing operation', async () => {
       const formData: OperationFormData = {
         name: 'Updated Milling',
-        resource_group_id: 'group-2',
         labor_rate: '80',
         description: 'Updated description',
       };
@@ -482,7 +254,6 @@ describe('operationsAccess utilities', () => {
       // @ts-expect-error Testing invalid input
       await bulkDeleteOperations(['valid', null, '', undefined]);
 
-      // Should only process valid IDs
       expect(mockSupabase.from).toHaveBeenCalled();
     });
 
@@ -496,41 +267,26 @@ describe('operationsAccess utilities', () => {
     });
   });
 
-  // ============== Import Tests ==============
-
   describe('bulkImportOperations', () => {
     it('imports operations successfully', async () => {
-      // Mock existing operations query
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        return {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        ...mockQueryBuilder,
+        select: vi.fn().mockReturnValue({
           ...mockQueryBuilder,
-          select: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              data: [],
-              error: null,
-            }),
-          }),
-          insert: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              single: vi.fn().mockReturnValue({
-                data: { id: 'new-group', name: 'CNC' },
-                error: null,
-              }),
-            }),
-            data: null,
+          eq: vi.fn().mockReturnValue({
+            data: [],
             error: null,
           }),
-        };
-      });
+        }),
+        insert: vi.fn().mockReturnValue({
+          data: null,
+          error: null,
+        }),
+      }));
 
       const rows = [
-        { name: 'Milling', labor_rate: '75', resource_group: 'CNC' },
-        { name: 'Turning', labor_rate: '70', resource_group: 'CNC' },
+        { name: 'Milling', labor_rate: '75' },
+        { name: 'Turning', labor_rate: '70' },
       ];
 
       const result = await bulkImportOperations('company-1', rows);
@@ -563,7 +319,7 @@ describe('operationsAccess utilities', () => {
     });
 
     it('detects duplicate names in database', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => ({
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
           ...mockQueryBuilder,
@@ -583,7 +339,7 @@ describe('operationsAccess utilities', () => {
     });
 
     it('detects duplicate names within file', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => ({
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
           ...mockQueryBuilder,
@@ -600,12 +356,11 @@ describe('operationsAccess utilities', () => {
 
       const rows = [
         { name: 'Duplicate', labor_rate: '75' },
-        { name: 'Duplicate', labor_rate: '80' }, // Same name
+        { name: 'Duplicate', labor_rate: '80' },
       ];
 
       const result = await bulkImportOperations('company-1', rows);
 
-      // One should succeed, one should be skipped as duplicate
       expect(result.errors.some((e) => e.reason.includes('Duplicate'))).toBe(true);
     });
   });

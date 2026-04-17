@@ -16,10 +16,6 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
 import CircularProgress from '@mui/material/CircularProgress';
 import MuiLink from '@mui/material/Link';
 
@@ -75,7 +71,7 @@ export default function QuotesPage() {
 
   // Customer list for filter
   const [customers, setCustomers] = useState<Customer[]>([]);
-  // Team member list for "Prepared By" filter
+  // Team member list for "Created By" filter
   const [members, setMembers] = useState<CompanyMember[]>([]);
 
   // Selection state
@@ -276,7 +272,7 @@ export default function QuotesPage() {
     },
     {
       colId: 'prepared_by',
-      headerName: 'Prepared By',
+      headerName: 'Created By',
       width: 160,
       valueGetter: (params) =>
         params.data?.created_by_member?.name ||
@@ -350,18 +346,20 @@ export default function QuotesPage() {
           }}
         />
 
-        <FormControl size="small" sx={{ minWidth: 130 }}>
-          <InputLabel>Status</InputLabel>
-          <Select
-            value={statusFilter}
+        <Box sx={{ minWidth: 160 }}>
+          <SearchableSelect
+            options={[
+              { id: 'active', label: 'Active' },
+              { id: 'expired', label: 'Expired' },
+            ]}
+            value={statusFilter === 'all' ? '' : statusFilter}
+            onChange={(value) => setStatusFilter((value || 'all') as QuoteStatus | 'all')}
             label="Status"
-            onChange={(e) => setStatusFilter(e.target.value as QuoteStatus | 'all')}
-          >
-            <MenuItem value="all">All Statuses</MenuItem>
-            <MenuItem value="active">Active</MenuItem>
-            <MenuItem value="expired">Expired</MenuItem>
-          </Select>
-        </FormControl>
+            allowNone
+            noneLabel="All Statuses"
+            size="small"
+          />
+        </Box>
 
         <Box sx={{ minWidth: 220 }}>
           <SearchableSelect

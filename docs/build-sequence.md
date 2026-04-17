@@ -211,8 +211,6 @@ Phase 0 is complete when Shane can:
 
 - `parts`
 
-- `resource_groups` (categories of operations - e.g., CNC, LATHE&MILL, Hone)
-
 - `operation_types` (operation types with labor rates - e.g., HURCO Mill @ $135/hr)
 
 - `quotes`

@@ -140,30 +140,6 @@ METRIC_TOOLS: list[dict] = [
         },
     },
     {
-        "name": "get_resource_utilization",
-        "description": (
-            "Get resource group utilization showing booked hours by resource group "
-            "over time. Joins job_operations with operation_types and resource_groups. "
-            "Returns data suitable for a stacked bar chart."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "period_type": {
-                    "type": "string",
-                    "enum": ["daily", "weekly", "monthly"],
-                    "description": "How to group the utilization data",
-                },
-                "num_periods": {
-                    "type": "integer",
-                    "description": "Number of periods to return (default 8)",
-                    "default": 8,
-                },
-            },
-            "required": ["period_type"],
-        },
-    },
-    {
         "name": "get_revenue_forecast",
         "description": (
             "Get revenue forecast from the open quote pipeline. "

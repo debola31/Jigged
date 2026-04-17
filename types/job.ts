@@ -60,7 +60,6 @@ export interface Job {
   quote_id: string | null;
   customer_id: string;
   part_id: string | null;
-  description: string | null;
   status: JobStatus;
   status_changed_at: string | null;
   current_operation_sequence: number | null;
@@ -162,7 +161,6 @@ export interface JobWithRelations extends Job {
 export interface JobFormData {
   customer_id: string;
   part_id: string;
-  description: string;
   due_date: string; // ISO date (YYYY-MM-DD), '' when not set
   lead_time_days: string;
 }
@@ -174,6 +172,7 @@ export interface JobFilters {
   status?: JobStatus | 'all';
   customerId?: string;
   search?: string;
+  overdue?: boolean;
 }
 
 /**
@@ -182,7 +181,6 @@ export interface JobFilters {
 export const EMPTY_JOB_FORM: JobFormData = {
   customer_id: '',
   part_id: '',
-  description: '',
   due_date: '',
   lead_time_days: '',
 };
@@ -194,7 +192,6 @@ export function jobToFormData(job: Job): JobFormData {
   return {
     customer_id: job.customer_id,
     part_id: job.part_id || '',
-    description: job.description || '',
     due_date: job.due_date || '',
     lead_time_days: job.lead_time_days !== null ? String(job.lead_time_days) : '',
   };

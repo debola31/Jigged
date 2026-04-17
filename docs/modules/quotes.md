@@ -514,8 +514,6 @@ When converting quote to job:
 
   - part_name_text from quote (if ad-hoc)
 
-  - description from quote
-
   - quantity_ordered from quote.quantity
 
   - due_date from modal input
@@ -755,7 +753,7 @@ While creating/editing a quote, users can create new entities without leaving th
 
 ## Search and Filter
 
-**Search:** Full-text search on quote number and description (toolbar input)
+**Search:** Full-text search on quote number (toolbar input)
 
 **Filters:**
 

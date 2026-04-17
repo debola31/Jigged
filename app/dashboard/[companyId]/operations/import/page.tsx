@@ -12,8 +12,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -39,7 +37,6 @@ type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'importing'
 const OPERATION_FIELDS: FieldDefinition[] = [
   { key: 'name', label: 'Name', required: true },
   { key: 'labor_rate', label: 'Labor Rate', required: false },
-  { key: 'resource_group', label: 'Resource Group', required: false },
   { key: 'description', label: 'Description', required: false },
   { key: 'legacy_id', label: 'Legacy ID', required: false },
 ];
@@ -57,13 +54,10 @@ export default function ImportOperationsPage() {
   const [unmappedRequired, setUnmappedRequired] = useState<string[]>([]);
   const [discardedColumns, setDiscardedColumns] = useState<string[]>([]);
   const [unmappedOptional, setUnmappedOptional] = useState<string[]>([]);
-  const [createGroups, setCreateGroups] = useState(true);
-  const [groupsToCreate, setGroupsToCreate] = useState<string[]>([]);
 
   // Validation & import
   const [validRowsCount, setValidRowsCount] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
-  const [groupsCreatedCount, setGroupsCreatedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +219,6 @@ export default function ImportOperationsPage() {
           mappings: mappingsDict,
           rows,
           total_rows: allRows.length,
-          create_groups: createGroups,
         }),
       });
 
@@ -236,7 +229,6 @@ export default function ImportOperationsPage() {
       const data = await response.json();
 
       setValidRowsCount(data.valid_rows_count || 0);
-      setGroupsToCreate(data.groups_to_create || []);
 
       if (data.has_conflicts || data.validation_errors?.length > 0) {
         setError(
@@ -278,7 +270,6 @@ export default function ImportOperationsPage() {
 
       // Execute batches sequentially and aggregate results
       let totalImported = 0;
-      let totalGroupsCreated = 0;
       let totalSkipped = 0;
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
@@ -291,7 +282,6 @@ export default function ImportOperationsPage() {
             mappings: mappingsDict,
             rows: batch,
             skip_conflicts: true,
-            create_groups: createGroups,
             batch_offset: batchIndex * MAX_ROWS_PER_REQUEST,
           }),
         });
@@ -302,12 +292,10 @@ export default function ImportOperationsPage() {
 
         const data = await response.json();
         totalImported += data.imported_count || 0;
-        totalGroupsCreated += data.groups_created || 0;
         totalSkipped += data.skipped_count || 0;
       }
 
       setImportedCount(totalImported);
-      setGroupsCreatedCount(totalGroupsCreated);
       setSkippedCount(totalSkipped);
       setCurrentStep('complete');
     } catch (err) {
@@ -334,17 +322,6 @@ export default function ImportOperationsPage() {
                 Choose File
                 <input type="file" accept=".csv" hidden onChange={handleFileChange} />
               </Button>
-              <Box mt={3}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={createGroups}
-                      onChange={(e) => setCreateGroups(e.target.checked)}
-                    />
-                  }
-                  label="Auto-create resource groups from data"
-                />
-              </Box>
             </CardContent>
           </Card>
         );
@@ -436,11 +413,6 @@ export default function ImportOperationsPage() {
               <Typography color="text.secondary" mb={1}>
                 {importedCount} operations imported
               </Typography>
-              {groupsCreatedCount > 0 && (
-                <Typography color="text.secondary" mb={1}>
-                  {groupsCreatedCount} groups created
-                </Typography>
-              )}
               {skippedCount > 0 && (
                 <Typography color="warning.main" mb={1}>
                   {skippedCount} rows skipped (duplicates or errors)
@@ -456,7 +428,6 @@ export default function ImportOperationsPage() {
                     setAllRows([]);
                     setImportedCount(0);
                     setSkippedCount(0);
-                    setGroupsCreatedCount(0);
                   }}
                 >
                   Import Another File

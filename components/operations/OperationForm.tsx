@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -12,28 +12,23 @@ import Grid from '@mui/material/Grid';
 import Alert from '@mui/material/Alert';
 import InputAdornment from '@mui/material/InputAdornment';
 import CircularProgress from '@mui/material/CircularProgress';
-import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import {
   createOperation,
   updateOperation,
   deleteOperation,
-  getResourceGroups,
   checkOperationNameExists,
   getOperationWithRelations,
 } from '@/utils/operationsAccess';
-import type { OperationFormData, ResourceGroup } from '@/types/operations';
+import type { OperationFormData } from '@/types/operations';
 
 interface OperationFormProps {
   companyId: string;
-  operationId?: string; // undefined for create mode
+  operationId?: string;
   initialData: OperationFormData;
   onCancel: () => void;
   onSaved: (operationId: string) => void;
 }
 
-/**
- * Form for creating/editing operations.
- */
 export default function OperationForm({
   companyId,
   operationId,
@@ -48,25 +43,7 @@ export default function OperationForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [groups, setGroups] = useState<ResourceGroup[]>([]);
-  const [loadingGroups, setLoadingGroups] = useState(true);
 
-  // Load resource groups for dropdown
-  useEffect(() => {
-    async function loadGroups() {
-      try {
-        const data = await getResourceGroups(companyId);
-        setGroups(data);
-      } catch (err) {
-        console.error('Failed to load resource groups:', err);
-      } finally {
-        setLoadingGroups(false);
-      }
-    }
-    loadGroups();
-  }, [companyId]);
-
-  // Handle field change
   const handleChange =
     (field: keyof OperationFormData) => (e: React.ChangeEvent<HTMLInputElement>) => {
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
@@ -75,15 +52,12 @@ export default function OperationForm({
       }
     };
 
-  // Validate form
   const validate = async (): Promise<boolean> => {
     const errors: Record<string, string> = {};
 
-    // Required: name
     if (!formData.name.trim()) {
       errors.name = 'Name is required';
     } else {
-      // Check uniqueness
       const exists = await checkOperationNameExists(
         companyId,
         formData.name.trim(),
@@ -94,7 +68,6 @@ export default function OperationForm({
       }
     }
 
-    // Validate labor rate (if provided)
     if (formData.labor_rate) {
       const rate = parseFloat(formData.labor_rate);
       if (isNaN(rate)) {
@@ -108,7 +81,6 @@ export default function OperationForm({
     return Object.keys(errors).length === 0;
   };
 
-  // Handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -135,11 +107,9 @@ export default function OperationForm({
     }
   };
 
-  // Handle delete
   const handleDelete = async () => {
     if (!operationId) return;
 
-    // Check for relations
     const operationWithRelations = await getOperationWithRelations(operationId);
     if (operationWithRelations && operationWithRelations.routing_operations_count > 0) {
       setError(
@@ -168,7 +138,6 @@ export default function OperationForm({
         </Alert>
       )}
 
-      {/* Basic Information */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 3 }}>
@@ -185,22 +154,6 @@ export default function OperationForm({
                 disabled={loading}
                 error={!!fieldErrors.name}
                 helperText={fieldErrors.name || 'e.g., HURCO Mill, Mazak Lathe'}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <SearchableSelect
-                options={groups.map((g): SelectOption => ({
-                  id: g.id,
-                  label: g.name,
-                }))}
-                value={formData.resource_group_id}
-                onChange={(value) => setFormData((prev) => ({ ...prev, resource_group_id: value }))}
-                label="Resource Group"
-                disabled={loading || loadingGroups}
-                loading={loadingGroups}
-                allowNone
-                noneLabel="None (Ungrouped)"
-                helperText="Category for this operation (optional)"
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -224,7 +177,6 @@ export default function OperationForm({
         </CardContent>
       </Card>
 
-      {/* Description */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 3 }}>
@@ -243,7 +195,6 @@ export default function OperationForm({
         </CardContent>
       </Card>
 
-      {/* Actions */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
         {isEdit && (
           <Button variant="outlined" color="error" onClick={handleDelete} disabled={loading}>

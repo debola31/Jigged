@@ -71,8 +71,7 @@ The hidden demo company approach leverages RLS (`company_id` filtering) which is
 |--------|-------|---------|
 | Customers | 3 | Acme Manufacturing, Ajax Industries, Precision Corp |
 | Parts | 6 | With pricing tiers across customers |
-| Resource Groups | 4 | CNC, Manual, Quality, Finishing |
-| Operation Types | 8 | With labor rates, linked to resource groups |
+| Operation Types | 8 | With labor rates |
 | Routings | 3 | With nodes and edges |
 | Quotes | 5 | pending_approval, accepted statuses |
 | Jobs | 4 | Pending, in_progress, completed statuses |
@@ -205,11 +204,8 @@ Template-local `_ref` IDs are mapped to real UUIDs during seeding:
       "country": "USA"
     }
   ],
-  "resource_groups": [
-    { "_ref": "rg-1", "name": "CNC", "description": "CNC Machining" }
-  ],
   "operation_types": [
-    { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00, "resource_group_ref": "rg-1" }
+    { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00 }
   ],
   "parts": [
     { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
@@ -229,7 +225,7 @@ Template-local `_ref` IDs are mapped to real UUIDs during seeding:
   ],
   "jobs": [
     {
-      "_ref": "job-1", "job_number": "J-DEMO-001", "customer_ref": "cust-1", "part_ref": "part-1", "quote_ref": "quote-1", "routing_ref": "routing-1", "status": "in_progress", "description": "Precision Brackets - 50 units",
+      "_ref": "job-1", "job_number": "J-DEMO-001", "customer_ref": "cust-1", "part_ref": "part-1", "quote_ref": "quote-1", "routing_ref": "routing-1", "status": "in_progress",
       "operations": [
         { "_ref": "jop-1", "sequence": 1, "operation_name": "CNC Milling", "operation_type_ref": "op-1", "estimated_run_hours_per_unit": 0.5, "quantity_completed": 20, "status": "in_progress" }
       ]
@@ -319,7 +315,7 @@ AS $$
 -- Reads active template from demo_data_templates
 -- Iterates each entity array, mapping _ref keys to real UUIDs via v_ref_map
 -- Insert order (respects FK dependencies):
---   customers → resource_groups → operation_types → parts →
+--   customers → operation_types → parts →
 --   inventory_items → routings (+ nodes + edges) →
 --   quotes → jobs (+ job_operations)
 -- Post-pass: links quotes.converted_to_job_id (circular FK)
@@ -427,7 +423,6 @@ BEGIN
     DELETE FROM parts WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
     DELETE FROM operation_types WHERE company_id = v_demo_company_id;
-    DELETE FROM resource_groups WHERE company_id = v_demo_company_id;
     DELETE FROM customers WHERE company_id = v_demo_company_id;
 
     -- Delete AI data for demo company

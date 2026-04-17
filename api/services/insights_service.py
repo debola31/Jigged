@@ -486,93 +486,6 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
     }
 
 
-def get_resource_utilization(
-    company_id: str,
-    period_type: str = "weekly",
-    num_periods: int = 8,
-) -> dict:
-    """Get resource group utilization showing booked hours over time."""
-    supabase = _get_supabase_service_role()
-    periods = _get_period_boundaries(period_type, num_periods)
-
-    start_date = periods[0]["start"]
-    end_date = periods[-1]["end"]
-
-    # Get job operations with their operation types and resource groups
-    # We scope by job created_at in the date range
-    response = (
-        supabase.table("jobs")
-        .select(
-            "id, created_at, "
-            "job_operations(estimated_setup_hours, estimated_run_hours_per_unit, "
-            "operation_types!left(name, resource_group_id, resource_groups!left(name)))"
-        )
-        .eq("company_id", company_id)
-        .in_("status", ["not_started", "in_progress", "completed", "shipped"])
-        .gte("created_at", start_date)
-        .lt("created_at", end_date)
-        .execute()
-    )
-
-    jobs = response.data or []
-
-    # Build period data keyed by resource group
-    resource_groups: dict[str, dict[str, float]] = {}
-
-    for job in jobs:
-        job_created = job.get("created_at", "")
-        if not job_created:
-            continue
-
-        # Find which period this job belongs to
-        period_label = None
-        for period in periods:
-            if period["start"] <= job_created < period["end"]:
-                period_label = period["label"]
-                break
-        if not period_label:
-            continue
-
-        operations = job.get("job_operations") or []
-        if not isinstance(operations, list):
-            continue
-
-        for op in operations:
-            setup = float(op.get("estimated_setup_hours", 0) or 0)
-            run = float(op.get("estimated_run_hours_per_unit", 0) or 0)
-            total_hours = setup + run  # Simplified; per-unit * 1
-
-            op_type = op.get("operation_types") or {}
-            if isinstance(op_type, list) and op_type:
-                op_type = op_type[0]
-
-            rg = op_type.get("resource_groups") or {}
-            if isinstance(rg, list) and rg:
-                rg = rg[0]
-            rg_name = rg.get("name", "Unassigned") if isinstance(rg, dict) else "Unassigned"
-
-            if rg_name not in resource_groups:
-                resource_groups[rg_name] = {}
-            resource_groups[rg_name][period_label] = (
-                resource_groups[rg_name].get(period_label, 0) + total_hours
-            )
-
-    # Format output
-    result_periods = []
-    for period in periods:
-        period_entry = {"period": period["label"]}
-        for rg_name in resource_groups:
-            period_entry[rg_name] = round(resource_groups[rg_name].get(period["label"], 0), 1)
-        result_periods.append(period_entry)
-
-    return {
-        "periods": result_periods,
-        "resource_groups": list(resource_groups.keys()),
-        "period_type": period_type,
-        "num_periods": num_periods,
-    }
-
-
 def get_revenue_forecast(company_id: str) -> dict:
     """
     Get revenue forecast from the open quote pipeline.
@@ -632,7 +545,6 @@ TOOL_FUNCTIONS = {
     "get_job_cycle_times": get_job_cycle_times,
     "get_customer_revenue_breakdown": get_customer_revenue_breakdown,
     "get_part_profitability": get_part_profitability,
-    "get_resource_utilization": get_resource_utilization,
     "get_revenue_forecast": get_revenue_forecast,
 }
 

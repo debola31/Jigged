@@ -4,7 +4,6 @@ export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface AtRiskJob {
   job_number: string;
-  description: string;
   customer_name: string;
   status: string;
   pct_complete: number;
@@ -35,7 +34,6 @@ interface JobOperationRow {
 interface JobRow {
   id: string;
   job_number: string | null;
-  description: string | null;
   status: string;
   created_at: string | null;
   customers: { name: string | null } | null;
@@ -59,7 +57,7 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
     .from('jobs')
     .select(
       `
-      id, job_number, description, status, created_at,
+      id, job_number, status, created_at,
       customers!left(name),
       quotes!jobs_quote_id_fkey(quantity),
       job_operations(id, status, estimated_setup_minutes, estimated_run_minutes_per_unit)
@@ -108,7 +106,6 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
 
     atRisk.push({
       job_number: job.job_number ?? 'Unknown',
-      description: job.description ?? '',
       customer_name: job.customers?.name ?? 'Unknown',
       status: job.status,
       pct_complete: round1(pctComplete),

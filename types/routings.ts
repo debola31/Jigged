@@ -81,18 +81,13 @@ export interface RoutingWithStats extends RoutingWithPart {
 }
 
 /**
- * Routing node joined with its operation type (and resource group) for display.
+ * Routing node joined with its operation type for display.
  */
 export interface RoutingNodeWithOperation extends RoutingNode {
   operation_type: {
     id: string;
     name: string;
     labor_rate: number | null;
-    resource_group_id: string | null;
-    resource_group?: {
-      id: string;
-      name: string;
-    } | null;
   } | null;
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -52,16 +52,26 @@ import SearchableSelect, { type SelectOption } from '@/components/common/Searcha
 import type { QuoteWithRelations, QuoteStatus, QuoteFilters, CompanyMember } from '@/types/quote';
 import type { Customer } from '@/types/customer';
 
+const VALID_QUOTE_STATUSES: Array<QuoteStatus | 'all'> = ['all', 'active', 'expired'];
+
+function parseQuoteStatusParam(v: string | null): QuoteStatus | 'all' {
+  if (v && (VALID_QUOTE_STATUSES as string[]).includes(v)) return v as QuoteStatus | 'all';
+  return 'all';
+}
+
 export default function QuotesPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
   const [quotes, setQuotes] = useState<QuoteWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>(() =>
+    parseQuoteStatusParam(searchParams.get('status'))
+  );
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [createdByFilter, setCreatedByFilter] = useState<string>('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({

@@ -4,18 +4,21 @@ import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Skeleton from '@mui/material/Skeleton';
-import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import MetricPickerModal from './MetricPickerModal';
+import MetricScorecard from './MetricScorecard';
 import {
   type MetricKey,
+  type MetricValue,
   type MetricTimePeriod,
   AVAILABLE_METRICS,
+  ALWAYS_PINNED_METRIC,
+  PICKABLE_METRICS,
+  PINNED_METRIC_SLOTS,
   getPinnedMetricKeys,
   setPinnedMetricKeys,
   getPinnedMetricValues,
@@ -29,29 +32,46 @@ interface PinnedMetricsProps {
 
 const PAGE_SIZE = 4;
 
-function formatValue(value: number, format: 'number' | 'currency'): string {
-  if (format === 'currency') {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+function periodLabel(period: MetricTimePeriod): string {
+  return period === 'today' ? 'today' : 'this week';
+}
+
+function comparisonLabel(period: MetricTimePeriod): string {
+  return period === 'today' ? 'vs yesterday' : 'vs last week';
+}
+
+function drillDownHref(companyId: string, key: MetricKey): string | undefined {
+  switch (key) {
+    case 'open_quotes':
+      return `/dashboard/${companyId}/quotes?status=active`;
+    case 'not_started_jobs':
+      return `/dashboard/${companyId}/jobs?status=not_started`;
+    case 'in_progress_jobs':
+      return `/dashboard/${companyId}/jobs?status=in_progress`;
+    case 'completed_jobs':
+      return `/dashboard/${companyId}/jobs?status=completed`;
+    case 'overdue_jobs':
+      return `/dashboard/${companyId}/jobs?overdue=true`;
+    case 'revenue':
+      return `/dashboard/${companyId}/jobs?status=shipped`;
+    default:
+      return undefined;
   }
-  return value.toLocaleString();
 }
 
 export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const [pinnedKeys, setPinnedKeys] = useState<MetricKey[]>([]);
-  const [values, setValues] = useState<Record<string, number>>({});
+  const [values, setValues] = useState<Partial<Record<MetricKey, MetricValue>>>({});
   const [globalPeriod, setGlobalPeriod] = useState<MetricTimePeriod>('this_week');
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [page, setPage] = useState(0);
 
+  // Every key we need a value for — always includes overdue.
   const allKeys = useMemo<MetricKey[]>(() => {
-    const unpinned = AVAILABLE_METRICS.map((m) => m.key).filter((k) => !pinnedKeys.includes(k));
-    return [...pinnedKeys, ...unpinned];
+    const userPicked = pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC);
+    const unpicked = PICKABLE_METRICS.map((m) => m.key).filter((k) => !userPicked.includes(k));
+    return [ALWAYS_PINNED_METRIC, ...userPicked, ...unpicked];
   }, [pinnedKeys]);
 
   const pages = useMemo<MetricKey[][]>(() => {
@@ -64,9 +84,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   }, [allKeys]);
 
   useEffect(() => {
-    if (page >= pages.length) {
-      setPage(0);
-    }
+    if (page >= pages.length) setPage(0);
   }, [page, pages.length]);
 
   const visibleKeys = pages[page] ?? [];
@@ -74,9 +92,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const buildTimePeriods = useCallback((period: MetricTimePeriod): Partial<Record<MetricKey, MetricTimePeriod>> => {
     const periods: Partial<Record<MetricKey, MetricTimePeriod>> = {};
     for (const m of AVAILABLE_METRICS) {
-      if (m.supportsTimePeriod) {
-        periods[m.key] = period;
-      }
+      if (m.supportsTimePeriod) periods[m.key] = period;
     }
     return periods;
   }, []);
@@ -146,41 +162,36 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
     <Box sx={{ mb: 4 }}>
       <Box
         sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: { xs: 2, md: 0 },
-          alignItems: 'flex-start',
+          display: 'grid',
+          gap: 2,
+          gridTemplateColumns: {
+            xs: 'repeat(2, 1fr)',
+            md: `repeat(${PAGE_SIZE}, 1fr)`,
+          },
         }}
       >
         {Array.from({ length: PAGE_SIZE }).map((_, index) => {
           const key = visibleKeys[index];
           const def = key ? AVAILABLE_METRICS.find((m) => m.key === key) : undefined;
+          if (!def) {
+            return <Box key={`empty-${index}`} sx={{ visibility: 'hidden' }} />;
+          }
+          const v = values[def.key] ?? { value: 0 };
+          const isOverdue = def.key === 'overdue_jobs';
+          const isTimeAware = !!def.supportsTimePeriod;
           return (
-            <Box
-              key={key ?? `empty-${index}`}
-              sx={{
-                flex: { xs: '0 0 calc(50% - 8px)', md: 1 },
-                display: 'flex',
-                alignItems: 'center',
-                visibility: def ? 'visible' : 'hidden',
-              }}
-            >
-              {index > 0 && (
-                <Divider orientation="vertical" flexItem sx={{ mr: 3, display: { xs: 'none', md: 'block' } }} />
-              )}
-              <Box>
-                <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 500, color: 'text.primary' }}>
-                  {def?.label ?? '\u00A0'}
-                </Typography>
-                {loading ? (
-                  <Skeleton variant="text" width={60} height={36} />
-                ) : (
-                  <Typography variant="h4" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                    {def ? formatValue(values[def.key] ?? 0, def.format) : '\u00A0'}
-                  </Typography>
-                )}
-              </Box>
-            </Box>
+            <MetricScorecard
+              key={def.key}
+              label={def.label}
+              periodSuffix={isTimeAware ? periodLabel(globalPeriod) : undefined}
+              value={v.value}
+              format={def.format}
+              previousValue={v.previousValue}
+              comparisonLabel={isTimeAware ? comparisonLabel(globalPeriod) : undefined}
+              href={drillDownHref(companyId, def.key)}
+              severity={isOverdue && v.value > 0 ? 'alert' : 'normal'}
+              loading={loading}
+            />
           );
         })}
       </Box>
@@ -191,42 +202,44 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
           sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
           onClick={() => setPickerOpen(true)}
         >
-          {pinnedKeys.length < 4 ? '+ Add metric' : 'Edit metrics'}
+          {pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC).length < PINNED_METRIC_SLOTS
+            ? '+ Add metric'
+            : 'Edit metrics'}
         </Typography>
-        {multiplePages && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <IconButton
-              size="small"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              aria-label="Previous metrics"
-            >
-              <ChevronLeftIcon fontSize="small" />
-            </IconButton>
-            <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-              {pages.map((_, i) => (
-                <Box
-                  key={i}
-                  sx={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    bgcolor: i === page ? 'primary.main' : 'action.disabled',
-                  }}
-                />
-              ))}
+        <Box sx={{ ml: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+          {multiplePages && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <IconButton
+                size="small"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                aria-label="Previous metrics"
+              >
+                <ChevronLeftIcon fontSize="small" />
+              </IconButton>
+              <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                {pages.map((_, i) => (
+                  <Box
+                    key={i}
+                    sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      bgcolor: i === page ? 'primary.main' : 'action.disabled',
+                    }}
+                  />
+                ))}
+              </Box>
+              <IconButton
+                size="small"
+                onClick={() => setPage((p) => Math.min(pages.length - 1, p + 1))}
+                disabled={page >= pages.length - 1}
+                aria-label="Next metrics"
+              >
+                <ChevronRightIcon fontSize="small" />
+              </IconButton>
             </Box>
-            <IconButton
-              size="small"
-              onClick={() => setPage((p) => Math.min(pages.length - 1, p + 1))}
-              disabled={page >= pages.length - 1}
-              aria-label="Next metrics"
-            >
-              <ChevronRightIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        )}
-        <Box sx={{ ml: 'auto' }}>
+          )}
           <ToggleButtonGroup
             value={globalPeriod}
             exclusive
@@ -252,7 +265,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       <MetricPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        currentKeys={pinnedKeys}
+        currentKeys={pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC)}
         onSave={handleSave}
       />
     </Box>

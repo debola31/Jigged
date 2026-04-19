@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -47,18 +47,30 @@ import Chip from '@mui/material/Chip';
 import type { JobWithRelations, JobFilters, JobStatus } from '@/types/job';
 import { JOB_STATUS_CONFIG } from '@/types/job';
 
+const VALID_JOB_STATUSES: JobStatus[] = ['not_started', 'in_progress', 'completed', 'shipped', 'cancelled'];
+
+function parseStatusParam(v: string | null): JobFilters['status'] {
+  if (v && (VALID_JOB_STATUSES as string[]).includes(v)) return v as JobStatus;
+  return 'all';
+}
+
 export default function JobsPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
   const [jobs, setJobs] = useState<JobWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>('all');
+  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>(() =>
+    parseStatusParam(searchParams.get('status'))
+  );
   const [customerFilter, setCustomerFilter] = useState<string>('');
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [overdueOnly, setOverdueOnly] = useState<boolean>(
+    () => searchParams.get('overdue') === 'true'
+  );
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',

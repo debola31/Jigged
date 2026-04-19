@@ -45,6 +45,13 @@ export default function AuthGuard({
       return;
     }
 
+    // If the admin reset this user's password, force them through the
+    // password-change flow before granting access to any dashboard route.
+    if (user.user_metadata?.needs_password_change) {
+      router.replace('/change-password');
+      return;
+    }
+
     // If no company verification needed, we're done
     if (!requireCompany || !companyId) {
       setLoading(false);

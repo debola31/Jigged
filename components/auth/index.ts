@@ -3,6 +3,7 @@ export { default as Login } from './Login';
 export { default as SignUp } from './SignUp';
 export { default as ForgotPassword } from './ForgotPassword';
 export { default as ResetPassword } from './ResetPassword';
+export { default as ChangePassword } from './ChangePassword';
 export { default as CompanySelector } from './CompanySelector';
 export { default as AuthGuard } from './AuthGuard';
 export { default as SystemAdminGuard } from './SystemAdminGuard';

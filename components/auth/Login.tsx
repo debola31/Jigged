@@ -64,6 +64,14 @@ export default function Login({ expired, returnTo }: LoginProps) {
       }
 
       if (data.user) {
+        // If the admin reset this user's password, force them through the
+        // password-change flow before anything else — even a stale returnTo
+        // from a session-expiry redirect must not bypass this.
+        if (data.user.user_metadata?.needs_password_change) {
+          router.push('/change-password');
+          return;
+        }
+
         // If we have a valid returnTo path (e.g., from session expiry), go there
         if (returnTo && isValidReturnTo(returnTo)) {
           router.push(returnTo);

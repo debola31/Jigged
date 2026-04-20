@@ -76,12 +76,16 @@ export default function AddOperationModal({
   const setupError = touched && setupStr !== '' && (!Number.isFinite(setupParsed) || setupParsed < 0);
   const runError =
     touched && runStr !== '' && (!Number.isFinite(runParsed as number) || (runParsed as number) < 0);
-  const canSave = !!operation && !setupError && !runError;
+  const hasAnyTime =
+    (Number.isFinite(setupParsed) && setupParsed > 0) ||
+    (runParsed !== null && Number.isFinite(runParsed) && (runParsed as number) > 0);
+  const atLeastOneError = touched && !hasAnyTime;
+  const canSave = !!operation && !setupError && !runError && hasAnyTime;
 
   const handleSave = () => {
     setTouched(true);
     if (!operation) return;
-    if (setupError || runError) return;
+    if (setupError || runError || !hasAnyTime) return;
     onSave({
       operation,
       setupTime: Number.isFinite(setupParsed) ? Math.max(0, setupParsed) : 0,
@@ -126,12 +130,38 @@ export default function AddOperationModal({
 
           <Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              Time per part
+            </Typography>
+            <TextField
+              size="small"
+              fullWidth
+              label="Run time per unit (minutes, optional)"
+              type="text"
+              inputMode="decimal"
+              value={runStr}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '' || /^\d*\.?\d*$/.test(v)) setRunStr(v);
+              }}
+              placeholder="e.g. 2.5"
+              error={!!runError}
+              helperText={
+                runError
+                  ? 'Enter a non-negative number (or leave blank if not yet known).'
+                  : 'Repeated for every unit produced.'
+              }
+              disabled={saving}
+            />
+          </Box>
+
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
               Time per batch
             </Typography>
             <TextField
               size="small"
               fullWidth
-              label="Setup time (minutes)"
+              label="Setup time (minutes, optional)"
               type="text"
               inputMode="decimal"
               value={setupStr}
@@ -150,31 +180,12 @@ export default function AddOperationModal({
             />
           </Box>
 
-          <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              Time per part
-            </Typography>
-            <TextField
-              size="small"
-              fullWidth
-              label="Run time per unit (minutes)"
-              type="text"
-              inputMode="decimal"
-              value={runStr}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === '' || /^\d*\.?\d*$/.test(v)) setRunStr(v);
-              }}
-              placeholder="e.g. 2.5"
-              error={!!runError}
-              helperText={
-                runError
-                  ? 'Enter a non-negative number (or leave blank if not yet known).'
-                  : 'Repeated for every unit produced.'
-              }
-              disabled={saving}
-            />
-          </Box>
+          <Typography
+            variant="caption"
+            sx={{ color: atLeastOneError ? 'error.main' : 'text.secondary' }}
+          >
+            Enter a run time, a setup time, or both.
+          </Typography>
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>

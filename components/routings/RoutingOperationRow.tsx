@@ -39,8 +39,10 @@ interface RoutingOperationRowProps {
  * Compact one-line operation row.
  *   [↑] [↓] | N. Operation Name (group) | Setup 10 min · Run 2 min/unit | ✏️ | 🗑
  *
- * Times are subtle caption text; the individual fragment turns amber
- * (warning color) when its value isn't set.
+ * Times are subtle caption text. "No setup" is the common case and is
+ * rendered neutrally; "No run time" is the unusual shape (setup-only ops
+ * like Engineering/Programming) and is flagged in warning color so the user
+ * can confirm it's intentional.
  */
 export default function RoutingOperationRow({
   row,
@@ -62,7 +64,7 @@ export default function RoutingOperationRow({
   const setupLabel = setupSet ? `Setup ${formatTime(row.setupTime)}` : 'No setup';
   const runLabel = runSet ? `Run ${formatTime(row.runTimePerUnit)}/unit` : 'No run time';
 
-  const setupSx = { color: setupSet ? 'text.secondary' : 'warning.main' };
+  const setupSx = { color: 'text.secondary' };
   const runSx = { color: runSet ? 'text.secondary' : 'warning.main' };
 
   return (

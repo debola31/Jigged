@@ -239,25 +239,23 @@ export async function generateQuotePdf(
   cursorY = blockBottom + 24;
 
   // ---------- Line items ----------
-  const partName = quote.parts?.part_name ?? 'Ad-hoc part';
-  const lineDescription = quote.parts?.description?.trim() ?? '';
-  const qty = quote.quantity;
-  const unitPrice = quote.unit_price ?? 0;
-  const lineTotal = quote.total_price ?? unitPrice * qty;
+  const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
+  const body =
+    lineItems.length > 0
+      ? lineItems.map((li) => [
+          li.parts?.part_name ?? 'Part',
+          li.parts?.description?.trim() ?? '',
+          String(li.quantity),
+          formatCurrency(li.unit_price),
+          formatCurrency(li.total_price ?? li.unit_price * li.quantity),
+        ])
+      : [['', '', '', '', '']];
 
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
     head: [['Part', 'Description', 'Qty', 'Unit Price', 'Total']],
-    body: [
-      [
-        partName,
-        lineDescription,
-        String(qty),
-        formatCurrency(unitPrice),
-        formatCurrency(lineTotal),
-      ],
-    ],
+    body,
     styles: {
       font: 'helvetica',
       fontSize: 10,
@@ -283,12 +281,28 @@ export async function generateQuotePdf(
     (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 60;
 
   // ---------- Totals ----------
+  // Show a grand total only when the quote has exactly one line item.
+  // Multi-tier quotes omit the total — the customer hasn't picked a quantity yet.
   cursorY = afterTableY + 24;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(30);
-  doc.text('Total', pageWidth - MARGIN - 90, cursorY, { align: 'right' });
-  doc.text(formatCurrency(lineTotal), pageWidth - MARGIN, cursorY, { align: 'right' });
+  if (lineItems.length === 1) {
+    const only = lineItems[0];
+    const grandTotal = only.total_price ?? only.unit_price * only.quantity;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(30);
+    doc.text('Total', pageWidth - MARGIN - 90, cursorY, { align: 'right' });
+    doc.text(formatCurrency(grandTotal), pageWidth - MARGIN, cursorY, { align: 'right' });
+  } else if (lineItems.length > 1) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(10);
+    doc.setTextColor(90);
+    doc.text(
+      'Select a quantity per part to confirm total.',
+      pageWidth - MARGIN,
+      cursorY,
+      { align: 'right' },
+    );
+  }
 
   cursorY += 40;
 

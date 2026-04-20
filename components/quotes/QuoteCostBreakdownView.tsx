@@ -9,43 +9,21 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Divider from '@mui/material/Divider';
-import Alert from '@mui/material/Alert';
+import Chip from '@mui/material/Chip';
+import type {
+  QuoteOperationSnapshot,
+  QuoteMaterialSnapshot,
+  QuoteLineItem,
+} from '@/types/quote';
 
-/**
- * Shape the view expects. One row per operation (run_cost is per-unit labor,
- * setup_cost is the total one-time setup for this op). Materials are per-unit.
- * Computed fields (totals, override) are derived here from the props.
- */
-export interface CostBreakdownOperationRow {
-  key: string;
-  operation_name: string;
-  run_time_minutes: number | null;
-  setup_time_minutes: number | null;
-  labor_rate: number | null;
-  run_cost: number | null;   // per unit
-  setup_cost: number | null; // one-time total for this op
+export interface QuotePartBreakdownViewProps {
+  partName: string | null;
+  operations: QuoteOperationSnapshot[];
+  materials: QuoteMaterialSnapshot[];
+  lineItems: QuoteLineItem[];
 }
 
-export interface CostBreakdownMaterialRow {
-  key: string;
-  item_name: string;
-  quantity: number;
-  unit: string | null;
-  cost_per_unit: number | null;
-  line_cost: number | null;  // per unit of the part being quoted
-}
-
-export interface QuoteCostBreakdownViewProps {
-  operations: CostBreakdownOperationRow[];
-  materials: CostBreakdownMaterialRow[];
-  quantity: number;
-  baseCost: number;
-  markupPercent: number | null;
-  computedUnitPrice: number | null;
-  actualUnitPrice: number | null;
-}
-
-function formatCurrency(value: number | null): string {
+function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
@@ -55,39 +33,23 @@ function round2(n: number): number {
 }
 
 export default function QuoteCostBreakdownView({
+  partName,
   operations,
   materials,
-  quantity,
-  baseCost,
-  markupPercent,
-  computedUnitPrice,
-  actualUnitPrice,
-}: QuoteCostBreakdownViewProps) {
-  // Per-unit run labor (sum across ops; each op's run_cost is already per-unit)
+  lineItems,
+}: QuotePartBreakdownViewProps) {
   const totalRunPerUnit = round2(operations.reduce((s, o) => s + (o.run_cost ?? 0), 0));
-  // One-time setup labor across all ops
   const totalSetupBatch = round2(operations.reduce((s, o) => s + (o.setup_cost ?? 0), 0));
-  // Setup amortized per unit (over the quote's quantity)
-  const setupPerUnit = quantity > 0 ? round2(totalSetupBatch / quantity) : 0;
-  // Per-unit material (materials quantities are specified per-unit of the part)
   const totalMaterialPerUnit = round2(materials.reduce((s, m) => s + (m.line_cost ?? 0), 0));
-  // Full labor per unit = run + amortized setup
-  const laborPerUnit = round2(totalRunPerUnit + setupPerUnit);
-
-  const markupDollars =
-    markupPercent !== null ? round2(baseCost * (markupPercent / 100)) : null;
-
-  const overridePerUnit =
-    computedUnitPrice !== null && actualUnitPrice !== null
-      ? round2(actualUnitPrice - computedUnitPrice)
-      : null;
-  const hasOverride = overridePerUnit !== null && Math.abs(overridePerUnit) >= 0.005;
-
-  const lineTotal =
-    actualUnitPrice !== null ? round2(actualUnitPrice * quantity) : null;
 
   return (
-    <Box>
+    <Box sx={{ mb: 4 }}>
+      {partName && (
+        <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+          {partName}
+        </Typography>
+      )}
+
       {/* Operations */}
       {operations.length > 0 ? (
         <Box sx={{ mb: 3 }}>
@@ -108,7 +70,7 @@ export default function QuoteCostBreakdownView({
               </TableHead>
               <TableBody>
                 {operations.map((op) => (
-                  <TableRow key={op.key}>
+                  <TableRow key={op.id}>
                     <TableCell>{op.operation_name}</TableCell>
                     <TableCell align="right">{op.run_time_minutes ?? '—'}</TableCell>
                     <TableCell align="right">{op.setup_time_minutes ?? '—'}</TableCell>
@@ -134,7 +96,7 @@ export default function QuoteCostBreakdownView({
         </Box>
       ) : (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          No operations available for this quote.
+          No operations snapshot for this part.
         </Typography>
       )}
 
@@ -157,7 +119,7 @@ export default function QuoteCostBreakdownView({
               </TableHead>
               <TableBody>
                 {materials.map((mat) => (
-                  <TableRow key={mat.key}>
+                  <TableRow key={mat.id}>
                     <TableCell>{mat.item_name}</TableCell>
                     <TableCell align="right">{mat.quantity}</TableCell>
                     <TableCell align="right">{mat.unit ?? '—'}</TableCell>
@@ -179,107 +141,72 @@ export default function QuoteCostBreakdownView({
         </Box>
       ) : (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          No materials available for this quote.
+          No materials snapshot for this part.
         </Typography>
       )}
 
-      <Divider sx={{ my: 2 }} />
-
-      {/* Build-up summary: setup amortization → base → markup → price */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-        <SummaryRow label="Run labor / unit" value={formatCurrency(totalRunPerUnit)} />
-        <SummaryRow
-          label={`Setup (one-time) ÷ qty ${quantity}`}
-          value={formatCurrency(setupPerUnit)}
-          hint={totalSetupBatch > 0 ? `${formatCurrency(totalSetupBatch)} total` : undefined}
-        />
-        <SummaryRow label="Materials / unit" value={formatCurrency(totalMaterialPerUnit)} />
-        <Divider sx={{ my: 0.5 }} />
-        <SummaryRow label="Base cost / unit" value={formatCurrency(baseCost)} emphasis="subtotal" />
-        <SummaryRow
-          label={`Markup${markupPercent !== null ? ` (${markupPercent}%)` : ''}`}
-          value={formatCurrency(markupDollars)}
-        />
-        <SummaryRow
-          label="Computed unit price"
-          value={formatCurrency(computedUnitPrice)}
-        />
-        {hasOverride && (
-          <SummaryRow
-            label="Override / unit"
-            value={`${overridePerUnit! >= 0 ? '+' : ''}${formatCurrency(overridePerUnit)}`}
-            emphasis="warning"
-          />
-        )}
-        <Divider sx={{ my: 0.5 }} />
-        <SummaryRow
-          label="Actual unit price"
-          value={formatCurrency(actualUnitPrice)}
-          emphasis="primary"
-        />
-        <SummaryRow
-          label={`Line total (× ${quantity})`}
-          value={formatCurrency(lineTotal)}
-          emphasis="primary"
-        />
-      </Box>
-
-      {hasOverride && (
-        <Alert severity="info" sx={{ mt: 2 }}>
-          The unit price on this quote differs from the computed base cost + markup by{' '}
-          <strong>{formatCurrency(overridePerUnit)}</strong> per unit.
-        </Alert>
-      )}
-
-      {/* Sanity check alert: if the sum doesn't match base_cost, flag it. */}
-      {Math.abs(baseCost - laborPerUnit - totalMaterialPerUnit) > 0.01 && (
-        <Alert severity="warning" sx={{ mt: 2 }}>
-          The stored base cost ({formatCurrency(baseCost)}) doesn't match the sum of labor + materials per unit
-          ({formatCurrency(laborPerUnit + totalMaterialPerUnit)}). The routing may have changed since this quote was snapshotted.
-        </Alert>
-      )}
-    </Box>
-  );
-}
-
-function SummaryRow({
-  label,
-  value,
-  emphasis,
-  hint,
-}: {
-  label: string;
-  value: string;
-  emphasis?: 'primary' | 'warning' | 'subtotal';
-  hint?: string;
-}) {
-  return (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-        <Typography variant="body2" color={emphasis === 'warning' ? 'warning.main' : 'text.secondary'}>
-          {label}
-        </Typography>
-        {hint && (
-          <Typography variant="caption" color="text.secondary">
-            ({hint})
+      {/* Per-tier (line item) table */}
+      {lineItems.length > 0 && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+            Quantity tiers on this quote
           </Typography>
-        )}
-      </Box>
-      <Typography
-        variant={emphasis === 'primary' ? 'body1' : 'body2'}
-        fontWeight={emphasis ? 600 : 500}
-        color={
-          emphasis === 'warning'
-            ? 'warning.main'
-            : emphasis === 'primary'
-            ? 'primary'
-            : emphasis === 'subtotal'
-            ? 'text.primary'
-            : undefined
-        }
-      >
-        {value}
-      </Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell align="right">Qty</TableCell>
+                  <TableCell align="right">Base / unit</TableCell>
+                  <TableCell align="right">Setup / unit</TableCell>
+                  <TableCell align="right">Markup %</TableCell>
+                  <TableCell align="right">Unit price</TableCell>
+                  <TableCell align="right">Total</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {lineItems.map((li) => {
+                  const setupPerUnit = li.quantity > 0 ? round2(totalSetupBatch / li.quantity) : 0;
+                  const baseFromSnapshot = li.base_cost_per_unit ?? round2(totalRunPerUnit + totalMaterialPerUnit + setupPerUnit);
+                  const computedFromMarkup =
+                    li.markup_percent != null
+                      ? round2(baseFromSnapshot * (1 + li.markup_percent / 100))
+                      : null;
+                  const hasOverride =
+                    computedFromMarkup !== null &&
+                    Math.abs(li.unit_price - computedFromMarkup) >= 0.005;
+                  return (
+                    <TableRow key={li.id}>
+                      <TableCell align="right">{li.quantity}</TableCell>
+                      <TableCell align="right">{formatCurrency(baseFromSnapshot)}</TableCell>
+                      <TableCell align="right">{formatCurrency(setupPerUnit)}</TableCell>
+                      <TableCell align="right">
+                        {li.markup_percent != null ? `${li.markup_percent}%` : '—'}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatCurrency(li.unit_price)}
+                        {hasOverride && (
+                          <Chip
+                            size="small"
+                            label="override"
+                            color="warning"
+                            variant="outlined"
+                            sx={{ ml: 1, height: 18 }}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(li.total_price)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
+
+      <Divider />
     </Box>
   );
 }

@@ -17,10 +17,13 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 export default function ChangePassword() {
   const router = useRouter();
+  const { signOut } = useAuth();
 
+  const [email, setEmail] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -47,11 +50,17 @@ export default function ChangePassword() {
         return;
       }
 
+      setEmail(session.user.email ?? null);
       setCheckingSession(false);
     };
 
     checkSession();
   }, [router]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace('/login');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,9 +138,24 @@ export default function ChangePassword() {
         <Typography variant="h5" component="h2" gutterBottom align="center">
           Change Your Password
         </Typography>
-        <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 3 }}>
+        <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 1 }}>
           Your administrator reset your password. Please set a new one to continue.
         </Typography>
+        {email && (
+          <Typography variant="body2" align="center" sx={{ mb: 1, fontWeight: 500 }}>
+            Signed in as {email}
+          </Typography>
+        )}
+        <Box sx={{ textAlign: 'center', mb: 3 }}>
+          <Button
+            variant="text"
+            size="small"
+            onClick={handleSignOut}
+            disabled={loading}
+          >
+            Not you? Sign out
+          </Button>
+        </Box>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>

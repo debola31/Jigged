@@ -25,6 +25,8 @@ import DialogActions from '@mui/material/DialogActions';
 import { getPartWithRelations, deletePart } from '@/utils/partsAccess';
 import type { Part } from '@/types/part';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
+import PartCostBreakdown from '@/components/parts/PartCostBreakdown';
+import PartPricingTiers from '@/components/parts/PartPricingTiers';
 
 export default function PartDetailPage() {
   const params = useParams();
@@ -227,6 +229,12 @@ export default function PartDetailPage() {
 
       {/* Routing builder — auto-saves on every change */}
       <PartRoutingPanel companyId={companyId} partId={partId} />
+
+      {/* Cost breakdown + pricing tiers */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 3 }}>
+        <PartCostBreakdown partId={partId} />
+        <PartPricingTiers companyId={companyId} part={part} />
+      </Box>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

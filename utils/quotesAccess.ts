@@ -52,8 +52,8 @@ function sanitizeSearchString(search: string): string {
  * Metadata on a quote stays editable while the quote is still active
  * and has no jobs spawned from it yet. Line items are immutable once created.
  */
-function isQuoteEditable(row: { status: string; converted_at: string | null }): boolean {
-  return row.status === 'active' && row.converted_at === null;
+function isQuoteEditable(row: { status: string; converted_at: string | null | undefined }): boolean {
+  return row.status === 'active' && (row.converted_at === null || row.converted_at === undefined);
 }
 
 /**

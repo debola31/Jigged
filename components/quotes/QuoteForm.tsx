@@ -12,29 +12,26 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
-import InputAdornment from '@mui/material/InputAdornment';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
+import Chip from '@mui/material/Chip';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
-import { calculateTotalPrice, calculateUnitPriceFromMarkup } from '@/types/quote';
 import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
-import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
+import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import type { PartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import QuoteCostBreakdownView from '@/components/quotes/QuoteCostBreakdownView';
 import type { Customer } from '@/types/customer';
-import type { Part } from '@/types/part';
-import AddIcon from '@mui/icons-material/Add';
 import { deleteTempQuoteAttachment } from '@/utils/quotesAccess';
 
-// Generate unique session ID for temp uploads
 const generateSessionId = () => crypto.randomUUID();
 
 interface QuoteFormProps {
@@ -61,6 +58,14 @@ interface PartOption {
   isCreateNew?: boolean;
 }
 
+interface PartBlockState {
+  part_id: string;
+  tier_ids: string[];
+  tiers: PartPricingTier[];
+  loading: boolean;
+  error: string | null;
+}
+
 const CREATE_NEW_CUSTOMER: CustomerOption = {
   id: '__create_new__',
   name: 'Create New Customer',
@@ -77,641 +82,438 @@ const CREATE_NEW_PART: PartOption = {
   isCreateNew: true,
 };
 
+function formatCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+}
+
 export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave }: QuoteFormProps) {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(
+    initialData.parts.map((p) => ({
+      part_id: p.part_id,
+      tier_ids: p.tier_ids,
+      tiers: [],
+      loading: false,
+      error: null,
+    })),
+  );
 
-  // Modal states for quick create
-  const [customerModalOpen, setCustomerModalOpen] = useState(false);
-  const [partModalOpen, setPartModalOpen] = useState(false);
-
-  // Dropdown options
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [parts, setParts] = useState<PartOption[]>([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(true);
-  const [loadingParts, setLoadingParts] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Selected objects for display
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
-  const [selectedPart, setSelectedPart] = useState<PartOption | null>(null);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [partModalOpen, setPartModalOpen] = useState(false);
+  const [partModalTargetIdx, setPartModalTargetIdx] = useState<number | null>(null);
 
-  // Attachments
-  const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
-  const [loadingAttachments, setLoadingAttachments] = useState(false);
+  // Attachments (create-mode: temp; edit-mode: persisted)
+  const [sessionId] = useState<string>(() => generateSessionId());
   const [tempAttachments, setTempAttachments] = useState<TempAttachment[]>([]);
-  const [sessionId] = useState(() => generateSessionId());
+  const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
 
-  // Cost breakdown from routing (if available)
-  const [costBreakdown, setCostBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  const [loadingCost, setLoadingCost] = useState(false);
+  const loadData = useCallback(async () => {
+    try {
+      setLoadingData(true);
+      const [customersData, partsData] = await Promise.all([
+        getAllCustomers(companyId),
+        getPartsForSelect(companyId),
+      ]);
+      setCustomers([
+        CREATE_NEW_CUSTOMER,
+        ...customersData.map((c) => ({ id: c.id, name: c.name })),
+      ]);
+      setParts([
+        CREATE_NEW_PART,
+        ...partsData.map((p) => ({
+          id: p.id,
+          part_name: p.part_name,
+          description: p.description,
+          category_id: p.category_id,
+          has_routing: p.has_routing,
+          part_category: p.part_category,
+        })),
+      ]);
 
-  // Load customers on mount
-  useEffect(() => {
-    const loadCustomers = async () => {
-      try {
-        const data = await getAllCustomers(companyId);
-        const customerOptions = data.map((c) => ({
-          id: c.id,
-          name: c.name,
-        }));
-        setCustomers(customerOptions);
-
-        if (initialData.customer_id) {
-          const found = customerOptions.find((c) => c.id === initialData.customer_id);
-          if (found) setSelectedCustomer(found);
-        }
-      } catch (err) {
-        console.error('Error loading customers:', err);
-      } finally {
-        setLoadingCustomers(false);
+      if (mode === 'edit' && quoteId) {
+        const quoteAttachments = await getQuoteAttachments(quoteId);
+        setAttachments(quoteAttachments);
       }
-    };
-    loadCustomers();
-  }, [companyId, initialData.customer_id]);
-
-  // Load all parts on mount
-  useEffect(() => {
-    const loadParts = async () => {
-      setLoadingParts(true);
-      try {
-        const data = await getPartsForSelect(companyId);
-        setParts(data);
-
-        if (initialData.part_id) {
-          const found = data.find((p) => p.id === initialData.part_id);
-          if (found) setSelectedPart(found);
-        }
-      } catch (err) {
-        console.error('Error loading parts:', err);
-      } finally {
-        setLoadingParts(false);
-      }
-    };
-    loadParts();
-  }, [companyId, initialData.part_id]);
-
-  // Load attachments in edit mode
-  const loadAttachments = useCallback(async () => {
-    if (mode === 'edit' && quoteId) {
-      setLoadingAttachments(true);
-      try {
-        const data = await getQuoteAttachments(quoteId);
-        setAttachments(data);
-      } catch (err) {
-        console.error('Error loading attachments:', err);
-      } finally {
-        setLoadingAttachments(false);
-      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setLoadingData(false);
     }
-  }, [mode, quoteId]);
+  }, [companyId, mode, quoteId]);
 
   useEffect(() => {
-    loadAttachments();
-  }, [loadAttachments]);
+    loadData();
+  }, [loadData]);
 
-  // Cleanup temp attachments on unmount
+  // Load tiers for each part block when its part_id changes.
   useEffect(() => {
-    return () => {
-      if (mode === 'create' && tempAttachments.length > 0) {
-        tempAttachments.forEach(attachment => {
-          deleteTempQuoteAttachment(attachment.file_path).catch(console.error);
+    const loadTiers = async (idx: number, partId: string) => {
+      setPartBlocks((prev) => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], loading: true, error: null };
+        return next;
+      });
+      try {
+        const tiers = await getTiersForPart(partId);
+        setPartBlocks((prev) => {
+          const next = [...prev];
+          if (next[idx]) {
+            next[idx] = {
+              ...next[idx],
+              tiers,
+              loading: false,
+            };
+          }
+          return next;
+        });
+      } catch (err) {
+        setPartBlocks((prev) => {
+          const next = [...prev];
+          if (next[idx]) {
+            next[idx] = {
+              ...next[idx],
+              loading: false,
+              error: err instanceof Error ? err.message : 'Failed to load tiers',
+            };
+          }
+          return next;
         });
       }
     };
-  }, [mode, tempAttachments]);
-
-  const handleChange =
-    (field: keyof QuoteFormData) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const newValue = e.target.value;
-      setFormData((prev) => ({ ...prev, [field]: newValue }));
-      if (fieldErrors[field]) {
-        setFieldErrors((prev) => ({ ...prev, [field]: '' }));
+    partBlocks.forEach((block, idx) => {
+      if (block.part_id && block.tiers.length === 0 && !block.loading && !block.error) {
+        loadTiers(idx, block.part_id);
       }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partBlocks.length, partBlocks.map((b) => b.part_id).join(',')]);
 
-      // Recalculate base_cost when quantity changes if routing has setup cost
-      if (field === 'quantity' && costBreakdown && costBreakdown.total_setup_cost > 0) {
-        const qty = parseInt(newValue, 10) || 1;
-        const setupPerUnit = Math.round((costBreakdown.total_setup_cost / qty) * 100) / 100;
-        const baseCost = Math.round((costBreakdown.total_cost + setupPerUnit) * 100) / 100;
-        const markupPct = formData.markup_percent ? parseFloat(formData.markup_percent) : null;
-        const unitPrice = markupPct !== null
-          ? String(calculateUnitPriceFromMarkup(baseCost, markupPct))
-          : String(baseCost);
-        setFormData((prev) => ({
-          ...prev,
-          [field]: newValue,
-          base_cost: String(baseCost),
-          unit_price: unitPrice,
-        }));
-      }
-    };
-
-  const handleCustomerChange = (_: unknown, value: CustomerOption | null) => {
-    if (value?.isCreateNew) {
-      setCustomerModalOpen(true);
-      return;
-    }
-    setSelectedCustomer(value);
-    setFormData((prev) => ({
-      ...prev,
-      customer_id: value?.id || '',
-    }));
-    if (fieldErrors.customer_id) {
-      setFieldErrors((prev) => ({ ...prev, customer_id: '' }));
-    }
+  const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
+    setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
   };
 
-  const handlePartChange = async (_: unknown, value: PartOption | null) => {
-    if (value?.isCreateNew) {
+  const addPartBlock = () => {
+    setPartBlocks((prev) => [
+      ...prev,
+      { part_id: '', tier_ids: [], tiers: [], loading: false, error: null },
+    ]);
+  };
+
+  const removePartBlock = (idx: number) => {
+    setPartBlocks((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const updatePartInBlock = (idx: number, part: PartOption | null) => {
+    if (!part) {
+      setPartBlocks((prev) => {
+        const next = [...prev];
+        next[idx] = { part_id: '', tier_ids: [], tiers: [], loading: false, error: null };
+        return next;
+      });
+      return;
+    }
+    if (part.isCreateNew) {
+      setPartModalTargetIdx(idx);
       setPartModalOpen(true);
       return;
     }
-    setSelectedPart(value);
-    setCostBreakdown(null);
-
-    if (!value) {
-      setFormData((prev) => ({
-        ...prev,
-        part_id: '',
-        base_cost: '',
-        markup_percent: '',
-        unit_price: '',
-      }));
-      return;
-    }
-
-    // Default markup from category
-    const defaultMarkup = value.part_category?.default_markup_percent;
-    const markupStr = defaultMarkup !== null && defaultMarkup !== undefined ? String(defaultMarkup) : '';
-
-    setFormData((prev) => ({
-      ...prev,
-      part_id: value.id,
-      markup_percent: markupStr,
-    }));
-
-    if (fieldErrors.part_id) {
-      setFieldErrors((prev) => ({ ...prev, part_id: '' }));
-    }
-
-    // Reset pricing fields before calculating new cost
-    setFormData((prev) => ({
-      ...prev,
-      base_cost: '',
-      unit_price: '',
-    }));
-
-    if (value.has_routing && mode === 'create') {
-      // Part has routing — auto-populate cost from routing calculation
-      setLoadingCost(true);
-      try {
-        const breakdown = await calculateRoutingCost(value.id);
-        if (breakdown) {
-          setCostBreakdown(breakdown);
-          const qty = parseInt(formData.quantity, 10) || 1;
-          const setupPerUnit = breakdown.total_setup_cost > 0
-            ? Math.round((breakdown.total_setup_cost / qty) * 100) / 100
-            : 0;
-          const baseCost = Math.round((breakdown.total_cost + setupPerUnit) * 100) / 100;
-          const baseCostStr = String(baseCost);
-          const unitPrice = defaultMarkup !== null && defaultMarkup !== undefined
-            ? String(calculateUnitPriceFromMarkup(baseCost, defaultMarkup))
-            : baseCostStr;
-          setFormData((prev) => ({
-            ...prev,
-            base_cost: baseCostStr,
-            unit_price: unitPrice,
-          }));
-        }
-      } catch (err) {
-        console.error('Error calculating routing cost:', err);
-      } finally {
-        setLoadingCost(false);
-      }
-    } else {
-      // No routing — price starts at 0, user enters estimate
-      setFormData((prev) => ({
-        ...prev,
-        base_cost: '0',
-        unit_price: '0',
-        markup_percent: '',
-      }));
-    }
+    setPartBlocks((prev) => {
+      const next = [...prev];
+      next[idx] = {
+        part_id: part.id,
+        tier_ids: [],
+        tiers: [],
+        loading: false,
+        error: null,
+      };
+      return next;
+    });
   };
 
-  const handleCustomerCreated = async (customer: Customer) => {
-    const newOption: CustomerOption = {
-      id: customer.id,
-      name: customer.name,
-    };
-    setCustomers((prev) => [...prev, newOption]);
-    setSelectedCustomer(newOption);
-    setFormData((prev) => ({
-      ...prev,
-      customer_id: customer.id,
-    }));
-    setFieldErrors((prev) => ({ ...prev, customer_id: '' }));
+  const toggleTier = (blockIdx: number, tierId: string) => {
+    setPartBlocks((prev) => {
+      const next = [...prev];
+      const block = next[blockIdx];
+      const included = block.tier_ids.includes(tierId);
+      next[blockIdx] = {
+        ...block,
+        tier_ids: included ? block.tier_ids.filter((id) => id !== tierId) : [...block.tier_ids, tierId],
+      };
+      return next;
+    });
   };
 
-  const handlePartCreated = async (part: Part) => {
-    const newOption: PartOption = {
-      id: part.id,
-      part_name: part.part_name,
-      description: part.description,
-      category_id: part.category_id || null,
-      has_routing: !!part.routing,
-      part_category: part.part_category || null,
-    };
-    setParts((prev) => [...prev, newOption]);
-    setSelectedPart(newOption);
-    setFormData((prev) => ({
-      ...prev,
-      part_id: part.id,
-    }));
-    setFieldErrors((prev) => ({ ...prev, part_id: '' }));
+  const handleCustomerCreated = (customer: Customer) => {
+    setCustomers((prev) => [CREATE_NEW_CUSTOMER, ...prev.filter((c) => !c.isCreateNew), { id: customer.id, name: customer.name }]);
+    handleFieldChange('customer_id', customer.id);
+    setCustomerModalOpen(false);
   };
 
-  const validateForm = (): boolean => {
-    const errors: Record<string, string> = {};
-
-    if (!formData.customer_id) {
-      errors.customer_id = 'Customer is required';
+  const handlePartCreated = async (part: { id: string }) => {
+    await loadData();
+    if (partModalTargetIdx !== null) {
+      setPartBlocks((prev) => {
+        const next = [...prev];
+        next[partModalTargetIdx] = {
+          part_id: part.id,
+          tier_ids: [],
+          tiers: [],
+          loading: false,
+          error: null,
+        };
+        return next;
+      });
     }
-
-    const qty = parseInt(formData.quantity, 10);
-    if (isNaN(qty) || qty < 1) {
-      errors.quantity = 'Quantity must be at least 1';
-    }
-
-    const price = formData.unit_price ? parseFloat(formData.unit_price) : null;
-    if (price !== null && price < 0) {
-      errors.unit_price = 'Price cannot be negative';
-    }
-
-    setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
+    setPartModalOpen(false);
+    setPartModalTargetIdx(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleSubmit = async () => {
     setError(null);
 
-    if (!validateForm()) return;
+    if (!formData.customer_id) {
+      setError('Pick a customer.');
+      return;
+    }
+    if (partBlocks.length === 0) {
+      setError('Add at least one part to the quote.');
+      return;
+    }
+    for (const block of partBlocks) {
+      if (!block.part_id) {
+        setError('Every part block must have a part selected.');
+        return;
+      }
+      if (block.tier_ids.length === 0) {
+        setError('Every part must have at least one quantity tier selected.');
+        return;
+      }
+    }
+
+    const payload: QuoteFormData = {
+      ...formData,
+      parts: partBlocks.map((b) => ({ part_id: b.part_id, tier_ids: b.tier_ids })),
+    };
 
     setLoading(true);
-
     try {
       if (mode === 'create') {
-        const result = await createQuote(companyId, formData, tempAttachments);
-        if (result.attachmentErrors && result.attachmentErrors.length > 0) {
-          console.warn('Some attachments failed to save:', result.attachmentErrors);
+        const { quote, attachmentErrors } = await createQuote(companyId, payload, tempAttachments);
+        if (attachmentErrors.length > 0) {
+          setError(`Quote created with errors:\n${attachmentErrors.join('\n')}`);
+          return;
         }
-        router.push(`/dashboard/${companyId}/quotes/${result.quote.id}`);
-      } else if (quoteId) {
-        await updateQuote(quoteId, formData);
-        if (onSave) {
-          onSave();
-        } else {
-          router.push(`/dashboard/${companyId}/quotes/${quoteId}`);
-        }
+        onSave?.();
+        router.push(`/dashboard/${companyId}/quotes/${quote.id}`);
+      } else if (mode === 'edit' && quoteId) {
+        await updateQuote(quoteId, payload);
+        onSave?.();
+        router.push(`/dashboard/${companyId}/quotes/${quoteId}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err instanceof Error ? err.message : 'Failed to save quote');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCancel = () => {
-    if (onCancel) {
-      onCancel();
-    } else if (mode === 'edit' && quoteId) {
-      router.push(`/dashboard/${companyId}/quotes/${quoteId}`);
-    } else {
-      router.push(`/dashboard/${companyId}/quotes`);
+  const handleCancel = async () => {
+    if (mode === 'create' && tempAttachments.length > 0) {
+      for (const attachment of tempAttachments) {
+        try {
+          await deleteTempQuoteAttachment(attachment.file_path);
+        } catch (cleanupError) {
+          console.warn('Failed to clean up temp attachment:', cleanupError);
+        }
+      }
     }
+    if (onCancel) onCancel();
+    else router.back();
   };
 
-  // Calculate total for display
-  const quantity = parseInt(formData.quantity, 10) || 0;
-  const unitPrice = formData.unit_price ? parseFloat(formData.unit_price) : null;
-  const totalPrice = calculateTotalPrice(quantity, unitPrice);
-
-  const formatCurrency = (value: number | null): string => {
-    if (value === null) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-  };
+  if (loadingData) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
-    <Box component="form" onSubmit={handleSubmit}>
+    <Box>
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Customer Selection */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
             Customer
           </Typography>
           <Autocomplete
-            options={[CREATE_NEW_CUSTOMER, ...customers]}
-            getOptionLabel={(option) => option.name}
-            value={selectedCustomer}
-            onChange={handleCustomerChange}
-            loading={loadingCustomers}
-            disabled={loading}
-            filterOptions={(options, state) => {
-              const createNew = options.find((o) => o.isCreateNew);
-              const filtered = options
-                .filter((o) => !o.isCreateNew)
-                .filter((o) => {
-                  const label = o.name;
-                  return label.toLowerCase().includes(state.inputValue.toLowerCase());
-                });
-              return createNew ? [createNew, ...filtered] : filtered;
-            }}
-            renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
-              if (option.isCreateNew) {
-                return (
-                  <li
-                    key={key}
-                    {...otherProps}
-                    style={{
-                      fontWeight: 600,
-                      color: '#4682B4',
-                      borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
-                    }}
-                  >
-                    <AddIcon sx={{ mr: 1, fontSize: 20 }} />
-                    {option.name}
-                  </li>
-                );
+            size="small"
+            options={customers}
+            getOptionLabel={(o) => o.name}
+            value={customers.find((c) => c.id === formData.customer_id) ?? null}
+            onChange={(_, v) => {
+              if (v?.isCreateNew) {
+                setCustomerModalOpen(true);
+                return;
               }
-              return (
-                <li key={key} {...otherProps}>
-                  {option.name}
-                </li>
-              );
+              handleFieldChange('customer_id', v?.id ?? '');
             }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Select Customer"
-                required
-                error={!!fieldErrors.customer_id}
-                helperText={fieldErrors.customer_id}
-              />
-            )}
-            slotProps={{}}
-            fullWidth
+            renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
         </CardContent>
       </Card>
 
-      {/* Part Selection */}
+      {/* Parts */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Part
-          </Typography>
-
-          <Autocomplete
-                options={[CREATE_NEW_PART, ...parts]}
-                getOptionLabel={(option) =>
-                  option.isCreateNew
-                    ? option.part_name
-                    : option.description
-                      ? `${option.part_name} - ${option.description}`
-                      : option.part_name
-                }
-                value={selectedPart}
-                onChange={handlePartChange}
-                loading={loadingParts}
-                disabled={loading}
-                filterOptions={(options, state) => {
-                  const createNew = options.find((o) => o.isCreateNew);
-                  const filtered = options
-                    .filter((o) => !o.isCreateNew)
-                    .filter((o) => {
-                      const label = o.description
-                        ? `${o.part_name} - ${o.description}`
-                        : o.part_name;
-                      return label.toLowerCase().includes(state.inputValue.toLowerCase());
-                    });
-                  return createNew ? [createNew, ...filtered] : filtered;
-                }}
-                renderOption={(props, option) => {
-                  const { key, ...otherProps } = props;
-                  if (option.isCreateNew) {
-                    return (
-                      <li
-                        key={key}
-                        {...otherProps}
-                        style={{
-                          fontWeight: 600,
-                          color: '#4682B4',
-                          borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
-                        }}
-                      >
-                        <AddIcon sx={{ mr: 1, fontSize: 20 }} />
-                        {option.part_name}
-                      </li>
-                    );
-                  }
-                  return (
-                    <li key={key} {...otherProps}>
-                      {option.description
-                        ? `${option.part_name} - ${option.description}`
-                        : option.part_name}
-                    </li>
-                  );
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Select Part"
-                    error={!!fieldErrors.part_id}
-                    helperText={fieldErrors.part_id}
-                  />
-                )}
-                slotProps={{}}
-                fullWidth
-              />
-
-        </CardContent>
-      </Card>
-
-      {/* Pricing */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Pricing
-            </Typography>
-            {loadingCost && <CircularProgress size={16} />}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">Parts</Typography>
+            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addPartBlock}>
+              Add part
+            </Button>
           </Box>
 
-          <Grid container spacing={3}>
-            {/* Unit Price */}
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                label="Unit Price"
-                type="number"
-                value={formData.unit_price}
-                onChange={(e) => {
-                  setFormData((prev) => ({
-                    ...prev,
-                    unit_price: e.target.value,
-                  }));
-                }}
-                error={!!fieldErrors.unit_price}
-                helperText={fieldErrors.unit_price}
-                disabled={loading}
-                slotProps={{
-                  input: {
-                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                  },
-                  htmlInput: { min: 0, step: 0.01 },
-                }}
-              />
-            </Grid>
+          {partBlocks.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Add at least one part to quote.
+            </Typography>
+          )}
 
-            {/* Quantity */}
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                required
-                label="Quantity"
-                type="number"
-                value={formData.quantity}
-                onChange={handleChange('quantity')}
-                error={!!fieldErrors.quantity}
-                helperText={fieldErrors.quantity}
-                disabled={loading}
-                slotProps={{
-                  htmlInput: { min: 1 },
-                }}
-              />
-            </Grid>
+          {partBlocks.map((block, idx) => {
+            const selectedPart = parts.find((p) => p.id === block.part_id) ?? null;
+            return (
+              <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
+                {idx > 0 && <Divider sx={{ mb: 3 }} />}
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 2 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Autocomplete
+                      size="small"
+                      options={parts}
+                      getOptionLabel={(o) => o.part_name}
+                      value={selectedPart}
+                      onChange={(_, v) => updatePartInBlock(idx, v)}
+                      renderInput={(params) => <TextField {...params} label={`Part ${idx + 1}`} />}
+                    />
+                  </Box>
+                  <IconButton
+                    color="error"
+                    onClick={() => removePartBlock(idx)}
+                    aria-label="Remove part"
+                  >
+                    <DeleteOutlineIcon />
+                  </IconButton>
+                </Box>
 
-            {/* Total */}
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <Box sx={{ textAlign: 'center', pt: 1 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total
-                </Typography>
-                <Typography variant="h5" color="primary" fontWeight={600}>
-                  {formatCurrency(totalPrice)}
-                </Typography>
+                {block.loading && (
+                  <Box sx={{ py: 2, display: 'flex', justifyContent: 'center' }}>
+                    <CircularProgress size={20} />
+                  </Box>
+                )}
+
+                {block.error && <Alert severity="error">{block.error}</Alert>}
+
+                {!block.loading && block.part_id && block.tiers.length === 0 && (
+                  <Alert severity="warning">
+                    This part has no pricing tiers yet. Open the part detail page to add them.
+                  </Alert>
+                )}
+
+                {!block.loading && block.tiers.length > 0 && (
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                      Select one or more quantity tiers to include on this quote.
+                    </Typography>
+                    {block.tiers.map((tier) => {
+                      const included = block.tier_ids.includes(tier.id);
+                      return (
+                        <FormControlLabel
+                          key={tier.id}
+                          control={
+                            <Checkbox
+                              size="small"
+                              checked={included}
+                              onChange={() => toggleTier(idx, tier.id)}
+                            />
+                          }
+                          label={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                              <Typography variant="body2">
+                                Qty {tier.quantity} · {formatCurrency(tier.unit_price)} / unit
+                              </Typography>
+                              {tier.markup_percent != null && (
+                                <Chip
+                                  size="small"
+                                  label={`${tier.markup_percent}% markup`}
+                                  variant="outlined"
+                                  sx={{ height: 18 }}
+                                />
+                              )}
+                              {tier.is_price_override && (
+                                <Chip
+                                  size="small"
+                                  label="override"
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ height: 18 }}
+                                />
+                              )}
+                            </Box>
+                          }
+                          sx={{ display: 'flex', alignItems: 'center' }}
+                        />
+                      );
+                    })}
+                  </Box>
+                )}
               </Box>
-            </Grid>
-          </Grid>
-
-          {/* Cost breakdown warnings */}
-          {costBreakdown && costBreakdown.warnings.length > 0 && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              {costBreakdown.warnings.map((w, i) => (
-                <Typography key={i} variant="body2">{w.message}</Typography>
-              ))}
-            </Alert>
-          )}
-
-          {/* Expandable cost breakdown — only when we have live routing data */}
-          {costBreakdown && (costBreakdown.labor_items.length > 0 || costBreakdown.material_items.length > 0) && (
-            <Accordion
-              elevation={0}
-              sx={{
-                mt: 2,
-                bgcolor: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                '&:before': { display: 'none' },
-              }}
-            >
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  Cost Breakdown
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails>
-                <QuoteCostBreakdownView
-                  operations={costBreakdown.labor_items.map((item, i) => ({
-                    key: `op-${i}`,
-                    operation_name: item.operation_name,
-                    run_time_minutes: item.run_time_minutes,
-                    setup_time_minutes: item.setup_time_minutes,
-                    labor_rate: item.labor_rate,
-                    run_cost: item.cost,         // per-unit run labor
-                    setup_cost: item.setup_cost, // one-time total for this op
-                  }))}
-                  materials={costBreakdown.material_items.map((item, i) => ({
-                    key: `mat-${i}`,
-                    item_name: item.item_name,
-                    quantity: item.quantity,
-                    unit: item.unit,
-                    cost_per_unit: item.cost_per_unit,
-                    line_cost: item.cost,
-                  }))}
-                  quantity={quantity || 1}
-                  baseCost={formData.base_cost ? parseFloat(formData.base_cost) : 0}
-                  markupPercent={formData.markup_percent ? parseFloat(formData.markup_percent) : null}
-                  computedUnitPrice={
-                    formData.base_cost && formData.markup_percent
-                      ? calculateUnitPriceFromMarkup(
-                          parseFloat(formData.base_cost),
-                          parseFloat(formData.markup_percent)
-                        )
-                      : null
-                  }
-                  actualUnitPrice={formData.unit_price ? parseFloat(formData.unit_price) : null}
-                />
-              </AccordionDetails>
-            </Accordion>
-          )}
+            );
+          })}
         </CardContent>
       </Card>
 
-      {/* Timeline: lead time + expiration */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Timeline
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Terms
           </Typography>
-          <Grid container spacing={3}>
+          <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
-                fullWidth
-                label="Lead Time (days)"
+                label="Lead time (days)"
                 type="number"
+                size="small"
+                fullWidth
                 value={formData.lead_time_days}
-                onChange={handleChange('lead_time_days')}
-                disabled={loading}
-                slotProps={{ htmlInput: { min: 0, step: 1 } }}
-                helperText="Days from job start to promised delivery. Copied to the job on conversion."
+                onChange={(e) => handleFieldChange('lead_time_days', e.target.value)}
+                inputProps={{ min: 0, step: 1 }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
-                fullWidth
-                label="Expiration Date"
+                label="Expiration date"
                 type="date"
+                size="small"
+                fullWidth
                 value={formData.expiration_date}
-                onChange={handleChange('expiration_date')}
-                disabled={loading}
-                slotProps={{ inputLabel: { shrink: true } }}
-                helperText="Quote price is honored until this date. Defaults to 10 days from creation."
+                onChange={(e) => handleFieldChange('expiration_date', e.target.value)}
+                InputLabelProps={{ shrink: true }}
               />
             </Grid>
           </Grid>
@@ -719,55 +521,51 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       </Card>
 
       {/* Attachments */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-            Attachments
-          </Typography>
-          <QuoteAttachmentUpload
-            quoteId={mode === 'edit' ? quoteId! : null}
-            companyId={companyId}
-            sessionId={sessionId}
-            existingAttachments={attachments}
-            tempAttachments={tempAttachments}
-            onAttachmentChange={loadAttachments}
-            onTempAttachmentsChange={setTempAttachments}
-            disabled={mode === 'edit' && formData.status !== 'active'}
-          />
-        </CardContent>
-      </Card>
+      <QuoteAttachmentUpload
+        quoteId={mode === 'edit' ? quoteId ?? null : null}
+        companyId={companyId}
+        sessionId={sessionId}
+        existingAttachments={attachments}
+        tempAttachments={tempAttachments}
+        onAttachmentChange={() => {
+          if (mode === 'edit' && quoteId) {
+            getQuoteAttachments(quoteId).then(setAttachments).catch(() => {});
+          }
+        }}
+        onTempAttachmentsChange={setTempAttachments}
+        disabled={loading}
+      />
 
-      {/* Actions at bottom */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
-        <Button variant="outlined" onClick={handleCancel} disabled={loading}>
+
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3 }}>
+        <Button onClick={handleCancel} disabled={loading}>
           Cancel
         </Button>
         <Button
-          type="submit"
           variant="contained"
+          onClick={handleSubmit}
           disabled={loading}
-          startIcon={loading ? <CircularProgress size={20} /> : null}
+          startIcon={loading ? <CircularProgress size={14} color="inherit" /> : null}
         >
-          {loading ? 'Saving...' : mode === 'create' ? 'Create Quote' : 'Save'}
+          {mode === 'create' ? 'Create quote' : 'Save changes'}
         </Button>
       </Box>
 
-      {/* Quick Create Customer Modal */}
       <CustomerFormModal
         open={customerModalOpen}
         onClose={() => setCustomerModalOpen(false)}
         onCreated={handleCustomerCreated}
         companyId={companyId}
       />
-
-      {/* Quick Create Part Modal */}
       <PartFormModal
         open={partModalOpen}
-        onClose={() => setPartModalOpen(false)}
+        onClose={() => {
+          setPartModalOpen(false);
+          setPartModalTargetIdx(null);
+        }}
         onCreated={handlePartCreated}
         companyId={companyId}
       />
-
     </Box>
   );
 }

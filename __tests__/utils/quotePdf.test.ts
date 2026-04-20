@@ -67,19 +67,10 @@ const baseQuote: QuoteWithRelations = {
   company_id: 'company-1',
   quote_number: 'Q000123',
   customer_id: 'customer-1',
-  part_id: 'part-1',
-  quantity: 10,
-  base_cost: 50,
-  markup_percent: 40,
-  estimated_labor_cost: null,
-  estimated_material_cost: null,
-  unit_price: 70,
-  total_price: 700,
   lead_time_days: 14,
   expiration_date: '2099-12-31',
   status: 'active',
   status_changed_at: null,
-  converted_to_job_id: null,
   converted_at: null,
   legacy_quote_number: null,
   created_by: null,
@@ -99,13 +90,29 @@ const baseQuote: QuoteWithRelations = {
     country: 'USA',
     website: null,
   },
-  parts: {
-    id: 'part-1',
-    part_name: 'BRKT-001',
-    description: 'Steel bracket, 3/16"',
-    category_id: null,
-  },
-  jobs: null,
+  line_items: [
+    {
+      id: 'li-1',
+      quote_id: 'quote-1',
+      company_id: 'company-1',
+      part_id: 'part-1',
+      source_tier_id: null,
+      sequence: 10,
+      quantity: 10,
+      unit_price: 70,
+      total_price: 700,
+      markup_percent: 40,
+      base_cost_per_unit: 50,
+      created_at: '2026-04-16T10:00:00Z',
+      parts: {
+        id: 'part-1',
+        part_name: 'BRKT-001',
+        description: 'Steel bracket, 3/16"',
+        category_id: null,
+      },
+    },
+  ],
+  jobs: [],
   quote_attachments: [],
   created_by_member: null,
 };
@@ -175,7 +182,12 @@ describe('generateQuotePdf', () => {
   it('leaves the description cell blank when parts.description is null', async () => {
     const noDescQuote: QuoteWithRelations = {
       ...baseQuote,
-      parts: { ...baseQuote.parts!, description: null },
+      line_items: [
+        {
+          ...baseQuote.line_items![0],
+          parts: { ...baseQuote.line_items![0].parts!, description: null },
+        },
+      ],
     };
 
     await generateQuotePdf(noDescQuote, baseCompany);

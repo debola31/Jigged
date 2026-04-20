@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-04-16T04:59:11Z
+-- Generated: 2026-04-20T15:25:00Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "updated_at" timestamp with time zone DEFAULT now(),
     "is_demo" boolean DEFAULT false,
     "demo_company_id" uuid,
+    "logo_url" text,
+    "phone" text,
+    "email" text,
+    "website" text,
+    "address_line1" text,
+    "address_line2" text,
+    "city" text,
+    "state" text,
+    "postal_code" text,
+    "country" text,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
 );
@@ -53,20 +63,6 @@ CREATE TABLE IF NOT EXISTS "public"."ai_config"
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "ai_config_pkey" PRIMARY KEY (id),
     CONSTRAINT "ai_config_unique_company_feature" UNIQUE (company_id, feature)
-);
-
-CREATE TABLE IF NOT EXISTS "public"."ai_insight_cache"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "insight_type" character varying(50) NOT NULL,
-    "metric_data" jsonb NOT NULL,
-    "ai_summary" text NOT NULL,
-    "chart_config" jsonb,
-    "computed_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "expires_at" timestamp with time zone NOT NULL DEFAULT (now() + '01:00:00'::interval),
-    CONSTRAINT "ai_insight_cache_pkey" PRIMARY KEY (id),
-    CONSTRAINT "ai_insight_cache_company_id_insight_type_key" UNIQUE (company_id, insight_type)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."company_custom_units"
@@ -171,6 +167,20 @@ CREATE TABLE IF NOT EXISTS "public"."invitations"
     CONSTRAINT "invitations_status_check" CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'expired'::character varying, 'revoked'::character varying])::text[])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."operation_types"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "name" text NOT NULL,
+    "labor_rate" numeric(10,2),
+    "description" text,
+    "metadata" jsonb DEFAULT '{}'::jsonb,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "operation_types_pkey" PRIMARY KEY (id),
+    CONSTRAINT "operation_types_company_id_name_key" UNIQUE (company_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."part_categories"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -197,31 +207,148 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name)
 );
 
-CREATE TABLE IF NOT EXISTS "public"."resource_groups"
+CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "part_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
-    "name" text NOT NULL,
-    "description" text,
+    "sequence" integer NOT NULL,
+    "quantity" integer NOT NULL,
+    "base_cost_per_unit" numeric(12,4),
+    "markup_percent" numeric(5,2),
+    "unit_price" numeric(12,4),
+    "is_price_override" boolean NOT NULL DEFAULT false,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "resource_groups_pkey" PRIMARY KEY (id),
-    CONSTRAINT "resource_groups_company_id_name_key" UNIQUE (company_id, name)
+    CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_pricing_tiers_unique_seq" UNIQUE (part_id, sequence),
+    CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > 0))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."operation_types"
+CREATE TABLE IF NOT EXISTS "public"."quotes"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "resource_group_id" uuid,
-    "name" text NOT NULL,
-    "labor_rate" numeric(10,2),
-    "description" text,
-    "metadata" jsonb DEFAULT '{}'::jsonb,
+    "quote_number" text NOT NULL,
+    "customer_id" uuid,
+    "status" text NOT NULL DEFAULT 'active'::text,
+    "status_changed_at" timestamp with time zone,
+    "converted_at" timestamp with time zone,
+    "created_by" uuid,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    "lead_time_days" integer,
+    "expiration_date" date,
+    CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
+    CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quote_attachments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "quote_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "file_name" text NOT NULL,
+    "file_path" text NOT NULL,
+    "file_size" integer NOT NULL,
+    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
+    "uploaded_by" uuid,
+    "uploaded_at" timestamp with time zone DEFAULT now(),
+    CONSTRAINT "quote_attachments_pkey" PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "quote_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "source_tier_id" uuid,
+    "sequence" integer NOT NULL,
+    "quantity" integer NOT NULL,
+    "unit_price" numeric(12,4) NOT NULL,
+    "total_price" numeric(12,4),
+    "markup_percent" numeric(5,2),
+    "base_cost_per_unit" numeric(12,4),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "operation_types_pkey" PRIMARY KEY (id),
-    CONSTRAINT "operation_types_company_id_name_key" UNIQUE (company_id, name)
+    CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
+    CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."jobs"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "job_number" text NOT NULL,
+    "quote_id" uuid,
+    "customer_id" uuid,
+    "part_id" uuid,
+    "status" text NOT NULL DEFAULT 'not_started'::text,
+    "status_changed_at" timestamp with time zone,
+    "current_operation_sequence" integer,
+    "started_at" timestamp with time zone,
+    "completed_at" timestamp with time zone,
+    "shipped_at" timestamp with time zone,
+    "created_by" uuid,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    "due_date" date,
+    "lead_time_days" integer,
+    "source_quote_line_item_id" uuid,
+    CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
+    CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
+    CONSTRAINT "jobs_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_attachments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "file_name" text NOT NULL,
+    "file_path" text NOT NULL,
+    "file_size" integer NOT NULL,
+    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
+    "source_quote_attachment_id" uuid,
+    "uploaded_by" uuid,
+    "uploaded_at" timestamp with time zone DEFAULT now(),
+    CONSTRAINT "job_attachments_pkey" PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quote_materials"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "quote_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "sequence" integer NOT NULL,
+    "inventory_item_id" uuid,
+    "item_name" text NOT NULL,
+    "quantity" numeric NOT NULL,
+    "unit" text,
+    "cost_per_unit" numeric,
+    "line_cost" numeric,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "part_id" uuid NOT NULL,
+    CONSTRAINT "quote_materials_pkey" PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quote_operations"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "quote_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "sequence" integer NOT NULL,
+    "operation_name" text NOT NULL,
+    "run_time_minutes" numeric,
+    "setup_time_minutes" numeric,
+    "labor_rate" numeric,
+    "run_cost" numeric,
+    "setup_cost" numeric,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "part_id" uuid NOT NULL,
+    CONSTRAINT "quote_operations_pkey" PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."routings"
@@ -249,8 +376,28 @@ CREATE TABLE IF NOT EXISTS "public"."routing_materials"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "routing_materials_pkey" PRIMARY KEY (id),
-    CONSTRAINT "routing_materials_routing_sequence_unique" UNIQUE (routing_id, sequence) DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT "routing_materials_routing_sequence_unique" UNIQUE (routing_id, sequence),
     CONSTRAINT "routing_materials_quantity_check" CHECK ((quantity > (0)::numeric))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_materials"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" uuid NOT NULL,
+    "routing_material_id" uuid,
+    "inventory_item_id" uuid NOT NULL,
+    "expected_quantity" numeric NOT NULL DEFAULT 0,
+    "actual_quantity" numeric,
+    "unit" text NOT NULL,
+    "status" text NOT NULL DEFAULT 'pending'::text,
+    "consumed_at" timestamp with time zone,
+    "consumed_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_materials_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_materials_actual_quantity_check" CHECK (((actual_quantity IS NULL) OR (actual_quantity >= (0)::numeric))),
+    CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric)),
+    CONSTRAINT "job_materials_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'consumed'::text, 'skipped'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
@@ -266,7 +413,71 @@ CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
     "setup_time" numeric DEFAULT 0,
     "sequence" integer NOT NULL DEFAULT 0,
     CONSTRAINT "routing_nodes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "routing_nodes_routing_sequence_unique" UNIQUE (routing_id, sequence) DEFERRABLE INITIALLY DEFERRED
+    CONSTRAINT "routing_nodes_routing_sequence_unique" UNIQUE (routing_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_operations"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" uuid NOT NULL,
+    "sequence" integer NOT NULL,
+    "operation_name" text NOT NULL,
+    "operation_type_id" uuid,
+    "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
+    "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
+    "actual_setup_minutes" numeric(8,2),
+    "actual_run_minutes" numeric(8,2),
+    "status" text NOT NULL DEFAULT 'pending'::text,
+    "started_at" timestamp with time zone,
+    "completed_at" timestamp with time zone,
+    "assigned_to" uuid,
+    "completed_by" uuid,
+    "instructions" text,
+    "notes" text,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    "routing_node_id" uuid,
+    CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_operations_job_id_sequence_key" UNIQUE (job_id, sequence),
+    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'skipped'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "inventory_item_id" uuid,
+    "item_name" text NOT NULL,
+    "type" text NOT NULL,
+    "quantity" numeric NOT NULL,
+    "unit" text NOT NULL,
+    "converted_quantity" numeric NOT NULL,
+    "job_id" uuid,
+    "job_operation_id" uuid,
+    "operator_id" uuid,
+    "notes" text,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "created_by" uuid,
+    "has_discrepancy" boolean NOT NULL DEFAULT false,
+    CONSTRAINT "inventory_transactions_pkey" PRIMARY KEY (id),
+    CONSTRAINT "inventory_transactions_quantity_positive" CHECK ((quantity >= (0)::numeric)),
+    CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "operator_id" uuid NOT NULL,
+    "job_id" uuid NOT NULL,
+    "job_operation_id" uuid,
+    "operation_type_id" uuid NOT NULL,
+    "started_at" timestamp with time zone DEFAULT now(),
+    "ended_at" timestamp with time zone,
+    "notes" text,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    CONSTRAINT "operator_sessions_pkey" PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."saved_insights"
@@ -332,175 +543,11 @@ CREATE TABLE IF NOT EXISTS "public"."waitlist"
     CONSTRAINT "waitlist_email_unique" UNIQUE (email)
 );
 
-CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "inventory_item_id" uuid,
-    "item_name" text NOT NULL,
-    "type" text NOT NULL,
-    "quantity" numeric NOT NULL,
-    "unit" text NOT NULL,
-    "converted_quantity" numeric NOT NULL,
-    "job_id" uuid,
-    "job_operation_id" uuid,
-    "operator_id" uuid,
-    "notes" text,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "created_by" uuid,
-    "has_discrepancy" boolean NOT NULL DEFAULT false,
-    CONSTRAINT "inventory_transactions_pkey" PRIMARY KEY (id),
-    CONSTRAINT "inventory_transactions_quantity_positive" CHECK ((quantity >= (0)::numeric)),
-    CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."job_attachments"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "job_id" uuid NOT NULL,
-    "company_id" uuid NOT NULL,
-    "file_name" text NOT NULL,
-    "file_path" text NOT NULL,
-    "file_size" integer NOT NULL,
-    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
-    "source_quote_attachment_id" uuid,
-    "uploaded_by" uuid,
-    "uploaded_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "job_attachments_pkey" PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS "public"."job_materials"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "job_id" uuid NOT NULL,
-    "routing_material_id" uuid,
-    "inventory_item_id" uuid NOT NULL,
-    "expected_quantity" numeric NOT NULL DEFAULT 0,
-    "actual_quantity" numeric,
-    "unit" text NOT NULL,
-    "status" text NOT NULL DEFAULT 'pending'::text,
-    "consumed_at" timestamp with time zone,
-    "consumed_by" uuid,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "job_materials_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_materials_actual_quantity_check" CHECK (((actual_quantity IS NULL) OR (actual_quantity >= (0)::numeric))),
-    CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric)),
-    CONSTRAINT "job_materials_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'consumed'::text, 'skipped'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."job_operations"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "job_id" uuid NOT NULL,
-    "sequence" integer NOT NULL,
-    "operation_name" text NOT NULL,
-    "operation_type_id" uuid,
-    "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
-    "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
-    "actual_setup_minutes" numeric(8,2),
-    "actual_run_minutes" numeric(8,2),
-    "status" text NOT NULL DEFAULT 'pending'::text,
-    "started_at" timestamp with time zone,
-    "completed_at" timestamp with time zone,
-    "assigned_to" uuid,
-    "completed_by" uuid,
-    "instructions" text,
-    "notes" text,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    "routing_node_id" uuid,
-    CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_operations_job_id_sequence_key" UNIQUE (job_id, sequence),
-    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'skipped'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."jobs"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "job_number" text NOT NULL,
-    "quote_id" uuid,
-    "customer_id" uuid,
-    "part_id" uuid,
-    "description" text,
-    "status" text NOT NULL DEFAULT 'not_started'::text,
-    "status_changed_at" timestamp with time zone,
-    "current_operation_sequence" integer,
-    "started_at" timestamp with time zone,
-    "completed_at" timestamp with time zone,
-    "shipped_at" timestamp with time zone,
-    "created_by" uuid,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
-    CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
-    CONSTRAINT "jobs_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "operator_id" uuid NOT NULL,
-    "job_id" uuid NOT NULL,
-    "job_operation_id" uuid,
-    "operation_type_id" uuid NOT NULL,
-    "started_at" timestamp with time zone DEFAULT now(),
-    "ended_at" timestamp with time zone,
-    "notes" text,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "operator_sessions_pkey" PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS "public"."quote_attachments"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "quote_id" uuid NOT NULL,
-    "company_id" uuid NOT NULL,
-    "file_name" text NOT NULL,
-    "file_path" text NOT NULL,
-    "file_size" integer NOT NULL,
-    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
-    "uploaded_by" uuid,
-    "uploaded_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "quote_attachments_pkey" PRIMARY KEY (id)
-);
-
-CREATE TABLE IF NOT EXISTS "public"."quotes"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "quote_number" text NOT NULL,
-    "customer_id" uuid,
-    "part_id" uuid,
-    "description" text,
-    "quantity" integer NOT NULL DEFAULT 1,
-    "unit_price" numeric(12,4),
-    "total_price" numeric(12,4),
-    "status" text NOT NULL DEFAULT 'pending_approval'::text,
-    "status_changed_at" timestamp with time zone,
-    "converted_to_job_id" uuid,
-    "converted_at" timestamp with time zone,
-    "created_by" uuid,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    "base_cost" numeric(12,4),
-    "markup_percent" numeric(5,2),
-    "estimated_labor_cost" numeric(12,4),
-    "estimated_material_cost" numeric(12,4),
-    CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
-    CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['pending_approval'::text, 'approved'::text, 'rejected'::text, 'accepted'::text, 'expired'::text, 'converted'::text])))
-);
-
 -- ============================================================
 -- 3. ROW LEVEL SECURITY
 -- ============================================================
 ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."ai_insight_cache" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
@@ -517,10 +564,13 @@ ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operation_types" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_categories" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_attachments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quote_line_items" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quote_materials" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quote_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quotes" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."resource_groups" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_nodes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routings" ENABLE ROW LEVEL SECURITY;
@@ -570,14 +620,6 @@ CREATE POLICY "Admins can update AI config"
 DROP POLICY IF EXISTS "Users can view their company's AI config" ON "public"."ai_config";
 CREATE POLICY "Users can view their company's AI config"
     ON "public"."ai_config"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "Users can read own company insights" ON "public"."ai_insight_cache";
-CREATE POLICY "Users can read own company insights"
-    ON "public"."ai_insight_cache"
     FOR SELECT
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
@@ -1057,6 +1099,45 @@ CREATE POLICY "part_categories_update"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."part_pricing_tiers";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."part_pricing_tiers"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "part_pricing_tiers_delete" ON "public"."part_pricing_tiers";
+CREATE POLICY "part_pricing_tiers_delete"
+    ON "public"."part_pricing_tiers"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_pricing_tiers_insert" ON "public"."part_pricing_tiers";
+CREATE POLICY "part_pricing_tiers_insert"
+    ON "public"."part_pricing_tiers"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_pricing_tiers_select" ON "public"."part_pricing_tiers";
+CREATE POLICY "part_pricing_tiers_select"
+    ON "public"."part_pricing_tiers"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "part_pricing_tiers_update" ON "public"."part_pricing_tiers";
+CREATE POLICY "part_pricing_tiers_update"
+    ON "public"."part_pricing_tiers"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
     ON "public"."parts"
@@ -1135,6 +1216,123 @@ CREATE POLICY "quote_attachments_update"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_line_items";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."quote_line_items"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "quote_line_items_delete" ON "public"."quote_line_items";
+CREATE POLICY "quote_line_items_delete"
+    ON "public"."quote_line_items"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_line_items_insert" ON "public"."quote_line_items";
+CREATE POLICY "quote_line_items_insert"
+    ON "public"."quote_line_items"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_line_items_select" ON "public"."quote_line_items";
+CREATE POLICY "quote_line_items_select"
+    ON "public"."quote_line_items"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_line_items_update" ON "public"."quote_line_items";
+CREATE POLICY "quote_line_items_update"
+    ON "public"."quote_line_items"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_materials";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."quote_materials"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "quote_materials_delete" ON "public"."quote_materials";
+CREATE POLICY "quote_materials_delete"
+    ON "public"."quote_materials"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_materials_insert" ON "public"."quote_materials";
+CREATE POLICY "quote_materials_insert"
+    ON "public"."quote_materials"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_materials_select" ON "public"."quote_materials";
+CREATE POLICY "quote_materials_select"
+    ON "public"."quote_materials"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_materials_update" ON "public"."quote_materials";
+CREATE POLICY "quote_materials_update"
+    ON "public"."quote_materials"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_operations";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."quote_operations"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "quote_operations_delete" ON "public"."quote_operations";
+CREATE POLICY "quote_operations_delete"
+    ON "public"."quote_operations"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_operations_insert" ON "public"."quote_operations";
+CREATE POLICY "quote_operations_insert"
+    ON "public"."quote_operations"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_operations_select" ON "public"."quote_operations";
+CREATE POLICY "quote_operations_select"
+    ON "public"."quote_operations"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "quote_operations_update" ON "public"."quote_operations";
+CREATE POLICY "quote_operations_update"
+    ON "public"."quote_operations"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
 DROP POLICY IF EXISTS "Users can delete quotes" ON "public"."quotes";
 CREATE POLICY "Users can delete quotes"
     ON "public"."quotes"
@@ -1165,45 +1363,6 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."resource_groups";
-CREATE POLICY "ai_readonly_select"
-    ON "public"."resource_groups"
-    FOR SELECT
-    TO jigged_ai_readonly
-    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "resource_groups_delete" ON "public"."resource_groups";
-CREATE POLICY "resource_groups_delete"
-    ON "public"."resource_groups"
-    FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "resource_groups_insert" ON "public"."resource_groups";
-CREATE POLICY "resource_groups_insert"
-    ON "public"."resource_groups"
-    FOR INSERT
-    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "resource_groups_select" ON "public"."resource_groups";
-CREATE POLICY "resource_groups_select"
-    ON "public"."resource_groups"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "resource_groups_update" ON "public"."resource_groups";
-CREATE POLICY "resource_groups_update"
-    ON "public"."resource_groups"
-    FOR UPDATE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "Users can delete routing_materials" ON "public"."routing_materials";
 CREATE POLICY "Users can delete routing_materials"
@@ -1372,6 +1531,12 @@ CREATE POLICY "Admins can view company access"
     FOR SELECT
     USING (is_company_admin(company_id));
 
+DROP POLICY IF EXISTS "Members can view company member profiles" ON "public"."user_company_access";
+CREATE POLICY "Members can view company member profiles"
+    ON "public"."user_company_access"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can read own access record" ON "public"."user_company_access";
 CREATE POLICY "Users can read own access record"
     ON "public"."user_company_access"
@@ -1469,9 +1634,6 @@ ALTER TABLE "public"."ai_chat_queries"
 ALTER TABLE "public"."ai_config"
     ADD CONSTRAINT "ai_config_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."ai_insight_cache"
-    ADD CONSTRAINT "ai_insight_cache_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
 ALTER TABLE "public"."companies"
     ADD CONSTRAINT "companies_demo_company_id_fkey" FOREIGN KEY (demo_company_id) REFERENCES companies(id) ON DELETE SET NULL;
 
@@ -1568,11 +1730,11 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."operation_types"
-    ADD CONSTRAINT "operation_types_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+ALTER TABLE "public"."jobs"
+    ADD CONSTRAINT "jobs_source_quote_line_item_id_fkey" FOREIGN KEY (source_quote_line_item_id) REFERENCES quote_line_items(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."operation_types"
-    ADD CONSTRAINT "operation_types_resource_group_id_fkey" FOREIGN KEY (resource_group_id) REFERENCES resource_groups(id) ON DELETE SET NULL;
+    ADD CONSTRAINT "operation_types_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."operator_sessions"
     ADD CONSTRAINT "operator_sessions_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1589,6 +1751,12 @@ ALTER TABLE "public"."operator_sessions"
 ALTER TABLE "public"."part_categories"
     ADD CONSTRAINT "part_categories_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."part_pricing_tiers"
+    ADD CONSTRAINT "part_pricing_tiers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_pricing_tiers"
+    ADD CONSTRAINT "part_pricing_tiers_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_category_id_fkey" FOREIGN KEY (category_id) REFERENCES part_categories(id) ON DELETE SET NULL;
 
@@ -1601,23 +1769,44 @@ ALTER TABLE "public"."quote_attachments"
 ALTER TABLE "public"."quote_attachments"
     ADD CONSTRAINT "quote_attachments_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+ALTER TABLE "public"."quote_line_items"
+    ADD CONSTRAINT "quote_line_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quote_line_items"
+    ADD CONSTRAINT "quote_line_items_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id);
+
+ALTER TABLE "public"."quote_line_items"
+    ADD CONSTRAINT "quote_line_items_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quote_line_items"
+    ADD CONSTRAINT "quote_line_items_source_tier_id_fkey" FOREIGN KEY (source_tier_id) REFERENCES part_pricing_tiers(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quote_materials"
+    ADD CONSTRAINT "quote_materials_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quote_materials"
+    ADD CONSTRAINT "quote_materials_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT;
+
+ALTER TABLE "public"."quote_materials"
+    ADD CONSTRAINT "quote_materials_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quote_operations"
+    ADD CONSTRAINT "quote_operations_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quote_operations"
+    ADD CONSTRAINT "quote_operations_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT;
+
+ALTER TABLE "public"."quote_operations"
+    ADD CONSTRAINT "quote_operations_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_converted_to_job_id_fkey" FOREIGN KEY (converted_to_job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+    ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."resource_groups"
-    ADD CONSTRAINT "resource_groups_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."routing_materials"
     ADD CONSTRAINT "routing_materials_inventory_item_id_fkey" FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id) ON DELETE RESTRICT;
@@ -1703,24 +1892,32 @@ CREATE INDEX IF NOT EXISTS idx_jobs_part ON public.jobs USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_operation_types_company ON public.operation_types USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_operation_types_group ON public.operation_types USING btree (resource_group_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_company ON public.operator_sessions USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
 CREATE INDEX IF NOT EXISTS idx_part_categories_company ON public.part_categories USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_parts_category ON public.parts USING btree (category_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_company ON public.quote_attachments USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_quote ON public.quote_attachments USING btree (quote_id);
+CREATE INDEX IF NOT EXISTS idx_quote_line_items_company ON public.quote_line_items USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_quote_line_items_part ON public.quote_line_items USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_quote_line_items_quote ON public.quote_line_items USING btree (quote_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_quote_materials_company ON public.quote_materials USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_quote_materials_quote ON public.quote_materials USING btree (quote_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_quote_materials_quote_part ON public.quote_materials USING btree (quote_id, part_id);
+CREATE INDEX IF NOT EXISTS idx_quote_operations_company ON public.quote_operations USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_quote_operations_quote ON public.quote_operations USING btree (quote_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_quote_operations_quote_part ON public.quote_operations USING btree (quote_id, part_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_customer ON public.quotes USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_number ON public.quotes USING btree (quote_number);
-CREATE INDEX IF NOT EXISTS idx_quotes_part ON public.quotes USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_status ON public.quotes USING btree (company_id, status);
-CREATE INDEX IF NOT EXISTS idx_resource_groups_company ON public.resource_groups USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_routing_materials_inventory ON public.routing_materials USING btree (inventory_item_id);
 CREATE INDEX IF NOT EXISTS idx_routing_materials_routing ON public.routing_materials USING btree (routing_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_operation_type ON public.routing_nodes USING btree (operation_type_id);
@@ -2168,13 +2365,13 @@ BEGIN
     END IF;
 
     SELECT demo_company_id INTO v_demo_company_id
-    FROM companies WHERE id = p_source_company_id;
+    FROM companies
+    WHERE id = p_source_company_id;
 
     IF v_demo_company_id IS NULL THEN
         RAISE EXCEPTION 'No demo company exists for company: %', p_source_company_id;
     END IF;
 
-    -- Delete in reverse FK order
     DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
     DELETE FROM job_attachments WHERE company_id = v_demo_company_id;
@@ -2190,11 +2387,9 @@ BEGIN
     DELETE FROM part_categories WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
     DELETE FROM operation_types WHERE company_id = v_demo_company_id;
-    DELETE FROM resource_groups WHERE company_id = v_demo_company_id;
     DELETE FROM customers WHERE company_id = v_demo_company_id;
 
     DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
-    DELETE FROM ai_insight_cache WHERE company_id = v_demo_company_id;
 
     PERFORM seed_demo_data(v_demo_company_id, p_user_id);
 END;
@@ -2302,25 +2497,13 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Resource groups
-    IF v_template->'resource_groups' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'resource_groups') LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO resource_groups (id, company_id, name, description, created_at)
-            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description',
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
-        END LOOP;
-    END IF;
-
-    -- Operation types
+    -- Operation types (resource_groups concept removed)
     IF v_template->'operation_types' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types') LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO operation_types (id, company_id, resource_group_id, name, labor_rate, description, created_at)
+            INSERT INTO operation_types (id, company_id, name, labor_rate, description, created_at)
             VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'resource_group_ref'))::UUID,
                     v_item->>'name', (v_item->>'labor_rate')::NUMERIC, v_item->>'description',
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
         END LOOP;
@@ -2371,9 +2554,7 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Routings: insert routing, then nodes (with sequence by template order),
-    -- then routing_materials (either new top-level "materials" array OR
-    -- aggregated from per-node materials). Edges are silently ignored.
+    -- Routings + nodes + materials
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings') LOOP
             v_new_id := gen_random_uuid();
@@ -2387,7 +2568,6 @@ BEGIN
                     p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
 
-            -- Nodes (sequence = position in template array, steps of 10)
             v_node_seq := 10;
             IF v_item->'nodes' IS NOT NULL THEN
                 FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes') LOOP
@@ -2405,8 +2585,6 @@ BEGIN
                 END LOOP;
             END IF;
 
-            -- Materials: prefer routing-level "materials" array if present,
-            -- otherwise aggregate from per-node materials.
             IF v_item->'materials' IS NOT NULL AND jsonb_typeof(v_item->'materials') = 'array' THEN
                 INSERT INTO routing_materials (routing_id, inventory_item_id, quantity, unit, sequence)
                 SELECT v_routing_id,
@@ -2468,7 +2646,7 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Jobs + job_operations + job_materials (auto-copied from routing)
+    -- Jobs + job_operations + job_materials
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs') LOOP
             v_new_id := gen_random_uuid();
@@ -2476,7 +2654,7 @@ BEGIN
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
             INSERT INTO jobs (id, company_id, customer_id, part_id, quote_id,
-                              description, status, created_by, created_at,
+                              status, created_by, created_at,
                               started_at, completed_at, shipped_at, status_changed_at)
             VALUES (v_new_id, p_company_id,
                     (v_ref_map->>(v_item->>'customer_ref'))::UUID,
@@ -2484,7 +2662,6 @@ BEGIN
                          THEN (v_ref_map->>(v_item->>'part_ref'))::UUID ELSE NULL END,
                     CASE WHEN v_item->>'quote_ref' IS NOT NULL
                          THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID ELSE NULL END,
-                    v_item->>'description',
                     COALESCE(v_item->>'status', 'not_started'),
                     p_user_id,
                     COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
@@ -2526,7 +2703,6 @@ BEGIN
                 END LOOP;
             END IF;
 
-            -- Auto-populate job_materials from this job's part's routing
             IF v_item->>'part_ref' IS NOT NULL THEN
                 INSERT INTO job_materials (job_id, routing_material_id, inventory_item_id, expected_quantity, unit)
                 SELECT v_job_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
@@ -2714,6 +2890,9 @@ CREATE TRIGGER update_operation_types_updated_at BEFORE UPDATE ON public.operati
 DROP TRIGGER IF EXISTS "operator_sessions_updated_at" ON "public"."operator_sessions";
 CREATE TRIGGER operator_sessions_updated_at BEFORE UPDATE ON public.operator_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
+CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS "parts_updated_at" ON "public"."parts";
 CREATE TRIGGER parts_updated_at BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -2728,9 +2907,6 @@ CREATE TRIGGER trigger_set_quote_number BEFORE INSERT ON public.quotes FOR EACH 
 
 DROP TRIGGER IF EXISTS "update_quotes_updated_at" ON "public"."quotes";
 CREATE TRIGGER update_quotes_updated_at BEFORE UPDATE ON public.quotes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS "update_resource_groups_updated_at" ON "public"."resource_groups";
-CREATE TRIGGER update_resource_groups_updated_at BEFORE UPDATE ON public.resource_groups FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "routing_materials_updated_at" ON "public"."routing_materials";
 CREATE TRIGGER routing_materials_updated_at BEFORE UPDATE ON public.routing_materials FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2756,9 +2932,6 @@ COMMENT ON TABLE "public"."ai_chat_queries"
 
 COMMENT ON TABLE "public"."ai_config"
     IS 'AI/LLM configuration per company per feature. Stores provider settings (e.g., Anthropic, OpenAI), model selection, and feature-specific parameters for AI-powered functionality like CSV import analysis.';
-
-COMMENT ON TABLE "public"."ai_insight_cache"
-    IS 'Cache for AI-generated dashboard insights. Stores precomputed metric summaries and AI narratives with TTL-based expiration (default 1 hour) to avoid redundant LLM calls. Keyed by company + insight_type.';
 
 COMMENT ON TABLE "public"."companies"
     IS 'Multi-tenant root table. Each company represents a separate manufacturing shop/business with isolated data. All other tables reference company_id for tenant isolation via RLS policies.';
@@ -2805,17 +2978,26 @@ COMMENT ON TABLE "public"."operator_sessions"
 COMMENT ON TABLE "public"."part_categories"
     IS 'Categories for organizing parts within a company. Each category can define a default markup percentage used in cost-plus pricing calculations. Category names must be unique per company.';
 
+COMMENT ON TABLE "public"."part_pricing_tiers"
+    IS 'Quantity price breaks for a part (the "estimate" layer). Seeded from part_categories.default_markup_percent. Selected tiers are snapshotted into quote_line_items at quote creation.';
+
 COMMENT ON TABLE "public"."parts"
     IS 'Parts catalog. Each part has a company-unique part number, description, and flexible volume-based pricing stored as JSONB. Parts are company-wide entities (not customer-specific). Referenced by quotes, jobs, and routings (1:1).';
 
 COMMENT ON TABLE "public"."quote_attachments"
     IS 'PDF attachments for quotes. Phase 0 limits to one attachment per quote (enforced in UI). When quote converts to job, attachment is COPIED to job_attachments.';
 
+COMMENT ON TABLE "public"."quote_line_items"
+    IS 'Immutable snapshot of selected pricing tiers at quote creation. Multiple parts per quote, multiple tiers per part.';
+
+COMMENT ON TABLE "public"."quote_materials"
+    IS 'Per-material cost snapshot captured at quote creation from the part routing. Rows are immutable after creation so the cost breakdown survives later routing edits.';
+
+COMMENT ON TABLE "public"."quote_operations"
+    IS 'Per-operation cost snapshot captured at quote creation from the part routing. Rows are immutable after creation so the cost breakdown survives later routing edits.';
+
 COMMENT ON TABLE "public"."quotes"
     IS 'Sales quotes/estimates sent to customers before work begins. Contains pricing, lead time estimates, and can be converted to jobs. Tracks quote status (draft, sent, accepted, rejected, expired) and links to the job if converted.';
-
-COMMENT ON TABLE "public"."resource_groups"
-    IS 'Categories for organizing operation types (e.g., CNC, LATHE&MILL, Hone, EDM). Matches terminology from legacy system.';
 
 COMMENT ON TABLE "public"."routing_materials"
     IS 'Materials needed for the entire routing (job-level shopping list). Replaces the per-operation routing_nodes.materials JSONB.';
@@ -2903,30 +3085,6 @@ COMMENT ON COLUMN "public"."ai_config"."created_at"
 
 COMMENT ON COLUMN "public"."ai_config"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."id"
-    IS 'Primary key. UUID auto-generated.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."company_id"
-    IS 'FK to companies. Cascades on delete. Cache is per-company.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."insight_type"
-    IS 'Type of insight cached. Examples: "dashboard_summary", "job_efficiency", "inventory_alerts". Unique per company.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."metric_data"
-    IS 'JSONB payload of raw metric data used to generate the AI summary (e.g., counts, averages, trends).';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."ai_summary"
-    IS 'AI-generated natural language summary of the metrics. Displayed on dashboards.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."chart_config"
-    IS 'Optional JSONB chart configuration for visualizing the insight.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."computed_at"
-    IS 'Timestamp when this cache entry was computed. Auto-set on insert.';
-
-COMMENT ON COLUMN "public"."ai_insight_cache"."expires_at"
-    IS 'Timestamp when this cache entry expires. Default: 1 hour after computed_at. Entries past expiry should be recomputed.';
 
 COMMENT ON COLUMN "public"."companies"."id"
     IS 'Primary key. UUID auto-generated. Referenced by all other tables for multi-tenant isolation.';
@@ -3165,9 +3323,6 @@ COMMENT ON COLUMN "public"."jobs"."customer_id"
 COMMENT ON COLUMN "public"."jobs"."part_id"
     IS 'FK to parts. Optional - use part_number_text for one-off jobs. SET NULL if part deleted.';
 
-COMMENT ON COLUMN "public"."jobs"."description"
-    IS 'Description of work to be performed.';
-
 COMMENT ON COLUMN "public"."jobs"."status"
     IS 'Job lifecycle status. Values: pending, in_progress, on_hold, completed, shipped, cancelled. Default: pending';
 
@@ -3195,14 +3350,20 @@ COMMENT ON COLUMN "public"."jobs"."created_at"
 COMMENT ON COLUMN "public"."jobs"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."jobs"."due_date"
+    IS 'Date the job is due to ship. Typically CURRENT_DATE + lead_time_days at conversion. Used to flag overdue jobs.';
+
+COMMENT ON COLUMN "public"."jobs"."lead_time_days"
+    IS 'Lead time in days, copied from the source quote at conversion. Editable on the job after the fact.';
+
+COMMENT ON COLUMN "public"."jobs"."source_quote_line_item_id"
+    IS 'Identifies which specific quote line item (part + tier) produced this job via convertQuoteToJob.';
+
 COMMENT ON COLUMN "public"."operation_types"."id"
     IS 'Primary key (auto-generated UUID)';
 
 COMMENT ON COLUMN "public"."operation_types"."company_id"
     IS 'Foreign key to companies table (multi-tenant isolation)';
-
-COMMENT ON COLUMN "public"."operation_types"."resource_group_id"
-    IS 'Foreign key to resource_groups (NULL = ungrouped)';
 
 COMMENT ON COLUMN "public"."operation_types"."name"
     IS 'Operation type name (e.g., "HURCO Mill", "EDM", "GRINDING")';
@@ -3251,6 +3412,9 @@ COMMENT ON COLUMN "public"."part_categories"."created_at"
 
 COMMENT ON COLUMN "public"."part_categories"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."part_pricing_tiers"."is_price_override"
+    IS 'True when the user manually set unit_price. Recalcs from routing changes skip this tier''s unit_price.';
 
 COMMENT ON COLUMN "public"."parts"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -3309,29 +3473,11 @@ COMMENT ON COLUMN "public"."quotes"."quote_number"
 COMMENT ON COLUMN "public"."quotes"."customer_id"
     IS 'FK to customers. RESTRICT on delete - cannot delete customer with quotes.';
 
-COMMENT ON COLUMN "public"."quotes"."part_id"
-    IS 'FK to parts. Optional - use part_number_text for one-off quotes. SET NULL if part deleted.';
-
-COMMENT ON COLUMN "public"."quotes"."description"
-    IS 'Description of quoted work. May differ from part description for custom work.';
-
-COMMENT ON COLUMN "public"."quotes"."quantity"
-    IS 'Number of units quoted. Default: 1';
-
-COMMENT ON COLUMN "public"."quotes"."unit_price"
-    IS 'Price per unit quoted to customer. Precision: 12,4 for accuracy.';
-
-COMMENT ON COLUMN "public"."quotes"."total_price"
-    IS 'Total quoted price (quantity × unit_price). Stored for quick access.';
-
 COMMENT ON COLUMN "public"."quotes"."status"
     IS 'Quote lifecycle status. Values: draft, pending_approval, approved, rejected, accepted, expired, converted. Default: draft';
 
 COMMENT ON COLUMN "public"."quotes"."status_changed_at"
     IS 'Timestamp when status last changed. For tracking response times.';
-
-COMMENT ON COLUMN "public"."quotes"."converted_to_job_id"
-    IS 'FK to jobs. Set when quote is accepted and converted to a job. SET NULL if job deleted.';
 
 COMMENT ON COLUMN "public"."quotes"."converted_at"
     IS 'Timestamp when quote was converted to job.';
@@ -3345,23 +3491,11 @@ COMMENT ON COLUMN "public"."quotes"."created_at"
 COMMENT ON COLUMN "public"."quotes"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
-COMMENT ON COLUMN "public"."resource_groups"."id"
-    IS 'Primary key (auto-generated UUID)';
+COMMENT ON COLUMN "public"."quotes"."lead_time_days"
+    IS 'Lead time promised to the customer in days. Copied to jobs.lead_time_days on conversion.';
 
-COMMENT ON COLUMN "public"."resource_groups"."company_id"
-    IS 'Foreign key to companies table (multi-tenant isolation)';
-
-COMMENT ON COLUMN "public"."resource_groups"."name"
-    IS 'Group name (e.g., "CNC", "LATHE&MILL", "Hone", "EDM")';
-
-COMMENT ON COLUMN "public"."resource_groups"."description"
-    IS 'Optional description of the group';
-
-COMMENT ON COLUMN "public"."resource_groups"."created_at"
-    IS 'Timestamp when record was created';
-
-COMMENT ON COLUMN "public"."resource_groups"."updated_at"
-    IS 'Timestamp when record was last updated';
+COMMENT ON COLUMN "public"."quotes"."expiration_date"
+    IS 'Date at which the quote expires. Defaults to created_at + 10 days. Informational — expiration never blocks conversion.';
 
 COMMENT ON COLUMN "public"."routing_materials"."sequence"
     IS 'Display order in the routing builder. Steps of 10.';

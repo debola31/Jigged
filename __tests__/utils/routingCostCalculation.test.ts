@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import { calculateRoutingCost, calculateTierPricing, type RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import type { RoutingWithGraph, RoutingMaterialWithItem } from '@/types/routings';
 
 // Mock getRoutingForPart
@@ -188,15 +188,70 @@ describe('calculateRoutingCost', () => {
     expect(result!.warnings[0].type).toBe('missing_labor_rate');
   });
 
-  it('warns on missing run_time_per_unit', async () => {
-    const nodes = [makeNode({ run_time_per_unit: null })];
+  it('warns empty_operation when run and setup are both zero/null', async () => {
+    const nodes = [makeNode({ run_time_per_unit: null, setup_time: 0 })];
 
     mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
     const result = await calculateRoutingCost('part-1');
 
     expect(result!.labor_items).toHaveLength(0);
     expect(result!.warnings).toHaveLength(1);
-    expect(result!.warnings[0].type).toBe('missing_run_time');
+    expect(result!.warnings[0].type).toBe('empty_operation');
+  });
+
+  it('includes setup-only operation (null run time, non-zero setup) with run_cost = 0', async () => {
+    const nodes = [
+      makeNode({
+        id: 'node-eng',
+        run_time_per_unit: null,
+        setup_time: 30,
+        operation_type: { id: 'op-eng', name: 'Engineering', labor_rate: 125 },
+      }),
+    ];
+
+    mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
+    const result = await calculateRoutingCost('part-1');
+
+    expect(result!.warnings).toHaveLength(0);
+    expect(result!.labor_items).toHaveLength(1);
+    expect(result!.labor_items[0].cost).toBe(0);
+    expect(result!.labor_items[0].setup_cost).toBe(62.5);
+    expect(result!.total_setup_cost).toBe(62.5);
+  });
+
+  it('includes setup-only operation (explicit 0 run time) with run_cost = 0', async () => {
+    const nodes = [
+      makeNode({
+        id: 'node-prog',
+        run_time_per_unit: 0,
+        setup_time: 45,
+        operation_type: { id: 'op-prog', name: 'Programming', labor_rate: 100 },
+      }),
+    ];
+
+    mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
+    const result = await calculateRoutingCost('part-1');
+
+    expect(result!.warnings).toHaveLength(0);
+    expect(result!.labor_items[0].cost).toBe(0);
+    expect(result!.labor_items[0].setup_cost).toBe(75);
+  });
+
+  it('warns missing_labor_rate on a setup-only op when labor_rate is null', async () => {
+    const nodes = [
+      makeNode({
+        run_time_per_unit: null,
+        setup_time: 20,
+        operation_type: { id: 'op-1', name: 'Engineering', labor_rate: null },
+      }),
+    ];
+
+    mockGetRoutingForPart.mockResolvedValue(makeRouting(nodes));
+    const result = await calculateRoutingCost('part-1');
+
+    expect(result!.labor_items).toHaveLength(0);
+    expect(result!.warnings).toHaveLength(1);
+    expect(result!.warnings[0].type).toBe('missing_labor_rate');
   });
 
   it('warns on missing inventory item cost', async () => {
@@ -279,5 +334,59 @@ describe('calculateRoutingCost', () => {
     expect(result!.labor_items[0].setup_cost).toBe(0);
     expect(result!.labor_items[0].setup_time_minutes).toBe(0);
     expect(result!.total_setup_cost).toBe(0);
+  });
+});
+
+describe('calculateTierPricing', () => {
+  const breakdown: RoutingCostBreakdown = {
+    labor_items: [],
+    material_items: [],
+    total_labor_cost: 20,
+    total_setup_cost: 60,
+    total_material_cost: 10,
+    total_cost: 30,
+    warnings: [],
+  };
+
+  it('amortizes setup across quantity', () => {
+    const qty1 = calculateTierPricing(breakdown, 1, 0);
+    const qty4 = calculateTierPricing(breakdown, 4, 0);
+    const qty10 = calculateTierPricing(breakdown, 10, 0);
+    expect(qty1.baseCostPerUnit).toBe(90);
+    expect(qty4.baseCostPerUnit).toBe(45);
+    expect(qty10.baseCostPerUnit).toBe(36);
+  });
+
+  it('applies markup to base cost', () => {
+    const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, 4, 25);
+    expect(baseCostPerUnit).toBe(45);
+    expect(unitPrice).toBe(56.25);
+  });
+
+  it('returns null unit price when markup is null', () => {
+    const { unitPrice } = calculateTierPricing(breakdown, 4, null);
+    expect(unitPrice).toBeNull();
+  });
+
+  it('treats qty < 1 as qty = 1 (no division by zero)', () => {
+    const zero = calculateTierPricing(breakdown, 0, 10);
+    expect(zero.baseCostPerUnit).toBe(90);
+    expect(zero.unitPrice).toBe(99);
+  });
+
+  it('Miscellaneous $60/hr hack (70 min run) does not amortize across tiers', () => {
+    // 70 min × $60/hr = $70 per unit of run labor — should stay flat across tiers.
+    const miscBreakdown: RoutingCostBreakdown = {
+      labor_items: [],
+      material_items: [],
+      total_labor_cost: 70,
+      total_setup_cost: 0,
+      total_material_cost: 0,
+      total_cost: 70,
+      warnings: [],
+    };
+    expect(calculateTierPricing(miscBreakdown, 1, 0).baseCostPerUnit).toBe(70);
+    expect(calculateTierPricing(miscBreakdown, 4, 0).baseCostPerUnit).toBe(70);
+    expect(calculateTierPricing(miscBreakdown, 10, 0).baseCostPerUnit).toBe(70);
   });
 });

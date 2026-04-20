@@ -1,7 +1,7 @@
 import { getRoutingForPart } from '@/utils/routingsAccess';
 
 export interface CostWarning {
-  type: 'missing_run_time' | 'missing_labor_rate' | 'missing_material_cost' | 'no_operations';
+  type: 'empty_operation' | 'missing_labor_rate' | 'missing_material_cost' | 'no_operations';
   message: string;
   node_id?: string;
   material_id?: string;
@@ -37,9 +37,10 @@ export interface RoutingCostBreakdown {
 /**
  * Calculate the full cost breakdown for a part's routing.
  *
- * Labor: per operation, (run_time_per_unit / 60) × labor_rate, plus setup.
- * Materials: routing-level (not per-operation) — Σ(quantity × cost_per_unit)
- * across the routing's material list.
+ * Labor (per operation): (run_time_per_unit / 60) × labor_rate, plus setup.
+ * Setup-only operations (run = 0, setup > 0) are fully supported — their run
+ * cost is 0 and setup cost is the whole labor contribution.
+ * Materials: routing-level — Σ(quantity × cost_per_unit).
  *
  * Returns null if the part has no routing.
  */
@@ -67,37 +68,43 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
     };
   }
 
-  // Labor cost per operation
   for (const node of routing.nodes) {
     const operationName = node.operation_type?.name || 'Unknown Operation';
+    const runMinutes = node.run_time_per_unit ?? 0;
+    const setupMinutes = node.setup_time ?? 0;
+    const hasAnyTime = runMinutes > 0 || setupMinutes > 0;
 
-    if (node.run_time_per_unit === null || node.run_time_per_unit === undefined) {
+    if (!hasAnyTime) {
       warnings.push({
-        type: 'missing_run_time',
-        message: `${operationName}: missing run time`,
+        type: 'empty_operation',
+        message: `${operationName}: no run or setup time set`,
         node_id: node.id,
       });
-    } else if (!node.operation_type?.labor_rate) {
+      continue;
+    }
+
+    const laborRate = node.operation_type?.labor_rate;
+    if (!laborRate) {
       warnings.push({
         type: 'missing_labor_rate',
         message: `${operationName}: missing labor rate`,
         node_id: node.id,
       });
-    } else {
-      const laborCost = (node.run_time_per_unit / 60) * node.operation_type.labor_rate;
-      const setupCost = ((node.setup_time || 0) / 60) * node.operation_type.labor_rate;
-      laborItems.push({
-        operation_name: operationName,
-        run_time_minutes: node.run_time_per_unit,
-        setup_time_minutes: node.setup_time || 0,
-        labor_rate: node.operation_type.labor_rate,
-        cost: Math.round(laborCost * 100) / 100,
-        setup_cost: Math.round(setupCost * 100) / 100,
-      });
+      continue;
     }
+
+    const runCost = (runMinutes / 60) * laborRate;
+    const setupCost = (setupMinutes / 60) * laborRate;
+    laborItems.push({
+      operation_name: operationName,
+      run_time_minutes: runMinutes,
+      setup_time_minutes: setupMinutes,
+      labor_rate: laborRate,
+      cost: Math.round(runCost * 100) / 100,
+      setup_cost: Math.round(setupCost * 100) / 100,
+    });
   }
 
-  // Material cost across the routing (joined inventory item already loaded)
   for (const mat of routing.materials) {
     const invItem = mat.inventory_item;
     if (!invItem) {
@@ -141,4 +148,37 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
     total_cost: Math.round((totalLaborCost + totalMaterialCost) * 100) / 100,
     warnings,
   };
+}
+
+export interface TierPricing {
+  baseCostPerUnit: number;
+  unitPrice: number | null;
+}
+
+/**
+ * Compute per-unit base cost and unit price for a given quantity tier.
+ *
+ * Run labor and materials are already per-unit in the breakdown.
+ * Setup is one-time, so it amortizes across the tier quantity:
+ *   baseCostPerUnit = run_per_unit + material_per_unit + (total_setup / quantity)
+ * unitPrice = null if markup is null (signals "no price yet"); otherwise
+ *   baseCostPerUnit × (1 + markupPercent / 100).
+ */
+export function calculateTierPricing(
+  breakdown: RoutingCostBreakdown,
+  quantity: number,
+  markupPercent: number | null,
+): TierPricing {
+  const qty = Math.max(quantity, 1);
+  const runPerUnit = breakdown.total_labor_cost;
+  const materialPerUnit = breakdown.total_material_cost;
+  const setupPerUnit = breakdown.total_setup_cost / qty;
+  const baseCostPerUnit = Math.round((runPerUnit + materialPerUnit + setupPerUnit) * 100) / 100;
+
+  const unitPrice =
+    markupPercent == null || Number.isNaN(markupPercent)
+      ? null
+      : Math.round(baseCostPerUnit * (1 + markupPercent / 100) * 100) / 100;
+
+  return { baseCostPerUnit, unitPrice };
 }

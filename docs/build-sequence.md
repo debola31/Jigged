@@ -118,7 +118,7 @@ JOB (shipped)
 
 ## Phase 1: Cost-Plus Pricing
 
-**Goal:** Replace static pricing tiers with a cost-plus model. Parts get categories with default markups. Routing costs flow automatically into quotes. Users can set markups and see cost breakdowns.
+**Goal:** Cost-plus pricing on the part. Each part owns one or more `part_pricing_tiers` (quantity + markup %); unit price is derived live as `base_cost × (1 + markup/100)` against the routing. Quotes are multi-part, multi-tier, with optional per-quote price overrides on snapshotted line items.
 
 **GitHub Issue:** #62
 
@@ -126,24 +126,23 @@ JOB (shipped)
 
 | Order | Feature | Est. Days | Status | Dependencies |
 |---|---|---|---|---|
-| 1 | Part Categories (table, RLS, settings UI, category CRUD) | 1 | ⬜ Not Started | Parts module |
-| 2 | Pricing Tier Removal (data migration + drop column + remove code) | 1 | ⬜ Not Started | Part Categories |
-| 3 | Cost-Plus Quotes (new fields, bidirectional UI, markup defaults) | 2-3 | ⬜ Not Started | Part Categories, Routings |
-| 4 | Routing Cost Calculation (auto-populate cost from routing into quotes) | 1-2 | ⬜ Not Started | Routings, Operations |
+| 1 | `part_pricing_tiers` table + access layer + cost calc helper | 1 | ✅ Done | Parts module, Routings |
+| 2 | `quote_line_items` snapshot model + multi-part `createQuote` | 1-2 | ✅ Done | Pricing tiers |
+| 3 | Part detail page: live cost breakdown + auto-saving Pricing card + Copy-from-part | 2 | ✅ Done | Pricing tiers |
+| 4 | Quote form: repeating part block + per-line "Adjust price" override | 1-2 | ✅ Done | Pricing tiers, line items |
+| 5 | Convert to Jobs: per-part tier picker → N jobs | 1 | ✅ Done | Quote line items |
 
 ### Phase 1 Success Criteria
 
 Phase 1 (Cost-Plus) is complete when Shane can:
 
-- [ ] Create part categories with default markups
-- [ ] Assign parts to categories
-- [ ] See routing-calculated costs on parts with routings
-- [ ] Enter manual costs on parts without routings
-- [ ] Create a quote where markup pre-fills from category
-- [ ] Edit markup and see price recalculate (bidirectional)
-- [ ] Edit price and see markup back-calculate (bidirectional)
-- [ ] See cost breakdown (labor + materials) on quotes for routed parts
-- [ ] View markup, cost source, and cost breakdown on quote detail page
+- [ ] Create a part, define its routing, see the cost breakdown update live as he edits
+- [ ] Add multiple quantity tiers to the part with their own markup %; setup amortizes into each tier's base cost
+- [ ] Type a unit price directly on a tier — markup back-calculates automatically
+- [ ] Copy pricing from another part as a starting point
+- [ ] Create a multi-part quote that snapshots selected tiers
+- [ ] Adjust a tier's price for one specific quote without touching the part
+- [ ] Convert a multi-tier quote — pick one quantity per part — produces one job per selection
 
 ---
 

@@ -14,13 +14,7 @@ export async function getLineItemsForQuote(quoteId: string): Promise<QuoteLineIt
       parts (
         id,
         part_name,
-        description,
-        category_id,
-        part_categories (
-          id,
-          name,
-          default_markup_percent
-        )
+        description
       )
     `)
     .eq('quote_id', quoteId)
@@ -34,23 +28,40 @@ export async function getLineItemsForQuote(quoteId: string): Promise<QuoteLineIt
 }
 
 /**
+ * Optional one-off price override the user typed on the quote form for a
+ * single tier. When present, the snapshot uses these values and flips the
+ * `is_quote_override` flag for the chip on the cost-breakdown view.
+ */
+export interface QuoteLineItemOverride {
+  unit_price: number;
+  markup_percent: number | null;
+}
+
+/**
  * Snapshot a tier into a new line item for a quote. Called once per selected
  * tier during createQuote. The snapshot is immutable — later edits to the
  * tier do not flow back into an existing line item.
+ *
+ * Pass `override` when the user adjusted the price on the quote form; the
+ * snapshot stores the typed values and flags the line as quote-overridden.
  */
 export async function insertLineItemFromTier(
   quoteId: string,
   companyId: string,
   tier: PartPricingTier,
   sequence: number,
+  override?: QuoteLineItemOverride,
 ): Promise<QuoteLineItem> {
   const supabase = getSupabase();
-  if (tier.unit_price == null) {
+
+  const unitPrice = override?.unit_price ?? tier.unit_price;
+  if (unitPrice == null) {
     throw new Error(
-      `Cannot create quote line item: tier ${tier.id} has no unit price. Set a markup or override price first.`,
+      `Cannot create quote line item: tier ${tier.id} has no unit price. Set a markup or adjust the price on the quote form.`,
     );
   }
-  const totalPrice = Math.round(tier.unit_price * tier.quantity * 100) / 100;
+  const markupPercent = override !== undefined ? override.markup_percent : tier.markup_percent;
+  const totalPrice = Math.round(unitPrice * tier.quantity * 100) / 100;
 
   const { data, error } = await supabase
     .from('quote_line_items')
@@ -61,10 +72,11 @@ export async function insertLineItemFromTier(
       source_tier_id: tier.id,
       sequence,
       quantity: tier.quantity,
-      unit_price: tier.unit_price,
+      unit_price: unitPrice,
       total_price: totalPrice,
-      markup_percent: tier.markup_percent,
+      markup_percent: markupPercent,
       base_cost_per_unit: tier.base_cost_per_unit,
+      is_quote_override: !!override,
     })
     .select('*')
     .single();

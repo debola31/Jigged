@@ -25,6 +25,11 @@ import {
 interface PartRoutingPanelProps {
   companyId: string;
   partId: string;
+  /**
+   * Fired after each successful save so the parent page can refresh siblings
+   * (PartCostBreakdown, PartPricingTiers) that derive numbers from the routing.
+   */
+  onRoutingSaved?: () => void;
 }
 
 /**
@@ -38,7 +43,7 @@ interface PartRoutingPanelProps {
  *    so temp IDs become real IDs and the next change diffs correctly.
  *  - A subtle indicator in the header shows save state.
  */
-export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanelProps) {
+export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: PartRoutingPanelProps) {
   const [ops, setOps] = useState<OperationRowData[]>([]);
   const [mats, setMats] = useState<MaterialRowData[]>([]);
   const [routingId, setRoutingId] = useState<string | null>(null);
@@ -162,6 +167,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
             setOriginalMaterialIds(new Set(fresh.materials.map((m) => m.id)));
           }
           setSavedAt(new Date());
+          onRoutingSaved?.();
         } catch (err) {
           console.error('Failed to save routing:', err);
           setError(err instanceof Error ? err.message : 'Failed to save routing');
@@ -172,7 +178,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
       // Swallow rejections in the chain so one error doesn't poison the queue.
       queueRef.current = job.catch(() => undefined);
     },
-    [companyId, partId, routingId, originalNodeIds, originalMaterialIds]
+    [companyId, partId, routingId, originalNodeIds, originalMaterialIds, onRoutingSaved]
   );
 
   const handleOpsChange = useCallback(

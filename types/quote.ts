@@ -38,18 +38,17 @@ export interface QuoteLineItem {
   total_price: number | null;
   markup_percent: number | null;
   base_cost_per_unit: number | null;
+  /**
+   * True when the salesperson typed a one-off price/markup on the quote form
+   * that diverged from the source tier. UI surfaces a green "adjusted for this quote" chip.
+   */
+  is_quote_override: boolean;
   created_at: string;
   // Optional joined part info for UI rendering
   parts?: {
     id: string;
     part_name: string;
     description: string | null;
-    category_id: string | null;
-    part_categories?: {
-      id: string;
-      name: string;
-      default_markup_percent: number | null;
-    } | null;
   } | null;
 }
 
@@ -90,12 +89,24 @@ export interface QuoteWithRelations extends Quote {
 }
 
 /**
+ * Per-tier price/markup override the salesperson typed on the quote form
+ * (one-off concession that diverges from the part's tier).
+ */
+export interface QuoteTierOverride {
+  unit_price: number;
+  markup_percent: number | null;
+}
+
+/**
  * Selection shape for a single part inside the quote form —
- * picks which of the part's pricing tiers to snapshot.
+ * picks which of the part's pricing tiers to snapshot, with optional
+ * per-tier price overrides.
  */
 export interface QuoteFormPartBlock {
   part_id: string;
   tier_ids: string[];
+  /** tier_id → override values; only present for tiers the user adjusted */
+  overrides?: Record<string, QuoteTierOverride>;
 }
 
 /**

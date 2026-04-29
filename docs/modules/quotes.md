@@ -2,7 +2,16 @@
 
 ## Overview
 
-The Quotes module handles the sales quoting process — the entry point for work into the shop. Quotes capture what a customer wants, at what price, and when they need it. A quote can be converted directly into a job at any time; there is no separate approval step. Quotes use a **cost-plus pricing model** where the quoted price is derived from base cost plus a markup percentage, with an optional override.
+The Quotes module handles the sales quoting process — the entry point for work into the shop. Quotes capture what a customer wants, at what price, and when they need it. A quote can be converted directly into one or more jobs at any time; there is no separate approval step.
+
+**The quote is the customer-facing document; the part owns the pricing math.** A quote references parts and snapshots one or more pricing tiers per part into `quote_line_items` at creation. After that, the line items are immutable — editing the part's tiers later does not change the quote.
+
+A single quote can include:
+
+- **Multiple parts** (the customer asked for both a holder and a clamp), and
+- **Multiple quantity tiers per part** (e.g., 1, 2, 4 pieces of the holder, each at its own unit price).
+
+When the quote has more than one tier overall, the printed PDF intentionally omits a grand total — the customer hasn't yet picked which quantity to order. They pick at conversion time, and one job is created per (part, selected tier).
 
 **Priority:** Must Have (Build Third)
 
@@ -10,9 +19,9 @@ The Quotes module handles the sales quoting process — the entry point for work
 
 - Customers module (quotes require a customer)
 
-- Parts module (quotes reference parts)
+- Parts module — quotes select from each part's pricing tiers (see [Parts — Pricing Tiers](parts.md#part-pricing-tiers-table-part_pricing_tiers))
 
-**Database Table:** `quotes` (plus `quote_operations`, `quote_materials`, `quote_attachments`)
+**Database Tables:** `quotes`, `quote_line_items`, `quote_operations`, `quote_materials`, `quote_attachments`
 
 ---
 
@@ -21,19 +30,20 @@ The Quotes module handles the sales quoting process — the entry point for work
 ```
  ACTIVE ──(date > expiration_date)──▶ EXPIRED
    │                                     │
-   └──────────── Convert to Job ─────────┘
+   └──────────── Convert to Jobs ────────┘
                      │
                      ▼
               (quote stays in its status;
-               converted_to_job_id set)
+               converted_at set; jobs reference
+               line items via source_quote_line_item_id)
 ```
 
 **Status Definitions:**
 
-- **Active** — the quote is open. Editable, attachable, convertible.
+- **Active** — the quote is open. Editable (metadata only), attachable, convertible.
 - **Expired** — past `expiration_date`. Read-only, but can still be converted with a warning (the price is no longer guaranteed).
 
-**Conversion flag:** `converted_to_job_id` is set when the quote becomes a job. It is *not* a status — a quote can be `active` + `converted`, or `expired` + `converted`.
+**Conversion flag:** `converted_at` is set when the quote becomes one or more jobs. The reverse link lives on `jobs.source_quote_line_item_id` — each created job points at the specific line item (part + tier) it came from. A quote with N selected tiers across M parts becomes M jobs (one per part), each at the tier the user picked. Loading a quote shows every linked job in the "Jobs" banner.
 
 The pending-approval / approved / rejected states were removed in April 2026. For small shops the salesperson and the approver are the same person; the state machine added friction without adding value.
 
@@ -44,45 +54,73 @@ The pending-approval / approved / rejected states were removed in April 2026. Fo
 | As a... | I want to... | So that... |
 |---|---|---|
 | Salesperson | Create a quote for a customer | I can respond to customer inquiries |
-| Salesperson | Select an existing part and see its cost with a default markup | I can quickly quote repeat orders |
+| Salesperson | Add multiple parts to a single quote | I can quote a complete request without splitting it across documents |
+| Salesperson | Pick which pricing tiers (1, 2, 4 …) of each part to include | I can present price breaks the customer asked about on one document |
 | Salesperson | Set a lead time and expiration date | The customer knows when and for how long |
-| Salesperson | Expand a cost breakdown to see per-op / per-material costs | I can explain the price if asked |
-| Salesperson | Override the unit price on top of the computed cost | I can adjust for one-off negotiations |
-| Salesperson | Convert a quote directly to a job | Production can begin without a ceremony step |
+| Salesperson | Expand a cost breakdown to see per-op / per-material costs grouped by part | I can explain the price if asked |
+| Salesperson | Convert a quote directly to one job per (part, selected tier) | Production can begin without a ceremony step |
+| Salesperson | Pick which quantity tier the customer chose at conversion time | The work order reflects exactly what the customer agreed to |
 | Owner | View all active quotes | I can see the sales pipeline |
 | Owner | Filter quotes by active/expired and customer | I can focus on what's still live |
-| Owner | See when a quote was overridden off the base + markup | I know the markup wasn't just blindly adjusted |
+| Owner | See per-tier override chips when a price was manually locked | I know which prices are negotiated vs computed |
 
 ---
 
 ## Data Model
 
+### `quotes` (header)
+
+The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_items`.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, etc. |
-| legacy_quote_number | Text | No | Original quote number from legacy system (for migrated quotes) |
+| id | UUID | Yes | Primary key |
+| company_id | UUID (FK) | Yes | Multi-tenant isolation |
+| quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, … |
+| legacy_quote_number | Text | No | Original quote number from legacy system (migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| part_id | UUID (FK) | No | Link to existing part (optional) |
-| quantity | Integer | Yes | Number of units quoted |
-| base_cost | Decimal(12,4) | No | Cost per unit (from routing calculation at creation time) |
-| markup_percent | Decimal(5,2) | No | Markup percentage (pre-filled from part category, overridable) |
-| estimated_labor_cost | Decimal(12,4) | No | Rolled-up labor cost from routing (snapshot) |
-| estimated_material_cost | Decimal(12,4) | No | Rolled-up material cost from routing (snapshot) |
-| unit_price | Decimal | No | Price per unit. Defaults to `base_cost × (1 + markup_percent / 100)` but can be overridden |
-| total_price | Decimal | No | `quantity × unit_price` |
 | lead_time_days | Integer | No | Days to deliver; copied to `jobs.lead_time_days` on conversion |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
-| converted_to_job_id | UUID (FK) | No | Link to job when converted |
-| converted_at | Timestamp | No | When the quote was converted to a job |
+| status_changed_at | Timestamp | No | When `status` last changed |
+| converted_at | Timestamp | No | When the quote was converted to one or more jobs |
+| created_by | UUID | No | User who created the quote |
+| created_at | Timestamp | Yes | Auto-generated |
+| updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Note:** The free-text `description` field was removed in April 2026. The part itself carries descriptive detail; the quote no longer needs a separate narrative.
+**Removed in April 2026 (replaced by line items):** `part_id`, `quantity`, `base_cost`, `markup_percent`, `estimated_labor_cost`, `estimated_material_cost`, `unit_price`, `total_price`, `converted_to_job_id`. The `description` free-text field was removed earlier; the part itself carries descriptive detail.
 
-### Cost Breakdown Snapshots
+### Snapshotted Line Items (`quote_line_items`)
 
-`quote_operations` and `quote_materials` are per-row snapshots of the part's routing taken at quote creation. They are immutable after creation so the breakdown survives later routing edits. Columns roughly mirror `calculateRoutingCost()`'s output: operation name, run/setup minutes, labor rate, computed run/setup cost; material name, quantity, unit, cost-per-unit, line cost.
+One row per (part, selected tier) on a quote. Created at quote creation by snapshotting selected `part_pricing_tiers` and **never modified after** — even if the source tier changes. Multi-part / multi-tier quotes have multiple rows.
 
-Snapshots are refreshed if the user edits the quote and changes `part_id`, `base_cost`, or `markup_percent`. Other edits (e.g. changing only the quantity) preserve the snapshot.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | UUID | Yes | Primary key |
+| quote_id | UUID (FK) | Yes | Parent quote (cascade delete) |
+| company_id | UUID (FK) | Yes | Multi-tenant isolation |
+| part_id | UUID (FK) | Yes | Snapshot of the part this line item priced |
+| source_tier_id | UUID (FK) | No | Soft reference to the originating `part_pricing_tiers` row (set null if the tier is later deleted) |
+| sequence | Integer | Yes | Display/print order (10, 20, 30 …) |
+| quantity | Integer | Yes | Snapshotted tier quantity, > 0 |
+| unit_price | Decimal(12,4) | Yes | Snapshotted unit price (matches tier or the user's quote-form override) |
+| total_price | Decimal(12,4) | No | `quantity × unit_price` |
+| markup_percent | Decimal(5,2) | No | Snapshotted markup at creation time |
+| base_cost_per_unit | Decimal(12,4) | No | Snapshotted base cost — useful for internal cost-vs-sell reports |
+| is_quote_override | Boolean | Yes | `true` when the salesperson typed a one-off price on the quote form that diverged from the part tier. Drives the green "✏ adjusted for this quote" chip on the cost-breakdown view |
+| created_at | Timestamp | Yes | Auto-generated |
+
+**Unique Constraint:** `(quote_id, sequence)`
+
+### Cost Breakdown Snapshots (`quote_operations`, `quote_materials`)
+
+Per-operation and per-material snapshots of the part's routing at quote creation. Multi-part quotes capture one snapshot set per distinct `part_id` on the quote — both tables carry a `part_id` column for that scoping. Snapshots are immutable; later routing edits do not affect them.
+
+`writeCostSnapshotsForPart(quote_id, company_id, part_id)` is called once per distinct part during `createQuote`.
+
+### Reverse link to jobs (`jobs.source_quote_line_item_id`)
+
+Each job knows which line item it came from. To list every job spawned from a quote, follow `quote_line_items.id → jobs.source_quote_line_item_id`. The detail page surfaces this as a "Jobs" banner once `quote.converted_at` is set.
 
 ---
 
@@ -94,11 +132,15 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 
 **Features:**
 
-- Table showing: Quote #, Customer, Part, Quantity, Total, Status, Created
+- Table showing: Quote #, Customer, **Total**, Status, Created By, Expires, Created, **Jobs**
 
-- Search box (searches quote number, customer name, part name)
+- Total column shows the line-item total when the quote has exactly one line item; otherwise renders `—` with a tooltip ("Multi-tier quote — pick qty to confirm total")
 
-- Filter dropdown: Status (All / Pending Approval / Approved / Rejected)
+- Jobs column shows links to every job spawned from the quote (one per converted line item)
+
+- Search box (searches quote number)
+
+- Filter dropdown: Status (All / Active / Expired)
 
 - Filter dropdown: Customer (All / specific customer)
 
@@ -108,21 +150,11 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 
 - Pagination (25 per page)
 
-**Row Actions (icon buttons):**
-
-- Edit (pencil) - only for Pending Approval or Rejected status
-
-- Convert to Job (play icon) - only for Approved status
-
 **Status Pills:**
 
-- Pending Approval = Blue
+- Active = Primary
 
-- Approved = Green
-
-- Rejected = Red
-
-- Expired = Orange
+- Expired = Warning
 
 **Empty State:**
 
@@ -132,68 +164,53 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 
 **Route:** `/dashboard/{companyId}/quotes/new` or `/dashboard/{companyId}/quotes/{id}/edit`
 
-**Note:** Edit only available for Pending Approval or Rejected status quotes.
+**Note:** Edit on an existing quote is **metadata-only** (customer, lead time, expiration). Line items are immutable snapshots — to change parts or tiers, create a new quote.
 
 **Form Sections:**
 
 ▸ **Customer** (required)
 
-- Customer dropdown with search
+- Customer dropdown with search and "+ New Customer" inline create
 
-- Shows: customer name (customer code)
+▸ **Parts** (repeating block)
 
-▸ **Part**
+The form has a "Parts" card with one collapsible block per part on the quote, plus an "+ Add part" button at the top of the card.
 
-- Radio: ○ Existing Part  ○ New/Ad-hoc Part
+Each block:
 
-- If Existing Part:
-  - Part dropdown (all company parts, independent of selected customer)
+- Part picker (autocomplete; "+ New Part" opens the inline creator and auto-selects the new part)
+- After a part is selected, the form loads its `part_pricing_tiers` and renders one checkbox per tier:
+  - Label: `Qty {quantity} · {formatCurrency(unit_price)} / unit` with a markup chip when set
+  - User checks one or more tiers to include on the quote
+- "Remove part" trash icon to drop the block
 
-  - Shows: part name - description
+**Per-quote price overrides (`✏ Adjust price`):** when a tier is checked, an "✏ Adjust price" button appears on the row. Clicking it expands inline `Unit price` and `Markup %` inputs, pre-filled with the tier's current values. Bidirectional editing applies — typing a price back-calculates markup against the tier's base cost; typing a markup recomputes the price. When the typed price diverges from the tier's standing price, the row's chip changes from a markup chip to a green **"adjusted for this quote"** chip so the user can see at a glance which prices are one-off concessions. The override only lives on the resulting `quote_line_items` row (`is_quote_override = true`); the part's tier is never touched.
 
-  - Auto-fills description and suggests pricing
+If the chosen part has no pricing tiers yet, the block shows a warning ("This part has no pricing tiers yet. Open the part detail page to add them."). Tiers are authored on the part — the quote form is purely a selector with optional one-off overrides.
 
-- If Ad-hoc Part:
-  - Part Name text field
+**Order matters:** the visual order of part blocks (and the order of tier checkboxes within each block) drives the `sequence` field on the resulting `quote_line_items`, which in turn drives PDF row order.
 
-  - Description text field
+▸ **Terms**
 
-▸ **Cost & Pricing**
+- Lead time (days, optional)
+- Expiration date (defaults to today + 10 days)
 
-- Quantity (required, number input)
+▸ **Attachments**
 
-- Base Cost per Unit
-  - If part has routing: auto-populated from routing calculation, but editable (user can override)
-  - If no routing: starts at $0.00, editable field for user to enter an estimate
-  - Expandable cost breakdown when auto-populated from routing: Labor by operation + Materials subtotal
-
-- Markup % (pre-filled from part's category default when part has a routing, editable)
-  - Hint: "Default: 35% (Precision Machined)" showing source category
-
-- Unit Price (calculated from cost + markup, editable for bidirectional editing)
-
-- Total Price (calculated: quantity × unit_price, display only)
-
-**Bidirectional Editing:**
-- User edits Markup % → Unit Price recalculates
-- User edits Unit Price → Markup % back-calculates
-- Base Cost is always editable (can override routing-calculated value)
-
-▸ **Timeline**
-
-- Estimated Lead Time (days)
-
-- Valid Until (date picker)
-
-▸ **Notes**
-
-- Notes (multiline)
+- Drag-and-drop or file picker for PDFs (up to 5, 50MB each)
+- New quote: temp uploads keyed by a session id; promoted to permanent on save
+- Edit mode: persisted attachments edit-in-place
 
 **Actions:**
 
-- Send for Approval → Goes to quote detail
+- Create quote / Save changes → returns to detail page
+- Cancel → discards temp attachments and returns
 
-- Cancel → Returns to list without saving
+**Validation guards:**
+
+- At least one part block is required.
+- Every part block must have a part selected and at least one tier checked.
+- Lead time, if entered, must be 0 – 3,650 days.
 
 ### 3. Quote Detail View
 
@@ -202,67 +219,58 @@ Snapshots are refreshed if the user edits the quote and changes `part_id`, `base
 **Header:**
 
 - Quote number (large)
+- Status pill (Active / Expired)
+- Created date, created by, expires-in, lead time
 
-- Status pill
+**Content cards:**
 
-- Created date
-
-**Content:**
-
-- Customer (link to customer)
-
-- Part info (link to part if exists)
-
-- **Cost & Pricing:**
-  - Base Cost per Unit
-  - Cost breakdown (expandable: labor by operation + materials) when routing data was captured
-  - Markup % with source hint ("Category default" or "Custom override")
-  - Unit Price, Quantity, Total Price
-
-- Lead time, Valid until
-
-- Notes
+- **Converted-to-Jobs banner** — only when `converted_at` is set. Lists every linked job by number with click-through links.
+- **Customer card** — name + click-through to the customer record.
+- **Parts card** — one section per distinct `part_id` in the quote with the part name, optional description, and a "{N} tiers" caption.
+- **Attachments card** — only when attachments exist. Per-attachment download + (when editable) delete.
+- **Line items table** — Part, Qty, Unit price, Total (one row per `quote_line_item`). When the quote has more than one line item, a footer note reads *"Multiple tiers — grand total is withheld until the customer picks a quantity per part."*
+- **Cost Breakdown** — expandable card grouped per part. Shows the per-part operations table, materials table, and a "Quantity tiers on this quote" sub-table per part with Qty, Base/unit, Setup/unit (amortized at the tier's qty), Markup %, Unit price, Total, and an `override` chip on tiers whose unit price was locked.
 
 **Actions (based on status):**
 
-| Current Status | Available Actions |
+| Current State | Available Actions |
 |---|---|
-| Pending Approval | Edit, Mark as Approved, Mark as Rejected |
-| Approved | Convert to Job |
-| Rejected | Edit |
-| Expired | (none - read only) |
+| Active, not converted | Edit (metadata), Convert to Jobs, Delete |
+| Active, converted | Delete only (line items are frozen) |
+| Expired | Convert with warning, Delete |
 
-**Print PDF** lives in the top-right page toolbar (opposite the "Back to Quotes" link) and is available in every status. It generates a single-page, customer-facing PDF (`Quote-{quote_number}.pdf`). See [Printing Quotes](#printing-quotes) below.
+**Print PDF** lives in the top-right page toolbar and is available in every status. See [Printing Quotes](#printing-quotes) below.
 
-### 4. Convert to Job Modal
+### 4. Convert to Jobs Modal
 
-**Trigger:** Click "Convert to Job" on Approved quote
+**Trigger:** "Convert to Jobs" button on the detail page (active or expired quote).
 
-**Prerequisite:** The quote must reference a part (part_id is not null) and that part must have a routing defined. If the part has no routing, the conversion is blocked and a message is shown with a link to create a routing from the part detail page.
+**Prerequisite:** Every part on the quote must have a routing. If any does not, conversion is blocked with a link to fix the routing on that part.
 
 **Modal Content:**
 
-- Summary: "Create job from Quote Q-0042?"
+The modal lists one section per distinct `part_id` on the quote. Each section is a radio group of that part's line items — one radio per available tier:
 
-- Customer: [display]
+```
+Holder
+  ◯ Qty 1 · $187.00 / unit = $187.00
+  ◯ Qty 2 · $112.00 / unit = $224.00
+  ◉ Qty 4 · $94.00  / unit = $376.00
 
-- Part: [display]
+Clamp
+  ◉ Qty 5 · $62.00  / unit = $310.00     (auto-selected — only one tier)
+```
 
-- Quantity: [display]
+If a part has only one line item on the quote, that radio is pre-selected — the user just confirms.
 
-- **Due Date** (date picker, optional)
-
-- **Priority** (dropdown: Low / Normal / High / Rush, default: Normal)
-
-- Additional Notes (optional)
-
-**Note:** Routing is auto-resolved from the part. There is no routing selection in this modal.
+A single **Lead time** input applies to all jobs created in this conversion (defaults to the quote's lead time, editable).
 
 **Actions:**
 
-- Create Job → Creates job (routing auto-resolved from part), redirects to job detail
+- Create Jobs → calls `convertQuoteToJob(quote_id, { selections: [{ line_item_id }, …], leadTimeDays })` → creates one job per selection, copies the routing into each via `create_job_operations_from_routing`, copies the first quote attachment to each job, sets `quote.converted_at`, and redirects to the first created job's detail page.
+- Cancel → closes the modal without changes.
 
-- Cancel → Closes modal
+The submit button stays disabled until **every** part on the quote has a tier selected.
 
 ---
 
@@ -338,74 +346,9 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 ### Part Quick Create
 
-**Trigger:** "+ New Part" button next to part dropdown (only visible when "Existing Part" is selected)
+**Trigger:** "+ New Part" button next to a part picker inside a part block.
 
-**Modal: Quick Create Part**
-
-```javascript
-┌─────────────────────────────────────────────┐
-│  Quick Create Part                       ✕  │
-├─────────────────────────────────────────────┤
-│                                             │
-│  Part Name *      [____________]          │
-│  Description        [____________]          │
-│                                             │
-│  ─────── Category ───────                   │
-│  Category           [Dropdown    ▼]         │
-│                                             │
-│           [Cancel]  [Create Part]           │
-└─────────────────────────────────────────────┘
-```
-
-**Behavior:**
-
-1. User clicks "+ New Part" button
-
-2. Modal opens
-
-3. On success:
-  - Modal closes
-
-  - New part auto-selected in dropdown
-
-  - If category selected, markup pre-fills from category default
-
-  - Toast: "Part created successfully"
-
-4. On error: Show inline validation errors
-
-**Required Fields:**
-
-- Part Name (unique within company)
-
-**Optional Fields (for quick entry):**
-
-- Description
-
-- Category (dropdown of existing part_categories)
-
-> **Note:** Full part details, routing, and category assignment can be added later by editing the part record.
-
-### Updated Quote Form Layout
-
-```javascript
-▸ Customer (required)
-  ┌─────────────────────────────────────┐
-  │ [Customer Dropdown      ▼]  [+ New] │
-  └─────────────────────────────────────┘
-
-▸ Part
-  ○ Existing Part  ○ New/Ad-hoc Part
-
-  If Existing Part:
-  ┌─────────────────────────────────────┐
-  │ [Part Dropdown          ▼]  [+ New] │  ← All company parts (independent of customer)
-  └─────────────────────────────────────┘
-
-  If Ad-hoc Part:
-  [Part Name field]
-  [Description field]
-```
+**Modal:** asks for **Part Name** (required, unique within the company) and optional **Description**. That's it — no category, no routing, no pricing in this modal. After save, the new part is auto-selected in the part block. The user must then open the part detail page to add a routing and pricing tiers (or use "Copy pricing from another part" on the part detail page) before the part is quotable. The quote form will warn ("This part has no pricing tiers yet…") until they do.
 
 ### Edge Cases
 
@@ -419,69 +362,79 @@ To streamline the quoting workflow, users can create new customers and parts dir
 ### Acceptance Criteria (Quick Create)
 
 - [ ] "+ New Customer" button visible next to customer dropdown
-
 - [ ] Quick Create Customer modal opens with required fields
-
 - [ ] New customer auto-selected after creation
-
-- [ ] "+ New Part" button visible when "Existing Part" is selected
-
-- [ ] Quick Create Part modal opens with category dropdown
-
-- [ ] New part auto-selected after creation
-
-- [ ] Category from quick create pre-fills quote markup
-
+- [ ] "+ New Part" button visible inside a part block
+- [ ] Quick Create Part modal asks for name + description only
+- [ ] New part auto-selected in the part block after creation
+- [ ] Block warns "no pricing tiers yet" until the user adds tiers on the part detail page
 - [ ] Validation errors display inline in modals
-
 - [ ] Success toast shown after creation
 
 ---
 
-## Cost-Plus Pricing Logic
+## Pricing Logic
 
-When a user selects an existing part and enters quantity:
+The math lives on the part's pricing tiers, not on the quote. The quote is a snapshot.
 
-1. **Determine base cost:**
-   - If part has a routing: auto-populate from routing calculation (see [Routings — Cost Calculation](routings.md#cost-calculation-from-routing)), but the user can override the value
-   - If part has no routing: base_cost starts at $0.00 and the user enters an estimate
+**On the part (see [Parts — Cost Determination](parts.md#cost-determination-logic)):**
 
-2. **Apply markup:**
-   - Look up part's category → `default_markup_percent`, pre-fill `markup_percent` field
-   - If part has no category, markup is blank (user must enter)
-   - Markup is applied to all quotes: `unit_price = base_cost × (1 + markup_percent / 100)`
+```
+total_setup_cost = Σ over routing nodes of (setup_min / 60 × labor_rate)
+run_per_unit     = Σ over routing nodes of (run_min  / 60 × labor_rate)
+material_per_unit = Σ over routing materials of (qty × cost_per_unit)
 
-3. **Calculate unit price:**
-   ```
-   unit_price = base_cost × (1 + markup_percent / 100)
-   ```
+base_cost_per_unit (at tier qty Q) = run_per_unit + material_per_unit + (total_setup_cost / Q)
+unit_price                         = base_cost_per_unit × (1 + markup_percent / 100)
+```
 
-4. **Calculate total price:**
-   ```
-   total_price = quantity × unit_price
-   ```
+Markup % is the source of truth on a part tier. Typing a unit price in the part Pricing card back-calculates and stores the markup; routing changes still propagate to every tier's unit price.
 
-### Markup Editing
+**On the quote (createQuote):**
 
-During quote creation, the salesperson sees the pre-calculated unit price but cannot edit markup directly. The owner/approver can adjust markup during the approval step (`pending_approval` status), which recalculates the unit price.
+For each `(part, selected_tier)` the user checked in the form, insert one `quote_line_items` row:
 
-### Example (part with routing)
+```
+quote_line_items.{quantity, unit_price, markup_percent, base_cost_per_unit}
+                = source_tier.{quantity, unit_price, markup_percent, base_cost_per_unit}
+quote_line_items.total_price       = quantity × unit_price
+quote_line_items.source_tier_id    = source_tier.id   (soft reference)
+quote_line_items.is_quote_override = false
+```
 
-- Part "AE36589E-RT" has a routing with total cost = $103.25
-- Part category "Precision Machined" has default markup = 35%
-- User enters quantity: 50
+If the salesperson typed a one-off price in the form's "✏ Adjust price" editor, the matching `quote_line_items` row instead carries the typed values (and any back-calculated markup) plus `is_quote_override = true`. The part tier itself is never modified.
 
-System auto-fills:
-- Base Cost: $103.25 (from routing — user can override)
-- Markup: 35% (from category default)
-- Unit Price: $103.25 × (1 + 0.35) = $139.39
-- Total Price: 50 × $139.39 = $6,969.50
+Cost snapshots (`quote_operations`, `quote_materials`) are written once per **distinct part** in the quote, so a quote with three tiers of the same Holder still only stores one Holder cost snapshot.
 
-**Example (part without routing):**
-- Part "WIDGET-01" has no routing
-- User enters base cost estimate: $50.00, markup: 20%, quantity: 10
-- Unit Price: $50.00 × (1 + 0.20) = $60.00
-- Total Price: 10 × $60.00 = $600.00
+### Setup amortization is visible
+
+Per-tier `base_cost_per_unit` already contains the amortized setup. A 30 min engineering setup at $125/hr (= $62.50 one-time) split across:
+
+- **Qty 1:** $62.50 of setup folded into the unit cost
+- **Qty 4:** $15.625 per unit
+- **Qty 10:** $6.25 per unit
+
+This is exactly what Johnny described in the April 17 usability test: "anything I put into setup will amortize over the number of pieces."
+
+### Setup-only operations are first-class
+
+Operations with `setup_time > 0` and `run_time_per_unit = 0` (Engineering, Programming, …) compute `run_cost = 0` and a non-zero `setup_cost`. They are **not** dropped from the cost calculation; that bug (#224) was fixed in April 2026. See [Routings — Cost Calculation](routings.md#cost-calculation-from-routing).
+
+### Example (multi-tier on one part)
+
+- Part "Holder", routing total: 30 min run @ $125/hr + 30 min setup @ $125/hr + $5 in materials → run/unit = $62.50, setup-batch = $62.50, material/unit = $5.00
+- User types markup = 25 on each new tier
+- User adds three tiers: 1, 2, 4
+
+Stored on `part_pricing_tiers`:
+
+| qty | base_cost_per_unit | markup % | unit_price |
+|---|---|---|---|
+| 1 | 130.00 (62.50 + 5 + 62.50) | 25 | 162.50 |
+| 2 | 98.75 (62.50 + 5 + 31.25) | 25 | 123.44 |
+| 4 | 83.13 (62.50 + 5 + 15.625) | 25 | 103.91 |
+
+When the user creates a quote selecting all three tiers, three `quote_line_items` are snapshotted with these values; subsequent edits to the part's tiers do not mutate the quote.
 
 ---
 
@@ -489,47 +442,29 @@ System auto-fills:
 
 | From | To | Trigger |
 |---|---|---|
-| New Quote | Pending Approval | User clicks "Send for Approval" on creation form |
-| Pending Approval | Approved | User clicks "Mark as Approved" |
-| Pending Approval | Rejected | User clicks "Mark as Rejected" |
-| Pending Approval | Expired | System auto-expires past valid_until (future feature) |
-| Approved | (converted) | User clicks "Convert to Job" |
+| (new) | Active | `createQuote` |
+| Active | Expired | Background sweep when `expiration_date` passes (idempotent on every list/detail load) |
+| Active or Expired | (converted, status unchanged) | `convertQuoteToJob` sets `converted_at`; status stays where it is |
 
-**Note:** Pending Approval or Rejected quotes can be edited. Approved, Converted, and Expired quotes cannot be edited.
+**Editing rule:** the metadata (customer, lead time, expiration) is editable while `status === 'active'` and `converted_at IS NULL`. Line items are never editable — they're snapshots.
 
 ---
 
-## Convert to Job Function
+## Convert to Jobs Function
 
-When converting quote to job:
+`convertQuoteToJob(quote_id, { selections: [{ line_item_id }, …], leadTimeDays })`:
 
-1. Validate quote status is "Approved"
+1. Refuse if `converted_at` is already set.
+2. Validate selections: exactly one `line_item_id` per distinct `part_id` on the quote.
+3. Resolve lead time (override > quote default > null) and compute due date.
+4. For each selected line item:
+   - Insert a `jobs` row carrying `quote_id`, `customer_id`, `part_id`, `source_quote_line_item_id = line_item.id`, `due_date`, `lead_time_days`, `status = 'not_started'`.
+   - Call the `create_job_operations_from_routing(job_id, routing_id)` RPC to clone the part's routing into `job_operations`.
+   - Copy the quote's first attachment into `job_attachments` (best-effort).
+5. Set `quote.converted_at` (status unchanged).
+6. Return `{ quote, jobs: [{ id, job_number, line_item_id, part_id, quantity }, …] }`.
 
-2. Validate quote not already converted
-
-3. Create new job with:
-  - customer_id from quote
-
-  - part_id from quote
-
-  - part_name_text from quote (if ad-hoc)
-
-  - quantity_ordered from quote.quantity
-
-  - due_date from modal input
-
-  - priority from modal input
-
-  - status = "pending"
-
-  - quote_id = link back to quote
-
-1. Update quote:
-  - converted_to_job_id = new job id
-
-  - converted_at = now
-
-1. Redirect to job detail page
+A multi-part quote with three parts becomes three jobs. Each job's `quantity_ordered` matches the quantity of the line item the user picked, and the per-job lead time is the same value across the batch (single input on the modal).
 
 ---
 
@@ -539,21 +474,18 @@ When converting quote to job:
 
 The Quotes module uses direct Supabase calls from the frontend (via `utils/quotesAccess.ts`) for all operations:
 
-- CRUD operations
-
-- Status transitions (Pending Approval → Approved/Rejected)
-
-- Convert to Job
+- CRUD on quote headers
+- Snapshotting selected `part_pricing_tiers` into `quote_line_items` and per-part cost snapshots into `quote_operations` / `quote_materials`
+- Lazy expiration sweep (`sweepExpiredQuotes`) called as a fire-and-forget side effect on list/detail loads
+- Convert to Jobs (orchestrated in TypeScript; calls the `create_job_operations_from_routing` RPC for each created job)
 
 This follows the same pattern as Customers, Parts, and Operations:
 
 - Avoids Vercel serverless cold starts
-
 - Leverages Supabase RLS for security
-
 - Simpler, faster for all operations
 
-**No FastAPI endpoints needed** - there are no AI-powered features in Phase 0 Quotes.
+**No FastAPI endpoints needed** — there are no AI-powered features in the Quotes module.
 
 ---
 
@@ -563,119 +495,72 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Can view paginated list of quotes
 
-- [ ] Can search quotes by number, customer, part
+- [ ] Can search quotes by number
 
-- [ ] Can filter by status
+- [ ] Can filter by status (active / expired)
 
 - [ ] Can filter by customer
 
-- [ ] Can create new quote with existing part
+- [ ] Can create a quote with one or more parts; each part contributes one or more snapshotted tiers
 
-- [ ] Can create new quote with ad-hoc part
+- [ ] Form blocks submission until every part block has a part selected and at least one tier checked
 
-- [ ] Base cost auto-populates from routing when part has a routing (but can be overridden)
+- [ ] Quote header is editable (customer, lead time, expiration); line items are read-only after creation
 
-- [ ] Base cost starts at $0 when part has no routing
+- [ ] List page Total column shows the line-item total when there is exactly one line item, otherwise `—`
 
-- [ ] Markup pre-fills from part's category default_markup_percent
+- [ ] List page Jobs column shows links to every job spawned from the quote
 
-- [ ] Editing markup recalculates unit price (bidirectional)
+- [ ] Cost breakdown view groups operations + materials + tier prices per distinct part on the quote
 
-- [ ] Editing unit price back-calculates markup (bidirectional)
-
-- [ ] Cost breakdown (labor + materials) shown when routing data was captured
-
-- [ ] Total price calculates automatically
-
-- [ ] Quote goes directly to Pending Approval on creation
-
-- [ ] Can mark pending approval quote as Approved or Rejected
-
-- [ ] Can convert Approved quote to job
-
-- [ ] Converted quote shows link to created job
+- [ ] `override` chip shown on tiers whose unit price was locked manually
 
 - [ ] Quote number auto-generates (Q-0001 format)
 
-- [ ] Cannot edit quotes that are not in Pending Approval or Rejected status
+- [ ] Setup-only operations (run = 0, setup > 0) appear in the cost breakdown with `run_cost = 0` and a non-zero setup cost (regression test for #224)
 
-### Quick Create
+### Convert to Jobs
 
-- [ ] "+ New Customer" button visible next to customer dropdown
+- [ ] Modal lists one section per distinct part on the quote, with a radio per tier
 
-- [ ] Quick Create Customer modal creates customer with minimal fields
+- [ ] When a part has only one tier on the quote, that radio is pre-selected
 
-- [ ] New customer auto-selected in dropdown after creation
+- [ ] Convert button stays disabled until every part has a tier selected
 
-- [ ] "+ New Part" button visible when "Existing Part" is selected
+- [ ] Single lead-time input applies to all created jobs
 
-- [ ] Quick Create Part modal opens without customer dependency
+- [ ] N selected tiers (across distinct parts) produce N jobs, each with `source_quote_line_item_id` set
 
-- [ ] New part auto-selected in dropdown after creation
+- [ ] First quote attachment is copied into each created job
 
-- [ ] Category from quick create pre-fills markup on quote
+- [ ] Quote sets `converted_at` (status unchanged); detail page shows the linked jobs banner
 
-- [ ] Validation errors display inline in modals
+### Per-quote price overrides
 
-- [ ] Success toast notifications after creation
-
----
-
-## Routing-Based Cost Calculation
-
-When a part has a routing, the base cost is automatically calculated. See [Routings Module — Cost Calculation](routings.md#cost-calculation-from-routing) for the detailed formula.
-
-### Summary
-
-```
-base_cost = labor_cost + material_cost
-labor_cost = Σ (node.run_time_per_unit / 60 × operation_type.labor_rate)
-material_cost = Σ (node.materials[].quantity × inventory_item.cost_per_unit)
-```
-
-### Cost Breakdown Display
-
-The quote form shows an expandable cost breakdown when routing data was captured at creation:
-
-| Operation | Time/Unit | Rate | Cost |
-|---|---|---|---|
-| CNC Mill | 0.5 hr | $135/hr | $67.50 |
-| Deburr | 0.25 hr | $90/hr | $22.50 |
-| Inspect | 0.1 hr | $95/hr | $9.50 |
-| **Labor Subtotal** | | | **$99.50** |
-| 6061 Aluminum (0.5 lbs) | | | $3.75 |
-| **Material Subtotal** | | | **$3.75** |
-| **Total Base Cost** | | | **$103.25** |
-
-### Immutability After Creation
-
-Quote cost fields are immutable snapshots frozen at creation time. If a part's routing is updated after a quote was created, the quote's cost data is not affected. To quote at a new cost, the user creates a new quote.
-
-### Acceptance Criteria (Routing Cost)
-
-- [ ] Quotes for parts with routings show cost breakdown (labor by operation + materials)
-
-- [ ] Labor cost calculated from routing node run times × operation type labor rates
-
-- [ ] Material cost calculated from routing node materials × inventory item costs
-
-- [ ] Quote detail page displays markup %, base cost, and cost breakdown
+- [ ] Each selected tier row exposes an "✏ Adjust price" button on the quote form
+- [ ] Expanding the editor shows Unit price + Markup % inputs pre-filled from the part tier
+- [ ] Bidirectional editing: typing a price back-calculates markup, typing a markup recomputes price
+- [ ] When the typed price diverges from the tier's standing price, the row chip changes to "adjusted for this quote"
+- [ ] The resulting `quote_line_items` row carries `is_quote_override = true` and the typed values
+- [ ] The cost-breakdown view renders a green "✏ adjusted for this quote" chip on overridden line items
+- [ ] The part's tier is unchanged
 
 ---
 
 ## Printing Quotes
 
-Quote detail pages include a **Print PDF** button that generates a single-page, customer-facing PDF locally in the browser (no server round-trip).
+Quote detail pages include a **Print PDF** button that generates a customer-facing PDF locally in the browser (no server round-trip).
 
 **What the PDF contains:**
 
 - Company logo (if uploaded in Settings → Company Branding) and company name in the header
 - Large "QUOTE" heading with the quote number, date, and status
 - **Bill To** block — customer name, contact person, address, phone, and email (pulled from the customer record; missing fields are skipped cleanly)
-- Line-item table — part name, description, quantity, unit price, total
-- Bottom-line total
-- Notes section — the quote's description field, if present
-- Footer with generation date and page number
+- Line-item table — one row per `quote_line_item` ordered by `sequence`. Columns: Part, Description, Qty, Unit Price, Total.
+- **Conditional grand total**:
+  - Exactly one line item → bottom-line Total renders.
+  - More than one line item → grand total is **omitted** and replaced with the italic note "Select a quantity per part to confirm total." This is the multi-tier flow: the customer hasn't yet picked a quantity, so a single bottom-line price would be misleading.
+- Acceptance / signature block + page footer
 
 **Intentionally excluded** (kept off the customer's view):
 
@@ -687,67 +572,16 @@ Quote detail pages include a **Print PDF** button that generates a single-page, 
 
 **Branding:** Upload your logo at `/dashboard/{companyId}/settings` (admin-only, Company Branding card). PNG, JPG, or WebP up to 2 MB. SVGs are accepted for storage but currently fall back to a text-only header in the PDF — use a raster format for logos that should appear. If no logo is uploaded, the PDF renders with the company name only.
 
-**Immutability:** The PDF reflects the quote's current saved state. Because quotes are immutable cost snapshots after creation (see [Routing-Based Cost Calculation](#immutability-after-creation)), the printed PDF is a faithful record of the price the customer was quoted.
-
----
-
-## File Attachments
-
-Quotes support PDF file attachments for drawings, specifications, and other documents.
-
-**Attachment Limits:**
-
-- Maximum 5 attachments per quote
-
-- Maximum file size: 50MB per file
-
-- Allowed file types: PDF only
-
-**Behavior:**
-
-- Attachments can only be added/modified in Pending Approval or Rejected status
-
-- Multiple files can be uploaded at once via drag-and-drop or file picker
-
-- When quote is converted to a job, attachments are automatically copied to the job
-
----
-
-## Quote Attachments
-
-Quotes support PDF file attachments for customer drawings, specifications, or related documents.
-
-**Constraints:**
-
-- File type: PDF only
-
-- Maximum size: 50MB per file
-
-- Maximum count: 5 attachments per quote
-
-**Operations:**
-
-- Upload via drag-and-drop or file picker
-
-- Download via signed URL
-
-- Replace existing attachment
-
-- Delete attachment (pending approval/rejected quotes only)
-
-**Job Conversion:** First attachment is automatically copied to the job when converting.
+**Immutability:** Line items are frozen at creation, so the printed PDF is a faithful record of the price the customer was quoted. Re-printing the same quote tomorrow produces the same PDF.
 
 ---
 
 ## Inline Entity Creation
 
-While creating/editing a quote, users can create new entities without leaving the form:
+While creating a quote, users can create new entities without leaving the form:
 
-- **"Create New Customer"** option in customer dropdown - opens modal
-
-- **"Create New Part"** option in part dropdown - opens modal (parts are company-wide, no customer pre-selection)
-
-- Newly created entity is automatically selected
+- **"+ New Customer"** opens a modal that creates the customer and auto-selects it.
+- **"+ New Part"** (within a part block) opens a modal that creates the part and auto-selects it in that block. Tier authoring still happens on the part detail page — a freshly-created part has no tiers, so the form will warn until the user opens the part page and adds at least one tier.
 
 ---
 
@@ -757,104 +591,39 @@ While creating/editing a quote, users can create new entities without leaving th
 
 **Filters:**
 
-- Status dropdown: All, Pending Approval, Approved, Rejected
+- Status dropdown: All / Active / Expired
+- Customer dropdown: All / specific customer
 
-- Customer dropdown: All or specific customer
-
-**Sorting:** Click any column header to sort
+**Sorting:** Click any column header to sort.
 
 ---
 
 ## Validation Rules
 
-**Customer:** Required
+**Customer:** required
 
-**Part:** Required if "Existing Part" selected
+**Parts:** at least one part block; each block must have a part selected and at least one tier checked
 
-**Quantity:** Integer, 1 to 1,000,000
+**Lead time (days):** integer, 0 – 3,650 (optional)
 
-**Base Cost:** Decimal, 0 to 999,999.9999 (optional, but required before sending for approval)
+**Expiration date:** ISO date (defaults to created + 10 days)
 
-**Markup Percent:** Decimal, -100 to 100 (negative markups allowed for loss-leader quotes)
-
-**Unit Price:** Decimal, 0 to 999,999.99 (optional)
-
-**Description:** Max 5,000 characters
+**Tier-level fields** (`quantity`, `markup_percent`, `unit_price`) are validated on the part page when the tier is authored, not on the quote form.
 
 ---
 
-## Pricing Integration
+## Quote Attachments
 
-When selecting an existing part:
+Quotes support PDF file attachments for customer drawings, specifications, and related documents.
 
-- Base cost auto-populates from routing calculation (if part has a routing), otherwise starts at $0
+**Constraints:**
 
-- Base cost is always editable (user can override the routing-calculated value)
+- PDF only, max 50 MB per file, max 5 attachments per quote.
 
-- Markup pre-fills from the part's category `default_markup_percent`
+**Operations:**
 
-- Unit price calculated: `base_cost × (1 + markup_percent / 100)`
+- Upload via drag-and-drop or file picker.
+- Download via signed URL (1-hour TTL).
+- Replace or delete (only while the parent quote is editable: `status = 'active'` and `converted_at IS NULL`).
 
-- Total price calculated: `quantity × unit_price`
-
-- Cost breakdown (labor + materials) shown when routing data was captured
-
----
-
-## Status Workflow Updates
-
-**Editing Rule:** Only Pending Approval and Rejected quotes can be edited
-
-**Re-submit:** Rejected quotes can be edited and re-submitted for approval (rejected → pending_approval)
-
-**Note:** The "Expired" status is available for manual use but there is no automatic expiration logic implemented.
-
----
-
-## Convert to Job Details
-
-When converting an approved quote to a job:
-
-**User Input:**
-
-- Due date (optional date picker)
-
-- Priority: low, normal, high, rush
-
-**Job Created With:**
-
-- status = pending
-
-- quantity_ordered = quote quantity
-
-- quantity_completed = 0
-
-- quantity_scrapped = 0
-
-- First attachment copied to job_attachments table
-
-**Quote Updated:**
-
-- converted_to_job_id set to new job ID
-
-- converted_at set to current timestamp
-
----
-
-## Additional Data Model Fields
-
-These additional fields exist in the quotes table:
-
-- `status_changed_at` (timestamp) - When status last changed
-
-- `converted_to_job_id` (uuid FK) - Reference to job if converted
-
-- `converted_at` (timestamp) - When converted to job
-
-The `quote_attachments` table stores file attachments:
-
-- id, quote_id, company_id - Primary and foreign keys
-
-- file_name, file_path, file_size, mime_type - File metadata
-
-- uploaded_by, uploaded_at - Audit fields
+**Job conversion:** the first attachment on the quote is copied to **every** job created during conversion.

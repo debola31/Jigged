@@ -52,15 +52,17 @@ interface PartOption {
   id: string;
   part_name: string;
   description: string | null;
-  category_id: string | null;
   has_routing: boolean;
-  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
   isCreateNew?: boolean;
 }
 
 interface PartBlockState {
   part_id: string;
   tier_ids: string[];
+  /** Working-copy strings for typed overrides; tier_id → typed values. */
+  overrides: Record<string, { unit_price: string; markup_percent: string }>;
+  /** Which tier rows have the override editor expanded (UX state, not persisted). */
+  overrideOpen: Record<string, boolean>;
   tiers: PartPricingTier[];
   loading: boolean;
   error: string | null;
@@ -76,9 +78,7 @@ const CREATE_NEW_PART: PartOption = {
   id: '__create_new__',
   part_name: 'Create New Part',
   description: null,
-  category_id: null,
   has_routing: false,
-  part_category: null,
   isCreateNew: true,
 };
 
@@ -97,6 +97,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     initialData.parts.map((p) => ({
       part_id: p.part_id,
       tier_ids: p.tier_ids,
+      overrides: {},
+      overrideOpen: {},
       tiers: [],
       loading: false,
       error: null,
@@ -135,9 +137,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           id: p.id,
           part_name: p.part_name,
           description: p.description,
-          category_id: p.category_id,
           has_routing: p.has_routing,
-          part_category: p.part_category,
         })),
       ]);
 
@@ -203,11 +203,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
   };
 
+  const emptyBlock = (): PartBlockState => ({
+    part_id: '',
+    tier_ids: [],
+    overrides: {},
+    overrideOpen: {},
+    tiers: [],
+    loading: false,
+    error: null,
+  });
+
   const addPartBlock = () => {
-    setPartBlocks((prev) => [
-      ...prev,
-      { part_id: '', tier_ids: [], tiers: [], loading: false, error: null },
-    ]);
+    setPartBlocks((prev) => [...prev, emptyBlock()]);
   };
 
   const removePartBlock = (idx: number) => {
@@ -218,7 +225,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     if (!part) {
       setPartBlocks((prev) => {
         const next = [...prev];
-        next[idx] = { part_id: '', tier_ids: [], tiers: [], loading: false, error: null };
+        next[idx] = emptyBlock();
         return next;
       });
       return;
@@ -230,13 +237,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
     setPartBlocks((prev) => {
       const next = [...prev];
-      next[idx] = {
-        part_id: part.id,
-        tier_ids: [],
-        tiers: [],
-        loading: false,
-        error: null,
-      };
+      next[idx] = { ...emptyBlock(), part_id: part.id };
       return next;
     });
   };
@@ -246,10 +247,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       const next = [...prev];
       const block = next[blockIdx];
       const included = block.tier_ids.includes(tierId);
-      next[blockIdx] = {
-        ...block,
-        tier_ids: included ? block.tier_ids.filter((id) => id !== tierId) : [...block.tier_ids, tierId],
-      };
+      const tierIds = included
+        ? block.tier_ids.filter((id) => id !== tierId)
+        : [...block.tier_ids, tierId];
+      // Drop any override for tiers no longer selected.
+      const overrides = included
+        ? Object.fromEntries(Object.entries(block.overrides).filter(([k]) => k !== tierId))
+        : block.overrides;
+      const overrideOpen = included
+        ? Object.fromEntries(Object.entries(block.overrideOpen).filter(([k]) => k !== tierId))
+        : block.overrideOpen;
+      next[blockIdx] = { ...block, tier_ids: tierIds, overrides, overrideOpen };
       return next;
     });
   };
@@ -265,13 +273,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     if (partModalTargetIdx !== null) {
       setPartBlocks((prev) => {
         const next = [...prev];
-        next[partModalTargetIdx] = {
-          part_id: part.id,
-          tier_ids: [],
-          tiers: [],
-          loading: false,
-          error: null,
-        };
+        next[partModalTargetIdx] = { ...emptyBlock(), part_id: part.id };
         return next;
       });
     }
@@ -301,9 +303,32 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       }
     }
 
+    // Build overrides map: only tiers that have a typed unit_price diverging
+    // from the part tier's current price are submitted as overrides.
     const payload: QuoteFormData = {
       ...formData,
-      parts: partBlocks.map((b) => ({ part_id: b.part_id, tier_ids: b.tier_ids })),
+      parts: partBlocks.map((b) => {
+        const overrides: Record<string, { unit_price: number; markup_percent: number | null }> = {};
+        for (const tierId of b.tier_ids) {
+          const typed = b.overrides[tierId];
+          if (!typed || !typed.unit_price.trim()) continue;
+          const unitPrice = Number(typed.unit_price);
+          if (!Number.isFinite(unitPrice) || unitPrice < 0) continue;
+          const tier = b.tiers.find((t) => t.id === tierId);
+          // Only count as override if the typed price differs from the tier's current price.
+          if (tier && tier.unit_price !== null && Math.abs(tier.unit_price - unitPrice) < 0.005) continue;
+          const markup = typed.markup_percent.trim() === '' ? null : Number(typed.markup_percent);
+          overrides[tierId] = {
+            unit_price: unitPrice,
+            markup_percent: Number.isFinite(markup) ? (markup as number) : null,
+          };
+        }
+        return {
+          part_id: b.part_id,
+          tier_ids: b.tier_ids,
+          ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+        };
+      }),
     };
 
     setLoading(true);
@@ -438,46 +463,165 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 {!block.loading && block.tiers.length > 0 && (
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                      Select one or more quantity tiers to include on this quote.
+                      Select one or more quantity tiers to include on this quote. Use ✏ Adjust price to set a one-off price for this quote only.
                     </Typography>
                     {block.tiers.map((tier) => {
                       const included = block.tier_ids.includes(tier.id);
+                      const overrideOpen = !!block.overrideOpen[tier.id];
+                      const typed = block.overrides[tier.id];
+                      const typedUnitPrice = typed?.unit_price.trim() === '' ? null : Number(typed?.unit_price ?? '');
+                      const hasOverrideValue =
+                        typed !== undefined &&
+                        typed.unit_price.trim() !== '' &&
+                        Number.isFinite(typedUnitPrice) &&
+                        tier.unit_price !== null &&
+                        Math.abs(tier.unit_price - (typedUnitPrice as number)) >= 0.005;
                       return (
-                        <FormControlLabel
-                          key={tier.id}
-                          control={
-                            <Checkbox
-                              size="small"
-                              checked={included}
-                              onChange={() => toggleTier(idx, tier.id)}
+                        <Box key={tier.id} sx={{ mb: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  size="small"
+                                  checked={included}
+                                  onChange={() => toggleTier(idx, tier.id)}
+                                />
+                              }
+                              label={
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                  <Typography variant="body2">
+                                    Qty {tier.quantity} ·{' '}
+                                    {formatCurrency(
+                                      hasOverrideValue ? (typedUnitPrice as number) : tier.unit_price,
+                                    )}{' '}
+                                    / unit
+                                  </Typography>
+                                  {tier.markup_percent != null && !hasOverrideValue && (
+                                    <Chip
+                                      size="small"
+                                      label={`${tier.markup_percent}% markup`}
+                                      variant="outlined"
+                                      sx={{ height: 18 }}
+                                    />
+                                  )}
+                                  {hasOverrideValue && (
+                                    <Chip
+                                      size="small"
+                                      label="adjusted for this quote"
+                                      color="success"
+                                      variant="outlined"
+                                      sx={{ height: 18 }}
+                                    />
+                                  )}
+                                </Box>
+                              }
+                              sx={{ display: 'flex', alignItems: 'center', flex: 1 }}
                             />
-                          }
-                          label={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                              <Typography variant="body2">
-                                Qty {tier.quantity} · {formatCurrency(tier.unit_price)} / unit
-                              </Typography>
-                              {tier.markup_percent != null && (
-                                <Chip
-                                  size="small"
-                                  label={`${tier.markup_percent}% markup`}
-                                  variant="outlined"
-                                  sx={{ height: 18 }}
-                                />
-                              )}
-                              {tier.is_price_override && (
-                                <Chip
-                                  size="small"
-                                  label="override"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ height: 18 }}
-                                />
-                              )}
+                            {included && (
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  setPartBlocks((prev) => {
+                                    const next = [...prev];
+                                    const b = next[idx];
+                                    const open = !b.overrideOpen[tier.id];
+                                    next[idx] = {
+                                      ...b,
+                                      overrideOpen: { ...b.overrideOpen, [tier.id]: open },
+                                      overrides:
+                                        open && !b.overrides[tier.id]
+                                          ? {
+                                              ...b.overrides,
+                                              [tier.id]: {
+                                                unit_price:
+                                                  tier.unit_price !== null
+                                                    ? String(tier.unit_price)
+                                                    : '',
+                                                markup_percent:
+                                                  tier.markup_percent !== null
+                                                    ? String(tier.markup_percent)
+                                                    : '',
+                                              },
+                                            }
+                                          : b.overrides,
+                                    };
+                                    return next;
+                                  })
+                                }
+                              >
+                                {overrideOpen ? 'Cancel' : '✏ Adjust price'}
+                              </Button>
+                            )}
+                          </Box>
+                          {included && overrideOpen && (
+                            <Box sx={{ display: 'flex', gap: 1, ml: 4, mt: 0.5, alignItems: 'center' }}>
+                              <TextField
+                                size="small"
+                                label="Unit price"
+                                value={typed?.unit_price ?? ''}
+                                onChange={(e) => {
+                                  if (e.target.value !== '' && !/^\d*\.?\d*$/.test(e.target.value)) return;
+                                  const newPrice = e.target.value;
+                                  setPartBlocks((prev) => {
+                                    const next = [...prev];
+                                    const b = next[idx];
+                                    const tierBaseCost = tier.base_cost_per_unit ?? 0;
+                                    const priceNum = Number(newPrice);
+                                    const backMarkup =
+                                      Number.isFinite(priceNum) && tierBaseCost > 0
+                                        ? Math.round(((priceNum - tierBaseCost) / tierBaseCost) * 100 * 100) / 100
+                                        : null;
+                                    next[idx] = {
+                                      ...b,
+                                      overrides: {
+                                        ...b.overrides,
+                                        [tier.id]: {
+                                          unit_price: newPrice,
+                                          markup_percent: backMarkup !== null ? String(backMarkup) : (typed?.markup_percent ?? ''),
+                                        },
+                                      },
+                                    };
+                                    return next;
+                                  });
+                                }}
+                                sx={{ width: 130 }}
+                                inputMode="decimal"
+                              />
+                              <TextField
+                                size="small"
+                                label="Markup %"
+                                value={typed?.markup_percent ?? ''}
+                                onChange={(e) => {
+                                  if (e.target.value !== '' && !/^\d*\.?\d*$/.test(e.target.value)) return;
+                                  const newMarkup = e.target.value;
+                                  setPartBlocks((prev) => {
+                                    const next = [...prev];
+                                    const b = next[idx];
+                                    const tierBaseCost = tier.base_cost_per_unit ?? 0;
+                                    const markupNum = Number(newMarkup);
+                                    const computedPrice =
+                                      Number.isFinite(markupNum) && tierBaseCost > 0
+                                        ? Math.round(tierBaseCost * (1 + markupNum / 100) * 100) / 100
+                                        : null;
+                                    next[idx] = {
+                                      ...b,
+                                      overrides: {
+                                        ...b.overrides,
+                                        [tier.id]: {
+                                          unit_price: computedPrice !== null ? String(computedPrice) : (typed?.unit_price ?? ''),
+                                          markup_percent: newMarkup,
+                                        },
+                                      },
+                                    };
+                                    return next;
+                                  });
+                                }}
+                                sx={{ width: 110 }}
+                                inputMode="decimal"
+                              />
                             </Box>
-                          }
-                          sx={{ display: 'flex', alignItems: 'center' }}
-                        />
+                          )}
+                        </Box>
                       );
                     })}
                   </Box>

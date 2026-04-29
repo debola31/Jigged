@@ -25,8 +25,7 @@ import DialogActions from '@mui/material/DialogActions';
 import { getPartWithRelations, deletePart } from '@/utils/partsAccess';
 import type { Part } from '@/types/part';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
-import PartCostBreakdown from '@/components/parts/PartCostBreakdown';
-import PartPricingTiers from '@/components/parts/PartPricingTiers';
+import PartPricing from '@/components/parts/PartPricing';
 
 export default function PartDetailPage() {
   const params = useParams();
@@ -39,6 +38,8 @@ export default function PartDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Bumped after every routing save so cost breakdown + pricing tiers reload live.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     fetchPart();
@@ -174,16 +175,6 @@ export default function PartDetailPage() {
                     {part.description || '—'}
                   </Typography>
                 </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Category
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {part.part_category
-                      ? `${part.part_category.name}${part.part_category.default_markup_percent !== null ? ` (${part.part_category.default_markup_percent}% markup)` : ''}`
-                      : '—'}
-                  </Typography>
-                </Box>
               </Box>
             </CardContent>
           </Card>
@@ -228,12 +219,15 @@ export default function PartDetailPage() {
       </Grid>
 
       {/* Routing builder — auto-saves on every change */}
-      <PartRoutingPanel companyId={companyId} partId={partId} />
+      <PartRoutingPanel
+        companyId={companyId}
+        partId={partId}
+        onRoutingSaved={() => setRefreshKey((k) => k + 1)}
+      />
 
-      {/* Cost breakdown + pricing tiers */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 3 }}>
-        <PartCostBreakdown partId={partId} />
-        <PartPricingTiers companyId={companyId} part={part} />
+      {/* Unified pricing card — cost build-up + tier editor in one place. Reloads when routing changes. */}
+      <Box sx={{ mt: 3 }}>
+        <PartPricing companyId={companyId} part={part} refreshKey={refreshKey} />
       </Box>
 
       {/* Delete Confirmation Dialog */}

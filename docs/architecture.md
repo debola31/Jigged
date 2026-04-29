@@ -184,15 +184,15 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - customers - Customer records
 
-- parts - Part definitions with category and cost data (company-wide, no customer_id)
+- parts - Part definitions (company-wide, no customer_id)
 
-- part_categories - Part classifications with default markup percentages
+- part_pricing_tiers - Quantity break-points with markup % per tier; markup is the source of truth, unit price is derived live against the routing
 
 - operation_types - Available operations
 
 - routings, routing_nodes, routing_materials - Process definitions (1:1 with parts). `routing_nodes` is a linear, sequence-ordered list of operations; `routing_materials` is the routing-level materials list.
 
-- quotes, quote_attachments - Customer quotes (no routing_id)
+- quotes, quote_line_items, quote_attachments - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
 
 - jobs, job_operations, job_materials - Work orders (no routing_id; routing auto-resolved from part). `job_materials` snapshots `routing_materials` at job creation for consumption tracking.
 

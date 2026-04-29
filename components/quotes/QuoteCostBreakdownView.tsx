@@ -166,14 +166,8 @@ export default function QuoteCostBreakdownView({
               <TableBody>
                 {lineItems.map((li) => {
                   const setupPerUnit = li.quantity > 0 ? round2(totalSetupBatch / li.quantity) : 0;
-                  const baseFromSnapshot = li.base_cost_per_unit ?? round2(totalRunPerUnit + totalMaterialPerUnit + setupPerUnit);
-                  const computedFromMarkup =
-                    li.markup_percent != null
-                      ? round2(baseFromSnapshot * (1 + li.markup_percent / 100))
-                      : null;
-                  const hasOverride =
-                    computedFromMarkup !== null &&
-                    Math.abs(li.unit_price - computedFromMarkup) >= 0.005;
+                  const baseFromSnapshot =
+                    li.base_cost_per_unit ?? round2(totalRunPerUnit + totalMaterialPerUnit + setupPerUnit);
                   return (
                     <TableRow key={li.id}>
                       <TableCell align="right">{li.quantity}</TableCell>
@@ -184,11 +178,11 @@ export default function QuoteCostBreakdownView({
                       </TableCell>
                       <TableCell align="right">
                         {formatCurrency(li.unit_price)}
-                        {hasOverride && (
+                        {li.is_quote_override && (
                           <Chip
                             size="small"
-                            label="override"
-                            color="warning"
+                            label="✏ adjusted for this quote"
+                            color="success"
                             variant="outlined"
                             sx={{ ml: 1, height: 18 }}
                           />

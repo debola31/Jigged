@@ -39,9 +39,11 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
 }
 
 /**
- * Replace the full set of tiers for a part (upsert + delete diff by sequence).
- * Recomputes base_cost_per_unit and (when not overridden) unit_price from the
- * current routing so the stored values stay coherent.
+ * Replace the full set of tiers for a part (upsert + delete diff).
+ * Markup % is the source of truth: unit_price is always recomputed from
+ * `base_cost × (1 + markup/100)` against the current routing. There is no
+ * lock concept — typing a unit price in the UI back-calculates markup before
+ * calling this function, so the markup field captured here always governs.
  */
 export async function replaceTiersForPart(
   companyId: string,
@@ -62,11 +64,9 @@ export async function replaceTiersForPart(
   const keepIds = new Set<string>();
 
   for (const tier of tiers) {
-    const { baseCostPerUnit, unitPrice: computedUnitPrice } = breakdown
+    const { baseCostPerUnit, unitPrice } = breakdown
       ? calculateTierPricing(breakdown, tier.quantity, tier.markup_percent)
       : { baseCostPerUnit: 0, unitPrice: null };
-
-    const finalUnitPrice = tier.is_price_override ? tier.unit_price : computedUnitPrice;
 
     if (tier.id) {
       keepIds.add(tier.id);
@@ -77,8 +77,7 @@ export async function replaceTiersForPart(
           quantity: tier.quantity,
           base_cost_per_unit: baseCostPerUnit,
           markup_percent: tier.markup_percent,
-          unit_price: finalUnitPrice,
-          is_price_override: tier.is_price_override,
+          unit_price: unitPrice,
         })
         .eq('id', tier.id);
       if (error) throw error;
@@ -92,8 +91,7 @@ export async function replaceTiersForPart(
           quantity: tier.quantity,
           base_cost_per_unit: baseCostPerUnit,
           markup_percent: tier.markup_percent,
-          unit_price: finalUnitPrice,
-          is_price_override: tier.is_price_override,
+          unit_price: unitPrice,
         })
         .select('id')
         .single();
@@ -115,36 +113,26 @@ export async function replaceTiersForPart(
 }
 
 /**
- * Recalculate base_cost_per_unit for every tier on a part from the current
- * routing. When a tier is not price-overridden, also refresh unit_price from
- * the computed markup. Overridden tiers keep their unit_price.
+ * Copy pricing tiers from one part to another. Source qty + markup are copied
+ * verbatim; unit_price and base_cost_per_unit are recomputed against the
+ * target part's own routing so the prices reflect target-part economics.
  */
-export async function recalculateTiers(partId: string): Promise<PartPricingTier[]> {
-  const supabase = getSupabase();
-  const tiers = await getTiersForPart(partId);
-  if (tiers.length === 0) return [];
+export async function copyTiersFromPart(
+  companyId: string,
+  sourcePartId: string,
+  targetPartId: string,
+): Promise<PartPricingTier[]> {
+  const sourceTiers = await getTiersForPart(sourcePartId);
+  if (sourceTiers.length === 0) return getTiersForPart(targetPartId);
 
-  const breakdown = await calculateRoutingCost(partId);
-  if (!breakdown) return tiers;
+  // Existing target tiers are replaced — copy semantics, not merge.
+  const inputs: PartPricingTierInput[] = sourceTiers.map((t, i) => ({
+    sequence: (i + 1) * 10,
+    quantity: t.quantity,
+    markup_percent: t.markup_percent,
+  }));
 
-  for (const tier of tiers) {
-    const { baseCostPerUnit, unitPrice } = calculateTierPricing(
-      breakdown,
-      tier.quantity,
-      tier.markup_percent,
-    );
-    const update: Record<string, number | null> = { base_cost_per_unit: baseCostPerUnit };
-    if (!tier.is_price_override) {
-      update.unit_price = unitPrice;
-    }
-    const { error } = await supabase
-      .from('part_pricing_tiers')
-      .update(update)
-      .eq('id', tier.id);
-    if (error) throw error;
-  }
-
-  return getTiersForPart(partId);
+  return replaceTiersForPart(companyId, targetPartId, inputs);
 }
 
 /**

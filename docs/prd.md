@@ -52,9 +52,9 @@ Success looks like:
 | Routing | A workflow diagram defining how a part is manufactured. Each part has exactly one routing (1:1). Managed from the part detail page. |
 | Operation | A single step in a routing (e.g., CNC Turning). |
 | Operation Type | A category of operation (e.g., Machining, QC). |
-| Part | A company-wide product with part name and optional category. Cost derived from routing when one exists. Not tied to a specific customer. |
-| Part Category | A classification for parts (e.g., "Precision Machined", "Tooling") that carries a default markup percentage for quoting. |
-| Quote | A cost-plus price estimate. Base cost + markup = quoted price. Approved quotes become jobs. |
+| Part | A company-wide product with name and description. Cost derived from routing when one exists. Not tied to a specific customer. |
+| Pricing Tier | A quantity break-point on a part with its own markup % (e.g., "Qty 4 @ 25%"). Unit price is derived live as `base_cost × (1 + markup/100)`. |
+| Quote | A cost-plus price estimate. Multi-part, multi-tier; line items snapshot selected pricing tiers (with optional per-quote overrides). Convert produces one job per (part, selected tier). |
 
 ### 2. Users and Use Cases
 
@@ -260,9 +260,9 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 
-- **Part**: id, company_id, part_name, description, category_id, notes, created_at, updated_at (company-wide entity, no customer_id. Pricing is cost-plus: base cost auto-populated from routing when available, markup from category default with per-quote override.)
+- **Part**: id, company_id, part_name, description, created_at, updated_at (company-wide entity, no customer_id). Pricing is cost-plus and lives on `part_pricing_tiers`: each tier carries its own quantity + markup %; unit price is derived live as `base_cost × (1 + markup/100)` against the routing. Quotes snapshot tiers as immutable `quote_line_items` and may carry per-quote price overrides.
 
-- **Part Category**: id, company_id, name, default_markup_percent, description, created_at, updated_at
+- **Part Pricing Tier**: id, part_id, company_id, sequence, quantity, base_cost_per_unit, markup_percent, unit_price, created_at, updated_at. Markup % is the source of truth; typing a unit price back-calculates markup. No per-tier "lock" — for stable customer prices, override at the quote line item.
 
 - job: id, customer_id, part_id, created_by, status, estimated_price, actual_price, priority, due_date, created_at, updated_at (routing auto-resolved from part)
 
@@ -286,9 +286,13 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - Part → Routing (one-to-one; each part has exactly one routing)
 
-- Part → Part Category (many-to-one; optional category for markup defaults)
+- Part → Part Pricing Tier (one-to-many; quantity break-points with markup % per tier)
 
 - Part → Company (many-to-one; parts are company-wide, not customer-specific)
+
+- Quote → Quote Line Item (one-to-many; immutable snapshots of selected pricing tiers)
+
+- Quote Line Item → Job (one-to-one on conversion via `jobs.source_quote_line_item_id`)
 
 - job → Customer (many-to-one)
 

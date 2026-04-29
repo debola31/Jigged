@@ -192,35 +192,22 @@ total_routing_cost = total_labor_cost + total_material_cost
 
 ### Integration with Parts
 
-When a routing exists for a part:
-- The part's `cost_source` is set to `'routing'`
-- The part's effective base cost = `total_routing_cost` (calculated on demand from the routing, not stored redundantly on the parts table)
-- The part's `manual_cost` field is ignored in favor of the routing calculation
+The routing drives the live `Cost Breakdown` card on the part detail page (`calculateRoutingCost(partId)` recomputes on every load and after every routing auto-save). Each `part_pricing_tier` derives its `base_cost_per_unit` and `unit_price` from this calculation; routing edits propagate to all tiers automatically — no Recalculate button.
 
 ### Integration with Quotes
 
-When creating a quote for a part with a routing:
-1. Fetch the routing, its operations, and its materials
-2. For each operation, join to `operation_types` for `labor_rate`
-3. For each routing material, join to `inventory_items` for `cost_per_unit`
-4. Calculate `total_labor_cost` and `total_material_cost`
-5. Set `quote.base_cost = total_routing_cost`
-6. Set `quote.estimated_labor_cost = total_labor_cost`
-7. Set `quote.estimated_material_cost = total_material_cost`
-8. Set `quote.cost_source = 'routing'`
-9. Pre-fill `quote.markup_percent` from part's category `default_markup_percent`
-
-These values are **snapshots** — frozen at quote creation time. See [Quotes Module — Snapshot Behavior](quotes.md#data-model).
+Quotes reference parts via `quote_line_items.part_id`. At `createQuote`, per-part cost snapshots (`quote_operations`, `quote_materials`) are written once per distinct part on the quote so the breakdown survives later routing edits. The quote line item itself snapshots `quantity`, `unit_price`, `markup_percent`, and `base_cost_per_unit` from the selected pricing tier (or the salesperson's per-quote override). See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items-quote_line_items).
 
 ### Edge Cases
 
 | Scenario | Behavior |
 |---|---|
-| Operation has no `run_time_per_unit` | Skip labor for that operation. Show "Missing run time" warning on cost breakdown. |
-| Operation type has no `labor_rate` | Skip labor for that operation. Show "Missing labor rate for {operation_name}" warning. |
-| Routing has no materials defined | $0 material cost. Normal — no warning needed. |
-| Material has no `cost_per_unit` in inventory | Skip that material's cost. Show "Missing cost for {material_name}" warning. |
-| Routing has 0 operations | Cost = $0. Show "Routing has no operations" warning on quote form. |
-| Any warnings present | Quote form shows banner: "Cost may be incomplete — {N} items missing data" with expandable details listing each warning. |
+| Operation has no `run_time_per_unit` and no `setup_time` | Skip — show `empty_operation` warning on cost breakdown. |
+| Operation has setup but no run time (e.g. Engineering) | First-class — `run_cost = 0`, `setup_cost > 0`. Setup amortizes across tier quantity. |
+| Operation type has no `labor_rate` | Skip — show `missing_labor_rate` warning for that operation. |
+| Routing has no materials defined | $0 material cost. Normal — no warning. |
+| Material has no `cost_per_unit` in inventory | Skip that material's cost. `missing_material_cost` warning. |
+| Routing has 0 operations | Cost = $0. `no_operations` warning. |
+| Any warnings present | Surfaced inline at the top of `PartCostBreakdown`. |
 
 Warnings are informational — they do **not** block quote creation. The user can proceed with incomplete cost data and enter a manual override.

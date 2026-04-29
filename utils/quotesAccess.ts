@@ -73,25 +73,24 @@ function hydrateCreators<T extends QuoteWithRelations>(
 
 // ============== CRUD Operations ==============
 
+const QUOTE_LINE_ITEM_FIELDS = `
+  id, quote_id, company_id, part_id, source_tier_id, sequence,
+  quantity, unit_price, total_price, markup_percent, base_cost_per_unit,
+  is_quote_override, created_at,
+  parts(id, part_name, description)
+`;
+
 const QUOTE_LIST_SELECT = `
   *,
   customers!left(id, name),
-  line_items:quote_line_items!left(
-    id, quote_id, company_id, part_id, source_tier_id, sequence,
-    quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at,
-    parts(id, part_name, description, category_id, part_categories(id, name, default_markup_percent))
-  ),
+  line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
   jobs!left(id, job_number, status, source_quote_line_item_id)
 `;
 
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(id, name, website, contact_name, contact_phone, contact_email, address_line1, address_line2, city, state, postal_code, country),
-  line_items:quote_line_items!left(
-    id, quote_id, company_id, part_id, source_tier_id, sequence,
-    quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at,
-    parts(id, part_name, description, category_id, part_categories(id, name, default_markup_percent))
-  ),
+  line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
   jobs!left(id, job_number, status, source_quote_line_item_id),
   quote_attachments(*)
 `;
@@ -364,7 +363,8 @@ export async function createQuote(
       if (tier.part_id !== block.part_id) {
         throw new Error(`Pricing tier ${tierId} does not belong to part ${block.part_id}.`);
       }
-      await insertLineItemFromTier(quote.id, companyId, tier, sequence);
+      const override = block.overrides?.[tierId];
+      await insertLineItemFromTier(quote.id, companyId, tier, sequence, override);
       sequence += 10;
     }
 

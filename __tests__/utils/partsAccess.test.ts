@@ -178,13 +178,24 @@ describe('partsAccess utilities', () => {
               }),
             }),
           };
-        } else if (table === 'quotes') {
+        } else if (table === 'quote_line_items') {
+          // After the categories refactor, we count distinct quote_ids by walking
+          // line items rather than reading parts.quote_id (which no longer exists).
+          // Five distinct quote_ids → quotes_count = 5.
           return {
             ...mockQueryBuilder,
             select: vi.fn().mockReturnValue({
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
-                count: 5,
+                data: [
+                  { quote_id: 'q-1' },
+                  { quote_id: 'q-2' },
+                  { quote_id: 'q-3' },
+                  { quote_id: 'q-4' },
+                  { quote_id: 'q-5' },
+                  // dup of q-1 — should still be counted once
+                  { quote_id: 'q-1' },
+                ],
                 error: null,
               }),
             }),

@@ -20,7 +20,9 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import PercentIcon from '@mui/icons-material/Percent';
-import Radio from '@mui/material/Radio';
+import StarIcon from '@mui/icons-material/Star';
+import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 
@@ -48,6 +50,57 @@ import {
   bulkDeleteMarkupRates,
   updateMarkupRate,
 } from '@/utils/markupRatesAccess';
+
+// Custom selection-column cell. The default rate is non-selectable, so its
+// checkbox slot is empty — we reuse that space for a "Default" chip so the
+// signal sits in the leftmost column where the eye lands first. Other rows
+// render a manual checkbox synced to AG Grid's selection state (subscribing
+// to `rowSelected` so header "select all" stays in sync).
+function SelectionCellRenderer(params: ICellRendererParams<MarkupRate>) {
+  const { node } = params;
+  const isDefault = node.rowPinned === 'top' || !!node.data?.is_default;
+  const [selected, setSelected] = useState(node.isSelected() ?? false);
+
+  useEffect(() => {
+    if (isDefault) return;
+    const handler = () => setSelected(node.isSelected() ?? false);
+    node.addEventListener('rowSelected', handler);
+    return () => node.removeEventListener('rowSelected', handler);
+  }, [node, isDefault]);
+
+  if (isDefault) {
+    return (
+      <Box
+        data-selection-cell="true"
+        sx={{ display: 'flex', alignItems: 'center', height: '100%' }}
+      >
+        <Tooltip title="Applied to new parts by default">
+          <Chip
+            icon={<StarIcon sx={{ fontSize: 14 }} />}
+            label="Default"
+            size="small"
+            color="primary"
+            sx={{ height: 22, fontSize: 11, fontWeight: 600 }}
+          />
+        </Tooltip>
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      data-selection-cell="true"
+      sx={{ display: 'flex', alignItems: 'center', height: '100%' }}
+    >
+      <Checkbox
+        size="small"
+        checked={selected}
+        onChange={(e) => node.setSelected(e.target.checked)}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </Box>
+  );
+}
 
 export default function MarkupRatesListPage() {
   const params = useParams();
@@ -130,9 +183,9 @@ export default function MarkupRatesListPage() {
   }, []);
 
   const gridHeight = useMemo(() => {
-    if (loading) return 600;
+    if (loading) return 240;
     const totalRows = filteredRates.length + (defaultRate ? 1 : 0);
-    if (totalRows === 0) return 600;
+    if (totalRows === 0) return 240;
     // Sum actual variable row heights so the grid frame matches the
     // variable-height cells coming from the breakpoints renderer.
     const heights: number[] = [];
@@ -141,7 +194,8 @@ export default function MarkupRatesListPage() {
       heights.push(computeRowHeightForRate(r));
     }
     const displayedHeight = heights.reduce((s, h) => s + h, 0);
-    return Math.max(56 + displayedHeight + 56, 400);
+    // 56px header + content + 56px pagination footer.
+    return 56 + displayedHeight + 56;
   }, [loading, filteredRates, defaultRate]);
 
   // Click handler for the Default-column radio. Stops propagation so the
@@ -185,12 +239,12 @@ export default function MarkupRatesListPage() {
 
   const handleRowClicked = (event: RowClickedEvent<MarkupRate>) => {
     if (!event.data || !event.event) return;
-    // Don't navigate when the click was on the selection checkbox or on
-    // the Default-column radio (radio handles its own onClick + stopPropagation
-    // but we also guard here in case the click lands on the surrounding cell).
+    // Don't navigate when the click was on the selection checkbox/chip cell —
+    // that cell handles its own state and the chip on the default row is
+    // non-interactive.
     const target = event.event.target as HTMLElement;
     if (target.closest('.ag-checkbox-input-wrapper')) return;
-    if (target.closest('[data-default-radio="true"]')) return;
+    if (target.closest('[data-selection-cell="true"]')) return;
     router.push(`/dashboard/${companyId}/markup-rates/${event.data.id}/edit`);
   };
 
@@ -309,58 +363,6 @@ export default function MarkupRatesListPage() {
         );
       },
     },
-    {
-      colId: 'default',
-      headerName: 'Default',
-      width: 100,
-      pinned: 'right' as const,
-      sortable: false,
-      filter: false,
-      resizable: false,
-      // Settings-style indicator: a clickable radio in its own column. The
-      // pinned (top) row IS the default, but we read is_default off the data
-      // so a non-pinned default would still display correctly.
-      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
-        const rate = params.node.data;
-        if (!rate) return null;
-        const isDefault = !!rate.is_default;
-        const tooltip = isDefault ? 'Current default' : 'Set as default rate';
-        return (
-          <Box
-            data-default-radio="true"
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-            }}
-          >
-            <Tooltip title={tooltip}>
-              {/* span wrapper lets the tooltip work even when the radio is
-                  disabled (current default has no action). */}
-              <span>
-                <Radio
-                  checked={isDefault}
-                  disabled={isDefault || promotingRateId === rate.id}
-                  size="small"
-                  inputProps={{ 'aria-label': tooltip }}
-                  onClick={(e) => {
-                    // Critical: prevent the AG Grid row-click handler from
-                    // navigating to the edit page. We also tag the wrapper
-                    // with data-default-radio so onRowClicked has a second
-                    // line of defense.
-                    e.stopPropagation();
-                    if (!isDefault) {
-                      void handleSetDefault(rate);
-                    }
-                  }}
-                />
-              </span>
-            </Tooltip>
-          </Box>
-        );
-      },
-    },
   ];
 
   return (
@@ -382,6 +384,21 @@ export default function MarkupRatesListPage() {
             },
           }}
         />
+
+        {selectedIds.length === 1 && (() => {
+          const sel = rates.find((r) => r.id === selectedIds[0]);
+          if (!sel || sel.is_default) return null;
+          return (
+            <Button
+              variant="outlined"
+              startIcon={<StarIcon />}
+              onClick={() => void handleSetDefault(sel)}
+              disabled={!!promotingRateId}
+            >
+              Set as default
+            </Button>
+          );
+        })()}
 
         {selectedIds.length > 0 && (
           <>
@@ -458,12 +475,11 @@ export default function MarkupRatesListPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card elevation={2} sx={{ position: 'relative', minHeight: 600 }}>
+        <Card elevation={2} sx={{ position: 'relative' }}>
           <Box
             sx={{
               width: '100%',
               height: gridHeight,
-              minHeight: 500,
               '& .ag-root-wrapper': { border: 'none' },
               '& .ag-row': { cursor: 'pointer' },
               '& .ag-cell:focus, & .ag-header-cell:focus': {
@@ -481,10 +497,18 @@ export default function MarkupRatesListPage() {
               columnDefs={columnDefs}
               theme={jiggedAgGridTheme}
               defaultColDef={{ sortable: true, resizable: true }}
-              selectionColumnDef={{ pinned: 'left' }}
+              selectionColumnDef={{
+                pinned: 'left',
+                width: 96,
+                cellStyle: { display: 'flex', alignItems: 'center' },
+                cellRenderer: SelectionCellRenderer,
+              }}
               rowSelection={{
                 mode: 'multiRow',
-                checkboxes: true,
+                // We render the checkbox / Default chip ourselves in the
+                // selection cell — leaving AG Grid's built-in checkbox on
+                // would double up.
+                checkboxes: false,
                 headerCheckbox: true,
                 enableClickSelection: false,
                 selectAll: 'all',

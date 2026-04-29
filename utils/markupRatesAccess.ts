@@ -8,11 +8,9 @@ import type { PartPricingTierInput } from '@/types/partPricing';
 import { replaceTiersForPart } from '@/utils/partPricingTiersAccess';
 
 /**
- * Fetch all markup rates for a company. Sorted by name ascending.
- *
- * Built-in rates are NOT included — callers that need them mixed with DB rates
- * should concatenate `BUILT_IN_MARKUP_RATES` themselves so it's explicit at
- * the call site.
+ * Fetch all markup rates for a company, sorted by name ascending. The
+ * company's seeded "Default" / "Volume tiers" / "Premium small batch" rates
+ * are real DB rows so they're included like any other.
  */
 export async function getAllMarkupRates(companyId: string): Promise<MarkupRate[]> {
   const supabase = getSupabase();
@@ -63,7 +61,6 @@ export async function createMarkupRate(
   const payload = {
     company_id: companyId,
     name: formData.name.trim(),
-    description: formData.description.trim() || null,
     breakpoints: normalizeBreakpoints(formData.breakpoints),
     is_default: formData.is_default,
   };
@@ -105,7 +102,6 @@ export async function updateMarkupRate(
 
   const payload = {
     name: formData.name.trim(),
-    description: formData.description.trim() || null,
     breakpoints: normalizeBreakpoints(formData.breakpoints),
     is_default: formData.is_default,
   };

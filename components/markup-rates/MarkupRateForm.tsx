@@ -22,8 +22,6 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Switch from '@mui/material/Switch';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -81,9 +79,7 @@ export default function MarkupRateForm({
   const seed = initialData ?? EMPTY_MARKUP_RATE_FORM;
 
   const [name, setName] = useState(seed.name);
-  const [description, setDescription] = useState(seed.description);
   const [rows, setRows] = useState<RowDraft[]>(toRowDrafts(seed));
-  const [isDefault, setIsDefault] = useState(seed.is_default);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,10 +87,9 @@ export default function MarkupRateForm({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // True when this row is the company's current default. Drives copy in the
-  // toggle helper text and prevents the user from accidentally clearing it
-  // without realizing what they're giving up.
-  const wasDefaultOnLoad = mode === 'edit' && initialData?.is_default === true;
+  // is_default is set/changed only via the radio in the list page — this form
+  // preserves the existing value (or defaults to false when creating).
+  const preservedIsDefault = seed.is_default;
 
   const updateRow = (idx: number, patch: Partial<RowDraft>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -165,9 +160,8 @@ export default function MarkupRateForm({
 
       const formData: MarkupRateFormData = {
         name: trimmedName,
-        description: description.trim(),
         breakpoints,
-        is_default: isDefault,
+        is_default: preservedIsDefault,
       };
 
       if (mode === 'create') {
@@ -230,18 +224,6 @@ export default function MarkupRateForm({
             required
             disabled={saving}
             slotProps={{ htmlInput: { maxLength: 100 } }}
-          />
-
-          <TextField
-            label="Description"
-            placeholder="Optional — what is this rate for?"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            fullWidth
-            multiline
-            rows={2}
-            disabled={saving}
-            slotProps={{ htmlInput: { maxLength: 500 } }}
           />
 
           <Box>
@@ -322,32 +304,6 @@ export default function MarkupRateForm({
                 Add breakpoint
               </Button>
             </Box>
-          </Box>
-
-          {/* Set-as-default toggle. Promoting demotes the previous default
-              atomically (handled in the access layer). Demoting (the user
-              turning this off when it was on) leaves the company with no
-              default — the list page surfaces that state separately. */}
-          <Box>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={isDefault}
-                  onChange={(_, checked) => setIsDefault(checked)}
-                  disabled={saving}
-                />
-              }
-              label="Set as default rate"
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 6 }}>
-              {isDefault && wasDefaultOnLoad
-                ? 'This rate is currently your default — auto-applied to new parts on creation.'
-                : isDefault
-                  ? 'Saving will make this the default and demote whichever rate is the default today.'
-                  : wasDefaultOnLoad
-                    ? 'Turning this off leaves no default rate. New parts will start without pricing tiers.'
-                    : 'When set, this rate is auto-applied to new parts on creation.'}
-            </Typography>
           </Box>
 
           <Divider />

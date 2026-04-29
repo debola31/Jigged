@@ -7,8 +7,7 @@
 --     project_markup_rates_decision.md for the snapshot-vs-subscription rationale.)
 --   * is_default boolean — exactly one rate per company can be the default
 --     (enforced by a partial unique index). The default is auto-applied to new
---     parts on creation (TS-side, in createPart). Replaces the earlier
---     "name === 'Default' is locked" approach. Names are now free-form.
+--     parts on creation (TS-side, in createPart). Names are free-form.
 --   * Three rates seeded per company on creation: "Default" (is_default=true),
 --     "Volume tiers", "Premium small batch". Seeded both for existing companies
 --     in this migration and for new companies via an AFTER INSERT trigger.
@@ -22,7 +21,6 @@ CREATE TABLE IF NOT EXISTS public.markup_rates (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id    uuid NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   name          text NOT NULL,
-  description   text,
   -- breakpoints: jsonb array of {qty: int, markup_percent: number}, sorted by qty asc.
   -- Atomic per rate (never queried independently of parent), so JSONB is the right shape.
   breakpoints   jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -32,10 +30,10 @@ CREATE TABLE IF NOT EXISTS public.markup_rates (
   CONSTRAINT markup_rates_name_unique_per_company UNIQUE (company_id, name)
 );
 
--- Add is_default to pre-existing tables (idempotent for re-runs of this migration
--- where the table was created by an earlier draft without the column).
-ALTER TABLE public.markup_rates
-  ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
+-- Drop the description column if a previous draft of this migration created
+-- it. We never used the value in the UI, so it's pure dead weight. Idempotent
+-- for fresh databases (column doesn't exist; IF EXISTS makes this a no-op).
+ALTER TABLE public.markup_rates DROP COLUMN IF EXISTS description;
 
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON markup_rates (company_id);
 
@@ -97,54 +95,17 @@ COMMENT ON COLUMN public.markup_rates.breakpoints IS
 
 
 -- ============================================================
--- One-time rename: an earlier draft of this migration seeded the
--- default rate as "Standard". Bring any pre-existing rows in line
--- with the new "Default" name. Skips a row whose company already
--- has a "Default" so we don't violate the unique constraint.
--- ============================================================
-
-UPDATE public.markup_rates AS mr
-   SET name = 'Default'
- WHERE mr.name = 'Standard'
-   AND NOT EXISTS (
-     SELECT 1 FROM public.markup_rates mr2
-      WHERE mr2.company_id = mr.company_id
-        AND mr2.name = 'Default'
-   );
-
-
--- ============================================================
--- One-time backfill: any rate whose name is 'Default' becomes
--- the company's default rate (is_default = true). Earlier drafts
--- of this migration shipped without the is_default column, so
--- existing rows need their flag set. Only updates if no other
--- rate in the same company already has is_default=true.
--- ============================================================
-
-UPDATE public.markup_rates AS mr
-   SET is_default = true
- WHERE mr.name = 'Default'
-   AND mr.is_default = false
-   AND NOT EXISTS (
-     SELECT 1 FROM public.markup_rates mr2
-      WHERE mr2.company_id = mr.company_id
-        AND mr2.is_default = true
-   );
-
-
--- ============================================================
 -- Seed defaults: per-company "Default", "Volume tiers", and
 -- "Premium small batch". Inserted only when the same name doesn't
 -- already exist for the company so the migration is re-runnable
--- and respects manual deletions. The "Default" seed is also marked
--- is_default=true (provided no other default exists for that
--- company, so we don't violate the partial unique index).
+-- and respects manual deletions. The "Default" seed is marked
+-- is_default=true unless the company already has another default
+-- (guards against violating the partial unique index).
 -- ============================================================
 
-INSERT INTO public.markup_rates (company_id, name, description, breakpoints, is_default)
+INSERT INTO public.markup_rates (company_id, name, breakpoints, is_default)
 SELECT c.id,
        'Default',
-       '25% markup on every quantity. The fallback starting point.',
        '[{"qty": 1, "markup_percent": 25}]'::jsonb,
        NOT EXISTS (
          SELECT 1 FROM public.markup_rates mr
@@ -156,10 +117,9 @@ SELECT c.id,
     WHERE mr.company_id = c.id AND mr.name = 'Default'
  );
 
-INSERT INTO public.markup_rates (company_id, name, description, breakpoints)
+INSERT INTO public.markup_rates (company_id, name, breakpoints)
 SELECT c.id,
        'Volume tiers',
-       'Tapered markup that rewards bigger orders.',
        '[{"qty": 1, "markup_percent": 25},
          {"qty": 10, "markup_percent": 22},
          {"qty": 100, "markup_percent": 18},
@@ -170,10 +130,9 @@ SELECT c.id,
     WHERE mr.company_id = c.id AND mr.name = 'Volume tiers'
  );
 
-INSERT INTO public.markup_rates (company_id, name, description, breakpoints)
+INSERT INTO public.markup_rates (company_id, name, breakpoints)
 SELECT c.id,
        'Premium small batch',
-       'Higher margin for low-volume / specialty work.',
        '[{"qty": 1, "markup_percent": 40},
          {"qty": 10, "markup_percent": 32}]'::jsonb
   FROM public.companies c
@@ -192,15 +151,13 @@ SELECT c.id,
 
 CREATE OR REPLACE FUNCTION public.seed_default_markup_rates() RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.markup_rates (company_id, name, description, breakpoints, is_default) VALUES
+  INSERT INTO public.markup_rates (company_id, name, breakpoints, is_default) VALUES
     (NEW.id,
      'Default',
-     '25% markup on every quantity. The fallback starting point.',
      '[{"qty": 1, "markup_percent": 25}]'::jsonb,
      true),
     (NEW.id,
      'Volume tiers',
-     'Tapered markup that rewards bigger orders.',
      '[{"qty": 1, "markup_percent": 25},
        {"qty": 10, "markup_percent": 22},
        {"qty": 100, "markup_percent": 18},
@@ -208,7 +165,6 @@ BEGIN
      false),
     (NEW.id,
      'Premium small batch',
-     'Higher margin for low-volume / specialty work.',
      '[{"qty": 1, "markup_percent": 40},
        {"qty": 10, "markup_percent": 32}]'::jsonb,
      false);

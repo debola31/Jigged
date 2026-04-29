@@ -114,11 +114,7 @@ export default function MarkupRatesListPage() {
     const others = rates.filter((r) => !r.is_default);
     const q = searchDebounced.trim().toLowerCase();
     if (!q) return others;
-    return others.filter(
-      (r) =>
-        r.name.toLowerCase().includes(q) ||
-        (r.description ?? '').toLowerCase().includes(q),
-    );
+    return others.filter((r) => r.name.toLowerCase().includes(q));
   }, [rates, searchDebounced]);
 
   // Row height grows with the number of breakpoints so the vertical
@@ -234,14 +230,90 @@ export default function MarkupRatesListPage() {
     }
   };
 
-  const formatDate = (s: string): string => new Date(s).toLocaleDateString();
-
   const columnDefs: ColDef<MarkupRate>[] = [
+    {
+      field: 'name',
+      headerName: 'Name',
+      width: 240,
+      pinned: 'left' as const,
+      // Match the breakpoints column — vertically center the name in the
+      // (variable-height) row so single-breakpoint rates don't render a
+      // top-aligned name floating above whitespace.
+      cellStyle: { display: 'flex', alignItems: 'center' },
+    },
+    {
+      colId: 'breakpoints',
+      headerName: 'Breakpoints',
+      flex: 1,
+      minWidth: 280,
+      sortable: false,
+      // cellStyle applies to the `.ag-cell` itself — that's the element AG
+      // Grid sizes to the row height, so flex-centering here is the only
+      // reliable way to vertically center variable-line cell content.
+      // (Wrapping the cellRenderer output in a `height: 100%` Box doesn't
+      // work because `.ag-cell-value` between them doesn't propagate height.)
+      cellStyle: { display: 'flex', alignItems: 'center' },
+      // Vertical mini key-value list — easier to scan than a comma-separated
+      // string when there are 3-4 breakpoints. Monospaced so qty/markup line
+      // up across rows.
+      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
+        const rate = params.node.data;
+        if (!rate || rate.breakpoints.length === 0) {
+          return (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              —
+            </Typography>
+          );
+        }
+        const sorted = [...rate.breakpoints].sort((a, b) => a.qty - b.qty);
+        return (
+          <Stack
+            spacing={0}
+            sx={{
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            }}
+          >
+            {sorted.map((bp, i) => (
+              <Box
+                key={i}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 1.5,
+                  lineHeight: '16px',
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontFamily: 'inherit',
+                    color: 'text.secondary',
+                    minWidth: 56,
+                  }}
+                >
+                  qty {bp.qty}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontFamily: 'inherit',
+                    color: 'text.primary',
+                    fontWeight: 500,
+                  }}
+                >
+                  {bp.markup_percent}%
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+        );
+      },
+    },
     {
       colId: 'default',
       headerName: 'Default',
-      width: 80,
-      pinned: 'left' as const,
+      width: 100,
+      pinned: 'right' as const,
       sortable: false,
       filter: false,
       resizable: false,
@@ -288,81 +360,6 @@ export default function MarkupRatesListPage() {
           </Box>
         );
       },
-    },
-    {
-      field: 'name',
-      headerName: 'Name',
-      width: 240,
-      pinned: 'left' as const,
-    },
-    {
-      colId: 'breakpoints',
-      headerName: 'Breakpoints',
-      flex: 1,
-      minWidth: 280,
-      sortable: false,
-      // Vertical mini key-value list — easier to scan than a comma-separated
-      // string when there are 3-4 breakpoints. Monospaced so qty/markup line
-      // up across rows.
-      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
-        const rate = params.node.data;
-        if (!rate || rate.breakpoints.length === 0) {
-          return (
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              —
-            </Typography>
-          );
-        }
-        const sorted = [...rate.breakpoints].sort((a, b) => a.qty - b.qty);
-        return (
-          <Stack
-            spacing={0}
-            sx={{
-              py: 0.5,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-            }}
-          >
-            {sorted.map((bp, i) => (
-              <Box
-                key={i}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 1.5,
-                  lineHeight: '16px',
-                }}
-              >
-                <Typography
-                  variant="caption"
-                  sx={{
-                    fontFamily: 'inherit',
-                    color: 'text.secondary',
-                    minWidth: 56,
-                  }}
-                >
-                  qty {bp.qty}
-                </Typography>
-                <Typography
-                  variant="caption"
-                  sx={{
-                    fontFamily: 'inherit',
-                    color: 'text.primary',
-                    fontWeight: 500,
-                  }}
-                >
-                  {bp.markup_percent}%
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-        );
-      },
-    },
-    {
-      field: 'updated_at',
-      headerName: 'Last updated',
-      width: 160,
-      valueFormatter: (params) => (params.value ? formatDate(params.value) : '—'),
     },
   ];
 

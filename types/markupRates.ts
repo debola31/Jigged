@@ -6,9 +6,9 @@
  * parts that previously had it applied. See project_markup_rates_decision.md
  * for the rationale.
  *
- * Three default rates ("Standard", "Volume tiers", "Premium small batch") are
- * seeded per company by the migration / company-creation trigger — they're
- * regular DB rows from the moment they exist, fully editable by the user.
+ * Three rates seeded per company by the migration / company-creation trigger:
+ * "Default" (is_default=true), "Volume tiers", "Premium small batch". Once
+ * seeded they're regular DB rows the user can rename, edit, or delete.
  */
 export interface MarkupRateBreakpoint {
   qty: number;
@@ -19,7 +19,6 @@ export interface MarkupRate {
   id: string;
   company_id: string;
   name: string;
-  description: string | null;
   breakpoints: MarkupRateBreakpoint[];
   /**
    * Exactly one rate per company has is_default=true. The default rate is
@@ -33,14 +32,12 @@ export interface MarkupRate {
 
 export interface MarkupRateFormData {
   name: string;
-  description: string;
   breakpoints: MarkupRateBreakpoint[];
   is_default: boolean;
 }
 
 export const EMPTY_MARKUP_RATE_FORM: MarkupRateFormData = {
   name: '',
-  description: '',
   breakpoints: [{ qty: 1, markup_percent: 25 }],
   is_default: false,
 };
@@ -48,7 +45,6 @@ export const EMPTY_MARKUP_RATE_FORM: MarkupRateFormData = {
 export function markupRateToFormData(rate: MarkupRate): MarkupRateFormData {
   return {
     name: rate.name,
-    description: rate.description ?? '',
     breakpoints: rate.breakpoints.map((bp) => ({ ...bp })),
     is_default: rate.is_default,
   };

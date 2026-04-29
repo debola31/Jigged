@@ -16,6 +16,7 @@ import CategoryIcon from '@mui/icons-material/Category';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import BuildIcon from '@mui/icons-material/Build';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
+import PercentIcon from '@mui/icons-material/Percent';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
 import FeedbackIcon from '@mui/icons-material/Feedback';
@@ -36,6 +37,7 @@ const menuItems: MenuItem[] = [
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
+  { name: 'Markup Rates', path: '/markup-rates', icon: PercentIcon },
   { name: 'Operations', path: '/operations', icon: BuildIcon },
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },

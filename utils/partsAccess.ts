@@ -315,6 +315,16 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     throw error;
   }
 
+  // Auto-apply the company's default markup rate so the new part has a
+  // starting pricing tier without the user having to pick one manually.
+  // Failures are non-fatal — the part is created either way.
+  try {
+    const { applyDefaultRateToPart } = await import('@/utils/markupRatesAccess');
+    await applyDefaultRateToPart(companyId, data.id);
+  } catch (autoApplyErr) {
+    console.warn('Default markup rate auto-apply failed for new part:', autoApplyErr);
+  }
+
   return data;
 }
 

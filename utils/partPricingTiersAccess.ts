@@ -61,7 +61,23 @@ export async function replaceTiersForPart(
     .eq('part_id', partId);
   if (existingErr) throw existingErr;
   const existingIds = new Set(((existing || []) as Array<{ id: string }>).map((r) => r.id));
-  const keepIds = new Set<string>();
+
+  // Delete the "no longer present" rows BEFORE the insert/update pass. This
+  // frees up the (part_id, sequence) unique-constraint slots so a caller that
+  // passes a fresh set of inputs without ids (e.g., applying a markup rate
+  // that replaces all current tiers) doesn't 409 against the rows it's about
+  // to obsolete.
+  const keepIds = new Set(
+    tiers.map((t) => t.id).filter((id): id is string => Boolean(id)),
+  );
+  const toDelete = [...existingIds].filter((id) => !keepIds.has(id));
+  if (toDelete.length > 0) {
+    const { error } = await supabase
+      .from('part_pricing_tiers')
+      .delete()
+      .in('id', toDelete);
+    if (error) throw error;
+  }
 
   for (const tier of tiers) {
     const { baseCostPerUnit, unitPrice } = breakdown
@@ -69,7 +85,6 @@ export async function replaceTiersForPart(
       : { baseCostPerUnit: 0, unitPrice: null };
 
     if (tier.id) {
-      keepIds.add(tier.id);
       const { error } = await supabase
         .from('part_pricing_tiers')
         .update({
@@ -82,7 +97,7 @@ export async function replaceTiersForPart(
         .eq('id', tier.id);
       if (error) throw error;
     } else {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('part_pricing_tiers')
         .insert({
           part_id: partId,
@@ -92,21 +107,9 @@ export async function replaceTiersForPart(
           base_cost_per_unit: baseCostPerUnit,
           markup_percent: tier.markup_percent,
           unit_price: unitPrice,
-        })
-        .select('id')
-        .single();
+        });
       if (error) throw error;
-      if (data?.id) keepIds.add(String(data.id));
     }
-  }
-
-  const toDelete = [...existingIds].filter((id) => !keepIds.has(id));
-  if (toDelete.length > 0) {
-    const { error } = await supabase
-      .from('part_pricing_tiers')
-      .delete()
-      .in('id', toDelete);
-    if (error) throw error;
   }
 
   return getTiersForPart(partId);

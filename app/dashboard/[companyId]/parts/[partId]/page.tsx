@@ -149,86 +149,54 @@ export default function PartDetailPage() {
         </Alert>
       )}
 
-      {/* Top row: basic info + related (50/50 to match Operations/Materials below) */}
+      {/* Two-column layout: main card on the left (part identification + pricing),
+          operations + materials on the right. The right column has no card-level
+          header — the Operations and Materials section headings inside speak for
+          themselves. */}
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
+        <Grid size={{ xs: 12, md: 7 }}>
+          <Card elevation={2}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Basic Information
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Part Name
+              {/* Header: part name = card title; description = subtitle;
+                  created date = caption. Replaces the old Basic Information +
+                  Related cards (Related's only useful field was Created). */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {part.part_name}
+                </Typography>
+                {part.description && (
+                  <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {part.description}
                   </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {part.part_name}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Description
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {part.description || '—'}
-                  </Typography>
-                </Box>
+                )}
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 0.5 }}
+                >
+                  Created {formatDate(part.created_at)}
+                </Typography>
               </Box>
+
+              <Divider sx={{ mb: 3 }} />
+
+              <PartPricing companyId={companyId} part={part} refreshKey={refreshKey} />
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
+        <Grid size={{ xs: 12, md: 5 }}>
+          <Card elevation={2}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Related
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Quotes
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {quotesCount} quote{quotesCount !== 1 ? 's' : ''}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Jobs
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {jobsCount} job{jobsCount !== 1 ? 's' : ''}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Created
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatDate(part.created_at)}
-                  </Typography>
-                </Box>
-              </Box>
+              <PartRoutingPanel
+                companyId={companyId}
+                partId={partId}
+                onRoutingSaved={() => setRefreshKey((k) => k + 1)}
+              />
             </CardContent>
           </Card>
         </Grid>
       </Grid>
-
-      {/* Routing builder — auto-saves on every change */}
-      <PartRoutingPanel
-        companyId={companyId}
-        partId={partId}
-        onRoutingSaved={() => setRefreshKey((k) => k + 1)}
-      />
-
-      {/* Unified pricing card — cost build-up + tier editor in one place. Reloads when routing changes. */}
-      <Box sx={{ mt: 3 }}>
-        <PartPricing companyId={companyId} part={part} refreshKey={refreshKey} />
-      </Box>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

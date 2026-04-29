@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
-  Card,
-  CardContent,
-  Grid,
+  Divider,
   CircularProgress,
   Alert,
   Typography,
@@ -206,19 +204,18 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
   }
 
   return (
-    <Box sx={{ position: 'relative' }}>
-      {/* Save indicator floats over the top-right corner so it never reserves
-          layout space — the Operations / Materials card titles speak for the
-          section, no header needed. */}
+    <Box>
+      {/* Inline save indicator — flows with the document instead of needing
+          absolute positioning, since the parent container doesn't reserve
+          negative-margin space for it. */}
       <Box
         sx={{
-          position: 'absolute',
-          top: -22,
-          right: 0,
           display: 'flex',
+          justifyContent: 'flex-end',
           alignItems: 'center',
+          minHeight: 20,
           color: 'text.secondary',
-          pointerEvents: 'none',
+          mb: 1,
         }}
       >
         {saving ? (
@@ -244,32 +241,23 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
         </Alert>
       )}
 
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <RoutingOperationsList
-                rows={ops}
-                onChange={handleOpsChange}
-                companyId={companyId}
-                disabled={saving}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <RoutingMaterialsList
-                rows={mats}
-                onChange={handleMatsChange}
-                companyId={companyId}
-                disabled={saving}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Stacked vertically (operations above materials) since this lives
+          inside a narrow side panel — side-by-side wouldn't have room. */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <RoutingOperationsList
+          rows={ops}
+          onChange={handleOpsChange}
+          companyId={companyId}
+          disabled={saving}
+        />
+        <Divider />
+        <RoutingMaterialsList
+          rows={mats}
+          onChange={handleMatsChange}
+          companyId={companyId}
+          disabled={saving}
+        />
+      </Box>
     </Box>
   );
 }

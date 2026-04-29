@@ -1,8 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
@@ -22,14 +20,10 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Autocomplete from '@mui/material/Autocomplete';
-import Accordion from '@mui/material/Accordion';
-import AccordionSummary from '@mui/material/AccordionSummary';
-import AccordionDetails from '@mui/material/AccordionDetails';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   calculateRoutingCost,
   calculateTierPricing,
@@ -94,6 +88,12 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
   }
   const markup = parseNumber(row.markupPercent);
   const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
+  // Phantom rows leave unitPrice empty so the input renders the suggested price
+  // as a placeholder rather than a committed value — typing in either Markup
+  // or Unit price flips the row out of phantom and the value becomes real.
+  if (row.phantom) {
+    return { ...row, baseCostPerUnit };
+  }
   return {
     ...row,
     baseCostPerUnit,
@@ -102,11 +102,10 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
 }
 
 function makePhantomRows(breakdown: RoutingCostBreakdown | null): EditRow[] {
-  // Seed qty 1 + qty 10 to demonstrate the tier shape and the amortization curve.
-  // Both stay phantom (UI-only) until the user types a markup, unit price, or new qty.
+  // Single phantom row — qty 1 with a suggested 25% markup. Multi-quantity
+  // exploration lives behind a separate UX (TBD).
   const rows: EditRow[] = [
-    { phantom: true, sequence: 10, quantity: '1', markupPercent: '', unitPrice: '', baseCostPerUnit: 0 },
-    { phantom: true, sequence: 20, quantity: '10', markupPercent: '', unitPrice: '', baseCostPerUnit: 0 },
+    { phantom: true, sequence: 10, quantity: '1', markupPercent: '25', unitPrice: '', baseCostPerUnit: 0 },
   ];
   return rows.map((r) => recomputeRow(r, breakdown));
 }
@@ -334,170 +333,162 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
   const materialPerUnit = breakdown ? Math.round(breakdown.total_material_cost * 100) / 100 : 0;
 
   return (
-    <Card elevation={2}>
-      <CardContent>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 2,
-            mb: 2,
-            flexWrap: 'wrap',
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Pricing
+    <Box>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 2,
+          mb: 2,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            Pricing
+          </Typography>
+          {saving && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
+              <CloudSyncOutlinedIcon fontSize="small" />
+              <Typography variant="caption">Saving…</Typography>
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {!loading && breakdown && breakdown.warnings.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Heads up:
+          </Typography>
+          {breakdown.warnings.map((w, i) => (
+            <Typography key={i} variant="body2">
+              • {w.message}
             </Typography>
-            {saving && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
-                <CloudSyncOutlinedIcon fontSize="small" />
-                <Typography variant="caption">Saving…</Typography>
-              </Box>
+          ))}
+        </Alert>
+      )}
+
+      {loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+          <CircularProgress size={24} />
+        </Box>
+      )}
+
+      {!loading && breakdown && (
+        <>
+          {/* Compact cost build-up — context for the tier rows below.
+              The full per-op / per-material breakdown lives in the routing
+              side panel, so this card stays focused on the per-unit totals. */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
+            <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
+            <SummaryRow
+              label="Setup (one-time)"
+              value={formatCurrency(setupBatch)}
+              hint="amortized across tier qty"
+            />
+            {materialPerUnit > 0 && (
+              <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
             )}
           </Box>
-        </Box>
-        <Divider sx={{ mb: 2 }} />
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
+          <Divider sx={{ mb: 2 }} />
 
-        {!loading && breakdown && breakdown.warnings.length > 0 && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              Heads up:
-            </Typography>
-            {breakdown.warnings.map((w, i) => (
-              <Typography key={i} variant="body2">
-                • {w.message}
-              </Typography>
-            ))}
-          </Alert>
-        )}
+          {/* Tier table */}
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Qty</TableCell>
+                  <TableCell align="right">Base / unit</TableCell>
+                  <TableCell align="right">Markup %</TableCell>
+                  <TableCell align="right">Unit price</TableCell>
+                  <TableCell align="right"></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.map((row, idx) => {
+                  // Suggested unit price = base × (1 + markup/100). Used as the
+                  // placeholder in the unit price input — phantom rows show this
+                  // as a hint instead of a committed value.
+                  const markupNum = parseNumber(row.markupPercent);
+                  const suggestedUnitPrice =
+                    row.baseCostPerUnit > 0 && markupNum !== null
+                      ? (Math.round(row.baseCostPerUnit * (1 + markupNum / 100) * 100) / 100).toFixed(2)
+                      : '0.00';
+                  return (
+                    <TableRow
+                      key={row.id ?? `tier-${idx}`}
+                      sx={row.phantom ? { opacity: 0.7 } : undefined}
+                    >
+                      <TableCell sx={{ minWidth: 90 }}>
+                        <TextField
+                          size="small"
+                          value={row.quantity}
+                          onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                          inputMode="numeric"
+                          placeholder="1"
+                        />
+                      </TableCell>
+                      <TableCell align="right">{formatCurrency(row.baseCostPerUnit)}</TableCell>
+                      <TableCell align="right" sx={{ minWidth: 120 }}>
+                        <TextField
+                          size="small"
+                          value={row.markupPercent}
+                          onChange={(e) => handleMarkupChange(idx, e.target.value)}
+                          inputMode="decimal"
+                          placeholder="25"
+                          sx={{ width: 100 }}
+                        />
+                      </TableCell>
+                      <TableCell align="right" sx={{ minWidth: 130 }}>
+                        <TextField
+                          size="small"
+                          value={row.unitPrice}
+                          onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
+                          inputMode="decimal"
+                          placeholder={suggestedUnitPrice}
+                          sx={{ width: 120 }}
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => removeRow(idx)}
+                          aria-label="Remove tier"
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
 
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-            <CircularProgress size={24} />
+          <Box sx={{ display: 'flex', gap: 1, mt: 2, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              startIcon={<ContentCopyIcon />}
+              onClick={openCopyDialog}
+            >
+              Copy markup from another part
+            </Button>
+            <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
+              Add tier
+            </Button>
           </Box>
-        )}
-
-        {!loading && breakdown && (
-          <>
-            {/* Compact cost build-up — context for the tier rows below */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
-              <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-              <SummaryRow
-                label="Setup (one-time)"
-                value={formatCurrency(setupBatch)}
-                hint="amortizes across tier quantity"
-              />
-              <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
-            </Box>
-
-            {/* Operations + materials detail — collapsed by default (progressive disclosure) */}
-            <Accordion elevation={0} disableGutters sx={{ mb: 2, bgcolor: 'transparent', '&:before': { display: 'none' } }}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ pl: 0 }}>
-                <Typography variant="body2" color="text.secondary">
-                  Operations &amp; materials detail
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails sx={{ px: 0 }}>
-                <CostDetail breakdown={breakdown} />
-              </AccordionDetails>
-            </Accordion>
-
-            <Divider sx={{ mb: 2 }} />
-
-            {/* Tier table */}
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Qty</TableCell>
-                    <TableCell align="right">Base / unit</TableCell>
-                    <TableCell align="right">Markup %</TableCell>
-                    <TableCell align="right">Unit price</TableCell>
-                    <TableCell align="right">Line total</TableCell>
-                    <TableCell align="right"></TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {rows.map((row, idx) => {
-                    const qty = parseNumber(row.quantity) ?? 0;
-                    const unitPrice = parseNumber(row.unitPrice);
-                    const total = unitPrice !== null ? Math.round(unitPrice * qty * 100) / 100 : null;
-                    return (
-                      <TableRow
-                        key={row.id ?? `tier-${idx}`}
-                        sx={row.phantom ? { opacity: 0.7 } : undefined}
-                      >
-                        <TableCell sx={{ minWidth: 90 }}>
-                          <TextField
-                            size="small"
-                            value={row.quantity}
-                            onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                            inputMode="numeric"
-                            placeholder="1"
-                          />
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(row.baseCostPerUnit)}</TableCell>
-                        <TableCell align="right" sx={{ minWidth: 120 }}>
-                          <TextField
-                            size="small"
-                            value={row.markupPercent}
-                            onChange={(e) => handleMarkupChange(idx, e.target.value)}
-                            inputMode="decimal"
-                            placeholder="25"
-                            sx={{ width: 100 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right" sx={{ minWidth: 130 }}>
-                          <TextField
-                            size="small"
-                            value={row.unitPrice}
-                            onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
-                            inputMode="decimal"
-                            placeholder="0.00"
-                            sx={{ width: 120 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(total)}</TableCell>
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => removeRow(idx)}
-                            aria-label="Remove tier"
-                          >
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-
-            <Box sx={{ display: 'flex', gap: 1, mt: 2, justifyContent: 'flex-end' }}>
-              <Button
-                size="small"
-                startIcon={<ContentCopyIcon />}
-                onClick={openCopyDialog}
-              >
-                Copy markup from another part
-              </Button>
-              <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
-                Add tier
-              </Button>
-            </Box>
-          </>
-        )}
-      </CardContent>
+        </>
+      )}
 
       <Dialog open={copyDialogOpen} onClose={() => !copying && setCopyDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Copy markup from another part</DialogTitle>
@@ -529,7 +520,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           </Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </Box>
   );
 }
 
@@ -558,83 +549,5 @@ function SummaryRow({
         {value}
       </Typography>
     </Box>
-  );
-}
-
-function CostDetail({ breakdown }: { breakdown: RoutingCostBreakdown }) {
-  return (
-    <>
-      {breakdown.labor_items.length > 0 && (
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-            Operations
-          </Typography>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Operation</TableCell>
-                  <TableCell align="right">Run (min/unit)</TableCell>
-                  <TableCell align="right">Setup (min)</TableCell>
-                  <TableCell align="right">Rate</TableCell>
-                  <TableCell align="right">Run / unit</TableCell>
-                  <TableCell align="right">Setup (total)</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {breakdown.labor_items.map((op, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{op.operation_name}</TableCell>
-                    <TableCell align="right">{op.run_time_minutes}</TableCell>
-                    <TableCell align="right">{op.setup_time_minutes}</TableCell>
-                    <TableCell align="right">{formatCurrency(op.labor_rate)}</TableCell>
-                    <TableCell align="right">{formatCurrency(op.cost)}</TableCell>
-                    <TableCell align="right">{formatCurrency(op.setup_cost)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-      )}
-
-      {breakdown.material_items.length > 0 && (
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-            Materials (per unit)
-          </Typography>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Item</TableCell>
-                  <TableCell align="right">Qty / unit</TableCell>
-                  <TableCell align="right">Unit</TableCell>
-                  <TableCell align="right">Cost / unit</TableCell>
-                  <TableCell align="right">Line / unit</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {breakdown.material_items.map((m, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{m.item_name}</TableCell>
-                    <TableCell align="right">{m.quantity}</TableCell>
-                    <TableCell align="right">{m.unit ?? '—'}</TableCell>
-                    <TableCell align="right">{formatCurrency(m.cost_per_unit)}</TableCell>
-                    <TableCell align="right">{formatCurrency(m.cost)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-      )}
-
-      {breakdown.labor_items.length === 0 && breakdown.material_items.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          No operations or materials yet — add them in the Operations and Materials cards above.
-        </Typography>
-      )}
-    </>
   );
 }

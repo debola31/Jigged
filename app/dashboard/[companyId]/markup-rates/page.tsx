@@ -20,7 +20,9 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import PercentIcon from '@mui/icons-material/Percent';
-import Chip from '@mui/material/Chip';
+import Radio from '@mui/material/Radio';
+import Tooltip from '@mui/material/Tooltip';
+import Stack from '@mui/material/Stack';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -30,6 +32,7 @@ import type {
   SelectionChangedEvent,
   RowClickedEvent,
   CellKeyDownEvent,
+  RowHeightParams,
 } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -38,9 +41,13 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import {
   type MarkupRate,
-  summarizeBreakpoints,
+  markupRateToFormData,
 } from '@/types/markupRates';
-import { getAllMarkupRates, bulkDeleteMarkupRates } from '@/utils/markupRatesAccess';
+import {
+  getAllMarkupRates,
+  bulkDeleteMarkupRates,
+  updateMarkupRate,
+} from '@/utils/markupRatesAccess';
 
 export default function MarkupRatesListPage() {
   const params = useParams();
@@ -114,13 +121,63 @@ export default function MarkupRatesListPage() {
     );
   }, [rates, searchDebounced]);
 
+  // Row height grows with the number of breakpoints so the vertical
+  // mini key-value list inside the Breakpoints cell stays readable.
+  // 24px base padding/chrome + 16px per breakpoint line, min 52px.
+  const computeRowHeightForRate = (rate: MarkupRate | null | undefined): number => {
+    const count = rate?.breakpoints?.length ?? 0;
+    return Math.max(52, 24 + 16 * count);
+  };
+
+  const getRowHeight = useCallback((params: RowHeightParams<MarkupRate>) => {
+    return computeRowHeightForRate(params.data ?? null);
+  }, []);
+
   const gridHeight = useMemo(() => {
     if (loading) return 600;
     const totalRows = filteredRates.length + (defaultRate ? 1 : 0);
     if (totalRows === 0) return 600;
-    const displayedRows = Math.min(totalRows, 25);
-    return Math.max(56 + 52 * displayedRows + 56, 400);
-  }, [loading, filteredRates.length, defaultRate]);
+    // Sum actual variable row heights so the grid frame matches the
+    // variable-height cells coming from the breakpoints renderer.
+    const heights: number[] = [];
+    if (defaultRate) heights.push(computeRowHeightForRate(defaultRate));
+    for (const r of filteredRates.slice(0, 25 - (defaultRate ? 1 : 0))) {
+      heights.push(computeRowHeightForRate(r));
+    }
+    const displayedHeight = heights.reduce((s, h) => s + h, 0);
+    return Math.max(56 + displayedHeight + 56, 400);
+  }, [loading, filteredRates, defaultRate]);
+
+  // Click handler for the Default-column radio. Stops propagation so the
+  // grid's row-click navigation doesn't fire, then promotes the rate.
+  // We rebuild the full form-data shape from the rate and flip is_default,
+  // since updateMarkupRate expects a complete MarkupRateFormData.
+  const [promotingRateId, setPromotingRateId] = useState<string | null>(null);
+  const handleSetDefault = useCallback(
+    async (rate: MarkupRate) => {
+      if (rate.is_default || promotingRateId) return;
+      setPromotingRateId(rate.id);
+      try {
+        const formData = { ...markupRateToFormData(rate), is_default: true };
+        await updateMarkupRate(rate.id, formData);
+        await load();
+        setSnackbar({
+          open: true,
+          message: `"${rate.name}" is now the default rate.`,
+          severity: 'success',
+        });
+      } catch (err) {
+        setSnackbar({
+          open: true,
+          message: err instanceof Error ? err.message : 'Failed to set default rate',
+          severity: 'error',
+        });
+      } finally {
+        setPromotingRateId(null);
+      }
+    },
+    [load, promotingRateId],
+  );
 
   const handleSelectionChanged = (event: SelectionChangedEvent<MarkupRate>) => {
     const selectedNodes = event.api.getSelectedNodes();
@@ -132,9 +189,12 @@ export default function MarkupRatesListPage() {
 
   const handleRowClicked = (event: RowClickedEvent<MarkupRate>) => {
     if (!event.data || !event.event) return;
-    // Don't navigate when the click was on the selection checkbox.
+    // Don't navigate when the click was on the selection checkbox or on
+    // the Default-column radio (radio handles its own onClick + stopPropagation
+    // but we also guard here in case the click lands on the surrounding cell).
     const target = event.event.target as HTMLElement;
     if (target.closest('.ag-checkbox-input-wrapper')) return;
+    if (target.closest('[data-default-radio="true"]')) return;
     router.push(`/dashboard/${companyId}/markup-rates/${event.data.id}/edit`);
   };
 
@@ -178,30 +238,62 @@ export default function MarkupRatesListPage() {
 
   const columnDefs: ColDef<MarkupRate>[] = [
     {
+      colId: 'default',
+      headerName: 'Default',
+      width: 80,
+      pinned: 'left' as const,
+      sortable: false,
+      filter: false,
+      resizable: false,
+      // Settings-style indicator: a clickable radio in its own column. The
+      // pinned (top) row IS the default, but we read is_default off the data
+      // so a non-pinned default would still display correctly.
+      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
+        const rate = params.node.data;
+        if (!rate) return null;
+        const isDefault = !!rate.is_default;
+        const tooltip = isDefault ? 'Current default' : 'Set as default rate';
+        return (
+          <Box
+            data-default-radio="true"
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+            }}
+          >
+            <Tooltip title={tooltip}>
+              {/* span wrapper lets the tooltip work even when the radio is
+                  disabled (current default has no action). */}
+              <span>
+                <Radio
+                  checked={isDefault}
+                  disabled={isDefault || promotingRateId === rate.id}
+                  size="small"
+                  inputProps={{ 'aria-label': tooltip }}
+                  onClick={(e) => {
+                    // Critical: prevent the AG Grid row-click handler from
+                    // navigating to the edit page. We also tag the wrapper
+                    // with data-default-radio so onRowClicked has a second
+                    // line of defense.
+                    e.stopPropagation();
+                    if (!isDefault) {
+                      void handleSetDefault(rate);
+                    }
+                  }}
+                />
+              </span>
+            </Tooltip>
+          </Box>
+        );
+      },
+    },
+    {
       field: 'name',
       headerName: 'Name',
       width: 240,
       pinned: 'left' as const,
-      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
-        // The default rate gets a "Default" chip next to its name. The pinned
-        // (top) row IS the default, but we check is_default explicitly so the
-        // visual stays in sync if AG Grid ever shows a non-pinned default.
-        const isDefault = params.data?.is_default || params.node.rowPinned;
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: '100%' }}>
-            <span>{params.value}</span>
-            {isDefault && (
-              <Chip
-                label="Default"
-                size="small"
-                color="primary"
-                variant="outlined"
-                sx={{ height: 22 }}
-              />
-            )}
-          </Box>
-        );
-      },
     },
     {
       colId: 'breakpoints',
@@ -209,8 +301,62 @@ export default function MarkupRatesListPage() {
       flex: 1,
       minWidth: 280,
       sortable: false,
-      valueGetter: (params) =>
-        params.data ? summarizeBreakpoints(params.data.breakpoints) : '',
+      // Vertical mini key-value list — easier to scan than a comma-separated
+      // string when there are 3-4 breakpoints. Monospaced so qty/markup line
+      // up across rows.
+      cellRenderer: (params: ICellRendererParams<MarkupRate>) => {
+        const rate = params.node.data;
+        if (!rate || rate.breakpoints.length === 0) {
+          return (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              —
+            </Typography>
+          );
+        }
+        const sorted = [...rate.breakpoints].sort((a, b) => a.qty - b.qty);
+        return (
+          <Stack
+            spacing={0}
+            sx={{
+              py: 0.5,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            }}
+          >
+            {sorted.map((bp, i) => (
+              <Box
+                key={i}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 1.5,
+                  lineHeight: '16px',
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontFamily: 'inherit',
+                    color: 'text.secondary',
+                    minWidth: 56,
+                  }}
+                >
+                  qty {bp.qty}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontFamily: 'inherit',
+                    color: 'text.primary',
+                    fontWeight: 500,
+                  }}
+                >
+                  {bp.markup_percent}%
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+        );
+      },
     },
     {
       field: 'updated_at',
@@ -350,6 +496,7 @@ export default function MarkupRatesListPage() {
               onSelectionChanged={handleSelectionChanged}
               onRowClicked={handleRowClicked}
               onCellKeyDown={handleCellKeyDown}
+              getRowHeight={getRowHeight}
               pagination={true}
               paginationPageSize={25}
               paginationPageSizeSelector={[25, 50, 100]}

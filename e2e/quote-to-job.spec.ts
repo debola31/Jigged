@@ -38,6 +38,10 @@ test.describe('Quote to Job workflow', () => {
       .first()
       .click();
 
+    // The Parts card starts with no part blocks — click "Add part" to
+    // render the first Part 1 Autocomplete.
+    await page.getByRole('button', { name: /Add part/i }).click();
+
     // Select a part — QuoteForm renders one Autocomplete per part block,
     // labeled "Part 1", "Part 2", etc.
     const partField = page.getByRole('combobox', { name: /^Part 1$/i });

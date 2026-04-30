@@ -205,35 +205,37 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
 
   return (
     <Box>
-      {/* Inline save indicator — flows with the document instead of needing
-          absolute positioning, since the parent container doesn't reserve
-          negative-margin space for it. */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          minHeight: 20,
-          color: 'text.secondary',
-          mb: 1,
-        }}
-      >
-        {saving ? (
-          <Fade in>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <CloudSyncOutlinedIcon fontSize="small" />
-              <Typography variant="caption">Saving…</Typography>
-            </Box>
-          </Fade>
-        ) : savedAt ? (
-          <Fade in>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <CloudDoneOutlinedIcon fontSize="small" color="success" />
-              <Typography variant="caption">All changes saved</Typography>
-            </Box>
-          </Fade>
-        ) : null}
-      </Box>
+      {/* Inline save indicator. Only mounted when there's something to show
+          so a brand-new part doesn't reserve empty space at the top of the
+          card. The first save will introduce the row — small one-time
+          layout shift, but better than perpetual whitespace. */}
+      {(saving || savedAt) && (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            color: 'text.secondary',
+            mb: 1,
+          }}
+        >
+          {saving ? (
+            <Fade in>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <CloudSyncOutlinedIcon fontSize="small" />
+                <Typography variant="caption">Saving…</Typography>
+              </Box>
+            </Fade>
+          ) : (
+            <Fade in>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <CloudDoneOutlinedIcon fontSize="small" color="success" />
+                <Typography variant="caption">All changes saved</Typography>
+              </Box>
+            </Fade>
+          )}
+        </Box>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

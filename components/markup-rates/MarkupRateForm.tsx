@@ -25,6 +25,9 @@ import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Snackbar from '@mui/material/Snackbar';
 import {
   type MarkupRateFormData,
   EMPTY_MARKUP_RATE_FORM,
@@ -87,9 +90,12 @@ export default function MarkupRateForm({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // is_default is set/changed only via the radio in the list page — this form
-  // preserves the existing value (or defaults to false when creating).
-  const preservedIsDefault = seed.is_default;
+  // Default-flag state is local so the "Set as default" radio reflects the
+  // promotion immediately. handleSave reads this on submit, and the
+  // promotion handler persists it independently from in-progress edits.
+  const [isDefault, setIsDefault] = useState(seed.is_default);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteSnackbar, setPromoteSnackbar] = useState<string | null>(null);
 
   const updateRow = (idx: number, patch: Partial<RowDraft>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -161,7 +167,7 @@ export default function MarkupRateForm({
       const formData: MarkupRateFormData = {
         name: trimmedName,
         breakpoints,
-        is_default: preservedIsDefault,
+        is_default: isDefault,
       };
 
       if (mode === 'create') {
@@ -174,6 +180,25 @@ export default function MarkupRateForm({
       console.error('Failed to save markup rate:', err);
       setError(err instanceof Error ? err.message : 'Failed to save markup rate');
       setSaving(false);
+    }
+  };
+
+  // Promote this rate to default. Persists the seed (last-saved) snapshot
+  // with is_default flipped — keeps in-progress name/breakpoint edits in
+  // form state without quietly saving them. Only available in edit mode.
+  const handleSetDefault = async () => {
+    if (!rateId || isDefault || mode !== 'edit') return;
+    setPromoting(true);
+    setError(null);
+    try {
+      await updateMarkupRate(rateId, { ...seed, is_default: true });
+      setIsDefault(true);
+      setPromoteSnackbar('This is now the default rate.');
+    } catch (err) {
+      console.error('Failed to set default rate:', err);
+      setError(err instanceof Error ? err.message : 'Failed to set default rate');
+    } finally {
+      setPromoting(false);
     }
   };
 
@@ -207,6 +232,31 @@ export default function MarkupRateForm({
         )}
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* Default-rate toggle. Only shown in edit mode — there's no rate
+              to promote until create finishes. The switch is one-way (you
+              don't unset a default; you promote a different rate from its
+              own page) so it's disabled when already on. */}
+          {mode === 'edit' && (
+            <FormControlLabel
+              sx={{ ml: 0, alignSelf: 'flex-start' }}
+              control={
+                <Switch
+                  checked={isDefault}
+                  onChange={() => void handleSetDefault()}
+                  disabled={isDefault || promoting || saving || deleting}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  {isDefault
+                    ? 'Default rate — applied to new parts'
+                    : 'Set as default rate'}
+                </Typography>
+              }
+            />
+          )}
+
           <TextField
             label="Name"
             placeholder="e.g. ACME Q4, Aerospace, Premium small batch"
@@ -377,6 +427,17 @@ export default function MarkupRateForm({
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={!!promoteSnackbar}
+        autoHideDuration={4000}
+        onClose={() => setPromoteSnackbar(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert severity="success" onClose={() => setPromoteSnackbar(null)}>
+          {promoteSnackbar}
+        </Alert>
+      </Snackbar>
     </Card>
   );
 }

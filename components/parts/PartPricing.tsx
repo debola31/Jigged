@@ -445,6 +445,25 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
         </Box>
       )}
 
+      {/* No routing yet — pricing is derived from operation labor cost +
+          materials, so without those there's nothing to price. Tell the user
+          what populates this section instead of leaving the area blank. */}
+      {!loading && !breakdown && (
+        <Box
+          sx={{
+            py: 4,
+            px: 2,
+            textAlign: 'center',
+            border: (theme) => `1px dashed ${theme.palette.divider}`,
+            borderRadius: 1,
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Add operations or materials to calculate pricing
+          </Typography>
+        </Box>
+      )}
+
       {!loading && breakdown && (
         <>
           {/* Compact cost build-up — context for the tier rows below.

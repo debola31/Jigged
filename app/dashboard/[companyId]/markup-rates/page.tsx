@@ -20,7 +20,6 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import PercentIcon from '@mui/icons-material/Percent';
-import StarIcon from '@mui/icons-material/Star';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
@@ -41,21 +40,16 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import {
-  type MarkupRate,
-  markupRateToFormData,
-} from '@/types/markupRates';
+import { type MarkupRate } from '@/types/markupRates';
 import {
   getAllMarkupRates,
   bulkDeleteMarkupRates,
-  updateMarkupRate,
 } from '@/utils/markupRatesAccess';
 
-// Custom selection-column cell. The default rate is non-selectable, so its
-// checkbox slot is empty — we reuse that space for a "Default" chip so the
-// signal sits in the leftmost column where the eye lands first. Other rows
-// render a manual checkbox synced to AG Grid's selection state (subscribing
-// to `rowSelected` so header "select all" stays in sync).
+// Custom selection-column cell. Default row shows a "Default" chip in place
+// of the (non-existent) checkbox; other rows show a checkbox synced to AG
+// Grid's selection state via `rowSelected` so the header select-all stays
+// in sync. Promotion to default lives on the rate's edit page.
 function SelectionCellRenderer(params: ICellRendererParams<MarkupRate>) {
   const { node } = params;
   const isDefault = node.rowPinned === 'top' || !!node.data?.is_default;
@@ -76,7 +70,6 @@ function SelectionCellRenderer(params: ICellRendererParams<MarkupRate>) {
       >
         <Tooltip title="Applied to new parts by default">
           <Chip
-            icon={<StarIcon sx={{ fontSize: 14 }} />}
             label="Default"
             size="small"
             color="primary"
@@ -197,37 +190,6 @@ export default function MarkupRatesListPage() {
     // 56px header + content + 56px pagination footer.
     return 56 + displayedHeight + 56;
   }, [loading, filteredRates, defaultRate]);
-
-  // Click handler for the Default-column radio. Stops propagation so the
-  // grid's row-click navigation doesn't fire, then promotes the rate.
-  // We rebuild the full form-data shape from the rate and flip is_default,
-  // since updateMarkupRate expects a complete MarkupRateFormData.
-  const [promotingRateId, setPromotingRateId] = useState<string | null>(null);
-  const handleSetDefault = useCallback(
-    async (rate: MarkupRate) => {
-      if (rate.is_default || promotingRateId) return;
-      setPromotingRateId(rate.id);
-      try {
-        const formData = { ...markupRateToFormData(rate), is_default: true };
-        await updateMarkupRate(rate.id, formData);
-        await load();
-        setSnackbar({
-          open: true,
-          message: `"${rate.name}" is now the default rate.`,
-          severity: 'success',
-        });
-      } catch (err) {
-        setSnackbar({
-          open: true,
-          message: err instanceof Error ? err.message : 'Failed to set default rate',
-          severity: 'error',
-        });
-      } finally {
-        setPromotingRateId(null);
-      }
-    },
-    [load, promotingRateId],
-  );
 
   const handleSelectionChanged = (event: SelectionChangedEvent<MarkupRate>) => {
     const selectedNodes = event.api.getSelectedNodes();
@@ -384,21 +346,6 @@ export default function MarkupRatesListPage() {
             },
           }}
         />
-
-        {selectedIds.length === 1 && (() => {
-          const sel = rates.find((r) => r.id === selectedIds[0]);
-          if (!sel || sel.is_default) return null;
-          return (
-            <Button
-              variant="outlined"
-              startIcon={<StarIcon />}
-              onClick={() => void handleSetDefault(sel)}
-              disabled={!!promotingRateId}
-            >
-              Set as default
-            </Button>
-          );
-        })()}
 
         {selectedIds.length > 0 && (
           <>

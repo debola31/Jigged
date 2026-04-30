@@ -70,11 +70,6 @@ export default function PartDetailPage() {
     }
   };
 
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString();
-  };
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -157,9 +152,7 @@ export default function PartDetailPage() {
         <Grid size={{ xs: 12, md: 7 }}>
           <Card elevation={2}>
             <CardContent>
-              {/* Header: part name = card title; description = subtitle;
-                  created date = caption. Replaces the old Basic Information +
-                  Related cards (Related's only useful field was Created). */}
+              {/* Header: part name = card title; description = subtitle. */}
               <Box sx={{ mb: 2 }}>
                 <Typography variant="h5" sx={{ fontWeight: 600 }}>
                   {part.part_name}
@@ -169,13 +162,6 @@ export default function PartDetailPage() {
                     {part.description}
                   </Typography>
                 )}
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 0.5 }}
-                >
-                  Created {formatDate(part.created_at)}
-                </Typography>
               </Box>
 
               <Divider sx={{ mb: 3 }} />

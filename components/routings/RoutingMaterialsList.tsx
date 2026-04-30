@@ -5,7 +5,7 @@ import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import RoutingMaterialRow, { type MaterialRowData } from './RoutingMaterialRow';
-import AddMaterialModal, { type MaterialModalValue } from './AddMaterialModal';
+import RoutingMaterialRowEditor, { type MaterialEditorValue } from './RoutingMaterialRowEditor';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import type { InventoryItem } from '@/types/inventory';
 
@@ -20,7 +20,7 @@ export interface RoutingMaterialsListProps {
 
 /**
  * Linear list of routing-level materials. Same UX pattern as operations:
- * arrow-button reorder, modal-add, modal-edit.
+ * inline-editor add at the bottom, inline-editor edit in place.
  */
 export default function RoutingMaterialsList({
   rows,
@@ -31,7 +31,7 @@ export default function RoutingMaterialsList({
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalState, setModalState] = useState<
+  const [editorState, setEditorState] = useState<
     | { mode: 'closed' }
     | { mode: 'add' }
     | { mode: 'edit'; rowIndex: number }
@@ -51,9 +51,9 @@ export default function RoutingMaterialsList({
     onChange(rows.filter((_, i) => i !== index));
   }, [rows, onChange]);
 
-  const handleModalSave = (value: MaterialModalValue) => {
+  const handleEditorSave = (value: MaterialEditorValue) => {
     if (!value.item) return;
-    if (modalState.mode === 'add') {
+    if (editorState.mode === 'add') {
       const newRow: MaterialRowData = {
         tempId: generateTempId(),
         inventoryItemId: value.item.id,
@@ -62,10 +62,10 @@ export default function RoutingMaterialsList({
         unit: value.unit,
       };
       onChange([...rows, newRow]);
-    } else if (modalState.mode === 'edit') {
+    } else if (editorState.mode === 'edit') {
       const copy = [...rows];
-      copy[modalState.rowIndex] = {
-        ...copy[modalState.rowIndex],
+      copy[editorState.rowIndex] = {
+        ...copy[editorState.rowIndex],
         inventoryItemId: value.item.id,
         itemName: value.item.name,
         quantity: value.quantity,
@@ -73,17 +73,20 @@ export default function RoutingMaterialsList({
       };
       onChange(copy);
     }
-    setModalState({ mode: 'closed' });
+    setEditorState({ mode: 'closed' });
   };
 
-  const editingRow = modalState.mode === 'edit' ? rows[modalState.rowIndex] : null;
-  const editingInitial: MaterialModalValue | undefined = editingRow
+  const editingRow = editorState.mode === 'edit' ? rows[editorState.rowIndex] : null;
+  const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
         item: inventoryItems.find((it) => it.id === editingRow.inventoryItemId) || null,
         quantity: editingRow.quantity,
         unit: editingRow.unit,
       }
     : undefined;
+
+  const isEditingExisting = editorState.mode === 'edit';
+  const editorOpen = editorState.mode !== 'closed';
 
   return (
     <Box>
@@ -103,8 +106,8 @@ export default function RoutingMaterialsList({
           size="small"
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setModalState({ mode: 'add' })}
-          disabled={disabled || loading}
+          onClick={() => setEditorState({ mode: 'add' })}
+          disabled={disabled || loading || editorOpen}
         >
           Add Material
         </Button>
@@ -120,7 +123,7 @@ export default function RoutingMaterialsList({
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
           <CircularProgress size={20} />
         </Box>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !editorOpen ? (
         <Box
           sx={{
             textAlign: 'center',
@@ -139,24 +142,35 @@ export default function RoutingMaterialsList({
           </Typography>
         </Box>
       ) : (
-        rows.map((row, idx) => (
-          <RoutingMaterialRow
-            key={row.tempId}
-            row={row}
-            onEdit={() => setModalState({ mode: 'edit', rowIndex: idx })}
-            onDelete={() => handleDelete(idx)}
-            disabled={disabled}
-          />
-        ))
+        <>
+          {rows.map((row, idx) =>
+            isEditingExisting && editorState.rowIndex === idx ? (
+              <RoutingMaterialRowEditor
+                key={row.tempId}
+                inventoryItems={inventoryItems}
+                initial={editingInitial}
+                onSave={handleEditorSave}
+                onCancel={() => setEditorState({ mode: 'closed' })}
+              />
+            ) : (
+              <RoutingMaterialRow
+                key={row.tempId}
+                row={row}
+                onEdit={() => setEditorState({ mode: 'edit', rowIndex: idx })}
+                onDelete={() => handleDelete(idx)}
+                disabled={disabled || editorOpen}
+              />
+            )
+          )}
+          {editorState.mode === 'add' && (
+            <RoutingMaterialRowEditor
+              inventoryItems={inventoryItems}
+              onSave={handleEditorSave}
+              onCancel={() => setEditorState({ mode: 'closed' })}
+            />
+          )}
+        </>
       )}
-
-      <AddMaterialModal
-        open={modalState.mode !== 'closed'}
-        onClose={() => setModalState({ mode: 'closed' })}
-        onSave={handleModalSave}
-        inventoryItems={inventoryItems}
-        initial={editingInitial}
-      />
     </Box>
   );
 }

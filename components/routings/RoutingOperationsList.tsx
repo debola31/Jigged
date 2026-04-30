@@ -5,7 +5,7 @@ import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add';
 import BuildIcon from '@mui/icons-material/Build';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
-import AddOperationModal, { type OperationModalValue } from './AddOperationModal';
+import RoutingOperationRowEditor, { type OperationEditorValue } from './RoutingOperationRowEditor';
 import { getAllOperations } from '@/utils/operationsAccess';
 import type { Operation } from '@/types/operations';
 import { calculateRoutingTime, formatTime } from '@/types/routings';
@@ -23,8 +23,8 @@ export interface RoutingOperationsListProps {
  * Linear list of routing operations.
  *  - Reorder via up/down arrow buttons (no drag-and-drop — too unfamiliar
  *    for the small-shop owners we're targeting).
- *  - Add Operation opens a modal asking for operation + setup + run time.
- *  - Edit row opens the same modal pre-populated.
+ *  - Add Operation expands an inline editor row at the end of the list.
+ *  - Edit pencil expands the existing row in place into the same editor.
  */
 export default function RoutingOperationsList({
   rows,
@@ -35,7 +35,7 @@ export default function RoutingOperationsList({
   const [operations, setOperations] = useState<Operation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [modalState, setModalState] = useState<
+  const [editorState, setEditorState] = useState<
     | { mode: 'closed' }
     | { mode: 'add' }
     | { mode: 'edit'; rowIndex: number }
@@ -69,9 +69,9 @@ export default function RoutingOperationsList({
     onChange(rows.filter((_, i) => i !== index));
   }, [rows, onChange]);
 
-  const handleModalSave = (value: OperationModalValue) => {
+  const handleEditorSave = (value: OperationEditorValue) => {
     if (!value.operation) return;
-    if (modalState.mode === 'add') {
+    if (editorState.mode === 'add') {
       const newRow: OperationRowData = {
         tempId: generateTempId(),
         operationTypeId: value.operation.id,
@@ -82,27 +82,30 @@ export default function RoutingOperationsList({
         instructions: null,
       };
       onChange([...rows, newRow]);
-    } else if (modalState.mode === 'edit') {
+    } else if (editorState.mode === 'edit') {
       const copy = [...rows];
-      copy[modalState.rowIndex] = {
-        ...copy[modalState.rowIndex],
+      copy[editorState.rowIndex] = {
+        ...copy[editorState.rowIndex],
         // operation type is locked in edit mode (delete + re-add to swap)
         runTimePerUnit: value.runTimePerUnit,
         setupTime: value.setupTime,
       };
       onChange(copy);
     }
-    setModalState({ mode: 'closed' });
+    setEditorState({ mode: 'closed' });
   };
 
-  const editingRow = modalState.mode === 'edit' ? rows[modalState.rowIndex] : null;
-  const editingInitial: OperationModalValue | undefined = editingRow
+  const editingRow = editorState.mode === 'edit' ? rows[editorState.rowIndex] : null;
+  const editingInitial: OperationEditorValue | undefined = editingRow
     ? {
         operation: operations.find((o) => o.id === editingRow.operationTypeId) || null,
         setupTime: editingRow.setupTime,
         runTimePerUnit: editingRow.runTimePerUnit,
       }
     : undefined;
+
+  const isEditingExisting = editorState.mode === 'edit';
+  const editorOpen = editorState.mode !== 'closed';
 
   const time = calculateRoutingTime(
     rows.map((r) => ({
@@ -140,8 +143,8 @@ export default function RoutingOperationsList({
           size="small"
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setModalState({ mode: 'add' })}
-          disabled={disabled || loading}
+          onClick={() => setEditorState({ mode: 'add' })}
+          disabled={disabled || loading || editorOpen}
         >
           Add Operation
         </Button>
@@ -157,7 +160,7 @@ export default function RoutingOperationsList({
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
           <CircularProgress size={20} />
         </Box>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !editorOpen ? (
         <Box
           sx={{
             textAlign: 'center',
@@ -176,28 +179,41 @@ export default function RoutingOperationsList({
           </Typography>
         </Box>
       ) : (
-        rows.map((row, idx) => (
-          <RoutingOperationRow
-            key={row.tempId}
-            row={row}
-            index={idx}
-            totalRows={rows.length}
-            onMoveUp={() => handleMoveUp(idx)}
-            onMoveDown={() => handleMoveDown(idx)}
-            onEdit={() => setModalState({ mode: 'edit', rowIndex: idx })}
-            onDelete={() => handleDelete(idx)}
-            disabled={disabled}
-          />
-        ))
+        <>
+          {rows.map((row, idx) =>
+            isEditingExisting && editorState.rowIndex === idx ? (
+              <RoutingOperationRowEditor
+                key={row.tempId}
+                operations={operations}
+                initial={editingInitial}
+                index={idx}
+                onSave={handleEditorSave}
+                onCancel={() => setEditorState({ mode: 'closed' })}
+              />
+            ) : (
+              <RoutingOperationRow
+                key={row.tempId}
+                row={row}
+                index={idx}
+                totalRows={rows.length}
+                onMoveUp={() => handleMoveUp(idx)}
+                onMoveDown={() => handleMoveDown(idx)}
+                onEdit={() => setEditorState({ mode: 'edit', rowIndex: idx })}
+                onDelete={() => handleDelete(idx)}
+                disabled={disabled || editorOpen}
+              />
+            )
+          )}
+          {editorState.mode === 'add' && (
+            <RoutingOperationRowEditor
+              operations={operations}
+              index={rows.length}
+              onSave={handleEditorSave}
+              onCancel={() => setEditorState({ mode: 'closed' })}
+            />
+          )}
+        </>
       )}
-
-      <AddOperationModal
-        open={modalState.mode !== 'closed'}
-        onClose={() => setModalState({ mode: 'closed' })}
-        onSave={handleModalSave}
-        operations={operations}
-        initial={editingInitial}
-      />
     </Box>
   );
 }

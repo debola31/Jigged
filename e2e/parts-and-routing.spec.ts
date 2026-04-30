@@ -49,16 +49,12 @@ test.describe('Parts and Routing workflow', () => {
       page.getByText(/Click "Add Operation" to start building this routing/i)
     ).toBeVisible({ timeout: 10_000 });
 
-    // Click "Add Operation" (in the Operations card header)
+    // Click "Add Operation" (in the Operations card header) — opens an inline
+    // editor row at the bottom of the Operations list (no dialog).
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // Dialog: single AddOperationModal with operation picker + time fields
-    const addOpDialog = page.getByRole('dialog');
-    await expect(addOpDialog).toBeVisible();
-    await expect(addOpDialog.getByRole('heading', { name: /Add Operation/i })).toBeVisible();
-
     // Open the Operation autocomplete and select the first available option.
-    await addOpDialog.getByLabel(/^Operation$/).click();
+    await page.getByLabel(/^Operation$/).click();
 
     const listbox = page.getByRole('listbox');
     const firstOption = listbox.getByRole('option').first();
@@ -72,13 +68,12 @@ test.describe('Parts and Routing workflow', () => {
 
     await firstOption.click();
 
-    // Modal requires at least one of run time / setup time before enabling
-    // the submit button (see AddOperationModal.canSave). Fill run time.
-    await addOpDialog.getByLabel(/Run time per unit/i).fill('2');
+    // Editor requires at least one of run time / setup time before save will
+    // commit (see RoutingOperationRowEditor validation). Fill run time.
+    await page.getByLabel(/Run time per unit/i).fill('2');
 
-    // Confirm: "Add to routing" (the new modal's primary action)
-    await addOpDialog.getByRole('button', { name: /Add to routing/i }).click();
-    await expect(addOpDialog).toBeHidden({ timeout: 10_000 });
+    // Confirm: "Add to routing" (the inline editor's primary action)
+    await page.getByRole('button', { name: /Add to routing/i }).click();
 
     // ── Step 3: Verify autosave + operation persisted ──
 

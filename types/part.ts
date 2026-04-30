@@ -6,15 +6,8 @@ export interface Part {
   company_id: string;
   part_name: string;
   description: string | null;
-  category_id: string | null;
   created_at: string;
   updated_at: string;
-  // Optional relation (populated by queries that join part_categories)
-  part_category?: {
-    id: string;
-    name: string;
-    default_markup_percent: number | null;
-  } | null;
   // Optional relation counts (populated by getPartWithRelations)
   quotes_count?: number;
   jobs_count?: number;
@@ -32,7 +25,6 @@ export interface Part {
 export interface PartFormData {
   part_name: string;
   description: string;
-  category_id: string;
 }
 
 /**
@@ -41,7 +33,6 @@ export interface PartFormData {
 export const EMPTY_PART_FORM: PartFormData = {
   part_name: '',
   description: '',
-  category_id: '',
 };
 
 /**
@@ -51,6 +42,5 @@ export function partToFormData(part: Part): PartFormData {
   return {
     part_name: part.part_name,
     description: part.description || '',
-    category_id: part.category_id || '',
   };
 }

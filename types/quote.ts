@@ -4,31 +4,52 @@
 export type QuoteStatus = 'active' | 'expired';
 
 /**
- * Quote record from database
+ * Quote header record. Part/quantity/pricing lives on quote_line_items.
  */
 export interface Quote {
   id: string;
   company_id: string;
   quote_number: string;
   customer_id: string;
-  part_id: string | null;
-  quantity: number;
-  base_cost: number | null;
-  markup_percent: number | null;
-  estimated_labor_cost: number | null;
-  estimated_material_cost: number | null;
-  unit_price: number | null;
-  total_price: number | null;
   lead_time_days: number | null;
   expiration_date: string | null;
   status: QuoteStatus;
   status_changed_at: string | null;
-  converted_to_job_id: string | null;
   converted_at: string | null;
   legacy_quote_number: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Snapshotted line item on a quote. One row per (part, tier) selected at quote creation.
+ * Immutable — edits to the part's pricing tiers after the snapshot do not affect the quote.
+ */
+export interface QuoteLineItem {
+  id: string;
+  quote_id: string;
+  company_id: string;
+  part_id: string;
+  source_tier_id: string | null;
+  sequence: number;
+  quantity: number;
+  unit_price: number;
+  total_price: number | null;
+  markup_percent: number | null;
+  base_cost_per_unit: number | null;
+  /**
+   * True when the salesperson typed a one-off price/markup on the quote form
+   * that diverged from the source tier. UI surfaces a green "adjusted for this quote" chip.
+   */
+  is_quote_override: boolean;
+  created_at: string;
+  // Optional joined part info for UI rendering
+  parts?: {
+    id: string;
+    part_name: string;
+    description: string | null;
+  } | null;
 }
 
 /**
@@ -51,24 +72,15 @@ export interface QuoteWithRelations extends Quote {
     postal_code?: string | null;
     country?: string | null;
   } | null;
-  // Joined part data
-  parts?: {
-    id: string;
-    part_name: string;
-    description: string | null;
-    category_id: string | null;
-    part_categories?: {
-      id: string;
-      name: string;
-      default_markup_percent: number | null;
-    } | null;
-  } | null;
-  // Joined job data (if converted)
-  jobs?: {
+  // Hydrated line items (ordered by sequence).
+  line_items?: QuoteLineItem[];
+  // Jobs created from this quote via conversion.
+  jobs?: Array<{
     id: string;
     job_number: string;
     status: string;
-  } | null;
+    source_quote_line_item_id: string | null;
+  }>;
   // Joined attachments
   quote_attachments?: QuoteAttachment[];
   // Resolved creator profile from user_company_access (populated client-side
@@ -77,16 +89,32 @@ export interface QuoteWithRelations extends Quote {
 }
 
 /**
+ * Per-tier price/markup override the salesperson typed on the quote form
+ * (one-off concession that diverges from the part's tier).
+ */
+export interface QuoteTierOverride {
+  unit_price: number;
+  markup_percent: number | null;
+}
+
+/**
+ * Selection shape for a single part inside the quote form —
+ * picks which of the part's pricing tiers to snapshot, with optional
+ * per-tier price overrides.
+ */
+export interface QuoteFormPartBlock {
+  part_id: string;
+  tier_ids: string[];
+  /** tier_id → override values; only present for tiers the user adjusted */
+  overrides?: Record<string, QuoteTierOverride>;
+}
+
+/**
  * Form data for creating/editing quotes
  */
 export interface QuoteFormData {
   customer_id: string;
-  part_type: 'existing' | 'adhoc';
-  part_id: string;
-  quantity: string;
-  base_cost: string;
-  markup_percent: string;
-  unit_price: string;
+  parts: QuoteFormPartBlock[];
   lead_time_days: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
   status?: QuoteStatus;
@@ -127,28 +155,26 @@ function defaultExpirationDate(): string {
 
 export const EMPTY_QUOTE_FORM: QuoteFormData = {
   customer_id: '',
-  part_type: 'existing',
-  part_id: '',
-  quantity: '1',
-  base_cost: '',
-  markup_percent: '',
-  unit_price: '',
+  parts: [],
   lead_time_days: '',
   expiration_date: defaultExpirationDate(),
 };
 
 /**
- * Convert Quote to QuoteFormData for edit forms
+ * Convert Quote to QuoteFormData for edit forms.
+ * Note: tier selection is derived from existing line_items — metadata-only edits
+ * are all that's supported on existing quotes (snapshots are immutable).
  */
-export function quoteToFormData(quote: Quote): QuoteFormData {
+export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
+  const byPart = new Map<string, string[]>();
+  for (const li of quote.line_items || []) {
+    const list = byPart.get(li.part_id) || [];
+    if (li.source_tier_id) list.push(li.source_tier_id);
+    byPart.set(li.part_id, list);
+  }
   return {
     customer_id: quote.customer_id,
-    part_type: quote.part_id ? 'existing' : 'adhoc',
-    part_id: quote.part_id || '',
-    quantity: String(quote.quantity),
-    base_cost: quote.base_cost !== null ? String(quote.base_cost) : '',
-    markup_percent: quote.markup_percent !== null ? String(quote.markup_percent) : '',
-    unit_price: quote.unit_price !== null ? String(quote.unit_price) : '',
+    parts: Array.from(byPart.entries()).map(([part_id, tier_ids]) => ({ part_id, tier_ids })),
     lead_time_days: quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,
@@ -249,11 +275,13 @@ export interface TempAttachment {
 
 /**
  * Per-operation cost snapshot captured at quote creation.
+ * Scoped per (quote, part) so multi-part quotes capture each part's ops independently.
  */
 export interface QuoteOperationSnapshot {
   id: string;
   quote_id: string;
   company_id: string;
+  part_id: string;
   sequence: number;
   operation_name: string;
   run_time_minutes: number | null;
@@ -266,11 +294,13 @@ export interface QuoteOperationSnapshot {
 
 /**
  * Per-material cost snapshot captured at quote creation.
+ * Scoped per (quote, part).
  */
 export interface QuoteMaterialSnapshot {
   id: string;
   quote_id: string;
   company_id: string;
+  part_id: string;
   sequence: number;
   inventory_item_id: string | null;
   item_name: string;
@@ -282,19 +312,23 @@ export interface QuoteMaterialSnapshot {
 }
 
 /**
- * Full cost breakdown read back from the snapshot tables,
- * with the computed vs. actual price so the UI can show overrides.
+ * Full cost breakdown read back from the snapshot tables for a single part within a quote.
  */
-export interface QuoteCostBreakdown {
+export interface QuotePartCostBreakdown {
+  part_id: string;
   operations: QuoteOperationSnapshot[];
   materials: QuoteMaterialSnapshot[];
   total_run_cost: number;
   total_setup_cost: number;
   total_labor_cost: number;
   total_material_cost: number;
-  base_cost: number;
-  markup_percent: number | null;
-  computed_unit_price: number | null;
-  actual_unit_price: number | null;
-  override_per_unit: number | null; // actual - computed (null if either missing)
+}
+
+/**
+ * Aggregated breakdown for a whole quote: one entry per distinct part, plus
+ * the line items (so the UI can overlay actual/computed prices per tier).
+ */
+export interface QuoteCostBreakdown {
+  parts: QuotePartCostBreakdown[];
+  line_items: QuoteLineItem[];
 }

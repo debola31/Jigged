@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -10,21 +10,22 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import type { QuoteWithRelations } from '@/types/quote';
+import type { QuoteWithRelations, QuoteLineItem } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
-import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
 
 interface ConvertToJobModalProps {
   open: boolean;
   onClose: () => void;
   quote: QuoteWithRelations;
-  onConverted: (jobId: string) => void;
+  onConverted: (jobIds: string[]) => void;
 }
 
 function formatDate(dateStr: string | null): string {
@@ -33,12 +34,15 @@ function formatDate(dateStr: string | null): string {
 }
 
 function computeDueDate(leadTimeDays: number | null): string | null {
-  if (leadTimeDays === null || leadTimeDays === undefined || isNaN(leadTimeDays)) {
-    return null;
-  }
+  if (leadTimeDays === null || leadTimeDays === undefined || isNaN(leadTimeDays)) return null;
   const d = new Date();
   d.setDate(d.getDate() + leadTimeDays);
   return d.toLocaleDateString();
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
 export default function ConvertToJobModal({
@@ -49,64 +53,64 @@ export default function ConvertToJobModal({
 }: ConvertToJobModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkingRouting, setCheckingRouting] = useState(false);
-  const [routingSummary, setRoutingSummary] = useState<{
-    id: string;
-    nodeCount: number;
-    totalRunTime: number | null;
-  } | null>(null);
-  const [hasRouting, setHasRouting] = useState(false);
 
-  // Lead time input — pre-fill from quote
   const [leadTimeInput, setLeadTimeInput] = useState<string>(
-    quote.lead_time_days !== null ? String(quote.lead_time_days) : ''
+    quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
   );
 
-  // Reset lead time when modal re-opens for a different quote
-  useEffect(() => {
-    if (open) {
-      setLeadTimeInput(quote.lead_time_days !== null ? String(quote.lead_time_days) : '');
+  // Map of part_id → selected line_item_id
+  const [selections, setSelections] = useState<Record<string, string>>({});
+
+  const lineItems = useMemo(
+    () => [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence),
+    [quote.line_items],
+  );
+
+  // Group line items by part.
+  const groupedByPart = useMemo(() => {
+    const map = new Map<string, QuoteLineItem[]>();
+    for (const li of lineItems) {
+      const list = map.get(li.part_id) ?? [];
+      list.push(li);
+      map.set(li.part_id, list);
     }
-  }, [open, quote.lead_time_days]);
+    return map;
+  }, [lineItems]);
 
-  // Check routing status when modal opens
+  // Initialize selections when the modal opens or line items change.
   useEffect(() => {
-    const checkRouting = async () => {
-      if (!open || !quote.part_id) {
-        setRoutingSummary(null);
-        setHasRouting(false);
-        return;
-      }
-
-      setCheckingRouting(true);
-      try {
-        const summary = await getRoutingSummaryForPart(quote.part_id);
-        setRoutingSummary(summary);
-        setHasRouting(!!summary);
-      } catch (err) {
-        console.error('Error checking routing:', err);
-        setHasRouting(false);
-      } finally {
-        setCheckingRouting(false);
-      }
-    };
-    checkRouting();
-  }, [open, quote.part_id]);
+    if (!open) return;
+    setLeadTimeInput(quote.lead_time_days !== null ? String(quote.lead_time_days) : '');
+    const init: Record<string, string> = {};
+    for (const [partId, items] of groupedByPart.entries()) {
+      // Pre-select when there's only one tier.
+      if (items.length === 1) init[partId] = items[0].id;
+    }
+    setSelections(init);
+    setError(null);
+  }, [open, quote.lead_time_days, groupedByPart]);
 
   const leadTimeNumber = leadTimeInput !== '' ? parseInt(leadTimeInput, 10) : null;
   const leadTimeValid =
-    leadTimeInput === '' || (!isNaN(leadTimeNumber!) && leadTimeNumber! >= 0 && leadTimeNumber! <= 3650);
+    leadTimeInput === '' ||
+    (!isNaN(leadTimeNumber as number) &&
+      (leadTimeNumber as number) >= 0 &&
+      (leadTimeNumber as number) <= 3650);
   const duePreview = leadTimeValid ? computeDueDate(leadTimeNumber) : null;
+
+  const allPartsResolved = Array.from(groupedByPart.keys()).every((partId) =>
+    Boolean(selections[partId]),
+  );
 
   const handleConvert = async () => {
     setLoading(true);
     setError(null);
-
     try {
       const result = await convertQuoteToJob(quote.id, {
+        selections: Object.values(selections).map((lineItemId) => ({ line_item_id: lineItemId })),
         leadTimeDays: leadTimeValid ? leadTimeNumber : null,
       });
-      onConverted(result.job.id);
+      onConverted(result.jobs.map((j) => j.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to convert quote to job');
     } finally {
@@ -120,15 +124,6 @@ export default function ConvertToJobModal({
       onClose();
     }
   };
-
-  const formatCurrency = (value: number | null): string => {
-    if (value === null) return '\u2014';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-  };
-
-  const createRoutingUrl = quote.part_id
-    ? `/dashboard/${quote.company_id}/parts/${quote.part_id}`
-    : null;
 
   const expired = isQuoteExpired(quote);
 
@@ -146,42 +141,63 @@ export default function ConvertToJobModal({
           {expired && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               This quote expired on <strong>{formatDate(quote.expiration_date)}</strong>. Pricing
-              may no longer be accurate — double-check before creating the job.
+              may no longer be accurate — double-check before creating jobs.
             </Alert>
           )}
 
           <Typography variant="body1" gutterBottom>
-            Create job from <strong>{quote.quote_number}</strong>?
+            Convert <strong>{quote.quote_number}</strong> to jobs
+          </Typography>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Customer: {quote.customers?.name || '—'}
           </Typography>
 
-          {/* Quote Summary */}
-          <Box
-            sx={{
-              bgcolor: 'rgba(255, 255, 255, 0.05)',
-              p: 2,
-              borderRadius: 1,
-              my: 2,
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-            }}
-          >
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Customer:</strong> {quote.customers?.name || '\u2014'}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Part:</strong> {quote.parts?.part_name || '\u2014'}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Quantity:</strong> {quote.quantity}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Total:</strong> {formatCurrency(quote.total_price)}
-            </Typography>
-          </Box>
+          <Divider sx={{ my: 2 }} />
+
+          {/* Per-part tier picker */}
+          {Array.from(groupedByPart.entries()).map(([partId, items]) => {
+            const partName = items[0]?.parts?.part_name ?? 'Part';
+            return (
+              <Box key={partId} sx={{ mb: 3 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  {partName}
+                </Typography>
+                <FormControl>
+                  <RadioGroup
+                    value={selections[partId] ?? ''}
+                    onChange={(_, value) =>
+                      setSelections((prev) => ({ ...prev, [partId]: value }))
+                    }
+                  >
+                    {items.map((li) => (
+                      <FormControlLabel
+                        key={li.id}
+                        value={li.id}
+                        control={<Radio size="small" />}
+                        label={
+                          <Typography variant="body2">
+                            Qty {li.quantity} · {formatCurrency(li.unit_price)} / unit ={' '}
+                            <strong>{formatCurrency(li.total_price)}</strong>
+                          </Typography>
+                        }
+                      />
+                    ))}
+                  </RadioGroup>
+                </FormControl>
+              </Box>
+            );
+          })}
+
+          {lineItems.length === 0 && (
+            <Alert severity="warning">
+              This quote has no line items — add at least one before converting.
+            </Alert>
+          )}
 
           {/* Lead time input */}
-          <Box sx={{ mb: 2 }}>
+          <Box sx={{ mt: 2 }}>
             <TextField
-              label="Lead time"
+              label="Lead time (applies to all created jobs)"
               type="number"
               size="small"
               fullWidth
@@ -204,55 +220,6 @@ export default function ConvertToJobModal({
               }}
             />
           </Box>
-
-          {/* Routing Status */}
-          {quote.part_id ? (
-            <>
-              <Divider sx={{ my: 2 }} />
-
-              {checkingRouting ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 2 }}>
-                  <CircularProgress size={20} />
-                  <Typography variant="body2" color="text.secondary">
-                    Checking routing...
-                  </Typography>
-                </Box>
-              ) : hasRouting && routingSummary ? (
-                <Alert
-                  severity="success"
-                  icon={<CheckCircleOutlineIcon />}
-                  sx={{ mt: 1 }}
-                >
-                  Routing found with {routingSummary.nodeCount} operation{routingSummary.nodeCount !== 1 ? 's' : ''}.
-                  Operations will be copied to the new job.
-                </Alert>
-              ) : (
-                <Alert severity="warning" sx={{ mt: 1 }}>
-                  <Typography variant="body2" gutterBottom>
-                    No routing defined for this part. A routing is required to create a job.
-                  </Typography>
-                  {createRoutingUrl && (
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      href={createRoutingUrl}
-                      startIcon={<ArrowForwardIcon />}
-                      sx={{ mt: 1 }}
-                    >
-                      Create Routing
-                    </Button>
-                  )}
-                </Alert>
-              )}
-            </>
-          ) : (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Alert severity="warning">
-                This quote has no part assigned. A part with a routing is required to create a job.
-              </Alert>
-            </>
-          )}
         </Box>
       </DialogContent>
       <DialogActions>
@@ -262,10 +229,10 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || !hasRouting || !quote.part_id || checkingRouting || !leadTimeValid}
+          disabled={loading || !allPartsResolved || lineItems.length === 0 || !leadTimeValid}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
-          {loading ? 'Creating...' : 'Create Job'}
+          {loading ? 'Creating…' : 'Create jobs'}
         </Button>
       </DialogActions>
     </Dialog>

@@ -164,9 +164,17 @@ export default function QuoteDetailPage() {
   }
 
   const expired = isQuoteExpired(quote);
-  const convertedLocked = !!quote.converted_to_job_id;
+  const convertedLocked = !!quote.converted_at;
   const isEditable = !convertedLocked && quote.status === 'active';
   const daysLeft = daysUntilExpiration(quote.expiration_date);
+  const linkedJobs = quote.jobs ?? [];
+  const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
+  const lineItemsByPart = new Map<string, typeof lineItems>();
+  for (const li of lineItems) {
+    const list = lineItemsByPart.get(li.part_id) ?? [];
+    list.push(li);
+    lineItemsByPart.set(li.part_id, list);
+  }
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -315,17 +323,22 @@ export default function QuoteDetailPage() {
         </Alert>
       )}
 
-      {/* Converted to Job Banner */}
-      {quote.converted_to_job_id && quote.jobs && (
+      {/* Converted to Jobs Banner */}
+      {convertedLocked && linkedJobs.length > 0 && (
         <Alert severity="success" sx={{ mb: 3 }}>
           This quote was converted to{' '}
-          <MuiLink
-            component={Link}
-            href={`/dashboard/${companyId}/jobs/${quote.converted_to_job_id}`}
-            sx={{ fontWeight: 600 }}
-          >
-            Job {quote.jobs.job_number}
-          </MuiLink>{' '}
+          {linkedJobs.map((j, i) => (
+            <span key={j.id}>
+              {i > 0 && ', '}
+              <MuiLink
+                component={Link}
+                href={`/dashboard/${companyId}/jobs/${j.id}`}
+                sx={{ fontWeight: 600 }}
+              >
+                Job {j.job_number}
+              </MuiLink>
+            </span>
+          ))}{' '}
           on {formatDate(quote.converted_at)}
         </Alert>
       )}
@@ -354,31 +367,40 @@ export default function QuoteDetailPage() {
           </Card>
         </Grid>
 
-        {/* Part Info */}
+        {/* Parts & tiers */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Part
+                Parts
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              {quote.parts ? (
-                <>
-                  <MuiLink
-                    component={Link}
-                    href={`/dashboard/${companyId}/parts/${quote.part_id}`}
-                    sx={{ fontWeight: 500 }}
-                  >
-                    {quote.parts.part_name}
-                  </MuiLink>
-                  {quote.parts.description && (
-                    <Typography variant="body2" color="text.secondary">
-                      {quote.parts.description}
-                    </Typography>
-                  )}
-                </>
+              {lineItemsByPart.size === 0 ? (
+                <Typography color="text.secondary">No parts on this quote</Typography>
               ) : (
-                <Typography color="text.secondary">No part specified</Typography>
+                Array.from(lineItemsByPart.entries()).map(([partId, items]) => {
+                  const partName = items[0]?.parts?.part_name ?? 'Part';
+                  const description = items[0]?.parts?.description;
+                  return (
+                    <Box key={partId} sx={{ mb: 2 }}>
+                      <MuiLink
+                        component={Link}
+                        href={`/dashboard/${companyId}/parts/${partId}`}
+                        sx={{ fontWeight: 500 }}
+                      >
+                        {partName}
+                      </MuiLink>
+                      {description && (
+                        <Typography variant="body2" color="text.secondary">
+                          {description}
+                        </Typography>
+                      )}
+                      <Typography variant="caption" color="text.secondary">
+                        {items.length} tier{items.length === 1 ? '' : 's'}
+                      </Typography>
+                    </Box>
+                  );
+                })
               )}
             </CardContent>
           </Card>
@@ -444,41 +466,53 @@ export default function QuoteDetailPage() {
           </Grid>
         )}
 
-        {/* Pricing summary */}
+        {/* Line items table */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
               <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-                Pricing
+                Line items
               </Typography>
               <Divider sx={{ mb: 2 }} />
-
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 6, sm: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Unit Price
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatCurrency(quote.unit_price)}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 6, sm: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Quantity
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {quote.quantity}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 4 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Total
-                  </Typography>
-                  <Typography variant="h5" color="primary" fontWeight={600}>
-                    {formatCurrency(quote.total_price)}
-                  </Typography>
-                </Grid>
-              </Grid>
+              {lineItems.length === 0 ? (
+                <Typography color="text.secondary">No line items on this quote.</Typography>
+              ) : (
+                <Box sx={{ overflowX: 'auto' }}>
+                  <Box
+                    component="table"
+                    sx={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      '& th, & td': { textAlign: 'left', py: 1, px: 1, borderBottom: '1px solid', borderColor: 'divider' },
+                      '& th.num, & td.num': { textAlign: 'right' },
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th>Part</th>
+                        <th className="num">Qty</th>
+                        <th className="num">Unit price</th>
+                        <th className="num">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lineItems.map((li) => (
+                        <tr key={li.id}>
+                          <td>{li.parts?.part_name ?? 'Part'}</td>
+                          <td className="num">{li.quantity}</td>
+                          <td className="num">{formatCurrency(li.unit_price)}</td>
+                          <td className="num">{formatCurrency(li.total_price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Box>
+                  {lineItems.length > 1 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      Multiple tiers — grand total is withheld until the customer picks a quantity per part.
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -488,7 +522,6 @@ export default function QuoteDetailPage() {
           <QuoteCostBreakdownAccordion
             quoteId={quote.id}
             companyId={companyId}
-            quantity={quote.quantity}
           />
         </Grid>
       </Grid>
@@ -498,8 +531,10 @@ export default function QuoteDetailPage() {
         open={convertModalOpen}
         onClose={() => setConvertModalOpen(false)}
         quote={quote}
-        onConverted={(jobId) => {
-          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
+        onConverted={(jobIds) => {
+          const first = jobIds[0];
+          if (first) router.push(`/dashboard/${companyId}/jobs/${first}`);
+          else router.push(`/dashboard/${companyId}/jobs`);
         }}
       />
 

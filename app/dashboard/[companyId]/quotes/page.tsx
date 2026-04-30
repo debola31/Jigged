@@ -266,10 +266,20 @@ export default function QuotesPage() {
       valueGetter: (params) => params.data?.customers?.name || '—',
     },
     {
-      field: 'total_price',
+      colId: 'total',
       headerName: 'Total',
-      width: 120,
-      valueFormatter: (params: ValueFormatterParams) => formatCurrency(params.value),
+      width: 140,
+      valueGetter: (params) => {
+        const items = params.data?.line_items ?? [];
+        if (items.length === 1) {
+          return items[0].total_price ?? items[0].unit_price * items[0].quantity;
+        }
+        return null;
+      },
+      valueFormatter: (params: ValueFormatterParams) =>
+        params.value == null ? '—' : formatCurrency(params.value),
+      tooltipValueGetter: (params) =>
+        (params.data?.line_items?.length ?? 0) > 1 ? 'Multi-tier quote — pick qty to confirm total' : undefined,
     },
     {
       field: 'status',
@@ -305,24 +315,27 @@ export default function QuotesPage() {
     },
     {
       colId: 'job',
-      headerName: 'Job',
-      width: 100,
+      headerName: 'Jobs',
+      width: 160,
       cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
         if (!params.data) return null;
-        const quote = params.data;
-        if (quote.converted_to_job_id && quote.jobs) {
-          return (
-            <MuiLink
-              component={Link}
-              href={`/dashboard/${companyId}/jobs/${quote.converted_to_job_id}`}
-              onClick={(e: React.MouseEvent) => e.stopPropagation()}
-              sx={{ fontWeight: 500 }}
-            >
-              {quote.jobs.job_number}
-            </MuiLink>
-          );
-        }
-        return '—';
+        const jobs = params.data.jobs ?? [];
+        if (jobs.length === 0) return '—';
+        return (
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+            {jobs.map((j, i) => (
+              <MuiLink
+                key={j.id}
+                component={Link}
+                href={`/dashboard/${companyId}/jobs/${j.id}`}
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                sx={{ fontWeight: 500 }}
+              >
+                {j.job_number}{i < jobs.length - 1 ? ',' : ''}
+              </MuiLink>
+            ))}
+          </Box>
+        );
       },
     },
   ];

@@ -54,6 +54,16 @@ If a backfill is genuinely impossible (truly lost history), prefer an explicit "
 
 ---
 
+### Never make changes directly on the main branch
+
+Always create a new feature branch before modifying code, schema, or configuration. No exceptions for "small fixes" or "hotfixes."
+
+**Why:** Direct edits to main bypass code review, make rollbacks harder, and can clobber teammates' in-progress work. Feature branches keep history linear and reviewable.
+
+**How to apply:** Before touching files, run `git checkout -b feature/<short-description>` (e.g., `feature/pricing-tiers-and-markup`). Commit with clear messages, push with `-u origin`, and open a PR for merge. If you're ever uncertain what branch you're on, check `git branch --show-current` before editing.
+
+---
+
 ## Design System: Jigged Manufacturing ERP (Material-UI)
 
 > **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.

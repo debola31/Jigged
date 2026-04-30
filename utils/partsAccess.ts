@@ -20,7 +20,7 @@ export async function getAllParts(
   while (hasMore) {
     let query = supabase
       .from('parts')
-      .select('*, part_categories(id, name, default_markup_percent), routings(id)')
+      .select('*, routings(id)')
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -44,16 +44,13 @@ export async function getAllParts(
   return allData.map((part) => {
     const routings = part.routings as Array<{ id: string }> | { id: string } | null;
     const routingRecord = Array.isArray(routings) ? routings[0] : routings;
-    const partCategory = part.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
     return {
       id: part.id as string,
       company_id: part.company_id as string,
       part_name: part.part_name as string,
       description: part.description as string | null,
-      category_id: part.category_id as string | null,
       created_at: part.created_at as string,
       updated_at: part.updated_at as string,
-      part_category: partCategory || null,
       routing: routingRecord
         ? { id: routingRecord.id, nodes_count: 0, total_run_time_per_unit: null }
         : undefined,
@@ -76,7 +73,7 @@ export async function getPartsPaginated(
 
   let query = supabase
     .from('parts')
-    .select('*, part_categories(id, name, default_markup_percent)')
+    .select('*')
     .eq('company_id', companyId)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
@@ -92,19 +89,14 @@ export async function getPartsPaginated(
     throw error;
   }
 
-  return (data || []).map((part: Record<string, unknown>) => {
-    const partCategory = part.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
-    return {
-      id: part.id as string,
-      company_id: part.company_id as string,
-      part_name: part.part_name as string,
-      description: part.description as string | null,
-      category_id: part.category_id as string | null,
-      created_at: part.created_at as string,
-      updated_at: part.updated_at as string,
-      part_category: partCategory || null,
-    };
-  });
+  return (data || []).map((part: Record<string, unknown>) => ({
+    id: part.id as string,
+    company_id: part.company_id as string,
+    part_name: part.part_name as string,
+    description: part.description as string | null,
+    created_at: part.created_at as string,
+    updated_at: part.updated_at as string,
+  }));
 }
 
 /**
@@ -143,7 +135,7 @@ export async function getPart(partId: string): Promise<Part | null> {
 
   const { data, error } = await supabase
     .from('parts')
-    .select('*, part_categories(id, name, default_markup_percent)')
+    .select('*')
     .eq('id', partId)
     .single();
 
@@ -152,14 +144,7 @@ export async function getPart(partId: string): Promise<Part | null> {
     throw error;
   }
 
-  if (!data) return null;
-
-  const raw = data as Record<string, unknown>;
-  const partCategory = raw.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
-  return {
-    ...data,
-    part_category: partCategory || null,
-  };
+  return data;
 }
 
 /**
@@ -168,10 +153,9 @@ export async function getPart(partId: string): Promise<Part | null> {
 export async function getPartWithRelations(partId: string): Promise<Part | null> {
   const supabase = getSupabase();
 
-  // Get part with category
   const { data: part, error: partError } = await supabase
     .from('parts')
-    .select('*, part_categories(id, name, default_markup_percent)')
+    .select('*')
     .eq('id', partId)
     .single();
 
@@ -182,11 +166,15 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 
   if (!part) return null;
 
-  // Get quotes count
-  const { count: quotesCount, error: quotesError } = await supabase
-    .from('quotes')
-    .select('*', { count: 'exact', head: true })
+  // Quotes count: walk through line items and de-dupe by quote_id (a multi-tier quote on
+  // the same part should still count as one quote).
+  const { data: liQuoteRows, error: quotesError } = await supabase
+    .from('quote_line_items')
+    .select('quote_id')
     .eq('part_id', partId);
+  const quotesCount = quotesError
+    ? 0
+    : new Set(((liQuoteRows ?? []) as Array<{ quote_id: string }>).map((r) => r.quote_id)).size;
 
   if (quotesError) {
     console.error('Error fetching quotes count:', quotesError);
@@ -227,12 +215,8 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
     };
   }
 
-  const rawPart = part as Record<string, unknown>;
-  const partCategory = rawPart.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
-
   return {
     ...part,
-    part_category: partCategory || null,
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
     routing: routingInfo,
@@ -241,7 +225,7 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 
 /**
  * Lightweight parts query for dropdowns.
- * Returns id, part name, description, category info, and whether the part has a routing.
+ * Returns id, part name, description, and whether the part has a routing.
  */
 export async function getPartsForSelect(
   companyId: string
@@ -249,9 +233,7 @@ export async function getPartsForSelect(
   id: string;
   part_name: string;
   description: string | null;
-  category_id: string | null;
   has_routing: boolean;
-  part_category: { id: string; name: string; default_markup_percent: number | null } | null;
 }>> {
   const supabase = getSupabase();
 
@@ -261,8 +243,6 @@ export async function getPartsForSelect(
       id,
       part_name,
       description,
-      category_id,
-      part_categories(id, name, default_markup_percent),
       routings(id)
     `)
     .eq('company_id', companyId)
@@ -275,14 +255,11 @@ export async function getPartsForSelect(
 
   return (data || []).map((p: Record<string, unknown>) => {
     const routings = p.routings as Array<{ id: string }> | { id: string } | null;
-    const partCategory = p.part_categories as { id: string; name: string; default_markup_percent: number | null } | null;
     return {
       id: p.id as string,
       part_name: p.part_name as string,
       description: p.description as string | null,
-      category_id: p.category_id as string | null,
       has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
-      part_category: partCategory || null,
     };
   });
 }
@@ -329,7 +306,6 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
       company_id: companyId,
       part_name: formData.part_name.trim(),
       description: formData.description.trim() || null,
-      category_id: formData.category_id || null,
     })
     .select()
     .single();
@@ -337,6 +313,16 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
   if (error) {
     console.error('Error creating part:', error);
     throw error;
+  }
+
+  // Auto-apply the company's default markup rate so the new part has a
+  // starting pricing tier without the user having to pick one manually.
+  // Failures are non-fatal — the part is created either way.
+  try {
+    const { applyDefaultRateToPart } = await import('@/utils/markupRatesAccess');
+    await applyDefaultRateToPart(companyId, data.id);
+  } catch (autoApplyErr) {
+    console.warn('Default markup rate auto-apply failed for new part:', autoApplyErr);
   }
 
   return data;
@@ -353,7 +339,6 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
     .update({
       part_name: formData.part_name.trim(),
       description: formData.description.trim() || null,
-      category_id: formData.category_id || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', partId)

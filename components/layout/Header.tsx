@@ -89,6 +89,13 @@ function getPageTitle(pathname: string): string {
     return 'Settings';
   }
 
+  // Check for markup-rates routes
+  if (segments.includes('markup-rates')) {
+    if (segments.includes('new')) return 'New Markup Rate';
+    if (segments.includes('edit')) return 'Edit Markup Rate';
+    return 'Markup Rates';
+  }
+
   // Map other route segments to display titles
   const titleMap: Record<string, string> = {};
 

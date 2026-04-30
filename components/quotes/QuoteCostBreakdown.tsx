@@ -9,19 +9,17 @@ import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import { getQuoteCostBreakdown } from '@/utils/quotesAccess';
-import type { QuoteCostBreakdown } from '@/types/quote';
+import type { QuoteCostBreakdown, QuoteLineItem } from '@/types/quote';
 import QuoteCostBreakdownView from './QuoteCostBreakdownView';
 
 interface QuoteCostBreakdownProps {
   quoteId: string;
   companyId: string;
-  quantity: number;
 }
 
 export default function QuoteCostBreakdownCard({
   quoteId,
   companyId,
-  quantity,
 }: QuoteCostBreakdownProps) {
   const [breakdown, setBreakdown] = useState<QuoteCostBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,24 +46,21 @@ export default function QuoteCostBreakdownCard({
     };
   }, [quoteId, companyId]);
 
-  const hasOverride =
-    breakdown?.override_per_unit !== null &&
-    breakdown?.override_per_unit !== undefined &&
-    Math.abs(breakdown.override_per_unit) >= 0.005;
+  const lineItemsByPart = new Map<string, QuoteLineItem[]>();
+  if (breakdown) {
+    for (const li of breakdown.line_items) {
+      const list = lineItemsByPart.get(li.part_id) || [];
+      list.push(li);
+      lineItemsByPart.set(li.part_id, list);
+    }
+  }
 
   return (
     <Card elevation={2}>
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Cost Breakdown
-          </Typography>
-          {hasOverride && (
-            <Typography variant="caption" color="warning.main">
-              Price overridden
-            </Typography>
-          )}
-        </Box>
+        <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+          Cost Breakdown
+        </Typography>
         <Divider sx={{ mb: 2 }} />
 
         {loading && (
@@ -80,32 +75,28 @@ export default function QuoteCostBreakdownCard({
           </Alert>
         )}
 
-        {breakdown && !loading && (
-          <QuoteCostBreakdownView
-            operations={breakdown.operations.map((o) => ({
-              key: o.id,
-              operation_name: o.operation_name,
-              run_time_minutes: o.run_time_minutes,
-              setup_time_minutes: o.setup_time_minutes,
-              labor_rate: o.labor_rate,
-              run_cost: o.run_cost,
-              setup_cost: o.setup_cost,
-            }))}
-            materials={breakdown.materials.map((m) => ({
-              key: m.id,
-              item_name: m.item_name,
-              quantity: m.quantity,
-              unit: m.unit,
-              cost_per_unit: m.cost_per_unit,
-              line_cost: m.line_cost,
-            }))}
-            quantity={quantity}
-            baseCost={breakdown.base_cost}
-            markupPercent={breakdown.markup_percent}
-            computedUnitPrice={breakdown.computed_unit_price}
-            actualUnitPrice={breakdown.actual_unit_price}
-          />
+        {breakdown && !loading && breakdown.parts.length === 0 && (
+          <Typography variant="body2" color="text.secondary">
+            This quote has no cost snapshot.
+          </Typography>
         )}
+
+        {breakdown && !loading &&
+          breakdown.parts.map((part) => {
+            const lis = (lineItemsByPart.get(part.part_id) || []).sort(
+              (a, b) => a.sequence - b.sequence,
+            );
+            const partName = lis[0]?.parts?.part_name ?? null;
+            return (
+              <QuoteCostBreakdownView
+                key={part.part_id}
+                partName={partName}
+                operations={part.operations}
+                materials={part.materials}
+                lineItems={lis}
+              />
+            );
+          })}
       </CardContent>
     </Card>
   );

@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
-  Card,
-  CardContent,
-  Grid,
+  Divider,
   CircularProgress,
   Alert,
   Typography,
@@ -25,6 +23,11 @@ import {
 interface PartRoutingPanelProps {
   companyId: string;
   partId: string;
+  /**
+   * Fired after each successful save so the parent page can refresh siblings
+   * (PartCostBreakdown, PartPricingTiers) that derive numbers from the routing.
+   */
+  onRoutingSaved?: () => void;
 }
 
 /**
@@ -38,7 +41,7 @@ interface PartRoutingPanelProps {
  *    so temp IDs become real IDs and the next change diffs correctly.
  *  - A subtle indicator in the header shows save state.
  */
-export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanelProps) {
+export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: PartRoutingPanelProps) {
   const [ops, setOps] = useState<OperationRowData[]>([]);
   const [mats, setMats] = useState<MaterialRowData[]>([]);
   const [routingId, setRoutingId] = useState<string | null>(null);
@@ -162,6 +165,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
             setOriginalMaterialIds(new Set(fresh.materials.map((m) => m.id)));
           }
           setSavedAt(new Date());
+          onRoutingSaved?.();
         } catch (err) {
           console.error('Failed to save routing:', err);
           setError(err instanceof Error ? err.message : 'Failed to save routing');
@@ -172,7 +176,7 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
       // Swallow rejections in the chain so one error doesn't poison the queue.
       queueRef.current = job.catch(() => undefined);
     },
-    [companyId, partId, routingId, originalNodeIds, originalMaterialIds]
+    [companyId, partId, routingId, originalNodeIds, originalMaterialIds, onRoutingSaved]
   );
 
   const handleOpsChange = useCallback(
@@ -200,37 +204,38 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
   }
 
   return (
-    <Box sx={{ position: 'relative' }}>
-      {/* Save indicator floats over the top-right corner so it never reserves
-          layout space — the Operations / Materials card titles speak for the
-          section, no header needed. */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: -22,
-          right: 0,
-          display: 'flex',
-          alignItems: 'center',
-          color: 'text.secondary',
-          pointerEvents: 'none',
-        }}
-      >
-        {saving ? (
-          <Fade in>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <CloudSyncOutlinedIcon fontSize="small" />
-              <Typography variant="caption">Saving…</Typography>
-            </Box>
-          </Fade>
-        ) : savedAt ? (
-          <Fade in>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <CloudDoneOutlinedIcon fontSize="small" color="success" />
-              <Typography variant="caption">All changes saved</Typography>
-            </Box>
-          </Fade>
-        ) : null}
-      </Box>
+    <Box>
+      {/* Inline save indicator. Only mounted when there's something to show
+          so a brand-new part doesn't reserve empty space at the top of the
+          card. The first save will introduce the row — small one-time
+          layout shift, but better than perpetual whitespace. */}
+      {(saving || savedAt) && (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            color: 'text.secondary',
+            mb: 1,
+          }}
+        >
+          {saving ? (
+            <Fade in>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <CloudSyncOutlinedIcon fontSize="small" />
+                <Typography variant="caption">Saving…</Typography>
+              </Box>
+            </Fade>
+          ) : (
+            <Fade in>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                <CloudDoneOutlinedIcon fontSize="small" color="success" />
+                <Typography variant="caption">All changes saved</Typography>
+              </Box>
+            </Fade>
+          )}
+        </Box>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -238,32 +243,23 @@ export default function PartRoutingPanel({ companyId, partId }: PartRoutingPanel
         </Alert>
       )}
 
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <RoutingOperationsList
-                rows={ops}
-                onChange={handleOpsChange}
-                companyId={companyId}
-                disabled={saving}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <RoutingMaterialsList
-                rows={mats}
-                onChange={handleMatsChange}
-                companyId={companyId}
-                disabled={saving}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Stacked vertically (operations above materials) since this lives
+          inside a narrow side panel — side-by-side wouldn't have room. */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <RoutingOperationsList
+          rows={ops}
+          onChange={handleOpsChange}
+          companyId={companyId}
+          disabled={saving}
+        />
+        <Divider />
+        <RoutingMaterialsList
+          rows={mats}
+          onChange={handleMatsChange}
+          companyId={companyId}
+          disabled={saving}
+        />
+      </Box>
     </Box>
   );
 }

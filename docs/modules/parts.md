@@ -2,13 +2,21 @@
 
 ## Overview
 
-The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts. Parts include a category assignment for default markup configuration and can have a routing defining their manufacturing process. If a routing exists, cost is calculated from it (labor + materials). Cost determination happens at quote creation time, not on the part itself.
+The Parts module manages the catalog of products/parts that a company manufactures. Parts are **company-wide entities** and are not tied to a specific customer. The customer relationship is expressed through quotes and jobs, not parts.
+
+A part owns three layers of information that drive quoting:
+
+1. **Routing** — operations and materials that define how the part is made (see [Routings](routings.md)).
+2. **Cost breakdown** — labor + setup + materials, derived live from the routing. The Cost Breakdown card on the part detail page reloads automatically every time the routing auto-saves; there is no Recalculate button.
+3. **Pricing** — quantity break-points (e.g., 1, 2, 4 pieces) each with their own markup %. Markup % is the source of truth on a tier; unit price is always derived as `base_cost × (1 + markup/100)`. Typing a unit price directly back-calculates the markup. Tiers persist on the part; quotes snapshot tiers as immutable line items.
+
+This three-layer split mirrors how shops like Contour Tool & Machine already think: cost the part once, set quantity break-points once, then point quotes at the tiers that apply to a given customer conversation.
 
 **Priority:** Must Have (Build Second)
 
 **Dependencies:** None (parts are independent company-wide entities)
 
-**Database Table:** `parts`
+**Database Tables:** `parts`, `part_pricing_tiers`
 
 ---
 
@@ -20,15 +28,21 @@ The Parts module manages the catalog of products/parts that a company manufactur
 | Owner/Admin | Search parts by part name or description | I can quickly find a specific part |
 | Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default markups |
 | Owner/Admin | Edit part information | I can update descriptions or other details |
-| Owner/Admin | Manage part categories with default markups | I can standardize markup expectations across similar parts |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
 | Owner/Admin | Create or edit a routing from the part detail page | I can define the manufacturing process for a part |
-| Salesperson | Look up part cost and category markup when creating quotes | I can quickly provide accurate quotes |
+| Owner/Admin | See a cost breakdown for a part (labor + setup + materials, with previews at qty 1 and qty 10) | I can sanity-check the routing economics without leaving the part |
+| Salesperson | Add multiple quantity tiers (e.g. 1, 2, 4) to a part, each with its own markup % | I can quote price breaks the customer asked for |
+| Salesperson | Type a unit price directly on a tier | The markup back-calculates automatically; I don't have to do the math |
+| Salesperson | Copy pricing from another part | I can reuse the same markup curve across similar parts without retyping |
+| Salesperson | See cost breakdown and tier prices update live as I edit the routing | I trust the numbers without clicking a refresh button |
+| Salesperson | Adjust a price for a single quote (one-off concession) | I can cut a deal without changing the part's standing prices |
 
 ---
 
 ## Data Model
+
+### `parts`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -36,43 +50,37 @@ The Parts module manages the catalog of products/parts that a company manufactur
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
 | part_name | Text | Yes | Part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
-| category_id | UUID (FK) | No | Link to part_categories table |
-| notes | Text | No | Internal notes |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, part_name)`
+**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company.
 
-Part names must be unique within a company.
+**Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`) and were replaced by the **Copy pricing from another part** action. New tier markups are blank by default and the user types them.
 
-### Part Categories Table (`part_categories`)
+### Part Pricing Tiers (`part_pricing_tiers`)
 
-Part categories classify parts for default markup configuration during quoting. Each company defines its own categories (e.g., "Precision Machined", "Assemblies", "Tooling"). A typical shop has 5–10 categories.
+Quantity price break-points that live on the part. One row per tier; selected tiers are snapshotted into `quote_line_items` at quote creation. Setup amortizes into `base_cost_per_unit` at the tier's quantity.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| id | UUID | Yes | Primary key (auto-generated) |
-| company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
-| name | Text | Yes | Category name (e.g., "Precision Machined", "Assemblies", "Tooling") |
-| default_markup_percent | Decimal(5,2) | No | Default markup % applied when quoting parts in this category |
-| description | Text | No | Optional description of the category |
+| id | UUID | Yes | Primary key |
+| part_id | UUID (FK) | Yes | Part the tier belongs to (cascade delete) |
+| company_id | UUID (FK) | Yes | Multi-tenant isolation |
+| sequence | Integer | Yes | Display order within the part (10, 20, 30...) |
+| quantity | Integer | Yes | Tier quantity, must be > 0 |
+| base_cost_per_unit | Decimal(12,4) | No | Cache of `run_labor + materials + (total_setup / qty)` against the current routing |
+| markup_percent | Decimal(5,2) | No | **Source of truth.** User-typed markup % for this tier |
+| unit_price | Decimal(12,4) | No | Always derived: `base_cost × (1 + markup/100)`. Typing a unit price back-calculates markup before save |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, name)`
+**Unique Constraint:** `(part_id, sequence)`
 
-### Pricing Tier Migration
+**Single-direction data flow:**
 
-The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** by the cost-plus model. This is a clean break with no deprecation period:
-
-**Migration steps (single migration):**
-1. Drop the `pricing` column entirely
-2. Drop the `validate_pricing_json` function, `idx_parts_pricing` GIN index, and `parts_valid_pricing` CHECK constraint
-
-**Code changes (same PR):**
-- Remove `getUnitPrice`, `calculateUnitPrice`, `sortPricingTiers`, `validatePricingTiers` from `types/part.ts`
-- Remove pricing tier rendering from PartForm and QuoteForm
-- Remove `PricingTier` interface
+- `markup_percent` is the source of truth.
+- `unit_price` is always recomputed against the current routing. Routing change → unit prices drift to reflect the new cost basis. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#per-quote-price-overrides)).
+- Typing in the unit-price input is shorthand for "compute the markup % that would yield this price"; the editor back-calculates and stores the markup, then keeps `unit_price` in lockstep.
 
 ---
 
@@ -106,32 +114,15 @@ The legacy `pricing` JSONB column (quantity-based price tiers) is **replaced** b
 
 ▸ **Basic Information**
 
-- Part Name (required)
-
+- Part Name (required, unique within the company)
 - Description
 
-▸ **Category**
-
-- Category dropdown (list of company's part_categories)
-  - Shows: category name (default markup %)
-  - "+ New Category" quick-create link opens inline modal
-  - Optional — parts can exist without a category
-
-▸ **Cost Information**
-
-- If routing exists: "Calculated from routing" (read-only, with cost value)
-- If no routing: "No cost data — create a routing to calculate cost"
-
-▸ **Other**
-
-- Notes (multiline)
+That's it for the metadata form. Routing, cost breakdown, and pricing all live on the part **detail** page (auto-saving as you edit) — there's no separate "Routing" or "Pricing" form.
 
 **Actions:**
 
 - Save → Returns to list
-
 - Cancel → Returns to list without saving
-
 - Delete (edit mode only) → Confirmation dialog
 
 ### 3. Part Detail
@@ -152,24 +143,47 @@ Read-only view showing:
 
 The part detail page embeds the routing editor directly — there's no separate page to navigate to. The panel shows Operations and Materials side-by-side with auto-save: each modal save, reorder click, or delete persists immediately and a "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't yet have one. See `docs/modules/routings.md` for the full editor behavior.
 
+▸ **Cost Breakdown Card (`PartCostBreakdown`)**
+
+A read-only summary that pulls live cost from the routing via `calculateRoutingCost(partId)`:
+
+- Operations table: run min/unit, setup min, rate, run $/unit, setup $ (one-time).
+- Materials table: per-unit qty, unit, cost/unit, line/unit.
+- Build-up: run labor / unit, one-time setup, materials / unit, **unit cost @ qty 1** (full setup), **unit cost @ qty 10** (setup ÷ 10). The two preview rows make setup amortization visible without committing to a tier yet.
+- Surfaces routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) inline so data quality issues catch the salesperson's eye before quoting.
+
+▸ **Pricing Card (`PartPricingTiers`)**
+
+Interactive editor for `part_pricing_tiers`. One row per tier with: Qty, Base / unit, Markup %, Unit price, Line total, and a delete icon. Header buttons:
+
+- **+ Add tier** — appends a blank row.
+- **Copy from another part** — opens a part picker; on confirm, copies the source part's tiers (qty + markup) onto this part. Unit prices are recomputed against this part's own routing.
+
+Editing model — markup % is the source of truth:
+
+- Editing **quantity** recomputes `base_cost_per_unit` (setup amortization changes); `unit_price` follows from the current markup.
+- Editing **markup %** recomputes `unit_price` directly.
+- Editing **unit price** back-calculates the markup % and stores it as the new source of truth. There is no lock concept; subsequent routing changes still propagate.
+
+**Auto-save**: every edit triggers a debounced save (~600ms after the last keystroke) via `replaceTiersForPart(companyId, partId, tiers)`. A "Saving… / All changes saved" indicator next to the card title mirrors the routing panel's pattern.
+
+**Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's `base_cost_per_unit` and `unit_price` against the new cost basis.
+
 ---
 
 ## Cost Determination Logic
 
-A part's cost is determined solely by its routing:
+A part's cost flows in three layers:
 
-```javascript
-function getPartBaseCost(part: Part): number | null {
-  if (part.routing) {
-    // Calculated from routing — see routings.md for formula
-    return calculateRoutingCost(part.routing);
-  }
-  // No routing — no cost data available
-  return null;
-}
-```
+1. **Routing cost** — derived live by `calculateRoutingCost(partId)`. Returns per-op run + setup costs and per-material line costs, plus warnings.
+2. **Tier cost** — `calculateTierPricing(breakdown, quantity, markup)` adds setup amortization at the tier's quantity:
+   ```
+   base_cost_per_unit = run_labor_per_unit + material_per_unit + (total_setup / quantity)
+   unit_price        = base_cost_per_unit × (1 + markup / 100)
+   ```
+3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items).
 
-Cost determination happens at **quote creation time**, not on the part itself. When creating a quote for a part, the routing cost (if available) flows into the quote's `base_cost` field and the part category's `default_markup_percent` pre-fills the markup. Parts without a routing have no cost data until a routing is created. See [Quotes Module — Cost-Plus Pricing](quotes.md#cost-plus-pricing-logic) for the full pricing flow.
+Parts without a routing show "No cost data" in the cost breakdown card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a routing exists).
 
 ---
 
@@ -190,12 +204,6 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 4. **Validate** - Check for duplicate part names within company
 
 5. **Execute** - Import with results summary
-
-### Category Mapping
-
-If the CSV contains a "Category" column, the import will:
-- Match existing categories by name (case-insensitive)
-- Auto-create new categories for unmatched values (with no default markup — admin sets markups later)
 
 ### Conflict Detection
 
@@ -222,34 +230,34 @@ If the CSV contains a "Category" column, the import will:
 ### Core CRUD
 
 - [ ] Can view paginated list of parts
-
 - [ ] Can search parts by number or description
-
-- [ ] Can create new part
-
+- [ ] Can create new part (basic info only — name + description)
 - [ ] Can edit existing part
-
-- [ ] Can assign a part to a category
-
-- [ ] Can create a new part category from the part form (quick-create)
-
-- [ ] Category default markup displays on part detail
-
-- [ ] Parts with routings show calculated cost (read-only)
-
-- [ ] Parts without routings show "No cost data" indicator
-
+- [ ] Parts without routings show "No cost data" indicator on the cost breakdown card
 - [ ] Can delete a part (hard delete with confirmation)
-
-- [ ] Part number is unique within company
-
-- [ ] Part detail page shows routing info card
-
-- [ ] Can create routing from part detail page if none exists
-
-- [ ] Can edit routing from part detail page if one exists
-
+- [ ] Part name is unique within company
+- [ ] Part detail page shows routing panel + cost breakdown + pricing card
 - [ ] Form shows validation errors inline
+
+### Cost Breakdown Card
+
+- [ ] Operations table renders one row per routing op with run/setup/rate/$ columns
+- [ ] Materials table renders one row per routing material with qty/unit/cost columns
+- [ ] Summary shows run labor / unit, one-time setup, materials / unit
+- [ ] Preview rows show unit cost at qty 1 and qty 10 (illustrating setup amortization)
+- [ ] Routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) surface inline
+- [ ] **Live updates**: editing the routing immediately reloads the breakdown — no Recalculate button
+
+### Pricing Card
+
+- [ ] Can add a new tier — markup field is blank by default
+- [ ] Tier base cost recomputes when quantity changes
+- [ ] Editing markup recomputes unit price live
+- [ ] Editing unit price back-calculates and stores markup % (markup is the source of truth)
+- [ ] **Live updates**: routing edits propagate to every tier's `base_cost_per_unit` and `unit_price` automatically (within ~600ms of routing save)
+- [ ] **Auto-save**: every edit persists with a "Saving… / All changes saved" indicator; no Save button
+- [ ] **Copy from another part**: opens a part picker; on confirm, source qty + markup are copied; unit prices recompute against this part's routing; subsequent edits to the source do not affect the copy
+- [ ] Tiers belonging to a part are deleted when the part is deleted (cascade)
 
 ### AI-Powered Import
 
@@ -269,10 +277,6 @@ If the CSV contains a "Category" column, the import will:
 
 ## Delete Behavior
 
-Parts can be deleted even if they have related quotes or jobs. When a part is deleted:
+A part can be deleted only when no quote line items or jobs reference it. The delete dialog surfaces the related-record counts; if any exist, the Delete button is disabled. Pricing tiers are removed by cascade when the part is deleted.
 
-- Related quotes will have their part_id set to NULL (orphaned)
-
-- Related jobs will have their part_id set to NULL (orphaned)
-
-A warning is shown in the delete confirmation dialog when the part has related records.
+Quote line items are immutable historical records — deleting a part that's been quoted requires first removing the dependent quotes (or accepting that the historical record stays).

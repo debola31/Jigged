@@ -72,6 +72,10 @@ test.describe('Parts and Routing workflow', () => {
 
     await firstOption.click();
 
+    // Modal requires at least one of run time / setup time before enabling
+    // the submit button (see AddOperationModal.canSave). Fill run time.
+    await addOpDialog.getByLabel(/Run time per unit/i).fill('2');
+
     // Confirm: "Add to routing" (the new modal's primary action)
     await addOpDialog.getByRole('button', { name: /Add to routing/i }).click();
     await expect(addOpDialog).toBeHidden({ timeout: 10_000 });

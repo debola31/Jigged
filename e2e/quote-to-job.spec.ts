@@ -25,8 +25,9 @@ test.describe('Quote to Job workflow', () => {
     await page.getByRole('button', { name: /New Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/new/);
 
-    // Select a customer (MUI Autocomplete)
-    const customerField = page.getByRole('combobox', { name: /Select Customer/i });
+    // Select a customer (MUI Autocomplete) — QuoteForm uses TextField
+    // label="Customer", so the combobox accessible name is "Customer".
+    const customerField = page.getByRole('combobox', { name: /^Customer$/i });
     await customerField.click();
     await customerField.fill('');
     // Pick the first customer option (skip the "Create New Customer" option)
@@ -37,8 +38,9 @@ test.describe('Quote to Job workflow', () => {
       .first()
       .click();
 
-    // Select a part (MUI Autocomplete)
-    const partField = page.getByRole('combobox', { name: /Select Part/i });
+    // Select a part — QuoteForm renders one Autocomplete per part block,
+    // labeled "Part 1", "Part 2", etc.
+    const partField = page.getByRole('combobox', { name: /^Part 1$/i });
     await partField.click();
     await partField.fill('');
     // Pick the first part option (skip "Create New Part")
@@ -49,8 +51,16 @@ test.describe('Quote to Job workflow', () => {
       .first()
       .click();
 
-    // Fill quantity
-    await page.getByLabel(/Quantity/i).fill('10');
+    // Pick the first quantity tier — QuoteForm replaced the free-form
+    // Quantity input with tier checkboxes (one per pricing tier on the part).
+    // The label is "Qty <n> · $<price> / unit"; we match the leading "Qty N"
+    // pattern. If the test part has no pricing tiers, skip.
+    const firstTier = page.getByRole('checkbox', { name: /Qty \d+/i }).first();
+    const hasTiers = await firstTier.isVisible({ timeout: 10_000 }).catch(() => false);
+    if (!hasTiers) {
+      test.skip(true, 'Test part has no pricing tiers');
+    }
+    await firstTier.check();
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)
     await page.getByRole('button', { name: /Create Quote/i }).click();

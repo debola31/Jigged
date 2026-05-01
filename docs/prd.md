@@ -256,7 +256,7 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Customer**: id, name, email, phone, address, created_at, updated_at
 
-- **Inventory Item**: id, name, description, sku, unit_of_measure, quantity, reorder_threshold, cost_per_unit, location, created_at, updated_at
+- **Inventory Item**: id, name, description, unit_of_measure, quantity, reorder_threshold, cost_per_unit, location, created_at, updated_at
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 

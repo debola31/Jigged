@@ -15,15 +15,8 @@ import StepLabel from '@mui/material/StepLabel';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorIcon from '@mui/icons-material/Error';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import { MappingReviewTable } from '@/components/import';
+import { MappingReviewTable, ConflictDialog } from '@/components/import';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import type { FieldDefinition, ColumnMapping } from '@/components/import';
 import { parseCSV } from '@/utils/csvParser';
@@ -44,7 +37,6 @@ type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'conflicts'
 const INVENTORY_FIELDS: FieldDefinition[] = [
   { key: 'name', label: 'Name', required: true },
   { key: 'description', label: 'Description', required: false },
-  { key: 'sku', label: 'SKU', required: false },
   { key: 'primary_unit', label: 'Primary Unit', required: true },
   { key: 'quantity', label: 'Quantity', required: false },
   { key: 'cost_per_unit', label: 'Cost per Unit', required: false },
@@ -53,7 +45,6 @@ const INVENTORY_FIELDS: FieldDefinition[] = [
 interface InventoryConflictInfo {
   row_number: number;
   csv_name: string | null;
-  csv_sku: string | null;
   conflict_type: string;
   existing_item_id: string;
   existing_value: string;
@@ -89,11 +80,11 @@ export default function ImportInventoryPage() {
   const [conflicts, setConflicts] = useState<InventoryConflictInfo[]>([]);
   const [validationErrors, setValidationErrors] = useState<InventoryValidationError[]>([]);
   const [validRowsCount, setValidRowsCount] = useState(0);
+  const [uomResolutions, setUomResolutions] = useState<Record<number, string>>({});
   const [importResult, setImportResult] = useState<InventoryExecuteResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const [showUnmappedConfirmDialog, setShowUnmappedConfirmDialog] = useState(false);
 
   const getActiveStepIndex = (): number => {
     switch (currentStep) {
@@ -210,6 +201,25 @@ export default function ImportInventoryPage() {
     setUnmappedOptional(optionalFields.map((f) => f.key));
   };
 
+  const buildMappingDict = (): Record<string, string> => {
+    const dict: Record<string, string> = {};
+    mappings.forEach((m) => {
+      if (m.db_field) {
+        dict[m.csv_column] = m.db_field;
+      }
+    });
+    return dict;
+  };
+
+  const buildRowObjects = (): Record<string, string>[] =>
+    allRows.map((row) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((header, idx) => {
+        obj[header] = row[idx] || '';
+      });
+      return obj;
+    });
+
   const handleProceedToValidation = async () => {
     if (unmappedRequired.length > 0) {
       setError(`Required fields not mapped: ${unmappedRequired.join(', ')}`);
@@ -221,22 +231,8 @@ export default function ImportInventoryPage() {
     setError(null);
 
     try {
-      // Build mapping dict
-      const mappingDict: Record<string, string> = {};
-      mappings.forEach((m) => {
-        if (m.db_field) {
-          mappingDict[m.csv_column] = m.db_field;
-        }
-      });
-
-      // Convert rows to objects
-      const rowObjects = allRows.map((row) => {
-        const obj: Record<string, string> = {};
-        headers.forEach((header, idx) => {
-          obj[header] = row[idx] || '';
-        });
-        return obj;
-      });
+      const mappingDict = buildMappingDict();
+      const rowObjects = buildRowObjects();
 
       const response = await fetch(`${API_BASE_URL}/api/inventory/import/validate`, {
         method: 'POST',
@@ -258,12 +254,13 @@ export default function ImportInventoryPage() {
       setConflicts(data.conflicts);
       setValidationErrors(data.validation_errors);
       setValidRowsCount(data.valid_rows_count);
+      setUomResolutions(data.uom_resolutions || {});
 
       if (data.has_conflicts || data.validation_errors.length > 0) {
         setCurrentStep('conflicts');
+        setShowConflictDialog(true);
       } else {
-        // No conflicts, proceed to import
-        await executeImport(mappingDict, rowObjects, false);
+        await executeImport(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed');
@@ -273,22 +270,32 @@ export default function ImportInventoryPage() {
     }
   };
 
-  const executeImport = async (
-    mappingDict: Record<string, string>,
-    rowObjects: Record<string, string>[],
-    skipConflicts: boolean
-  ) => {
+  const executeImport = async (skipConflicts: boolean) => {
+    setShowConflictDialog(false);
     setCurrentStep('importing');
     setLoading(true);
     setError(null);
 
     try {
+      const mappingDict = buildMappingDict();
+      const rowObjects = buildRowObjects();
+
       // Batch import for large files
       let totalImported = 0;
       let totalSkipped = 0;
 
       for (let i = 0; i < rowObjects.length; i += MAX_ROWS_PER_REQUEST) {
         const batch = rowObjects.slice(i, i + MAX_ROWS_PER_REQUEST);
+
+        // Translate global row_numbers (from validate) to per-batch indices.
+        const batchUomResolutions: Record<number, string> = {};
+        for (const [rowNumStr, unit] of Object.entries(uomResolutions)) {
+          const globalRow = parseInt(rowNumStr, 10);
+          const localRow = globalRow - i;
+          if (localRow >= 1 && localRow <= batch.length) {
+            batchUomResolutions[localRow] = unit;
+          }
+        }
 
         const response = await fetch(`${API_BASE_URL}/api/inventory/import/execute`, {
           method: 'POST',
@@ -298,6 +305,7 @@ export default function ImportInventoryPage() {
             mappings: mappingDict,
             rows: batch,
             skip_conflicts: skipConflicts,
+            uom_resolutions: batchUomResolutions,
           }),
         });
 
@@ -320,31 +328,10 @@ export default function ImportInventoryPage() {
       setCurrentStep('complete');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed');
-      setCurrentStep('conflicts');
+      setCurrentStep('review');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleImportWithSkip = async () => {
-    setShowConflictDialog(false);
-
-    const mappingDict: Record<string, string> = {};
-    mappings.forEach((m) => {
-      if (m.db_field) {
-        mappingDict[m.csv_column] = m.db_field;
-      }
-    });
-
-    const rowObjects = allRows.map((row) => {
-      const obj: Record<string, string> = {};
-      headers.forEach((header, idx) => {
-        obj[header] = row[idx] || '';
-      });
-      return obj;
-    });
-
-    await executeImport(mappingDict, rowObjects, true);
   };
 
   const handleReset = () => {
@@ -358,6 +345,7 @@ export default function ImportInventoryPage() {
     setConflicts([]);
     setValidationErrors([]);
     setValidRowsCount(0);
+    setUomResolutions({});
     setImportResult(null);
     setError(null);
   };
@@ -386,7 +374,6 @@ export default function ImportInventoryPage() {
         </Alert>
       )}
 
-      {/* Step 1: Upload */}
       {currentStep === 'upload' && (
         <Card elevation={2}>
           <CardContent sx={{ p: 4, textAlign: 'center' }}>
@@ -405,12 +392,10 @@ export default function ImportInventoryPage() {
         </Card>
       )}
 
-      {/* Step 2: Analyzing */}
       {currentStep === 'analyzing' && (
         <AIAnalysisLoading description="AI is mapping your columns to inventory fields..." />
       )}
 
-      {/* Step 3: Review Mappings */}
       {currentStep === 'review' && (
         <Card elevation={2}>
           <CardContent>
@@ -450,7 +435,6 @@ export default function ImportInventoryPage() {
         </Card>
       )}
 
-      {/* Step 4: Validating */}
       {currentStep === 'validating' && (
         <Card elevation={2}>
           <CardContent sx={{ p: 4, textAlign: 'center' }}>
@@ -465,53 +449,6 @@ export default function ImportInventoryPage() {
         </Card>
       )}
 
-      {/* Step 4b: Conflicts */}
-      {currentStep === 'conflicts' && (
-        <Card elevation={2}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-              <WarningAmberIcon color="warning" sx={{ fontSize: 32 }} />
-              <Typography variant="h6">
-                Validation Results
-              </Typography>
-            </Box>
-
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="body1" sx={{ mb: 2 }}>
-                <strong>{validRowsCount}</strong> rows ready to import
-              </Typography>
-
-              {conflicts.length > 0 && (
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  {conflicts.length} row{conflicts.length > 1 ? 's' : ''} have conflicts (duplicate SKUs)
-                </Alert>
-              )}
-
-              {validationErrors.length > 0 && (
-                <Alert severity="error" sx={{ mb: 2 }}>
-                  {validationErrors.length} row{validationErrors.length > 1 ? 's' : ''} have validation errors
-                </Alert>
-              )}
-            </Box>
-
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-              <Button variant="outlined" onClick={handleReset}>
-                Start Over
-              </Button>
-              {validRowsCount > 0 && (
-                <Button
-                  variant="contained"
-                  onClick={() => setShowConflictDialog(true)}
-                >
-                  Import {validRowsCount} Valid Rows
-                </Button>
-              )}
-            </Box>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 5: Importing */}
       {currentStep === 'importing' && (
         <Card elevation={2}>
           <CardContent sx={{ p: 4, textAlign: 'center' }}>
@@ -526,7 +463,6 @@ export default function ImportInventoryPage() {
         </Card>
       )}
 
-      {/* Step 5b: Complete */}
       {currentStep === 'complete' && importResult && (
         <Card elevation={2}>
           <CardContent sx={{ p: 4, textAlign: 'center' }}>
@@ -557,41 +493,31 @@ export default function ImportInventoryPage() {
         </Card>
       )}
 
-      {/* Conflict Confirmation Dialog */}
-      <Dialog
+      <ConflictDialog
         open={showConflictDialog}
-        onClose={() => setShowConflictDialog(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Import with Skipped Rows?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body1" sx={{ mb: 2 }}>
-            <strong>{validRowsCount}</strong> row{validRowsCount !== 1 ? 's' : ''} will be imported.
-          </Typography>
-          {conflicts.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              {conflicts.length} row{conflicts.length !== 1 ? 's' : ''} with conflicts will be skipped.
-            </Alert>
-          )}
-          {validationErrors.length > 0 && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {validationErrors.length} row{validationErrors.length !== 1 ? 's' : ''} with validation errors will be skipped.
-            </Alert>
-          )}
-          <Typography variant="body2" color="text.secondary">
-            Do you want to proceed with importing the valid rows?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowConflictDialog(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained" onClick={handleImportWithSkip}>
-            Import {validRowsCount} Rows
-          </Button>
-        </DialogActions>
-      </Dialog>
+        conflicts={conflicts}
+        validationErrors={validationErrors}
+        validRowsCount={validRowsCount}
+        totalRows={allRows.length}
+        onCancel={() => {
+          setShowConflictDialog(false);
+          setCurrentStep('review');
+        }}
+        onConfirm={() => executeImport(true)}
+        entityName="Inventory Items"
+        conflictColumns={[{ key: 'csv_name', label: 'Name' }]}
+        getConflictLabel={(conflict) => {
+          switch (conflict.conflict_type) {
+            case 'csv_duplicate_name':
+              return 'Duplicate Name in CSV';
+            case 'duplicate_name':
+              return 'Name Exists in Database';
+            default:
+              return 'Duplicate';
+          }
+        }}
+        getErrorMessage={(error) => `${error.field}: ${error.message}`}
+      />
     </Box>
   );
 }

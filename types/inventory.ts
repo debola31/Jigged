@@ -15,7 +15,6 @@ export interface InventoryItem {
   company_id: string;
   name: string;
   description: string | null;
-  sku: string | null;
   primary_unit: string;
   quantity: number;
   cost_per_unit: number | null;
@@ -120,7 +119,6 @@ export interface UnitConversionFormData {
 export interface InventoryItemFormData {
   name: string;
   description: string;
-  sku: string;
   primary_unit: string;
   quantity: number;
   cost_per_unit: number | null;
@@ -133,7 +131,6 @@ export interface InventoryItemFormData {
 export const EMPTY_INVENTORY_FORM: InventoryItemFormData = {
   name: '',
   description: '',
-  sku: '',
   primary_unit: 'pieces',
   quantity: 0,
   cost_per_unit: null,
@@ -173,7 +170,6 @@ export function inventoryItemToFormData(
   return {
     name: item.name,
     description: item.description || '',
-    sku: item.sku || '',
     primary_unit: item.primary_unit,
     quantity: item.quantity,
     cost_per_unit: item.cost_per_unit,

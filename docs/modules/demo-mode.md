@@ -218,7 +218,7 @@ Template-local `_ref` IDs are mapped to real UUIDs during seeding:
     }
   ],
   "inventory_items": [
-    { "_ref": "inv-1", "name": "6061 Aluminum Bar Stock", "sku": "AL-6061-BAR", "primary_unit": "inches", "quantity": 240, "cost_per_unit": 3.50 }
+    { "_ref": "inv-1", "name": "6061 Aluminum Bar Stock", "primary_unit": "inches", "quantity": 240, "cost_per_unit": 3.50 }
   ],
   "quotes": [
     { "_ref": "quote-1", "quote_number": "Q-DEMO-001", "customer_ref": "cust-1", "part_ref": "part-1", "routing_ref": "routing-1", "quantity": 50, "unit_price": 130.00, "total_price": 6500.00, "status": "accepted" }

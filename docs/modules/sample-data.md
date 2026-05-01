@@ -233,7 +233,7 @@ Same structure as the previous demo company template — template-local `_ref` I
     }
   ],
   "inventory_items": [
-    { "_ref": "inv-1", "name": "6061 Aluminum Bar Stock", "sku": "AL-6061-BAR", "primary_unit": "inches", "quantity": 240, "cost_per_unit": 3.50 }
+    { "_ref": "inv-1", "name": "6061 Aluminum Bar Stock", "primary_unit": "inches", "quantity": 240, "cost_per_unit": 3.50 }
   ],
   "quotes": [
     { "_ref": "quote-1", "quote_number": "Q-SAMPLE-001", "customer_ref": "cust-1", "part_ref": "part-1", "routing_ref": "routing-1", "quantity": 50, "unit_price": 130.00, "total_price": 6500.00, "status": "accepted" }
@@ -345,9 +345,9 @@ BEGIN
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO inventory_items (id, company_id, name, sku, primary_unit, quantity, cost_per_unit, is_sample)
+        INSERT INTO inventory_items (id, company_id, name, primary_unit, quantity, cost_per_unit, is_sample)
         VALUES (v_new_id, p_company_id,
-                v_item->>'name', v_item->>'sku', v_item->>'primary_unit',
+                v_item->>'name', v_item->>'primary_unit',
                 COALESCE((v_item->>'quantity')::NUMERIC, 0),
                 (v_item->>'cost_per_unit')::NUMERIC, TRUE);
     END LOOP;

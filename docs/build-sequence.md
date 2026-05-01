@@ -3299,7 +3299,6 @@ Phase 0 is complete when Shane can:
   | company_id | uuid | Yes | FK to companies |
   | name | text | Yes | Item name (e.g., "4140 Steel Bar") |
   | description | text | No | Optional description |
-  | sku | text | No | Internal SKU |
   | primary_unit | text | Yes | Primary unit of measure (e.g., "lbs") |
   | quantity | numeric | Yes | Current quantity in primary unit |
   | cost_per_unit | numeric | No | Cost per primary unit |
@@ -3346,9 +3345,9 @@ Phase 0 is complete when Shane can:
 
   **Route:** /dashboard/{companyId}/inventory
 
-  - Table columns: Item Name, SKU, Quantity, Unit, Last Updated
+  - Table columns: Item Name, Description, Quantity, Unit, Last Updated
 
-  - Search by name/SKU
+  - Search by name and description
 
   - "+Add Item" button → Create screen
 
@@ -3364,8 +3363,6 @@ Phase 0 is complete when Shane can:
 
   - Description
 
-  - SKU
-
   - Primary Unit (required) - e.g., lbs, kg, pcs
 
   - Current Quantity (required)
@@ -3378,7 +3375,7 @@ Phase 0 is complete when Shane can:
 
   **Route:** /dashboard/{companyId}/inventory/{id}
 
-  - Item details card (name, SKU, description, unit)
+  - Item details card (name, description, unit)
 
   - Current quantity (large display)
 

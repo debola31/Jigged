@@ -241,7 +241,6 @@ The template stores data for each entity type, keyed by table name. Each entity 
     {
       "_ref": "inv-1",
       "name": "6061 Aluminum Bar Stock",
-      "sku": "AL-6061-BAR",
       "primary_unit": "inches",
       "quantity": 240,
       "cost_per_unit": 3.50
@@ -416,9 +415,9 @@ BEGIN
         v_new_id := gen_random_uuid();
         v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
 
-        INSERT INTO inventory_items (id, company_id, name, sku, primary_unit, quantity, cost_per_unit)
+        INSERT INTO inventory_items (id, company_id, name, primary_unit, quantity, cost_per_unit)
         VALUES (v_new_id, v_company_id,
-                v_item->>'name', v_item->>'sku', v_item->>'primary_unit',
+                v_item->>'name', v_item->>'primary_unit',
                 COALESCE((v_item->>'quantity')::NUMERIC, 0),
                 (v_item->>'cost_per_unit')::NUMERIC);
     END LOOP;

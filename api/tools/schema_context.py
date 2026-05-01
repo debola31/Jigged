@@ -155,7 +155,6 @@ SCHEMA_CONTEXT = """
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT
 - description: TEXT
-- sku: TEXT
 - primary_unit: TEXT (e.g. "ft", "ea", "lb")
 - quantity: NUMERIC (current stock level, >= 0)
 - cost_per_unit: NUMERIC(12,4)
@@ -243,7 +242,7 @@ ORDER BY revenue DESC
 LIMIT 5;
 
 -- Inventory items below reorder point
-SELECT name, sku, quantity, reorder_point, primary_unit,
+SELECT name, quantity, reorder_point, primary_unit,
        (reorder_point - quantity) as deficit
 FROM inventory_items
 WHERE company_id = $1

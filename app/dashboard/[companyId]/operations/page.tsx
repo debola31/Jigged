@@ -195,14 +195,15 @@ export default function OperationsPage() {
     {
       field: 'name',
       headerName: 'Name',
-      flex: 2,
+      width: 100,
       minWidth: 200,
       pinned: 'left' as const,
     },
     {
       field: 'labor_rate',
       headerName: 'Labor Rate',
-      width: 150,
+      flex: 1,
+      minWidth: 150,
       valueFormatter: (p) => (p.value != null ? `$${Number(p.value).toFixed(2)}/hr` : '—'),
     },
   ];

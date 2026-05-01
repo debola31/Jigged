@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-01T00:51:07Z
+-- Generated: 2026-05-01T02:34:07Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -242,18 +242,26 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."quote_attachments"
+CREATE TABLE IF NOT EXISTS "public"."jobs"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "quote_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
-    "file_name" text NOT NULL,
-    "file_path" text NOT NULL,
-    "file_size" integer NOT NULL,
-    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
-    "uploaded_by" uuid,
-    "uploaded_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "quote_attachments_pkey" PRIMARY KEY (id)
+    "job_number" text NOT NULL,
+    "quote_id" uuid,
+    "customer_id" uuid,
+    "status" text NOT NULL DEFAULT 'not_started'::text,
+    "status_changed_at" timestamp with time zone,
+    "started_at" timestamp with time zone,
+    "completed_at" timestamp with time zone,
+    "shipped_at" timestamp with time zone,
+    "created_by" uuid,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    "due_date" date,
+    "lead_time_days" integer,
+    CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
+    CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
+    CONSTRAINT "jobs_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
@@ -276,44 +284,28 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."jobs"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "job_number" text NOT NULL,
-    "quote_id" uuid,
-    "customer_id" uuid,
-    "part_id" uuid,
-    "status" text NOT NULL DEFAULT 'not_started'::text,
-    "status_changed_at" timestamp with time zone,
-    "current_operation_sequence" integer,
-    "started_at" timestamp with time zone,
-    "completed_at" timestamp with time zone,
-    "shipped_at" timestamp with time zone,
-    "created_by" uuid,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    "due_date" date,
-    "lead_time_days" integer,
-    "source_quote_line_item_id" uuid,
-    CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
-    CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
-    CONSTRAINT "jobs_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."job_attachments"
+CREATE TABLE IF NOT EXISTS "public"."job_parts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "job_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
-    "file_name" text NOT NULL,
-    "file_path" text NOT NULL,
-    "file_size" integer NOT NULL,
-    "mime_type" text NOT NULL DEFAULT 'application/pdf'::text,
-    "source_quote_attachment_id" uuid,
-    "uploaded_by" uuid,
-    "uploaded_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "job_attachments_pkey" PRIMARY KEY (id)
+    "part_id" uuid NOT NULL,
+    "source_quote_line_item_id" uuid,
+    "sequence" integer NOT NULL,
+    "quantity" integer NOT NULL,
+    "status" text NOT NULL DEFAULT 'not_started'::text,
+    "status_changed_at" timestamp with time zone,
+    "started_at" timestamp with time zone,
+    "completed_at" timestamp with time zone,
+    "shipped_at" timestamp with time zone,
+    "current_operation_sequence" integer,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_parts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_parts_job_part_unique" UNIQUE (job_id, part_id),
+    CONSTRAINT "job_parts_job_sequence_unique" UNIQUE (job_id, sequence),
+    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > 0)),
+    CONSTRAINT "job_parts_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quote_materials"
@@ -393,6 +385,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_materials"
     "consumed_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "job_part_id" uuid NOT NULL,
     CONSTRAINT "job_materials_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_materials_actual_quantity_check" CHECK (((actual_quantity IS NULL) OR (actual_quantity >= (0)::numeric))),
     CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric)),
@@ -436,8 +429,9 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "routing_node_id" uuid,
+    "job_part_id" uuid NOT NULL,
     CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_operations_job_id_sequence_key" UNIQUE (job_id, sequence),
+    CONSTRAINT "job_operations_job_part_sequence_key" UNIQUE (job_part_id, sequence),
     CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'skipped'::text])))
 );
 
@@ -556,9 +550,9 @@ ALTER TABLE "public"."inventory_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_unit_conversions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operation_types" ENABLE ROW LEVEL SECURITY;
@@ -836,45 +830,6 @@ CREATE POLICY "Users can read invitations for their email"
    FROM auth.users
   WHERE (users.id = auth.uid())))::text));
 
-DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_attachments";
-CREATE POLICY "ai_readonly_select"
-    ON "public"."job_attachments"
-    FOR SELECT
-    TO jigged_ai_readonly
-    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "job_attachments_delete" ON "public"."job_attachments";
-CREATE POLICY "job_attachments_delete"
-    ON "public"."job_attachments"
-    FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "job_attachments_insert" ON "public"."job_attachments";
-CREATE POLICY "job_attachments_insert"
-    ON "public"."job_attachments"
-    FOR INSERT
-    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "job_attachments_select" ON "public"."job_attachments";
-CREATE POLICY "job_attachments_select"
-    ON "public"."job_attachments"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "job_attachments_update" ON "public"."job_attachments";
-CREATE POLICY "job_attachments_update"
-    ON "public"."job_attachments"
-    FOR UPDATE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
 DROP POLICY IF EXISTS "Users can delete job_materials" ON "public"."job_materials";
 CREATE POLICY "Users can delete job_materials"
     ON "public"."job_materials"
@@ -956,6 +911,47 @@ CREATE POLICY "ai_readonly_select"
     USING ((EXISTS ( SELECT 1
    FROM jobs
   WHERE ((jobs.id = job_operations.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Users can delete job_parts" ON "public"."job_parts";
+CREATE POLICY "Users can delete job_parts"
+    ON "public"."job_parts"
+    FOR DELETE
+    USING ((job_id IN ( SELECT jobs.id
+   FROM jobs
+  WHERE (jobs.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can insert job_parts" ON "public"."job_parts";
+CREATE POLICY "Users can insert job_parts"
+    ON "public"."job_parts"
+    FOR INSERT
+    WITH CHECK ((job_id IN ( SELECT jobs.id
+   FROM jobs
+  WHERE (jobs.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can update job_parts" ON "public"."job_parts";
+CREATE POLICY "Users can update job_parts"
+    ON "public"."job_parts"
+    FOR UPDATE
+    USING ((job_id IN ( SELECT jobs.id
+   FROM jobs
+  WHERE (jobs.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can view job_parts" ON "public"."job_parts";
+CREATE POLICY "Users can view job_parts"
+    ON "public"."job_parts"
+    FOR SELECT
+    USING ((job_id IN ( SELECT jobs.id
+   FROM jobs
+  WHERE (jobs.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_parts";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."job_parts"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((EXISTS ( SELECT 1
+   FROM jobs
+  WHERE ((jobs.id = job_parts.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
 DROP POLICY IF EXISTS "Users can delete jobs" ON "public"."jobs";
 CREATE POLICY "Users can delete jobs"
@@ -1645,12 +1641,6 @@ ALTER TABLE "public"."invitations"
 ALTER TABLE "public"."invitations"
     ADD CONSTRAINT "invitations_invited_by_fkey" FOREIGN KEY (invited_by) REFERENCES auth.users(id);
 
-ALTER TABLE "public"."job_attachments"
-    ADD CONSTRAINT "job_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."job_attachments"
-    ADD CONSTRAINT "job_attachments_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
-
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_consumed_by_fkey" FOREIGN KEY (consumed_by) REFERENCES auth.users(id) ON DELETE SET NULL;
 
@@ -1659,6 +1649,9 @@ ALTER TABLE "public"."job_materials"
 
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_materials"
+    ADD CONSTRAINT "job_materials_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_routing_material_id_fkey" FOREIGN KEY (routing_material_id) REFERENCES routing_materials(id) ON DELETE SET NULL;
@@ -1673,10 +1666,25 @@ ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_operations"
+    ADD CONSTRAINT "job_operations_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_operation_type_id_fkey" FOREIGN KEY (operation_type_id) REFERENCES operation_types(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_routing_node_id_fkey" FOREIGN KEY (routing_node_id) REFERENCES routing_nodes(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."job_parts"
+    ADD CONSTRAINT "job_parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_parts"
+    ADD CONSTRAINT "job_parts_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_parts"
+    ADD CONSTRAINT "job_parts_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id);
+
+ALTER TABLE "public"."job_parts"
+    ADD CONSTRAINT "job_parts_source_quote_line_item_id_fkey" FOREIGN KEY (source_quote_line_item_id) REFERENCES quote_line_items(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1688,13 +1696,7 @@ ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."jobs"
-    ADD CONSTRAINT "jobs_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."jobs"
-    ADD CONSTRAINT "jobs_source_quote_line_item_id_fkey" FOREIGN KEY (source_quote_line_item_id) REFERENCES quote_line_items(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1829,19 +1831,22 @@ CREATE INDEX IF NOT EXISTS inventory_unit_conversions_item_id_idx ON public.inve
 CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON public.invitations USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON public.invitations USING btree (email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email_company ON public.invitations USING btree (email, company_id) WHERE ((status)::text = 'pending'::text);
-CREATE INDEX IF NOT EXISTS idx_job_attachments_company ON public.job_attachments USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON public.job_attachments USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_inventory ON public.job_materials USING btree (inventory_item_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING btree (job_id);
+CREATE INDEX IF NOT EXISTS idx_job_materials_job_part_id ON public.job_materials USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_routing_material ON public.job_materials USING btree (routing_material_id);
+CREATE INDEX IF NOT EXISTS idx_job_operations_job_part_id ON public.job_operations USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_assigned ON public.job_operations USING btree (assigned_to) WHERE (assigned_to IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_job ON public.job_operations USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_operation_type ON public.job_operations USING btree (operation_type_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_routing_node ON public.job_operations USING btree (routing_node_id) WHERE (routing_node_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_status ON public.job_operations USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_job_parts_company_id ON public.job_parts USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_job_parts_job_id ON public.job_parts USING btree (job_id);
+CREATE INDEX IF NOT EXISTS idx_job_parts_part_id ON public.job_parts USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_job_parts_status ON public.job_parts USING btree (status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_part ON public.jobs USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
@@ -1920,6 +1925,39 @@ BEGIN
     WHERE id = v_inv.id;
 
     RETURN v_inv.company_id;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_status(p_job_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_total int;
+    v_cancelled int;
+    v_shipped int;
+    v_completed int;
+    v_in_progress int;
+BEGIN
+    SELECT
+      count(*),
+      count(*) FILTER (WHERE status = 'cancelled'),
+      count(*) FILTER (WHERE status = 'shipped'),
+      count(*) FILTER (WHERE status = 'completed'),
+      count(*) FILTER (WHERE status = 'in_progress')
+    INTO v_total, v_cancelled, v_shipped, v_completed, v_in_progress
+    FROM job_parts
+    WHERE job_id = p_job_id;
+
+    IF v_total = 0 THEN RETURN 'not_started'; END IF;
+    IF v_cancelled = v_total THEN RETURN 'cancelled'; END IF;
+    IF v_shipped = v_total THEN RETURN 'shipped'; END IF;
+    IF v_completed + v_shipped = v_total THEN RETURN 'completed'; END IF;
+    IF v_in_progress > 0 OR v_completed > 0 OR v_shipped > 0 THEN RETURN 'in_progress'; END IF;
+    RETURN 'not_started';
 END;
 $function$
 
@@ -2065,7 +2103,7 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.create_job_operations_from_routing(p_job_id uuid, p_routing_id uuid)
+CREATE OR REPLACE FUNCTION public.create_job_part_operations_from_routing(p_job_part_id uuid, p_routing_id uuid)
  RETURNS integer
  LANGUAGE plpgsql
 AS $function$
@@ -2073,7 +2111,14 @@ DECLARE
     v_count integer := 0;
     v_node record;
     v_seq integer := 10;
+    v_job_id uuid;
+    v_min_seq integer;
 BEGIN
+    SELECT job_id INTO v_job_id FROM job_parts WHERE id = p_job_part_id;
+    IF v_job_id IS NULL THEN
+        RAISE EXCEPTION 'job_part % not found', p_job_part_id;
+    END IF;
+
     FOR v_node IN
         SELECT rn.*, ot.name AS operation_name
         FROM routing_nodes rn
@@ -2082,53 +2127,35 @@ BEGIN
         ORDER BY rn.sequence, rn.created_at
     LOOP
         INSERT INTO job_operations (
-            job_id, sequence, operation_name, operation_type_id,
-            instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, status,
-            routing_node_id
+            job_id, job_part_id, sequence, operation_name, operation_type_id,
+            instructions, estimated_setup_minutes, estimated_run_minutes_per_unit,
+            status, routing_node_id
         ) VALUES (
-            p_job_id, v_seq, v_node.operation_name, v_node.operation_type_id,
-            v_node.instructions, COALESCE(v_node.setup_time, 0), v_node.run_time_per_unit, 'pending',
-            v_node.id
+            v_job_id, p_job_part_id, v_seq, v_node.operation_name, v_node.operation_type_id,
+            v_node.instructions, COALESCE(v_node.setup_time, 0), v_node.run_time_per_unit,
+            'pending', v_node.id
         );
         v_seq := v_seq + 10;
         v_count := v_count + 1;
     END LOOP;
 
-    -- Copy routing_materials → job_materials (idempotent; only inserts if not already present)
-    INSERT INTO job_materials (job_id, routing_material_id, inventory_item_id, expected_quantity, unit)
-    SELECT p_job_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
+    -- Copy routing_materials → job_materials (idempotent on routing_material_id)
+    INSERT INTO job_materials (job_id, job_part_id, routing_material_id, inventory_item_id, expected_quantity, unit)
+    SELECT v_job_id, p_job_part_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
     FROM routing_materials rm
     WHERE rm.routing_id = p_routing_id
       AND NOT EXISTS (
           SELECT 1 FROM job_materials jm
-          WHERE jm.job_id = p_job_id AND jm.routing_material_id = rm.id
+          WHERE jm.job_part_id = p_job_part_id AND jm.routing_material_id = rm.id
       );
 
-    IF v_count > 0 THEN
-        UPDATE jobs SET current_operation_sequence = 10 WHERE id = p_job_id;
+    -- Set the job_part's current operation cursor to the lowest sequence we wrote.
+    SELECT MIN(sequence) INTO v_min_seq FROM job_operations WHERE job_part_id = p_job_part_id;
+    IF v_min_seq IS NOT NULL THEN
+        UPDATE job_parts SET current_operation_sequence = v_min_seq WHERE id = p_job_part_id;
     END IF;
+
     RETURN v_count;
-END;
-$function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.generate_job_number(company_uuid uuid)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-  next_num INTEGER;
-BEGIN
-  SELECT COALESCE(
-    MAX(CAST(SUBSTRING(job_number FROM 'J-(\d+)') AS INTEGER)), 0
-  ) + 1
-  INTO next_num
-  FROM jobs
-  WHERE company_id = company_uuid
-    AND job_number ~ '^J-\d+$';
-  
-  RETURN 'J-' || LPAD(next_num::TEXT, 4, '0');
 END;
 $function$
 
@@ -2177,10 +2204,7 @@ BEGIN
     RETURN QUERY
     WITH
     in_progress_ops AS (
-        SELECT
-            jo.job_id,
-            jo.operation_name,
-            COUNT(*)::integer AS cnt
+        SELECT jo.job_id, jo.operation_name, COUNT(*)::integer AS cnt
         FROM job_operations jo
         WHERE jo.job_id = ANY(p_job_ids)
           AND jo.status = 'in_progress'
@@ -2189,29 +2213,22 @@ BEGIN
     jobs_with_in_progress AS (
         SELECT DISTINCT ip.job_id FROM in_progress_ops ip
     ),
-    -- Linear readiness: a pending op is ready iff every earlier-sequence op
-    -- in the same job is completed or skipped.
+    -- Per-part readiness: predecessors compared inside the same job_part.
     ready_ops AS (
-        SELECT
-            jo.job_id,
-            jo.operation_name
+        SELECT jo.job_id, jo.operation_name
         FROM job_operations jo
         WHERE jo.job_id = ANY(p_job_ids)
           AND jo.job_id NOT IN (SELECT jwi.job_id FROM jobs_with_in_progress jwi)
           AND jo.status = 'pending'
           AND NOT EXISTS (
-              SELECT 1
-              FROM job_operations prev
-              WHERE prev.job_id = jo.job_id
+              SELECT 1 FROM job_operations prev
+              WHERE prev.job_part_id = jo.job_part_id
                 AND prev.sequence < jo.sequence
                 AND prev.status NOT IN ('completed', 'skipped')
           )
     ),
     ready_agg AS (
-        SELECT
-            ro.job_id,
-            MIN(ro.operation_name) AS operation_name,
-            COUNT(*)::integer AS ready_count
+        SELECT ro.job_id, MIN(ro.operation_name) AS operation_name, COUNT(*)::integer AS ready_count
         FROM ready_ops ro
         GROUP BY ro.job_id
     )
@@ -2226,39 +2243,49 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.get_ready_operations_for_station(p_company_id uuid, p_operation_type_id uuid)
- RETURNS TABLE(job_id uuid, job_operation_id uuid, operation_name text, op_status text)
+ RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity integer)
  LANGUAGE plpgsql
  STABLE
 AS $function$
 BEGIN
     RETURN QUERY
     WITH eligible_jobs AS (
-        SELECT j.id
-        FROM jobs j
+        SELECT j.id, j.job_number FROM jobs j
         WHERE j.company_id = p_company_id
           AND j.status IN ('not_started', 'in_progress')
     ),
     station_ops AS (
-        SELECT jo.id, jo.job_id, jo.operation_name, jo.status, jo.sequence
+        SELECT jo.id, jo.job_id, jo.job_part_id, jo.operation_name, jo.status, jo.sequence, ej.job_number
         FROM job_operations jo
         JOIN eligible_jobs ej ON ej.id = jo.job_id
         WHERE jo.operation_type_id = p_operation_type_id
           AND jo.status IN ('pending', 'in_progress')
     ),
     ready_or_active AS (
-        SELECT so.id, so.job_id, so.operation_name, so.status
+        SELECT so.id, so.job_id, so.job_part_id, so.operation_name, so.status, so.job_number
         FROM station_ops so
         WHERE so.status = 'in_progress'
            OR NOT EXISTS (
-               SELECT 1
-               FROM job_operations prev
-               WHERE prev.job_id = so.job_id
+               SELECT 1 FROM job_operations prev
+               WHERE prev.job_part_id = so.job_part_id
                  AND prev.sequence < so.sequence
                  AND prev.status NOT IN ('completed', 'skipped')
            )
     )
-    SELECT ra.job_id, ra.id AS job_operation_id, ra.operation_name, ra.status AS op_status
-    FROM ready_or_active ra;
+    SELECT
+        ra.job_id,
+        ra.job_part_id,
+        ra.id AS job_operation_id,
+        ra.operation_name,
+        ra.status AS op_status,
+        ra.job_number,
+        jp.part_id,
+        p.part_name,
+        p.description AS part_description,
+        jp.quantity AS part_quantity
+    FROM ready_or_active ra
+    JOIN job_parts jp ON jp.id = ra.job_part_id
+    JOIN parts p ON p.id = jp.part_id;
 END;
 $function$
 
@@ -2309,15 +2336,14 @@ CREATE OR REPLACE FUNCTION public.reset_demo_company(p_source_company_id uuid, p
  SET search_path TO 'public'
 AS $function$
 DECLARE
-    v_demo_company_id UUID;
+    v_demo_company_id uuid;
 BEGIN
     IF p_user_id != auth.uid() THEN
         RAISE EXCEPTION 'Access denied';
     END IF;
 
     SELECT demo_company_id INTO v_demo_company_id
-    FROM companies
-    WHERE id = p_source_company_id;
+    FROM companies WHERE id = p_source_company_id;
 
     IF v_demo_company_id IS NULL THEN
         RAISE EXCEPTION 'No demo company exists for company: %', p_source_company_id;
@@ -2325,10 +2351,9 @@ BEGIN
 
     DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
-    DELETE FROM job_attachments WHERE company_id = v_demo_company_id;
-    DELETE FROM quote_attachments WHERE company_id = v_demo_company_id;
     DELETE FROM job_materials WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
     DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
+    DELETE FROM job_parts WHERE company_id = v_demo_company_id;
     DELETE FROM jobs WHERE company_id = v_demo_company_id;
     DELETE FROM quotes WHERE company_id = v_demo_company_id;
     DELETE FROM routing_materials WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
@@ -2339,7 +2364,6 @@ BEGIN
     DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
     DELETE FROM operation_types WHERE company_id = v_demo_company_id;
     DELETE FROM customers WHERE company_id = v_demo_company_id;
-
     DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
 
     PERFORM seed_demo_data(v_demo_company_id, p_user_id);
@@ -2442,78 +2466,52 @@ CREATE OR REPLACE FUNCTION public.seed_demo_data(p_company_id uuid, p_user_id uu
  SET search_path TO 'public'
 AS $function$
 DECLARE
-    v_template JSONB;
-    v_ref_map JSONB := '{}';
-    v_item JSONB;
-    v_new_id UUID;
-    v_node JSONB;
-    v_op JSONB;
-    v_routing_id UUID;
-    v_job_id UUID;
-    v_node_seq INTEGER;
+    v_template jsonb;
+    v_ref_map jsonb := '{}'::jsonb;
+    v_item jsonb;
+    v_op jsonb;
+    v_new_id uuid;
+    v_job_id uuid;
+    v_job_part_id uuid;
+    v_part_id uuid;
 BEGIN
-    SELECT template_data INTO v_template
+    SELECT template INTO v_template
     FROM demo_data_templates
-    WHERE name = p_template_name AND is_active = TRUE
+    WHERE name = p_template_name AND is_active = true
     LIMIT 1;
 
     IF v_template IS NULL THEN
-        RAISE EXCEPTION 'No active demo data template found for name: %', p_template_name;
+        RAISE EXCEPTION 'No active demo template found with name: %', p_template_name;
     END IF;
 
     -- Customers
     IF v_template->'customers' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers') LOOP
             v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO customers (id, company_id, name, contact_name, contact_email,
-                                   contact_phone, city, state, country, created_at)
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO customers (id, company_id, name, contact_name, contact_email, contact_phone,
+                                   address_line1, address_line2, city, state, postal_code, country, website,
+                                   created_at, updated_at)
             VALUES (v_new_id, p_company_id,
-                    v_item->>'name', v_item->>'contact_name', v_item->>'contact_email',
-                    v_item->>'contact_phone', v_item->>'city', v_item->>'state',
-                    COALESCE(v_item->>'country', 'USA'),
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+                    v_item->>'name', v_item->>'contact_name', v_item->>'contact_email', v_item->>'contact_phone',
+                    v_item->>'address_line1', v_item->>'address_line2',
+                    v_item->>'city', v_item->>'state', v_item->>'postal_code',
+                    COALESCE(v_item->>'country','USA'), v_item->>'website',
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()));
         END LOOP;
     END IF;
 
-    -- Operation types (resource_groups concept removed)
+    -- Operation types
     IF v_template->'operation_types' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'operation_types') LOOP
             v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO operation_types (id, company_id, name, labor_rate, description, created_at)
-            VALUES (v_new_id, p_company_id,
-                    v_item->>'name', (v_item->>'labor_rate')::NUMERIC, v_item->>'description',
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
-        END LOOP;
-    END IF;
-
-    -- Part categories
-    IF v_template->'part_categories' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'part_categories') LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO part_categories (id, company_id, name, default_markup_percent, description, created_at)
-            VALUES (v_new_id, p_company_id, v_item->>'name',
-                    (v_item->>'default_markup_percent')::NUMERIC,
-                    v_item->>'description',
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
-        END LOOP;
-    END IF;
-
-    -- Parts
-    IF v_template->'parts' IS NOT NULL THEN
-        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts') LOOP
-            v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO parts (id, company_id, part_number, description,
-                               category_id, manual_cost, cost_source, created_at)
-            VALUES (v_new_id, p_company_id, v_item->>'part_number', v_item->>'description',
-                    CASE WHEN v_item->>'category_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'category_ref'))::UUID ELSE NULL END,
-                    (v_item->>'manual_cost')::NUMERIC,
-                    v_item->>'cost_source',
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO operation_types (id, company_id, name, description, hourly_rate, created_at, updated_at)
+            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description',
+                    (v_item->>'hourly_rate')::numeric,
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()));
         END LOOP;
     END IF;
 
@@ -2521,202 +2519,205 @@ BEGIN
     IF v_template->'inventory_items' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'inventory_items') LOOP
             v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO inventory_items (id, company_id, name, description, sku, primary_unit,
-                                         quantity, cost_per_unit, reorder_point, created_at)
-            VALUES (v_new_id, p_company_id, v_item->>'name', v_item->>'description',
-                    v_item->>'sku', v_item->>'primary_unit',
-                    COALESCE((v_item->>'quantity')::NUMERIC, 0),
-                    (v_item->>'cost_per_unit')::NUMERIC,
-                    (v_item->>'reorder_point')::NUMERIC,
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO inventory_items (id, company_id, item_name, description, unit, current_stock,
+                                          minimum_stock, cost_per_unit, location, created_at, updated_at)
+            VALUES (v_new_id, p_company_id, v_item->>'item_name', v_item->>'description',
+                    COALESCE(v_item->>'unit','each'),
+                    COALESCE((v_item->>'current_stock')::numeric, 0),
+                    COALESCE((v_item->>'minimum_stock')::numeric, 0),
+                    COALESCE((v_item->>'cost_per_unit')::numeric, 0),
+                    v_item->>'location',
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()));
         END LOOP;
     END IF;
 
-    -- Routings + nodes + materials
+    -- Parts
+    IF v_template->'parts' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts') LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO parts (id, company_id, part_name, description, category_id,
+                               created_by, created_at, updated_at)
+            VALUES (v_new_id, p_company_id, v_item->>'part_name', v_item->>'description',
+                    NULL, p_user_id,
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()));
+        END LOOP;
+    END IF;
+
+    -- Routings, routing_nodes, routing_materials, quotes, quote_line_items —
+    -- carried over from the previous seed_demo_data definition. Templates that
+    -- pre-date this change still work as long as they don't reference the
+    -- now-dropped jobs.part_id field.
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings') LOOP
             v_new_id := gen_random_uuid();
-            v_routing_id := v_new_id;
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-
-            INSERT INTO routings (id, company_id, part_id, name, description, created_by, created_at)
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO routings (id, company_id, part_id, name, description,
+                                  created_by, created_at, updated_at)
             VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'part_ref'))::UUID,
+                    (v_ref_map->>(v_item->>'part_ref'))::uuid,
                     v_item->>'name', v_item->>'description',
                     p_user_id,
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()));
 
-            v_node_seq := 10;
             IF v_item->'nodes' IS NOT NULL THEN
-                FOR v_node IN SELECT * FROM jsonb_array_elements(v_item->'nodes') LOOP
+                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'nodes') LOOP
                     v_new_id := gen_random_uuid();
-                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_node->>'_ref'], to_jsonb(v_new_id::TEXT));
-                    INSERT INTO routing_nodes (id, routing_id, operation_type_id,
-                                               run_time_per_unit, setup_time, instructions, sequence)
-                    VALUES (v_new_id, v_routing_id,
-                            (v_ref_map->>(v_node->>'operation_type_ref'))::UUID,
-                            (v_node->>'run_time_per_unit')::NUMERIC,
-                            COALESCE((v_node->>'setup_time')::NUMERIC, 0),
-                            v_node->>'instructions',
-                            v_node_seq);
-                    v_node_seq := v_node_seq + 10;
+                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::text));
+                    INSERT INTO routing_nodes (id, routing_id, operation_type_id, sequence,
+                                               run_time_per_unit, setup_time, instructions,
+                                               metadata, created_at, updated_at)
+                    VALUES (v_new_id,
+                            (v_ref_map->>(v_item->>'_ref'))::uuid,
+                            (v_ref_map->>(v_op->>'operation_type_ref'))::uuid,
+                            (v_op->>'sequence')::integer,
+                            COALESCE((v_op->>'run_time_per_unit')::numeric, 0),
+                            COALESCE((v_op->>'setup_time')::numeric, 0),
+                            v_op->>'instructions',
+                            COALESCE((v_op->'metadata'), '{}'::jsonb),
+                            COALESCE((v_op->>'created_at')::timestamptz, now()),
+                            COALESCE((v_op->>'updated_at')::timestamptz, now()));
                 END LOOP;
             END IF;
 
-            IF v_item->'materials' IS NOT NULL AND jsonb_typeof(v_item->'materials') = 'array' THEN
-                INSERT INTO routing_materials (routing_id, inventory_item_id, quantity, unit, sequence)
-                SELECT v_routing_id,
-                       (v_ref_map->>(mat->>'inventory_item_ref'))::UUID,
-                       (mat->>'quantity')::NUMERIC,
-                       mat->>'unit',
-                       (ord * 10)::INTEGER
-                FROM jsonb_array_elements(v_item->'materials') WITH ORDINALITY AS arr(mat, ord)
-                WHERE mat->>'inventory_item_ref' IS NOT NULL;
-            ELSIF v_item->'nodes' IS NOT NULL THEN
-                INSERT INTO routing_materials (routing_id, inventory_item_id, quantity, unit, sequence)
-                SELECT
-                    v_routing_id,
-                    (v_ref_map->>agg.inv_ref)::UUID,
-                    agg.qty,
-                    agg.unit,
-                    (ROW_NUMBER() OVER (ORDER BY agg.first_idx, agg.unit) * 10)::INTEGER
-                FROM (
-                    SELECT
-                        mat->>'inventory_item_ref' AS inv_ref,
-                        mat->>'unit' AS unit,
-                        SUM((mat->>'quantity')::NUMERIC) AS qty,
-                        MIN(node_pos.ord) AS first_idx
-                    FROM jsonb_array_elements(v_item->'nodes') WITH ORDINALITY AS node_pos(node, ord)
-                    CROSS JOIN LATERAL jsonb_array_elements(node_pos.node->'materials') AS mat
-                    WHERE jsonb_typeof(node_pos.node->'materials') = 'array'
-                      AND mat->>'inventory_item_ref' IS NOT NULL
-                    GROUP BY mat->>'inventory_item_ref', mat->>'unit'
-                ) agg;
+            IF v_item->'materials' IS NOT NULL THEN
+                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'materials') LOOP
+                    INSERT INTO routing_materials (id, routing_id, inventory_item_id,
+                                                   quantity, unit, sequence)
+                    VALUES (gen_random_uuid(),
+                            (v_ref_map->>(v_item->>'_ref'))::uuid,
+                            (v_ref_map->>(v_op->>'inventory_item_ref'))::uuid,
+                            (v_op->>'quantity')::numeric,
+                            v_op->>'unit',
+                            COALESCE((v_op->>'sequence')::integer, 0));
+                END LOOP;
             END IF;
         END LOOP;
     END IF;
 
-    -- Quotes
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes') LOOP
             v_new_id := gen_random_uuid();
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
-            INSERT INTO quotes (id, company_id, customer_id, part_id, description,
-                                quantity, unit_price, status, created_by,
-                                base_cost, markup_percent, cost_source,
-                                labor_cost_snapshot, material_cost_snapshot,
-                                created_at)
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO quotes (id, company_id, customer_id, status,
+                                lead_time_days, expiration_date,
+                                created_by, created_at, updated_at,
+                                status_changed_at, converted_at)
             VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                    CASE WHEN v_item->>'part_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID ELSE NULL END,
-                    v_item->>'description',
-                    COALESCE((v_item->>'quantity')::INTEGER, 1),
-                    (v_item->>'unit_price')::NUMERIC,
-                    COALESCE(v_item->>'status', 'draft'),
+                    (v_ref_map->>(v_item->>'customer_ref'))::uuid,
+                    COALESCE(v_item->>'status', 'active'),
+                    (v_item->>'lead_time_days')::integer,
+                    (v_item->>'expiration_date')::date,
                     p_user_id,
-                    (v_item->>'base_cost')::NUMERIC,
-                    (v_item->>'markup_percent')::NUMERIC,
-                    v_item->>'cost_source',
-                    (v_item->>'labor_cost_snapshot')::NUMERIC,
-                    (v_item->>'material_cost_snapshot')::NUMERIC,
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()));
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    COALESCE((v_item->>'updated_at')::timestamptz, now()),
+                    (v_item->>'status_changed_at')::timestamptz,
+                    (v_item->>'converted_at')::timestamptz);
         END LOOP;
     END IF;
 
-    -- Jobs + job_operations + job_materials
+    -- Jobs: insert one job + one job_parts per (job, part_ref). Operations and
+    -- materials hang off the job_part.
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs') LOOP
             v_new_id := gen_random_uuid();
             v_job_id := v_new_id;
-            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::TEXT));
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
 
-            INSERT INTO jobs (id, company_id, customer_id, part_id, quote_id,
-                              status, created_by, created_at,
+            INSERT INTO jobs (id, company_id, customer_id, quote_id,
+                              job_number, status, created_by, created_at,
                               started_at, completed_at, shipped_at, status_changed_at)
             VALUES (v_new_id, p_company_id,
-                    (v_ref_map->>(v_item->>'customer_ref'))::UUID,
-                    CASE WHEN v_item->>'part_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'part_ref'))::UUID ELSE NULL END,
+                    (v_ref_map->>(v_item->>'customer_ref'))::uuid,
                     CASE WHEN v_item->>'quote_ref' IS NOT NULL
-                         THEN (v_ref_map->>(v_item->>'quote_ref'))::UUID ELSE NULL END,
+                         THEN (v_ref_map->>(v_item->>'quote_ref'))::uuid ELSE NULL END,
+                    -- Demo templates can pre-set job_number; otherwise derive
+                    -- a placeholder so the unique constraint holds.
+                    COALESCE(v_item->>'job_number', 'J-DEMO-' || substr(v_new_id::text, 1, 8)),
                     COALESCE(v_item->>'status', 'not_started'),
                     p_user_id,
-                    COALESCE((v_item->>'created_at')::TIMESTAMPTZ, NOW()),
-                    (v_item->>'started_at')::TIMESTAMPTZ,
-                    (v_item->>'completed_at')::TIMESTAMPTZ,
-                    (v_item->>'shipped_at')::TIMESTAMPTZ,
-                    (v_item->>'status_changed_at')::TIMESTAMPTZ);
-
-            IF v_item->'operations' IS NOT NULL THEN
-                FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations') LOOP
-                    v_new_id := gen_random_uuid();
-                    v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::TEXT));
-                    INSERT INTO job_operations (id, job_id, sequence, operation_name,
-                                                operation_type_id, estimated_setup_minutes,
-                                                estimated_run_minutes_per_unit,
-                                                actual_setup_minutes, actual_run_minutes,
-                                                status, routing_node_id, instructions,
-                                                started_at, completed_at, created_at)
-                    VALUES (v_new_id, v_job_id,
-                            (v_op->>'sequence')::INTEGER,
-                            v_op->>'operation_name',
-                            CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
-                                 THEN (v_ref_map->>(v_op->>'operation_type_ref'))::UUID ELSE NULL END,
-                            COALESCE((v_op->>'estimated_setup_minutes')::NUMERIC,
-                                     (v_op->>'estimated_setup_hours')::NUMERIC * 60, 0),
-                            COALESCE((v_op->>'estimated_run_minutes_per_unit')::NUMERIC,
-                                     (v_op->>'estimated_run_hours_per_unit')::NUMERIC * 60, 0),
-                            COALESCE((v_op->>'actual_setup_minutes')::NUMERIC,
-                                     (v_op->>'actual_setup_hours')::NUMERIC * 60),
-                            COALESCE((v_op->>'actual_run_minutes')::NUMERIC,
-                                     (v_op->>'actual_run_hours')::NUMERIC * 60),
-                            COALESCE(v_op->>'status', 'pending'),
-                            CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
-                                 THEN (v_ref_map->>(v_op->>'routing_node_ref'))::UUID ELSE NULL END,
-                            v_op->>'instructions',
-                            (v_op->>'started_at')::TIMESTAMPTZ,
-                            (v_op->>'completed_at')::TIMESTAMPTZ,
-                            COALESCE((v_op->>'created_at')::TIMESTAMPTZ, NOW()));
-                END LOOP;
-            END IF;
+                    COALESCE((v_item->>'created_at')::timestamptz, now()),
+                    (v_item->>'started_at')::timestamptz,
+                    (v_item->>'completed_at')::timestamptz,
+                    (v_item->>'shipped_at')::timestamptz,
+                    (v_item->>'status_changed_at')::timestamptz);
 
             IF v_item->>'part_ref' IS NOT NULL THEN
-                INSERT INTO job_materials (job_id, routing_material_id, inventory_item_id, expected_quantity, unit)
-                SELECT v_job_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
+                v_part_id := (v_ref_map->>(v_item->>'part_ref'))::uuid;
+                v_job_part_id := gen_random_uuid();
+
+                INSERT INTO job_parts (id, job_id, company_id, part_id,
+                                       sequence, quantity, status,
+                                       status_changed_at, started_at, completed_at, shipped_at,
+                                       created_at, updated_at)
+                VALUES (v_job_part_id, v_job_id, p_company_id, v_part_id,
+                        10,
+                        COALESCE((v_item->>'quantity')::integer, 1),
+                        COALESCE(v_item->>'status', 'not_started'),
+                        (v_item->>'status_changed_at')::timestamptz,
+                        (v_item->>'started_at')::timestamptz,
+                        (v_item->>'completed_at')::timestamptz,
+                        (v_item->>'shipped_at')::timestamptz,
+                        COALESCE((v_item->>'created_at')::timestamptz, now()),
+                        COALESCE((v_item->>'created_at')::timestamptz, now()));
+
+                IF v_item->'operations' IS NOT NULL THEN
+                    FOR v_op IN SELECT * FROM jsonb_array_elements(v_item->'operations') LOOP
+                        v_new_id := gen_random_uuid();
+                        v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::text));
+                        INSERT INTO job_operations (id, job_id, job_part_id, sequence, operation_name,
+                                                    operation_type_id, estimated_setup_minutes,
+                                                    estimated_run_minutes_per_unit,
+                                                    actual_setup_minutes, actual_run_minutes,
+                                                    status, routing_node_id, instructions,
+                                                    started_at, completed_at, created_at)
+                        VALUES (v_new_id, v_job_id, v_job_part_id,
+                                (v_op->>'sequence')::integer,
+                                v_op->>'operation_name',
+                                CASE WHEN v_op->>'operation_type_ref' IS NOT NULL
+                                     THEN (v_ref_map->>(v_op->>'operation_type_ref'))::uuid ELSE NULL END,
+                                COALESCE((v_op->>'estimated_setup_minutes')::numeric,
+                                         (v_op->>'estimated_setup_hours')::numeric * 60, 0),
+                                COALESCE((v_op->>'estimated_run_minutes_per_unit')::numeric,
+                                         (v_op->>'estimated_run_hours_per_unit')::numeric * 60, 0),
+                                COALESCE((v_op->>'actual_setup_minutes')::numeric,
+                                         (v_op->>'actual_setup_hours')::numeric * 60),
+                                COALESCE((v_op->>'actual_run_minutes')::numeric,
+                                         (v_op->>'actual_run_hours')::numeric * 60),
+                                COALESCE(v_op->>'status', 'pending'),
+                                CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
+                                     THEN (v_ref_map->>(v_op->>'routing_node_ref'))::uuid ELSE NULL END,
+                                v_op->>'instructions',
+                                (v_op->>'started_at')::timestamptz,
+                                (v_op->>'completed_at')::timestamptz,
+                                COALESCE((v_op->>'created_at')::timestamptz, now()));
+                    END LOOP;
+                END IF;
+
+                INSERT INTO job_materials (job_id, job_part_id, routing_material_id,
+                                           inventory_item_id, expected_quantity, unit)
+                SELECT v_job_id, v_job_part_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
                 FROM routing_materials rm
                 JOIN routings r ON r.id = rm.routing_id
-                WHERE r.part_id = (v_ref_map->>(v_item->>'part_ref'))::UUID;
+                WHERE r.part_id = v_part_id;
             END IF;
         END LOOP;
     END IF;
 
-    -- Link converted quotes
+    -- Link converted quotes to first job (one-quote-one-job model)
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes') LOOP
             IF v_item->>'converted_to_job_ref' IS NOT NULL THEN
                 UPDATE quotes
-                SET converted_to_job_id = (v_ref_map->>(v_item->>'converted_to_job_ref'))::UUID,
-                    converted_at = (v_item->>'converted_at')::TIMESTAMPTZ
-                WHERE id = (v_ref_map->>(v_item->>'_ref'))::UUID;
+                SET converted_at = (v_item->>'converted_at')::timestamptz
+                WHERE id = (v_ref_map->>(v_item->>'_ref'))::uuid;
             END IF;
         END LOOP;
     END IF;
-END;
-$function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.set_job_number()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-  IF NEW.job_number IS NULL OR NEW.job_number = '' THEN
-    NEW.job_number := generate_job_number(NEW.company_id);
-  END IF;
-  RETURN NEW;
 END;
 $function$
 
@@ -2761,6 +2762,41 @@ BEGIN
       AND source_uca.company_id = p_source_company_id
       AND demo_uca.user_id = source_uca.user_id
       AND demo_uca.role != source_uca.role;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.sync_job_status_from_parts()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_job_id uuid;
+    v_new_status text;
+    v_now timestamptz := now();
+BEGIN
+    v_job_id := COALESCE(NEW.job_id, OLD.job_id);
+    v_new_status := compute_job_status(v_job_id);
+
+    UPDATE jobs
+    SET status = v_new_status,
+        status_changed_at = CASE WHEN status IS DISTINCT FROM v_new_status THEN v_now ELSE status_changed_at END,
+        started_at = CASE
+            WHEN started_at IS NULL AND v_new_status IN ('in_progress','completed','shipped')
+              THEN v_now ELSE started_at END,
+        completed_at = CASE
+            WHEN v_new_status IN ('completed','shipped') AND completed_at IS NULL THEN v_now
+            WHEN v_new_status = 'in_progress' THEN NULL
+            ELSE completed_at END,
+        shipped_at = CASE
+            WHEN v_new_status = 'shipped' AND shipped_at IS NULL THEN v_now
+            WHEN v_new_status <> 'shipped' THEN NULL
+            ELSE shipped_at END,
+        updated_at = v_now
+    WHERE id = v_job_id;
+
+    RETURN NULL;
 END;
 $function$
 
@@ -2827,6 +2863,22 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.user_company_access_fill_email()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'auth'
+AS $function$
+BEGIN
+  IF NEW.email IS NULL OR NEW.email = '' THEN
+    SELECT email INTO NEW.email FROM auth.users WHERE id = NEW.user_id;
+  END IF;
+  RETURN NEW;
+END;
+$function$
+
+;
+
 -- ============================================================
 -- 8. TRIGGERS
 -- ============================================================
@@ -2857,14 +2909,20 @@ CREATE TRIGGER job_materials_updated_at BEFORE UPDATE ON public.job_materials FO
 DROP TRIGGER IF EXISTS "job_operations_updated_at" ON "public"."job_operations";
 CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_del" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_status_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_ins" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_status_from_parts_ins AFTER INSERT ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_upd" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_status_from_parts_upd AFTER UPDATE OF status ON public.job_parts FOR EACH ROW WHEN ((old.status IS DISTINCT FROM new.status)) EXECUTE FUNCTION sync_job_status_from_parts();
+
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "trigger_job_status_change" ON "public"."jobs";
 CREATE TRIGGER trigger_job_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_status_change();
-
-DROP TRIGGER IF EXISTS "trigger_set_job_number" ON "public"."jobs";
-CREATE TRIGGER trigger_set_job_number BEFORE INSERT ON public.jobs FOR EACH ROW EXECUTE FUNCTION set_job_number();
 
 DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
 CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2901,6 +2959,9 @@ CREATE TRIGGER routing_nodes_updated_at BEFORE UPDATE ON public.routing_nodes FO
 
 DROP TRIGGER IF EXISTS "routings_updated_at" ON "public"."routings";
 CREATE TRIGGER routings_updated_at BEFORE UPDATE ON public.routings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "user_company_access_fill_email_trg" ON "public"."user_company_access";
+CREATE TRIGGER user_company_access_fill_email_trg BEFORE INSERT ON public.user_company_access FOR EACH ROW EXECUTE FUNCTION user_company_access_fill_email();
 
 DROP TRIGGER IF EXISTS "user_preferences_updated_at" ON "public"."user_preferences";
 CREATE TRIGGER user_preferences_updated_at BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2941,9 +3002,6 @@ COMMENT ON TABLE "public"."inventory_transactions"
 
 COMMENT ON TABLE "public"."inventory_unit_conversions"
     IS 'Secondary units with conversion factors to primary unit. Enables flexible inventory tracking (FR-1).';
-
-COMMENT ON TABLE "public"."job_attachments"
-    IS 'PDF attachments for jobs. Created either by copying from quote on conversion, or uploaded directly to job. Phase 0 limits to one attachment per job (enforced in UI).';
 
 COMMENT ON TABLE "public"."job_materials"
     IS 'Materials expected and consumed for a job. Snapshot from routing_materials at job creation time.';
@@ -3191,33 +3249,6 @@ COMMENT ON COLUMN "public"."inventory_transactions"."has_discrepancy"
 COMMENT ON COLUMN "public"."inventory_unit_conversions"."to_primary_factor"
     IS 'Multiply quantity in from_unit by this factor to get quantity in primary unit';
 
-COMMENT ON COLUMN "public"."job_attachments"."id"
-    IS 'Primary key. UUID auto-generated.';
-
-COMMENT ON COLUMN "public"."job_attachments"."job_id"
-    IS 'FK to jobs. Cascades on delete - attachment deleted with job.';
-
-COMMENT ON COLUMN "public"."job_attachments"."company_id"
-    IS 'FK to companies. Cascades on delete. Isolates attachments per tenant.';
-
-COMMENT ON COLUMN "public"."job_attachments"."file_name"
-    IS 'Original filename. Either from quote attachment copy or direct upload.';
-
-COMMENT ON COLUMN "public"."job_attachments"."file_path"
-    IS 'Storage path: {companyId}/jobs/{jobId}/{uuid}_{filename}';
-
-COMMENT ON COLUMN "public"."job_attachments"."file_size"
-    IS 'File size in bytes. Maximum 10MB enforced in application.';
-
-COMMENT ON COLUMN "public"."job_attachments"."mime_type"
-    IS 'MIME type. Default: application/pdf. Phase 0 only supports PDF.';
-
-COMMENT ON COLUMN "public"."job_attachments"."uploaded_by"
-    IS 'UUID of user who uploaded/copied the attachment. References Supabase auth.users.';
-
-COMMENT ON COLUMN "public"."job_attachments"."uploaded_at"
-    IS 'Timestamp when attachment was uploaded/copied.';
-
 COMMENT ON COLUMN "public"."job_materials"."routing_material_id"
     IS 'Source routing_material this row was copied from. SET NULL if the routing material is later deleted.';
 
@@ -3299,17 +3330,11 @@ COMMENT ON COLUMN "public"."jobs"."quote_id"
 COMMENT ON COLUMN "public"."jobs"."customer_id"
     IS 'FK to customers. Required - every job must have a customer. RESTRICT on delete.';
 
-COMMENT ON COLUMN "public"."jobs"."part_id"
-    IS 'FK to parts. Optional - use part_number_text for one-off jobs. SET NULL if part deleted.';
-
 COMMENT ON COLUMN "public"."jobs"."status"
     IS 'Job lifecycle status. Values: pending, in_progress, on_hold, completed, shipped, cancelled. Default: pending';
 
 COMMENT ON COLUMN "public"."jobs"."status_changed_at"
     IS 'Timestamp when status last changed.';
-
-COMMENT ON COLUMN "public"."jobs"."current_operation_sequence"
-    IS 'Sequence number of currently active operation. For quick status display.';
 
 COMMENT ON COLUMN "public"."jobs"."started_at"
     IS 'Timestamp when first operation began.';
@@ -3334,9 +3359,6 @@ COMMENT ON COLUMN "public"."jobs"."due_date"
 
 COMMENT ON COLUMN "public"."jobs"."lead_time_days"
     IS 'Lead time in days, copied from the source quote at conversion. Editable on the job after the fact.';
-
-COMMENT ON COLUMN "public"."jobs"."source_quote_line_item_id"
-    IS 'Identifies which specific quote line item (part + tier) produced this job via convertQuoteToJob.';
 
 COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
     IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';

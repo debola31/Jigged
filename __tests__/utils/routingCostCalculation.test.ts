@@ -66,7 +66,6 @@ function makeNode(overrides: Partial<RoutingWithGraph['nodes'][0]> = {}): Routin
     operation_type_id: 'op-1',
     run_time_per_unit: 30,
     setup_time: 0,
-    instructions: null,
     metadata: {},
     sequence: 10,
     created_at: '2024-01-01T00:00:00Z',

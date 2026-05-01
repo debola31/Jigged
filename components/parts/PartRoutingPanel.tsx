@@ -73,7 +73,6 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
               laborRate: n.operation_type?.labor_rate || null,
               runTimePerUnit: n.run_time_per_unit,
               setupTime: n.setup_time || 0,
-              instructions: n.instructions,
             }))
           );
           setMats(
@@ -124,7 +123,6 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
               laborRate: o.laborRate,
               runTimePerUnit: o.runTimePerUnit,
               setupTime: o.setupTime,
-              instructions: o.instructions,
             })),
             nextMats.map((m) => ({
               tempId: m.tempId,
@@ -149,7 +147,6 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
                 laborRate: n.operation_type?.labor_rate || null,
                 runTimePerUnit: n.run_time_per_unit,
                 setupTime: n.setup_time || 0,
-                instructions: n.instructions,
               }))
             );
             setMats(

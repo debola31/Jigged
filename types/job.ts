@@ -26,7 +26,6 @@ export interface JobOperation {
   completed_at: string | null;
   assigned_to: string | null;
   completed_by: string | null;
-  instructions: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

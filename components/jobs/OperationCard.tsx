@@ -75,7 +75,6 @@ export default function OperationCard({
   };
 
   const hasDetails =
-    operation.instructions ||
     operation.started_at ||
     operation.completed_at ||
     operation.actual_setup_minutes !== null ||
@@ -220,17 +219,6 @@ export default function OperationCard({
             mt: 0,
           }}
         >
-          {operation.instructions && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Instructions
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mt: 0.5 }}>
-                {operation.instructions}
-              </Typography>
-            </Box>
-          )}
-
           {/* Timing Info */}
           {(operation.started_at || operation.completed_at) && (
             <Box sx={{ mt: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>

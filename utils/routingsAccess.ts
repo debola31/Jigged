@@ -303,7 +303,6 @@ export async function createRoutingNode(
         ? parseFloat(formData.run_time_per_unit)
         : null,
       setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
-      instructions: formData.instructions.trim() || null,
       metadata: {},
       sequence: seq,
     })
@@ -332,7 +331,6 @@ export async function updateRoutingNode(
         ? parseFloat(formData.run_time_per_unit)
         : null,
       setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
-      instructions: formData.instructions.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', nodeId)
@@ -457,7 +455,6 @@ export interface PendingNode {
   laborRate: number | null;
   runTimePerUnit: number | null;
   setupTime: number;
-  instructions: string | null;
 }
 
 /**
@@ -577,7 +574,6 @@ export async function saveRoutingWithOperationsAndMaterials(
             operation_type_id: node.operationTypeId,
             run_time_per_unit: node.runTimePerUnit,
             setup_time: node.setupTime ?? 0,
-            instructions: node.instructions,
             sequence: seq,
             updated_at: new Date().toISOString(),
           })
@@ -591,7 +587,6 @@ export async function saveRoutingWithOperationsAndMaterials(
             operation_type_id: node.operationTypeId,
             run_time_per_unit: node.runTimePerUnit,
             setup_time: node.setupTime ?? 0,
-            instructions: node.instructions,
             metadata: {},
             sequence: seq,
           });

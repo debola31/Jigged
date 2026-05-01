@@ -347,7 +347,7 @@ export async function getOperatorJobPartDetail(
 
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, sequence, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
+    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
 
@@ -362,7 +362,6 @@ export async function getOperatorJobPartDetail(
     sequence: number;
     operation_name: string;
     status: string;
-    instructions: string | null;
     estimated_setup_minutes: number | null;
     estimated_run_minutes_per_unit: number | null;
     operation_type_id: string;
@@ -460,7 +459,6 @@ export async function getOperatorJobPartDetail(
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
-    instructions: currentOp?.instructions || null,
     estimated_minutes: estimatedMinutes,
     active_session_id: activeSessionId,
     session_started_at: sessionStartedAt,

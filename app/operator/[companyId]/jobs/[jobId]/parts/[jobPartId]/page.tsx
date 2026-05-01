@@ -309,6 +309,15 @@ export default function OperatorJobPartDetailPage() {
             Order qty {job.part_quantity}
           </Typography>
 
+          {!isWorking && job.operation_name && job.estimated_minutes != null && job.estimated_minutes > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              Estimated:{' '}
+              {job.estimated_minutes < 60
+                ? `${Math.round(job.estimated_minutes)} min`
+                : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
+            </Typography>
+          )}
+
           {job.operations_total > 1 && (
             <Box sx={{ mt: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
@@ -349,44 +358,21 @@ export default function OperatorJobPartDetailPage() {
         </Card>
       )}
 
-      {job.operation_name && (
-        <Card
-          elevation={2}
-          sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
-        >
-          <CardContent>
-            <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-              Work Instructions
-            </Typography>
-            {job.instructions && (
-              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
-                {job.instructions}
-              </Typography>
-            )}
-            {job.estimated_minutes && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                Estimated:{' '}
-                {job.estimated_minutes < 60
-                  ? `${Math.round(job.estimated_minutes)} min`
-                  : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {job.materials && job.materials.length > 0 && (
         <Card
           elevation={2}
           sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
         >
           <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
               <InventoryIcon fontSize="small" color="action" />
               <Typography variant="h6" color="text.secondary">
-                Materials Required
+                Related Materials
               </Typography>
             </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              Confirm what you used when you mark this part complete.
+            </Typography>
             <List dense disablePadding>
               {job.materials.map((mat, idx) => (
                 <ListItem key={idx} disableGutters sx={{ py: 0.25 }}>

@@ -65,7 +65,6 @@ export default function RoutingViewer({ routing }: RoutingViewerProps) {
                       <Typography variant="caption" color="text.secondary">
                         Setup {formatTime(node.setup_time)} • Run{' '}
                         {formatTime(node.run_time_per_unit)}/unit
-                        {node.instructions ? ` • ${node.instructions}` : ''}
                       </Typography>
                     }
                   />

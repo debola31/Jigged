@@ -34,7 +34,6 @@ import {
   createInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
-  checkSkuExists,
   getCompanyCustomUnits,
   createCompanyCustomUnit,
 } from '@/utils/inventoryAccess';
@@ -217,18 +216,6 @@ export default function InventoryForm({
       errors.cost_per_unit = 'Cost cannot be negative';
     }
 
-    if (formData.sku.trim()) {
-      try {
-        const exists = await checkSkuExists(companyId, formData.sku, mode === 'edit' ? itemId : undefined);
-        if (exists) {
-          errors.sku = 'This SKU is already in use';
-        }
-      } catch {
-        setError('Error validating SKU');
-        return false;
-      }
-    }
-
     // Validate unit conversions
     const conversionUnits = new Set<string>();
     for (let i = 0; i < formData.unit_conversions.length; i++) {
@@ -331,7 +318,7 @@ export default function InventoryForm({
             Basic Information
           </Typography>
           <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6 }}>
+            <Grid size={{ xs: 12 }}>
               <TextField
                 fullWidth
                 required
@@ -340,17 +327,6 @@ export default function InventoryForm({
                 onChange={handleChange('name')}
                 error={!!fieldErrors.name}
                 helperText={fieldErrors.name || 'e.g., "4140 Steel Bar", "Aluminum 6061 Sheet"'}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="SKU"
-                value={formData.sku}
-                onChange={handleChange('sku')}
-                error={!!fieldErrors.sku}
-                helperText={fieldErrors.sku || 'Optional internal identifier code'}
                 disabled={loading}
               />
             </Grid>

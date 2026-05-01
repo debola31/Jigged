@@ -44,7 +44,6 @@ type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'conflicts'
 const INVENTORY_FIELDS: FieldDefinition[] = [
   { key: 'name', label: 'Name', required: true },
   { key: 'description', label: 'Description', required: false },
-  { key: 'sku', label: 'SKU', required: false },
   { key: 'primary_unit', label: 'Primary Unit', required: true },
   { key: 'quantity', label: 'Quantity', required: false },
   { key: 'cost_per_unit', label: 'Cost per Unit', required: false },
@@ -53,7 +52,6 @@ const INVENTORY_FIELDS: FieldDefinition[] = [
 interface InventoryConflictInfo {
   row_number: number;
   csv_name: string | null;
-  csv_sku: string | null;
   conflict_type: string;
   existing_item_id: string;
   existing_value: string;

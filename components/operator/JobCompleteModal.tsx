@@ -359,9 +359,7 @@ export default function JobCompleteModal({
                   options={inventoryItems.filter(
                     (item) => !materials.some((m) => m.inventory_item_id === item.id)
                   )}
-                  getOptionLabel={(option) =>
-                    `${option.name}${option.sku ? ` (${option.sku})` : ''}`
-                  }
+                  getOptionLabel={(option) => option.name}
                   loading={loadingItems}
                   onChange={(_, value) => handleSelectNewMaterial(value)}
                   renderInput={(params) => (

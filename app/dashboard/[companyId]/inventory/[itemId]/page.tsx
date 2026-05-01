@@ -108,14 +108,9 @@ export default function InventoryDetailPage() {
       {/* Header with actions */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600, mb: 1 }}>
+          <Typography variant="h4" sx={{ fontWeight: 600 }}>
             {item.name}
           </Typography>
-          {item.sku && (
-            <Typography variant="body1" color="text.secondary">
-              SKU: {item.sku}
-            </Typography>
-          )}
         </Box>
         <Button
           variant="outlined"

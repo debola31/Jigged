@@ -33,8 +33,7 @@ class InventoryConflictInfo(BaseModel):
 
     row_number: int
     csv_name: Optional[str]
-    csv_sku: Optional[str]
-    conflict_type: str  # "duplicate_sku" | "duplicate_name" | "csv_duplicate_sku" | "csv_duplicate_name"
+    conflict_type: str  # "duplicate_name" | "csv_duplicate_name"
     existing_item_id: str  # Empty string for CSV internal duplicates
     existing_value: str
 
@@ -105,11 +104,6 @@ INVENTORY_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Detailed description of the item",
-    },
-    "sku": {
-        "type": "string",
-        "required": False,
-        "description": "Stock keeping unit - internal identifier code",
     },
     "primary_unit": {
         "type": "string",

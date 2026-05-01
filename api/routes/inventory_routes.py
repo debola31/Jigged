@@ -199,32 +199,25 @@ async def validate_import(
     """
     Validate CSV data before import by checking for conflicts.
 
-    Checks for duplicate SKU against existing records.
+    Checks for duplicate name against existing records and within the CSV.
     """
     try:
-        # Get existing inventory items for this company
         response = supabase.table("inventory_items").select(
-            "id, sku, name"
+            "id, name"
         ).eq("company_id", request.company_id).execute()
 
         existing_items = response.data or []
-
-        # Build lookup sets for quick conflict detection
-        existing_skus = {
-            i["sku"].lower(): i for i in existing_items if i.get("sku")
+        existing_names = {
+            i["name"].lower(): i for i in existing_items if i.get("name")
         }
 
-        # Find column mappings
-        sku_column = None
         name_column = None
         primary_unit_column = None
         quantity_column = None
         cost_column = None
 
         for csv_col, db_field in request.mappings.items():
-            if db_field == "sku":
-                sku_column = csv_col
-            elif db_field == "name":
+            if db_field == "name":
                 name_column = csv_col
             elif db_field == "primary_unit":
                 primary_unit_column = csv_col
@@ -233,22 +226,21 @@ async def validate_import(
             elif db_field == "cost_per_unit":
                 cost_column = csv_col
 
-        # Track occurrences for internal duplicate detection
-        sku_occurrences: dict[str, list[int]] = {}
+        # Track name occurrences for internal duplicate detection
+        name_occurrences: dict[str, list[int]] = {}
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
-            csv_sku = row.get(sku_column, "").strip() if sku_column else ""
+            csv_name = row.get(name_column, "").strip() if name_column else ""
 
-            if csv_sku:
-                sku_lower = csv_sku.lower()
-                if sku_lower not in sku_occurrences:
-                    sku_occurrences[sku_lower] = []
-                sku_occurrences[sku_lower].append(row_number)
+            if csv_name:
+                name_lower = csv_name.lower()
+                if name_lower not in name_occurrences:
+                    name_occurrences[name_lower] = []
+                name_occurrences[name_lower].append(row_number)
 
-        duplicate_skus = {k: v for k, v in sku_occurrences.items() if len(v) > 1}
+        duplicate_names = {k: v for k, v in name_occurrences.items() if len(v) > 1}
 
-        # Validate rows
         validation_errors = []
         validation_error_rows: set[int] = set()
         conflicts = []
@@ -258,12 +250,10 @@ async def validate_import(
             row_number = i + 1
 
             csv_name = row.get(name_column, "").strip() if name_column else ""
-            csv_sku = row.get(sku_column, "").strip() if sku_column else ""
             csv_unit = row.get(primary_unit_column, "").strip() if primary_unit_column else ""
             csv_quantity = row.get(quantity_column, "").strip() if quantity_column else ""
             csv_cost = row.get(cost_column, "").strip() if cost_column else ""
 
-            # Required field validation
             if not csv_name:
                 validation_errors.append(
                     InventoryValidationError(
@@ -288,7 +278,6 @@ async def validate_import(
                 validation_error_rows.add(row_number)
                 continue
 
-            # Numeric field validation
             if csv_quantity:
                 try:
                     qty = float(csv_quantity)
@@ -323,7 +312,6 @@ async def validate_import(
                     validation_error_rows.add(row_number)
                     continue
 
-        # Check for conflicts (after validation)
         for i, row in enumerate(request.rows):
             row_number = i + 1
 
@@ -331,40 +319,36 @@ async def validate_import(
                 continue
 
             csv_name = row.get(name_column, "").strip() if name_column else ""
-            csv_sku = row.get(sku_column, "").strip() if sku_column else ""
+            if not csv_name:
+                continue
 
-            # Check for CSV internal duplicate SKU
-            if csv_sku:
-                sku_lower = csv_sku.lower()
-                if sku_lower in duplicate_skus:
-                    other_rows = [r for r in duplicate_skus[sku_lower] if r != row_number]
-                    conflicts.append(
-                        InventoryConflictInfo(
-                            row_number=row_number,
-                            csv_name=csv_name,
-                            csv_sku=csv_sku,
-                            conflict_type="csv_duplicate_sku",
-                            existing_item_id="",
-                            existing_value=f"Rows {', '.join(map(str, other_rows))}",
-                        )
+            name_lower = csv_name.lower()
+            if name_lower in duplicate_names:
+                other_rows = [r for r in duplicate_names[name_lower] if r != row_number]
+                conflicts.append(
+                    InventoryConflictInfo(
+                        row_number=row_number,
+                        csv_name=csv_name,
+                        conflict_type="csv_duplicate_name",
+                        existing_item_id="",
+                        existing_value=f"Rows {', '.join(map(str, other_rows))}",
                     )
-                    conflict_rows.add(row_number)
-                    continue
+                )
+                conflict_rows.add(row_number)
+                continue
 
-                # Check for DB duplicate SKU
-                if sku_lower in existing_skus:
-                    existing = existing_skus[sku_lower]
-                    conflicts.append(
-                        InventoryConflictInfo(
-                            row_number=row_number,
-                            csv_name=csv_name,
-                            csv_sku=csv_sku,
-                            conflict_type="duplicate_sku",
-                            existing_item_id=existing["id"],
-                            existing_value=existing["sku"],
-                        )
+            if name_lower in existing_names:
+                existing = existing_names[name_lower]
+                conflicts.append(
+                    InventoryConflictInfo(
+                        row_number=row_number,
+                        csv_name=csv_name,
+                        conflict_type="duplicate_name",
+                        existing_item_id=existing["id"],
+                        existing_value=existing["name"],
                     )
-                    conflict_rows.add(row_number)
+                )
+                conflict_rows.add(row_number)
 
         total_skipped = conflict_rows | validation_error_rows
         valid_rows = len(request.rows) - len(total_skipped)
@@ -466,11 +450,6 @@ async def execute_import(
             except Exception as e:
                 error_str = str(e)
                 if "23505" in error_str or "duplicate key" in error_str.lower():
-                    if "sku" in error_str.lower():
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Import failed: An item with this SKU already exists.",
-                        )
                     raise HTTPException(
                         status_code=400,
                         detail="Import failed: Duplicate values detected.",

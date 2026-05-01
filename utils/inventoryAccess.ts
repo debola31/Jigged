@@ -20,7 +20,6 @@ interface InventoryItemWithJoins {
   company_id: string;
   name: string;
   description: string | null;
-  sku: string | null;
   primary_unit: string;
   quantity: number;
   cost_per_unit: number | null;
@@ -76,9 +75,8 @@ export async function getAllInventoryItems(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    // Apply search (name or sku)
     if (search.trim()) {
-      query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
+      query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
     }
 
     const { data, error } = await query;
@@ -111,7 +109,7 @@ export async function getInventoryItemsCount(
     .eq('company_id', companyId);
 
   if (search.trim()) {
-    query = query.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
+    query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
   }
 
   const { count, error } = await query;
@@ -248,38 +246,6 @@ export async function getItemTransactions(
   };
 }
 
-/**
- * Check if an SKU already exists for a company.
- */
-export async function checkSkuExists(
-  companyId: string,
-  sku: string,
-  excludeId?: string
-): Promise<boolean> {
-  if (!sku.trim()) return false;
-
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from('inventory_items')
-    .select('id')
-    .eq('company_id', companyId)
-    .ilike('sku', sku.trim());
-
-  if (excludeId) {
-    query = query.neq('id', excludeId);
-  }
-
-  const { data, error } = await query.limit(1);
-
-  if (error) {
-    console.error('Error checking SKU:', error);
-    throw error;
-  }
-
-  return (data?.length || 0) > 0;
-}
-
 // ============================================================
 // CREATE Operations
 // ============================================================
@@ -305,7 +271,6 @@ export async function createInventoryItem(
       company_id: companyId,
       name: formData.name.trim(),
       description: formData.description.trim() || null,
-      sku: formData.sku.trim() || null,
       primary_unit: formData.primary_unit,
       quantity: formData.quantity,
       cost_per_unit: formData.cost_per_unit,
@@ -379,7 +344,6 @@ export async function updateInventoryItem(
     .update({
       name: formData.name.trim(),
       description: formData.description.trim() || null,
-      sku: formData.sku.trim() || null,
       primary_unit: formData.primary_unit,
       cost_per_unit: formData.cost_per_unit,
       updated_at: new Date().toISOString(),

@@ -195,10 +195,10 @@ export default function InventoryPage() {
       pinned: 'left' as const,
     },
     {
-      field: 'sku',
-      headerName: 'SKU',
-      flex: 1,
-      minWidth: 150,
+      field: 'description',
+      headerName: 'Description',
+      flex: 2,
+      minWidth: 200,
       valueFormatter: (params) => params.value ?? '—',
     },
     {

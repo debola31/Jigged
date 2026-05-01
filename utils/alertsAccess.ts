@@ -16,7 +16,6 @@ export interface AtRiskJob {
 
 export interface InventoryAlert {
   item_name: string;
-  sku: string;
   quantity: number;
   reorder_point: number;
   deficit: number;
@@ -44,7 +43,6 @@ interface JobRow {
 interface InventoryRow {
   id: string;
   name: string | null;
-  sku: string | null;
   quantity: number | string | null;
   reorder_point: number | string | null;
   primary_unit: string | null;
@@ -134,7 +132,7 @@ export async function getInventoryAlerts(
 
   const { data, error } = await supabase
     .from('inventory_items')
-    .select('id, name, sku, quantity, reorder_point, primary_unit')
+    .select('id, name, quantity, reorder_point, primary_unit')
     .eq('company_id', companyId)
     .not('reorder_point', 'is', null);
 
@@ -153,7 +151,6 @@ export async function getInventoryAlerts(
 
     alerts.push({
       item_name: item.name ?? 'Unknown',
-      sku: item.sku ?? '',
       quantity: qty,
       reorder_point: reorder,
       deficit: round2(reorder - qty),

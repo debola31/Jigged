@@ -413,7 +413,6 @@ BEGIN
     DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
     DELETE FROM job_attachments WHERE company_id = v_demo_company_id;
-    DELETE FROM quote_attachments WHERE company_id = v_demo_company_id;
     DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
     DELETE FROM jobs WHERE company_id = v_demo_company_id;
     DELETE FROM quotes WHERE company_id = v_demo_company_id;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -12,27 +12,22 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Autocomplete from '@mui/material/Autocomplete';
-import Checkbox from '@mui/material/Checkbox';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import type { QuoteFormData, QuoteAttachment, TempAttachment } from '@/types/quote';
-import { createQuote, updateQuote, getQuoteAttachments } from '@/utils/quotesAccess';
+import type { QuoteFormData } from '@/types/quote';
+import { createQuote, updateQuote } from '@/utils/quotesAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { resolveTier } from '@/utils/quotePricingResolver';
 import type { PartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
-import QuoteAttachmentUpload from '@/components/quotes/QuoteAttachmentUpload';
 import type { Customer } from '@/types/customer';
-import { deleteTempQuoteAttachment } from '@/utils/quotesAccess';
-
-const generateSessionId = () => crypto.randomUUID();
 
 interface QuoteFormProps {
   mode: 'create' | 'edit';
@@ -58,11 +53,10 @@ interface PartOption {
 
 interface PartBlockState {
   part_id: string;
-  tier_ids: string[];
-  /** Working-copy strings for typed overrides; tier_id → typed values. */
-  overrides: Record<string, { unit_price: string; markup_percent: string }>;
-  /** Which tier rows have the override editor expanded (UX state, not persisted). */
-  overrideOpen: Record<string, boolean>;
+  /** Working-copy string so the input can be empty mid-edit. */
+  order_quantity: string;
+  override_open: boolean;
+  override_unit_price: string;
   tiers: PartPricingTier[];
   loading: boolean;
   error: string | null;
@@ -87,6 +81,30 @@ function formatCurrency(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+function emptyBlock(): PartBlockState {
+  return {
+    part_id: '',
+    order_quantity: '',
+    override_open: false,
+    override_unit_price: '',
+    tiers: [],
+    loading: false,
+    error: null,
+  };
+}
+
+function blockFromInitial(p: QuoteFormData['parts'][number]): PartBlockState {
+  return {
+    part_id: p.part_id,
+    order_quantity: String(p.order_quantity),
+    override_open: !!p.override,
+    override_unit_price: p.override ? String(p.override.unit_price) : '',
+    tiers: [],
+    loading: false,
+    error: null,
+  };
+}
+
 export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave }: QuoteFormProps) {
   const router = useRouter();
   const params = useParams();
@@ -94,15 +112,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
   const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(
-    initialData.parts.map((p) => ({
-      part_id: p.part_id,
-      tier_ids: p.tier_ids,
-      overrides: {},
-      overrideOpen: {},
-      tiers: [],
-      loading: false,
-      error: null,
-    })),
+    initialData.parts.map(blockFromInitial),
   );
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -114,11 +124,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [partModalOpen, setPartModalOpen] = useState(false);
   const [partModalTargetIdx, setPartModalTargetIdx] = useState<number | null>(null);
-
-  // Attachments (create-mode: temp; edit-mode: persisted)
-  const [sessionId] = useState<string>(() => generateSessionId());
-  const [tempAttachments, setTempAttachments] = useState<TempAttachment[]>([]);
-  const [attachments, setAttachments] = useState<QuoteAttachment[]>([]);
 
   const loadData = useCallback(async () => {
     try {
@@ -140,17 +145,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           has_routing: p.has_routing,
         })),
       ]);
-
-      if (mode === 'edit' && quoteId) {
-        const quoteAttachments = await getQuoteAttachments(quoteId);
-        setAttachments(quoteAttachments);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoadingData(false);
     }
-  }, [companyId, mode, quoteId]);
+  }, [companyId]);
 
   useEffect(() => {
     loadData();
@@ -169,11 +169,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         setPartBlocks((prev) => {
           const next = [...prev];
           if (next[idx]) {
-            next[idx] = {
-              ...next[idx],
-              tiers,
-              loading: false,
-            };
+            next[idx] = { ...next[idx], tiers, loading: false };
           }
           return next;
         });
@@ -202,16 +198,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
   };
-
-  const emptyBlock = (): PartBlockState => ({
-    part_id: '',
-    tier_ids: [],
-    overrides: {},
-    overrideOpen: {},
-    tiers: [],
-    loading: false,
-    error: null,
-  });
 
   const addPartBlock = () => {
     setPartBlocks((prev) => [...prev, emptyBlock()]);
@@ -242,28 +228,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     });
   };
 
-  const toggleTier = (blockIdx: number, tierId: string) => {
+  const updateBlockField = (
+    idx: number,
+    patch: Partial<PartBlockState> | ((prev: PartBlockState) => Partial<PartBlockState>),
+  ) => {
     setPartBlocks((prev) => {
       const next = [...prev];
-      const block = next[blockIdx];
-      const included = block.tier_ids.includes(tierId);
-      const tierIds = included
-        ? block.tier_ids.filter((id) => id !== tierId)
-        : [...block.tier_ids, tierId];
-      // Drop any override for tiers no longer selected.
-      const overrides = included
-        ? Object.fromEntries(Object.entries(block.overrides).filter(([k]) => k !== tierId))
-        : block.overrides;
-      const overrideOpen = included
-        ? Object.fromEntries(Object.entries(block.overrideOpen).filter(([k]) => k !== tierId))
-        : block.overrideOpen;
-      next[blockIdx] = { ...block, tier_ids: tierIds, overrides, overrideOpen };
+      const current = next[idx];
+      const delta = typeof patch === 'function' ? patch(current) : patch;
+      next[idx] = { ...current, ...delta };
       return next;
     });
   };
 
   const handleCustomerCreated = (customer: Customer) => {
-    setCustomers((prev) => [CREATE_NEW_CUSTOMER, ...prev.filter((c) => !c.isCreateNew), { id: customer.id, name: customer.name }]);
+    setCustomers((prev) => [
+      CREATE_NEW_CUSTOMER,
+      ...prev.filter((c) => !c.isCreateNew),
+      { id: customer.id, name: customer.name },
+    ]);
     handleFieldChange('customer_id', customer.id);
     setCustomerModalOpen(false);
   };
@@ -281,6 +264,51 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setPartModalTargetIdx(null);
   };
 
+  /** Per-block live preview of the resolved tier + total. */
+  const blockPreviews = useMemo(() => {
+    return partBlocks.map((block) => {
+      const orderQty = Number(block.order_quantity);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) {
+        return { resolved: null as ReturnType<typeof resolveTier>, total: null as number | null };
+      }
+      if (block.override_open && block.override_unit_price.trim() !== '') {
+        const overridePrice = Number(block.override_unit_price);
+        if (Number.isFinite(overridePrice) && overridePrice >= 0) {
+          return {
+            resolved: null,
+            total: Math.round(overridePrice * orderQty * 100) / 100,
+            overridePrice,
+          };
+        }
+      }
+      const resolved = resolveTier(block.tiers, orderQty);
+      return {
+        resolved,
+        total: resolved ? Math.round(resolved.unit_price * orderQty * 100) / 100 : null,
+      };
+    });
+  }, [partBlocks]);
+
+  /** Quote total = sum of every part block that has a computable total. */
+  const quoteTotal = useMemo(() => {
+    let sum = 0;
+    let allComputable = true;
+    for (let i = 0; i < partBlocks.length; i++) {
+      const block = partBlocks[i];
+      if (!block.part_id) {
+        allComputable = false;
+        continue;
+      }
+      const total = blockPreviews[i]?.total;
+      if (total === null || total === undefined) {
+        allComputable = false;
+      } else {
+        sum += total;
+      }
+    }
+    return { sum: Math.round(sum * 100) / 100, allComputable };
+  }, [partBlocks, blockPreviews]);
+
   const handleSubmit = async () => {
     setError(null);
 
@@ -292,53 +320,67 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       setError('Add at least one part to the quote.');
       return;
     }
+    const seen = new Set<string>();
     for (const block of partBlocks) {
       if (!block.part_id) {
         setError('Every part block must have a part selected.');
         return;
       }
-      if (block.tier_ids.length === 0) {
-        setError('Every part must have at least one quantity tier selected.');
+      if (seen.has(block.part_id)) {
+        setError('A part can only appear once on a quote.');
         return;
+      }
+      seen.add(block.part_id);
+      const orderQty = Number(block.order_quantity);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) {
+        setError('Every part needs an order quantity greater than zero.');
+        return;
+      }
+      if (!Number.isInteger(orderQty)) {
+        setError('Order quantity must be a whole number.');
+        return;
+      }
+      if (block.override_open) {
+        const overridePrice = Number(block.override_unit_price);
+        if (!Number.isFinite(overridePrice) || overridePrice < 0) {
+          setError('Override unit price must be a non-negative number.');
+          return;
+        }
+      } else {
+        const resolved = resolveTier(block.tiers, orderQty);
+        if (!resolved) {
+          setError(
+            'At least one part has no priced tiers — open the part page to add pricing tiers, or use a custom price override.',
+          );
+          return;
+        }
       }
     }
 
-    // Build overrides map: only tiers that have a typed unit_price diverging
-    // from the part tier's current price are submitted as overrides.
     const payload: QuoteFormData = {
       ...formData,
       parts: partBlocks.map((b) => {
-        const overrides: Record<string, { unit_price: number; markup_percent: number | null }> = {};
-        for (const tierId of b.tier_ids) {
-          const typed = b.overrides[tierId];
-          if (!typed || !typed.unit_price.trim()) continue;
-          const unitPrice = Number(typed.unit_price);
-          if (!Number.isFinite(unitPrice) || unitPrice < 0) continue;
-          const tier = b.tiers.find((t) => t.id === tierId);
-          // Only count as override if the typed price differs from the tier's current price.
-          if (tier && tier.unit_price !== null && Math.abs(tier.unit_price - unitPrice) < 0.005) continue;
-          const markup = typed.markup_percent.trim() === '' ? null : Number(typed.markup_percent);
-          overrides[tierId] = {
+        const orderQty = Number(b.order_quantity);
+        const block: QuoteFormData['parts'][number] = {
+          part_id: b.part_id,
+          order_quantity: orderQty,
+        };
+        if (b.override_open && b.override_unit_price.trim() !== '') {
+          const unitPrice = Number(b.override_unit_price);
+          block.override = {
             unit_price: unitPrice,
-            markup_percent: Number.isFinite(markup) ? (markup as number) : null,
+            // Markup % is no longer a quote-form input — leave it null on overrides.
+            markup_percent: null,
           };
         }
-        return {
-          part_id: b.part_id,
-          tier_ids: b.tier_ids,
-          ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
-        };
+        return block;
       }),
     };
 
     setLoading(true);
     try {
       if (mode === 'create') {
-        const { quote, attachmentErrors } = await createQuote(companyId, payload, tempAttachments);
-        if (attachmentErrors.length > 0) {
-          setError(`Quote created with errors:\n${attachmentErrors.join('\n')}`);
-          return;
-        }
+        const { quote } = await createQuote(companyId, payload);
         onSave?.();
         router.push(`/dashboard/${companyId}/quotes/${quote.id}`);
       } else if (mode === 'edit' && quoteId) {
@@ -353,16 +395,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
   };
 
-  const handleCancel = async () => {
-    if (mode === 'create' && tempAttachments.length > 0) {
-      for (const attachment of tempAttachments) {
-        try {
-          await deleteTempQuoteAttachment(attachment.file_path);
-        } catch (cleanupError) {
-          console.warn('Failed to clean up temp attachment:', cleanupError);
-        }
-      }
-    }
+  const handleCancel = () => {
     if (onCancel) onCancel();
     else router.back();
   };
@@ -376,7 +409,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   }
 
   return (
-    <Box>
+    <Box sx={{ pb: 12 }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -423,6 +456,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
           {partBlocks.map((block, idx) => {
             const selectedPart = parts.find((p) => p.id === block.part_id) ?? null;
+            const preview = blockPreviews[idx];
+            const orderQtyNum = Number(block.order_quantity);
+            const hasOrderQty =
+              block.order_quantity !== '' && Number.isFinite(orderQtyNum) && orderQtyNum > 0;
+            const matched = preview?.resolved ?? null;
+            const isOverride = block.override_open && block.override_unit_price.trim() !== '';
+
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
                 {idx > 0 && <Divider sx={{ mb: 3 }} />}
@@ -454,176 +494,143 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
                 {block.error && <Alert severity="error">{block.error}</Alert>}
 
-                {!block.loading && block.part_id && block.tiers.length === 0 && (
+                {!block.loading && block.part_id && block.tiers.length === 0 && !block.error && (
                   <Alert severity="warning">
-                    This part has no pricing tiers yet. Open the part detail page to add them.
+                    This part has no pricing tiers yet. Add pricing tiers on the part page, or
+                    enter a custom unit price below.
                   </Alert>
                 )}
 
-                {!block.loading && block.tiers.length > 0 && (
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                      Select one or more quantity tiers to include on this quote. Use ✏ Adjust price to set a one-off price for this quote only.
-                    </Typography>
-                    {block.tiers.map((tier) => {
-                      const included = block.tier_ids.includes(tier.id);
-                      const overrideOpen = !!block.overrideOpen[tier.id];
-                      const typed = block.overrides[tier.id];
-                      const typedUnitPrice = typed?.unit_price.trim() === '' ? null : Number(typed?.unit_price ?? '');
-                      const hasOverrideValue =
-                        typed !== undefined &&
-                        typed.unit_price.trim() !== '' &&
-                        Number.isFinite(typedUnitPrice) &&
-                        tier.unit_price !== null &&
-                        Math.abs(tier.unit_price - (typedUnitPrice as number)) >= 0.005;
-                      return (
-                        <Box key={tier.id} sx={{ mb: 1 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  size="small"
-                                  checked={included}
-                                  onChange={() => toggleTier(idx, tier.id)}
-                                />
-                              }
-                              label={
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                                  <Typography variant="body2">
-                                    Qty {tier.quantity} ·{' '}
-                                    {formatCurrency(
-                                      hasOverrideValue ? (typedUnitPrice as number) : tier.unit_price,
-                                    )}{' '}
-                                    / unit
-                                  </Typography>
-                                  {tier.markup_percent != null && !hasOverrideValue && (
-                                    <Chip
-                                      size="small"
-                                      label={`${tier.markup_percent}% markup`}
-                                      variant="outlined"
-                                      sx={{ height: 18 }}
-                                    />
-                                  )}
-                                  {hasOverrideValue && (
-                                    <Chip
-                                      size="small"
-                                      label="adjusted for this quote"
-                                      color="success"
-                                      variant="outlined"
-                                      sx={{ height: 18 }}
-                                    />
-                                  )}
-                                </Box>
-                              }
-                              sx={{ display: 'flex', alignItems: 'center', flex: 1 }}
+                {!block.loading && block.part_id && (
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                      <TextField
+                        size="small"
+                        label="Order quantity"
+                        value={block.order_quantity}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v !== '' && !/^\d+$/.test(v)) return;
+                          updateBlockField(idx, { order_quantity: v });
+                        }}
+                        inputMode="numeric"
+                        sx={{ width: 160 }}
+                        helperText={
+                          hasOrderQty && matched && matched.below_min
+                            ? `Below minimum break (${matched.matched_tier_quantity} ea) — using lowest tier price`
+                            : ' '
+                        }
+                        error={hasOrderQty && matched?.below_min === true}
+                      />
+                      {hasOrderQty && (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 200 }}>
+                          {isOverride ? (
+                            <>
+                              <Typography variant="body2">
+                                Custom price{' '}
+                                <Box component="span" sx={{ fontWeight: 600 }}>
+                                  {formatCurrency(Number(block.override_unit_price))}
+                                </Box>{' '}
+                                / unit
+                              </Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                Total {formatCurrency(preview?.total ?? null)}
+                              </Typography>
+                            </>
+                          ) : matched ? (
+                            <>
+                              <Typography variant="body2">
+                                Tier {matched.matched_tier_quantity} ea ·{' '}
+                                <Box component="span" sx={{ fontWeight: 600 }}>
+                                  {formatCurrency(matched.unit_price)}
+                                </Box>{' '}
+                                / unit
+                              </Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                Total {formatCurrency(preview?.total ?? null)}
+                              </Typography>
+                            </>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              No priced tier matches — add a tier or use a custom price.
+                            </Typography>
+                          )}
+                          {isOverride && (
+                            <Chip
+                              size="small"
+                              label="adjusted for this quote"
+                              color="success"
+                              variant="outlined"
+                              sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
                             />
-                            {included && (
-                              <Button
-                                size="small"
-                                onClick={() =>
-                                  setPartBlocks((prev) => {
-                                    const next = [...prev];
-                                    const b = next[idx];
-                                    const open = !b.overrideOpen[tier.id];
-                                    next[idx] = {
-                                      ...b,
-                                      overrideOpen: { ...b.overrideOpen, [tier.id]: open },
-                                      overrides:
-                                        open && !b.overrides[tier.id]
-                                          ? {
-                                              ...b.overrides,
-                                              [tier.id]: {
-                                                unit_price:
-                                                  tier.unit_price !== null
-                                                    ? String(tier.unit_price)
-                                                    : '',
-                                                markup_percent:
-                                                  tier.markup_percent !== null
-                                                    ? String(tier.markup_percent)
-                                                    : '',
-                                              },
-                                            }
-                                          : b.overrides,
-                                    };
-                                    return next;
-                                  })
-                                }
-                              >
-                                {overrideOpen ? 'Cancel' : '✏ Adjust price'}
-                              </Button>
-                            )}
-                          </Box>
-                          {included && overrideOpen && (
-                            <Box sx={{ display: 'flex', gap: 1, ml: 4, mt: 0.5, alignItems: 'center' }}>
-                              <TextField
-                                size="small"
-                                label="Unit price"
-                                value={typed?.unit_price ?? ''}
-                                onChange={(e) => {
-                                  if (e.target.value !== '' && !/^\d*\.?\d*$/.test(e.target.value)) return;
-                                  const newPrice = e.target.value;
-                                  setPartBlocks((prev) => {
-                                    const next = [...prev];
-                                    const b = next[idx];
-                                    const tierBaseCost = tier.base_cost_per_unit ?? 0;
-                                    const priceNum = Number(newPrice);
-                                    const backMarkup =
-                                      Number.isFinite(priceNum) && tierBaseCost > 0
-                                        ? Math.round(((priceNum - tierBaseCost) / tierBaseCost) * 100 * 100) / 100
-                                        : null;
-                                    next[idx] = {
-                                      ...b,
-                                      overrides: {
-                                        ...b.overrides,
-                                        [tier.id]: {
-                                          unit_price: newPrice,
-                                          markup_percent: backMarkup !== null ? String(backMarkup) : (typed?.markup_percent ?? ''),
-                                        },
-                                      },
-                                    };
-                                    return next;
-                                  });
-                                }}
-                                sx={{ width: 130 }}
-                                inputMode="decimal"
-                              />
-                              <TextField
-                                size="small"
-                                label="Markup %"
-                                value={typed?.markup_percent ?? ''}
-                                onChange={(e) => {
-                                  if (e.target.value !== '' && !/^\d*\.?\d*$/.test(e.target.value)) return;
-                                  const newMarkup = e.target.value;
-                                  setPartBlocks((prev) => {
-                                    const next = [...prev];
-                                    const b = next[idx];
-                                    const tierBaseCost = tier.base_cost_per_unit ?? 0;
-                                    const markupNum = Number(newMarkup);
-                                    const computedPrice =
-                                      Number.isFinite(markupNum) && tierBaseCost > 0
-                                        ? Math.round(tierBaseCost * (1 + markupNum / 100) * 100) / 100
-                                        : null;
-                                    next[idx] = {
-                                      ...b,
-                                      overrides: {
-                                        ...b.overrides,
-                                        [tier.id]: {
-                                          unit_price: computedPrice !== null ? String(computedPrice) : (typed?.unit_price ?? ''),
-                                          markup_percent: newMarkup,
-                                        },
-                                      },
-                                    };
-                                    return next;
-                                  });
-                                }}
-                                sx={{ width: 110 }}
-                                inputMode="decimal"
-                              />
-                            </Box>
                           )}
                         </Box>
-                      );
-                    })}
+                      )}
+                    </Box>
+
+                    {/* Pricing tiers reference (always visible) */}
+                    {block.tiers.length > 0 && (
+                      <Box>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ display: 'block', mb: 0.5 }}
+                        >
+                          Pricing tiers
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {[...block.tiers]
+                            .sort((a, b) => a.quantity - b.quantity)
+                            .map((tier) => {
+                              const isMatched =
+                                matched?.source_tier_id === tier.id && !isOverride;
+                              return (
+                                <Chip
+                                  key={tier.id}
+                                  size="small"
+                                  label={`${tier.quantity} · ${formatCurrency(tier.unit_price)} each`}
+                                  color={isMatched ? 'primary' : 'default'}
+                                  variant={isMatched ? 'filled' : 'outlined'}
+                                />
+                              );
+                            })}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {/* Override toggle */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          updateBlockField(idx, (prev) => ({
+                            override_open: !prev.override_open,
+                            override_unit_price:
+                              !prev.override_open && prev.override_unit_price === '' && matched
+                                ? String(matched.unit_price)
+                                : prev.override_unit_price,
+                          }))
+                        }
+                      >
+                        {block.override_open ? 'Cancel custom price' : '✏ Use custom price'}
+                      </Button>
+                    </Box>
+                    {block.override_open && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <TextField
+                          size="small"
+                          label="Unit price"
+                          value={block.override_unit_price}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v !== '' && !/^\d*\.?\d*$/.test(v)) return;
+                            updateBlockField(idx, { override_unit_price: v });
+                          }}
+                          sx={{ width: 160 }}
+                          inputMode="decimal"
+                        />
+                      </Box>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -664,35 +671,50 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         </CardContent>
       </Card>
 
-      {/* Attachments */}
-      <QuoteAttachmentUpload
-        quoteId={mode === 'edit' ? quoteId ?? null : null}
-        companyId={companyId}
-        sessionId={sessionId}
-        existingAttachments={attachments}
-        tempAttachments={tempAttachments}
-        onAttachmentChange={() => {
-          if (mode === 'edit' && quoteId) {
-            getQuoteAttachments(quoteId).then(setAttachments).catch(() => {});
-          }
+      {/* Sticky footer with running total + actions */}
+      <Box
+        sx={{
+          position: 'sticky',
+          bottom: 0,
+          mt: 3,
+          py: 2,
+          px: 2,
+          bgcolor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 2,
+          flexWrap: 'wrap',
+          zIndex: 1,
         }}
-        onTempAttachmentsChange={setTempAttachments}
-        disabled={loading}
-      />
-
-
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 3 }}>
-        <Button onClick={handleCancel} disabled={loading}>
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleSubmit}
-          disabled={loading}
-          startIcon={loading ? <CircularProgress size={14} color="inherit" /> : null}
-        >
-          {mode === 'create' ? 'Create quote' : 'Save changes'}
-        </Button>
+      >
+        <Box>
+          <Typography variant="caption" color="text.secondary">
+            Quote total
+          </Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            {partBlocks.length === 0
+              ? '—'
+              : quoteTotal.allComputable
+                ? formatCurrency(quoteTotal.sum)
+                : `${formatCurrency(quoteTotal.sum)} (incomplete)`}
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button onClick={handleCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmit}
+            disabled={loading}
+            startIcon={loading ? <CircularProgress size={14} color="inherit" /> : null}
+          >
+            {mode === 'create' ? 'Create quote' : 'Save changes'}
+          </Button>
+        </Box>
       </Box>
 
       <CustomerFormModal

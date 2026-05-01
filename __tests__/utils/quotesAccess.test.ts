@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Quote, QuoteFormData, QuoteStatus, TempAttachment } from '@/types/quote';
+import type { Quote, QuoteFormData, QuoteStatus } from '@/types/quote';
 
 // Use vi.hoisted to define mock variables before vi.mock is called
 const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => {
@@ -85,17 +85,6 @@ import {
   bulkDeleteQuotes,
   convertQuoteToJob,
   getPartWithCostInfo,
-
-  getQuoteAttachments,
-  getQuoteAttachmentCount,
-  uploadQuoteAttachment,
-  deleteQuoteAttachment,
-  replaceQuoteAttachment,
-  getQuoteAttachmentUrl,
-  uploadTempQuoteAttachment,
-  deleteTempQuoteAttachment,
-  MAX_ATTACHMENTS_PER_QUOTE,
-  MAX_FILE_SIZE,
 } from '@/utils/quotesAccess';
 
 describe('quotesAccess utilities', () => {
@@ -345,7 +334,6 @@ describe('quotesAccess utilities', () => {
       expect(mockSupabase.from).toHaveBeenCalledWith('quotes');
       expect(mockQueryBuilder.insert).toHaveBeenCalled();
       expect(result.quote.id).toBe('new-quote-id');
-      expect(result.attachmentErrors).toHaveLength(0);
     });
 
     it('validates quantity bounds - too low', async () => {
@@ -394,53 +382,6 @@ describe('quotesAccess utilities', () => {
       expect(result.quote.part_id).toBeNull();
     });
 
-    it('handles temp attachments during creation', async () => {
-      mockQueryBuilder.data = { ...mockQuote, id: 'new-quote-id' };
-      mockQueryBuilder.error = null;
-
-      const tempAttachments: TempAttachment[] = [
-        {
-          file_name: 'test.pdf',
-          file_path: 'company-1/temp/session-1/test.pdf',
-          file_size: 1024,
-          mime_type: 'application/pdf',
-        },
-      ];
-
-      // Mock the subsequent insert for attachment
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            insert: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, id: 'new-quote-id' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            insert: vi.fn().mockReturnValue({
-              data: null,
-              error: null,
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      const result = await createQuote('company-1', validFormData, tempAttachments);
-
-      expect(mockStorageHelpers.moveFileInStorage).toHaveBeenCalled();
-      expect(result.attachmentErrors).toHaveLength(0);
-    });
   });
 
   describe('updateQuote', () => {
@@ -540,25 +481,8 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('deleteQuote', () => {
-    it('deletes quote and cleans up attachments', async () => {
-      let callCount = 0;
+    it('deletes the quote row (no attachment cleanup)', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: [{ file_path: 'company-1/quotes/quote-1/test.pdf' }],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
         if (table === 'quotes') {
           return {
             ...mockQueryBuilder,
@@ -577,52 +501,9 @@ describe('quotesAccess utilities', () => {
         return mockQueryBuilder;
       });
 
-      await deleteQuote('quote-1', 'company-1');
-
-      expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith(
-        'company-1/quotes/quote-1/test.pdf'
-      );
-    });
-
-    it('continues deletion even if storage cleanup fails', async () => {
-      mockStorageHelpers.deleteFileFromStorage.mockRejectedValueOnce(new Error('Storage error'));
-
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: [{ file_path: 'company-1/quotes/quote-1/test.pdf' }],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            delete: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: null,
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      // Should not throw
       await expect(deleteQuote('quote-1', 'company-1')).resolves.toBeUndefined();
+      // Quote attachments are gone — storage helper must not be involved.
+      expect(mockStorageHelpers.deleteFileFromStorage).not.toHaveBeenCalled();
     });
   });
 
@@ -705,8 +586,10 @@ describe('quotesAccess utilities', () => {
         };
       });
 
-      // @ts-expect-error Testing invalid input
-      await bulkDeleteQuotes(['valid-id', null, undefined, '', 'another-valid'], 'company-1');
+      await bulkDeleteQuotes(
+        ['valid-id', null as unknown as string, undefined as unknown as string, '', 'another-valid'],
+        'company-1',
+      );
 
       // Should only call with valid IDs
       expect(mockSupabase.from).toHaveBeenCalled();
@@ -906,306 +789,4 @@ describe('quotesAccess utilities', () => {
     });
   });
 
-  // ============== Attachment Tests ==============
-
-  describe('getQuoteAttachments', () => {
-    it('returns attachments for a quote', async () => {
-      const mockAttachments = [
-        { id: 'att-1', file_name: 'doc1.pdf', file_path: 'path/doc1.pdf' },
-        { id: 'att-2', file_name: 'doc2.pdf', file_path: 'path/doc2.pdf' },
-      ];
-      mockQueryBuilder.data = mockAttachments;
-      mockQueryBuilder.error = null;
-
-      const result = await getQuoteAttachments('quote-1');
-
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('quote_id', 'quote-1');
-      expect(result).toHaveLength(2);
-    });
-  });
-
-  describe('getQuoteAttachmentCount', () => {
-    it('returns count of attachments', async () => {
-      mockQueryBuilder.count = 3;
-      mockQueryBuilder.error = null;
-
-      const result = await getQuoteAttachmentCount('quote-1');
-
-      expect(result).toBe(3);
-    });
-  });
-
-  describe('uploadQuoteAttachment', () => {
-    it('uploads PDF attachment to active quote', async () => {
-      const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
-      Object.defineProperty(mockFile, 'size', { value: 1024 });
-
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'active', converted_to_job_id: null },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'quote_attachments' && callCount === 2) {
-          // Count check
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                count: 0,
-                error: null,
-              }),
-            }),
-          };
-        }
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            insert: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: {
-                    id: 'attachment-1',
-                    file_name: 'test.pdf',
-                    file_path: 'company-1/quotes/quote-1/test.pdf',
-                  },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      const result = await uploadQuoteAttachment('quote-1', 'company-1', mockFile);
-
-      expect(mockStorageHelpers.uploadFileToStorage).toHaveBeenCalled();
-      expect(result.file_name).toBe('test.pdf');
-    });
-
-    it('rejects non-PDF files', async () => {
-      const mockFile = new File(['test'], 'test.txt', { type: 'text/plain' });
-
-      await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        'Only PDF files are allowed'
-      );
-    });
-
-    it('rejects files over 50MB', async () => {
-      const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
-      Object.defineProperty(mockFile, 'size', { value: MAX_FILE_SIZE + 1 });
-
-      await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        'File size must be 50MB or less'
-      );
-    });
-
-    it('rejects upload to expired quote', async () => {
-      const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
-      Object.defineProperty(mockFile, 'size', { value: 1024 });
-
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'expired', converted_to_job_id: null },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        'Attachments can only be added to active quotes that have not been converted'
-      );
-    });
-
-    it('enforces max attachment limit', async () => {
-      const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
-      Object.defineProperty(mockFile, 'size', { value: 1024 });
-
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
-        if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'active', converted_to_job_id: null },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                count: MAX_ATTACHMENTS_PER_QUOTE,
-                error: null,
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      await expect(uploadQuoteAttachment('quote-1', 'company-1', mockFile)).rejects.toThrow(
-        `Maximum ${MAX_ATTACHMENTS_PER_QUOTE} attachment(s) allowed`
-      );
-    });
-  });
-
-  describe('deleteQuoteAttachment', () => {
-    it('deletes attachment from active quote', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  ...mockQueryBuilder,
-                  single: vi.fn().mockReturnValue({
-                    data: {
-                      id: 'attachment-1',
-                      file_path: 'path/to/file.pdf',
-                      quotes: { status: 'active', converted_to_job_id: null },
-                    },
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-            delete: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: null,
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      await deleteQuoteAttachment('attachment-1', 'company-1');
-
-      expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith('path/to/file.pdf');
-    });
-
-    it('rejects deletion from converted quote', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              single: vi.fn().mockReturnValue({
-                data: {
-                  id: 'attachment-1',
-                  file_path: 'path/to/file.pdf',
-                  quotes: { status: 'active', converted_at: '2026-04-16T10:00:00Z' },
-                },
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      }));
-
-      await expect(deleteQuoteAttachment('attachment-1', 'company-1')).rejects.toThrow(
-        'Attachments can only be deleted from active quotes that have not been converted'
-      );
-    });
-  });
-
-  describe('getQuoteAttachmentUrl', () => {
-    it('returns signed URL for attachment', async () => {
-      const result = await getQuoteAttachmentUrl('path/to/file.pdf');
-
-      expect(mockStorageHelpers.getSignedUrl).toHaveBeenCalledWith('path/to/file.pdf', 3600);
-      expect(result).toBe('https://signed-url.example.com');
-    });
-  });
-
-  describe('uploadTempQuoteAttachment', () => {
-    it('uploads to temp storage', async () => {
-      const mockFile = new File(['test'], 'temp.pdf', { type: 'application/pdf' });
-      Object.defineProperty(mockFile, 'size', { value: 1024 });
-
-      const result = await uploadTempQuoteAttachment('company-1', 'session-123', mockFile);
-
-      expect(mockStorageHelpers.generateTempStoragePath).toHaveBeenCalledWith(
-        'company-1',
-        'session-123',
-        'temp.pdf'
-      );
-      expect(mockStorageHelpers.uploadFileToStorage).toHaveBeenCalled();
-      expect(result.file_name).toBe('temp.pdf');
-    });
-
-    it('rejects non-PDF files', async () => {
-      const mockFile = new File(['test'], 'temp.txt', { type: 'text/plain' });
-
-      await expect(
-        uploadTempQuoteAttachment('company-1', 'session-123', mockFile)
-      ).rejects.toThrow('Only PDF files are allowed');
-    });
-  });
-
-  describe('deleteTempQuoteAttachment', () => {
-    it('deletes temp file from storage', async () => {
-      await deleteTempQuoteAttachment('company-1/temp/session-123/file.pdf');
-
-      expect(mockStorageHelpers.deleteFileFromStorage).toHaveBeenCalledWith(
-        'company-1/temp/session-123/file.pdf'
-      );
-    });
-  });
-
-  // ============== Constants Tests ==============
-
-  describe('Constants', () => {
-    it('exports MAX_ATTACHMENTS_PER_QUOTE as 5', () => {
-      expect(MAX_ATTACHMENTS_PER_QUOTE).toBe(5);
-    });
-
-    it('exports MAX_FILE_SIZE as 50MB', () => {
-      expect(MAX_FILE_SIZE).toBe(50 * 1024 * 1024);
-    });
-  });
 });

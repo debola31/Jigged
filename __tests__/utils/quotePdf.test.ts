@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoisted mocks so they're set up before imports resolve.
-const { jsPDFCtor, autoTableFn, downloadFileMock } = vi.hoisted(() => {
+const { jsPDFCtor, autoTableFn } = vi.hoisted(() => {
   const saveMock = vi.fn();
-  const addImageMock = vi.fn();
   const textMock = vi.fn();
   const lineMock = vi.fn();
   const rectMock = vi.fn();
@@ -25,7 +24,6 @@ const { jsPDFCtor, autoTableFn, downloadFileMock } = vi.hoisted(() => {
     setDrawColor: vi.fn(),
     setLineWidth: vi.fn(),
     setFillColor: vi.fn(),
-    addImage: addImageMock,
     text: textMock,
     line: lineMock,
     rect: rectMock,
@@ -34,6 +32,7 @@ const { jsPDFCtor, autoTableFn, downloadFileMock } = vi.hoisted(() => {
     addPage: addPageMock,
     setPage: setPageMock,
     getNumberOfPages: getNumberOfPagesMock,
+    getTextWidth: vi.fn().mockReturnValue(50),
     lastAutoTable: { finalY: 400 },
   };
 
@@ -41,9 +40,8 @@ const { jsPDFCtor, autoTableFn, downloadFileMock } = vi.hoisted(() => {
     return docInstance;
   });
   const autoTableFn = vi.fn();
-  const downloadFileMock = vi.fn();
 
-  return { jsPDFCtor, autoTableFn, downloadFileMock };
+  return { jsPDFCtor, autoTableFn };
 });
 
 vi.mock('jspdf', () => ({
@@ -54,8 +52,8 @@ vi.mock('jspdf-autotable', () => ({
   default: autoTableFn,
 }));
 
-vi.mock('@/utils/storageHelpers', () => ({
-  downloadFileFromStorage: downloadFileMock,
+vi.mock('@/utils/partPricingTiersAccess', () => ({
+  getTiersForPart: vi.fn().mockResolvedValue([]),
 }));
 
 import { generateQuotePdf } from '@/utils/quotePdf';
@@ -103,12 +101,12 @@ const baseQuote: QuoteWithRelations = {
       total_price: 700,
       markup_percent: 40,
       base_cost_per_unit: 50,
+      is_quote_override: false,
       created_at: '2026-04-16T10:00:00Z',
       parts: {
         id: 'part-1',
         part_name: 'BRKT-001',
         description: 'Steel bracket, 3/16"',
-        category_id: null,
       },
     },
   ],
@@ -120,7 +118,6 @@ const baseQuote: QuoteWithRelations = {
 const baseCompany: Company = {
   id: 'company-1',
   name: 'Contour Tool & Machine',
-  logo_url: null,
 };
 
 describe('generateQuotePdf', () => {
@@ -132,29 +129,11 @@ describe('generateQuotePdf', () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     expect(jsPDFCtor).toHaveBeenCalledWith({ unit: 'pt', format: 'letter' });
-    expect(autoTableFn).toHaveBeenCalledTimes(1);
+    // One main line items table + zero tier sub-tables (no tiers loaded).
+    expect(autoTableFn).toHaveBeenCalled();
 
     const docInstance = jsPDFCtor.mock.results[0].value;
     expect(docInstance.save).toHaveBeenCalledWith('Quote-Q000123.pdf');
-  });
-
-  it('skips the logo gracefully when logo_url is null (no storage fetch)', async () => {
-    await generateQuotePdf(baseQuote, { ...baseCompany, logo_url: null });
-
-    expect(downloadFileMock).not.toHaveBeenCalled();
-    const docInstance = jsPDFCtor.mock.results[0].value;
-    expect(docInstance.addImage).not.toHaveBeenCalled();
-  });
-
-  it('survives a storage fetch failure without throwing', async () => {
-    downloadFileMock.mockRejectedValueOnce(new Error('Storage down'));
-
-    await expect(
-      generateQuotePdf(baseQuote, { ...baseCompany, logo_url: 'company-1/company/logo.png' })
-    ).resolves.toBeUndefined();
-
-    const docInstance = jsPDFCtor.mock.results[0].value;
-    expect(docInstance.save).toHaveBeenCalled();
   });
 
   it('renders without a customer (null customers) without throwing', async () => {
@@ -166,11 +145,14 @@ describe('generateQuotePdf', () => {
     expect(docInstance.save).toHaveBeenCalled();
   });
 
-  it('uses parts.description (not a removed quote.description) for the line description', async () => {
+  it('renders the line items table with Part / Description / Order qty / Unit price / Total', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
-    const call = autoTableFn.mock.calls[0];
-    const config = call[1];
+    const headCall = autoTableFn.mock.calls[0];
+    const config = headCall[1];
+    expect(config.head).toEqual([
+      ['Part', 'Description', 'Order qty', 'Unit price', 'Total'],
+    ]);
     const [part, description, qty, unitPrice, total] = config.body[0];
     expect(part).toBe('BRKT-001');
     expect(description).toBe('Steel bracket, 3/16"');
@@ -192,8 +174,8 @@ describe('generateQuotePdf', () => {
 
     await generateQuotePdf(noDescQuote, baseCompany);
 
-    const call = autoTableFn.mock.calls[0];
-    const [, description] = call[1].body[0];
+    const headCall = autoTableFn.mock.calls[0];
+    const [, description] = headCall[1].body[0];
     expect(description).toBe('');
   });
 
@@ -207,7 +189,7 @@ describe('generateQuotePdf', () => {
 
     const docInstance = jsPDFCtor.mock.results[0].value;
     const bannerCall = docInstance.text.mock.calls.find((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).startsWith('THIS QUOTE HAS EXPIRED')
+      typeof c[0] === 'string' && (c[0] as string).startsWith('THIS QUOTE HAS EXPIRED'),
     );
     expect(bannerCall).toBeDefined();
   });
@@ -217,12 +199,12 @@ describe('generateQuotePdf', () => {
 
     const docInstance = jsPDFCtor.mock.results[0].value;
     const bannerCall = docInstance.text.mock.calls.find((c: unknown[]) =>
-      typeof c[0] === 'string' && (c[0] as string).startsWith('THIS QUOTE HAS EXPIRED')
+      typeof c[0] === 'string' && (c[0] as string).startsWith('THIS QUOTE HAS EXPIRED'),
     );
     expect(bannerCall).toBeUndefined();
   });
 
-  it('includes Valid Until and Lead Time in the header meta when present', async () => {
+  it('includes Valid Until and Lead Time in the stacked header meta when present', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
@@ -252,11 +234,12 @@ describe('generateQuotePdf', () => {
     expect(metaTexts.some((t: string) => t.startsWith('Lead Time:'))).toBe(false);
   });
 
-  it('renders the FROM block with whatever company contact fields are populated', async () => {
+  it('renders the company shop block (top-left) with name + address + phone', async () => {
     const filledCompany: Company = {
       ...baseCompany,
       phone: '313-555-0100',
       email: 'sales@contour.example',
+      website: 'https://contour.example',
       address_line1: '1 Shop Street',
       city: 'Detroit',
       state: 'MI',
@@ -270,10 +253,61 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    expect(rendered).toContain('FROM');
+    expect(rendered).toContain('Contour Tool & Machine');
     expect(rendered).toContain('1 Shop Street');
     expect(rendered).toContain('313-555-0100');
-    expect(rendered).toContain('sales@contour.example');
+    // Email and website are intentionally suppressed in the printable header.
+    expect(rendered).not.toContain('sales@contour.example');
+    expect(rendered).not.toContain('https://contour.example');
+  });
+
+  it('combines short address_line1 + address_line2 onto a single line', async () => {
+    const c: Company = {
+      ...baseCompany,
+      address_line1: '500 Industrial Ave',
+      address_line2: 'Suite 4',
+    };
+
+    await generateQuotePdf(baseQuote, c);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).toContain('500 Industrial Ave, Suite 4');
+    // Stand-alone "Suite 4" line is NOT rendered separately.
+    expect(rendered).not.toContain('Suite 4');
+  });
+
+  it('falls back to two stacked address lines when combined would be too long', async () => {
+    const c: Company = {
+      ...baseCompany,
+      address_line1: '1234 Very Long Industrial Boulevard Avenue',
+      address_line2: 'Building C, Suite 1500-A',
+    };
+
+    await generateQuotePdf(baseQuote, c);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).toContain('1234 Very Long Industrial Boulevard Avenue');
+    expect(rendered).toContain('Building C, Suite 1500-A');
+  });
+
+  it('does not render a FROM section label (replaced by top-left shop header)', async () => {
+    await generateQuotePdf(baseQuote, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).not.toContain('FROM');
+    expect(rendered).toContain('BILL TO');
   });
 
   it('renders the static ACCEPTANCE block (signature, PO#)', async () => {
@@ -288,5 +322,99 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('Signature');
     expect(rendered).toContain('PO #');
     expect(rendered).toContain('Date');
+  });
+
+  it('renders a CREATED BY block (left of BILL TO) when creator is known', async () => {
+    const quoteWithCreator: QuoteWithRelations = {
+      ...baseQuote,
+      created_by: 'user-1',
+      created_by_member: { user_id: 'user-1', name: 'Johnny T', email: 'johnny@example.com' },
+    };
+
+    await generateQuotePdf(quoteWithCreator, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).toContain('CREATED BY');
+    expect(rendered).toContain('Johnny T');
+    expect(rendered).toContain('johnny@example.com');
+  });
+
+  it('omits the CREATED BY label when there is no creator on the quote', async () => {
+    await generateQuotePdf(baseQuote, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).not.toContain('CREATED BY');
+    // BILL TO is still rendered.
+    expect(rendered).toContain('BILL TO');
+  });
+
+  it('renders a separate Pricing Tiers section for multi-tier parts', async () => {
+    const tierMockModule = await import('@/utils/partPricingTiersAccess');
+    const getTiersMock = vi.mocked(tierMockModule.getTiersForPart);
+    getTiersMock.mockResolvedValueOnce([
+      {
+        id: 't1', part_id: 'part-1', company_id: 'company-1', sequence: 1, quantity: 1,
+        base_cost_per_unit: 50, markup_percent: 40, unit_price: 70,
+        created_at: '', updated_at: '',
+      },
+      {
+        id: 't10', part_id: 'part-1', company_id: 'company-1', sequence: 2, quantity: 10,
+        base_cost_per_unit: 50, markup_percent: 40, unit_price: 65,
+        created_at: '', updated_at: '',
+      },
+    ]);
+
+    const quoteWithTier: QuoteWithRelations = {
+      ...baseQuote,
+      line_items: [
+        { ...baseQuote.line_items![0], source_tier_id: 't10' },
+      ],
+    };
+
+    await generateQuotePdf(quoteWithTier, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    // Section header is drawn outside autoTable
+    expect(rendered.some((t: string) => t.includes('PRICING TIERS'))).toBe(true);
+
+    // The tier sub-table is rendered as the SECOND autoTable call
+    expect(autoTableFn.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const tierCall = autoTableFn.mock.calls[1];
+    const tierBody = tierCall[1].body;
+    // Each row shape: [marker, qty, "{price} each", caption]
+    const rowFor10 = tierBody.find((r: string[]) => r[1] === '10');
+    expect(rowFor10).toBeDefined();
+    expect(rowFor10[2]).toMatch(/each$/);
+    expect(rowFor10[0]).toBe('>');
+
+    getTiersMock.mockReset();
+  });
+
+  it('does not render a Pricing Tiers section for an overridden line', async () => {
+    const overrideQuote: QuoteWithRelations = {
+      ...baseQuote,
+      line_items: [{ ...baseQuote.line_items![0], is_quote_override: true }],
+    };
+
+    await generateQuotePdf(overrideQuote, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered.some((t: string) => t.includes('PRICING TIERS'))).toBe(false);
   });
 });

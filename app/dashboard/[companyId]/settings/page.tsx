@@ -17,7 +17,6 @@ import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
-import CompanyBrandingCard from '@/components/settings/CompanyBrandingCard';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 
 export default function SettingsPage() {
@@ -43,11 +42,8 @@ export default function SettingsPage() {
   return (
     <AdminGuard message="You don't have permission to access settings.">
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {/* Shop contact info (FROM block on printed quotes) */}
+      {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
-
-      {/* Company Branding Section */}
-      <CompanyBrandingCard companyId={companyId} />
 
       {/* Demo Mode Section */}
       <Card elevation={2}>

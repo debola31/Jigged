@@ -9,19 +9,11 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
-import { downloadFileFromStorage } from '@/utils/storageHelpers';
+import type { PartPricingTier } from '@/types/partPricing';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
+import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 
 const MARGIN = 40;
-
-type ImageFormat = 'PNG' | 'JPEG' | 'WEBP';
-
-interface LoadedLogo {
-  dataUrl: string;
-  format: ImageFormat;
-  width: number;
-  height: number;
-}
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -37,53 +29,34 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
-function imageFormatFromMime(mime: string): ImageFormat | null {
-  const m = mime.toLowerCase();
-  if (m.includes('png')) return 'PNG';
-  if (m.includes('jpeg') || m.includes('jpg')) return 'JPEG';
-  if (m.includes('webp')) return 'WEBP';
-  return null; // SVG and others: unsupported by jsPDF.addImage
-}
+/**
+ * Lines of text for the top-left "shop header".
+ * Targets a 2-line address: address_line1 + address_line2 combined onto one line
+ * when short enough, then city/state/zip on a second line. Phone goes underneath.
+ * Email and website are intentionally omitted from the header — clutter on a printed
+ * customer-facing document.
+ */
+const ADDRESS_COMBINE_MAX_CHARS = 50;
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
-function loadImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = dataUrl;
-  });
-}
-
-async function loadCompanyLogo(path: string | null | undefined): Promise<LoadedLogo | null> {
-  if (!path) return null;
-  try {
-    const blob = await downloadFileFromStorage(path);
-    const format = imageFormatFromMime(blob.type || '');
-    if (!format) return null;
-    const dataUrl = await blobToDataUrl(blob);
-    const { width, height } = await loadImageDimensions(dataUrl);
-    return { dataUrl, format, width, height };
-  } catch (err) {
-    console.warn('Quote PDF: failed to load company logo, using text-only header.', err);
-    return null;
-  }
-}
-
-function buildFromLines(company: Company, preparedBy: string | null): string[] {
+function buildShopHeaderLines(company: Company): string[] {
   const lines: string[] = [];
-  if (company.name) lines.push(company.name);
 
-  if (company.address_line1) lines.push(company.address_line1);
-  if (company.address_line2) lines.push(company.address_line2);
+  // Combine address line 1 and 2 onto one line when reasonably short; otherwise stack.
+  const a1 = company.address_line1?.trim();
+  const a2 = company.address_line2?.trim();
+  if (a1 && a2) {
+    const combined = `${a1}, ${a2}`;
+    if (combined.length <= ADDRESS_COMBINE_MAX_CHARS) {
+      lines.push(combined);
+    } else {
+      lines.push(a1);
+      lines.push(a2);
+    }
+  } else if (a1) {
+    lines.push(a1);
+  } else if (a2) {
+    lines.push(a2);
+  }
 
   const cityStateZip = [company.city, company.state].filter(Boolean).join(', ');
   const cityStateZipFull = [cityStateZip, company.postal_code].filter(Boolean).join(' ').trim();
@@ -91,10 +64,6 @@ function buildFromLines(company: Company, preparedBy: string | null): string[] {
   if (company.country && company.country.toUpperCase() !== 'USA') lines.push(company.country);
 
   if (company.phone) lines.push(company.phone);
-  if (company.email) lines.push(company.email);
-  if (company.website) lines.push(company.website);
-
-  if (preparedBy) lines.push(`Prepared by: ${preparedBy}`);
 
   return lines;
 }
@@ -118,46 +87,64 @@ function buildBillToLines(customer: QuoteWithRelations['customers']): string[] {
   return lines;
 }
 
+/** Pre-fetch master tier lists for every part that appears on the quote. */
+async function loadTiersForQuote(
+  quote: QuoteWithRelations,
+): Promise<Record<string, PartPricingTier[]>> {
+  const partIds = Array.from(new Set((quote.line_items ?? []).map((li) => li.part_id)));
+  const out: Record<string, PartPricingTier[]> = {};
+  await Promise.all(
+    partIds.map(async (id) => {
+      try {
+        out[id] = await getTiersForPart(id);
+      } catch (err) {
+        console.warn('Quote PDF: failed to load tiers for part', id, err);
+        out[id] = [];
+      }
+    }),
+  );
+  return out;
+}
+
 /**
  * Generate and download a PDF for the given quote.
- * Returns a promise that resolves once `doc.save()` has been triggered.
  */
 export async function generateQuotePdf(
   quote: QuoteWithRelations,
-  company: Company
+  company: Company,
 ): Promise<void> {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  const logo = await loadCompanyLogo(company.logo_url ?? null);
+  const tiersByPart = await loadTiersForQuote(quote);
   const expired = isQuoteExpired(quote);
   const daysLeft = daysUntilExpiration(quote.expiration_date);
 
-  // ---------- Header ----------
+  // ---------- Header: company block (top-left) + QUOTE + meta (top-right) ----------
   const headerTop = MARGIN;
-  const logoMaxSize = 60;
-  let companyNameX = MARGIN;
 
-  if (logo) {
-    const scale = Math.min(logoMaxSize / logo.width, logoMaxSize / logo.height, 1);
-    const w = logo.width * scale;
-    const h = logo.height * scale;
-    doc.addImage(logo.dataUrl, logo.format, MARGIN, headerTop, w, h);
-    companyNameX = MARGIN + w + 12;
-  }
-
+  // Top-left: company name (bold) then address / contact lines.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(30);
-  doc.text(company.name, companyNameX, headerTop + 22);
+  doc.text(company.name, MARGIN, headerTop + 12);
 
+  const shopLines = buildShopHeaderLines(company);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(80);
+  shopLines.forEach((line, i) => {
+    doc.text(line, MARGIN, headerTop + 28 + i * 12);
+  });
+  const shopBlockBottom = headerTop + 28 + shopLines.length * 12;
+
+  // Top-right: QUOTE title + stacked meta (no box, right-aligned).
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
   doc.setTextColor(30);
   doc.text('QUOTE', pageWidth - MARGIN, headerTop + 20, { align: 'right' });
 
-  // Meta rows — drop internal status, add Valid Until and Lead Time.
   const metaRows: Array<{ text: string; color?: [number, number, number] }> = [];
   metaRows.push({ text: `Quote #: ${quote.quote_number}` });
   metaRows.push({ text: `Date: ${formatDate(quote.created_at)}` });
@@ -181,10 +168,9 @@ export async function generateQuotePdf(
     doc.setTextColor(r, g, b);
     doc.text(row.text, pageWidth - MARGIN, headerTop + 40 + i * 14, { align: 'right' });
   });
-
-  // Base below header is the taller of logo / meta stack
   const metaBlockBottom = headerTop + 40 + metaRows.length * 14;
-  let cursorY = Math.max(headerTop + (logo ? logoMaxSize : 30), metaBlockBottom) + 12;
+
+  let cursorY = Math.max(shopBlockBottom, metaBlockBottom) + 16;
 
   // ---------- EXPIRED banner ----------
   if (expired) {
@@ -198,7 +184,7 @@ export async function generateQuotePdf(
       'THIS QUOTE HAS EXPIRED — PRICES SUBJECT TO REQUOTE',
       pageWidth / 2,
       cursorY + bandHeight / 2 + 4,
-      { align: 'center' }
+      { align: 'center' },
     );
     cursorY += bandHeight + 8;
   }
@@ -207,39 +193,53 @@ export async function generateQuotePdf(
   doc.setDrawColor(210);
   doc.setLineWidth(0.75);
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
-  cursorY += 24;
+  cursorY += 20;
 
-  // ---------- FROM / BILL TO (two columns) ----------
+  // ---------- CREATED BY (left) + BILL TO (right) ----------
   const colWidth = (pageWidth - MARGIN * 2) / 2;
-  const fromX = MARGIN;
-  const billToX = MARGIN + colWidth + 8;
+  const leftX = MARGIN;
+  const rightX = MARGIN + colWidth + 8;
 
+  const createdByName = quote.created_by_member?.name ?? null;
+  const createdByEmail = quote.created_by_member?.email ?? null;
+  const billToLines = buildBillToLines(quote.customers);
+
+  // Section labels
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('FROM', fromX, cursorY);
-  doc.text('BILL TO', billToX, cursorY);
+  if (createdByName || createdByEmail) {
+    doc.text('CREATED BY', leftX, cursorY);
+  }
+  doc.text('BILL TO', rightX, cursorY);
 
-  const preparedBy = quote.created_by_member?.name ?? null;
-  const fromLines = buildFromLines(company, preparedBy);
-  const billToLines = buildBillToLines(quote.customers);
-
+  // Left column: Created by name + email
   doc.setFontSize(11);
   doc.setTextColor(40);
-  fromLines.forEach((line, i) => {
-    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-    doc.text(line, fromX, cursorY + 18 + i * 14);
-  });
+  let leftLineCount = 0;
+  if (createdByName) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(createdByName, leftX, cursorY + 16 + leftLineCount * 13);
+    leftLineCount += 1;
+  }
+  if (createdByEmail) {
+    doc.setFont('helvetica', 'normal');
+    doc.text(createdByEmail, leftX, cursorY + 16 + leftLineCount * 13);
+    leftLineCount += 1;
+  }
+
+  // Right column: Bill To
   billToLines.forEach((line, i) => {
     doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-    doc.text(line, billToX, cursorY + 18 + i * 14);
+    doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  const blockBottom = cursorY + 18 + Math.max(fromLines.length, billToLines.length) * 14;
-  cursorY = blockBottom + 24;
+  const blockLines = Math.max(leftLineCount, billToLines.length);
+  cursorY = cursorY + 16 + blockLines * 13 + 16;
 
   // ---------- Line items ----------
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
+
   const body =
     lineItems.length > 0
       ? lineItems.map((li) => [
@@ -254,12 +254,12 @@ export async function generateQuotePdf(
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
-    head: [['Part', 'Description', 'Qty', 'Unit Price', 'Total']],
+    head: [['Part', 'Description', 'Order qty', 'Unit price', 'Total']],
     body,
     styles: {
       font: 'helvetica',
       fontSize: 10,
-      cellPadding: 8,
+      cellPadding: 7,
       textColor: [40, 40, 40],
     },
     headStyles: {
@@ -268,11 +268,11 @@ export async function generateQuotePdf(
       fontStyle: 'bold',
     },
     columnStyles: {
-      0: { cellWidth: 120, fontStyle: 'bold' },
+      0: { cellWidth: 90, fontStyle: 'bold' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 40, halign: 'right' },
+      2: { cellWidth: 60, halign: 'right' },
       3: { cellWidth: 80, halign: 'right' },
-      4: { cellWidth: 80, halign: 'right' },
+      4: { cellWidth: 90, halign: 'right' },
     },
     theme: 'grid',
   });
@@ -280,46 +280,120 @@ export async function generateQuotePdf(
   const afterTableY =
     (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 60;
 
-  // ---------- Totals ----------
-  // Show a grand total only when the quote has exactly one line item.
-  // Multi-tier quotes omit the total — the customer hasn't picked a quantity yet.
-  cursorY = afterTableY + 24;
-  if (lineItems.length === 1) {
-    const only = lineItems[0];
-    const grandTotal = only.total_price ?? only.unit_price * only.quantity;
+  // ---------- Grand total ----------
+  cursorY = afterTableY + 20;
+  if (lineItems.length > 0) {
+    const grandTotal = lineItems.reduce(
+      (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
+      0,
+    );
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(30);
-    doc.text('Total', pageWidth - MARGIN - 90, cursorY, { align: 'right' });
+    doc.text('Total', pageWidth - MARGIN - 100, cursorY, { align: 'right' });
     doc.text(formatCurrency(grandTotal), pageWidth - MARGIN, cursorY, { align: 'right' });
-  } else if (lineItems.length > 1) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(10);
-    doc.setTextColor(90);
-    doc.text(
-      'Select a quantity per part to confirm total.',
-      pageWidth - MARGIN,
-      cursorY,
-      { align: 'right' },
-    );
+    cursorY += 20;
   }
 
-  cursorY += 40;
+  // ---------- Pricing tiers (separate appendix-style table) ----------
+  const partsWithTiers = lineItems.filter((li) => {
+    if (li.is_quote_override) return false;
+    const tiers = tiersByPart[li.part_id] ?? [];
+    return tiers.length > 1;
+  });
 
-  // ---------- Acceptance block ----------
-  const acceptanceHeight = 110;
-  const footerReserve = 50; // footer sits at pageHeight - MARGIN
+  if (partsWithTiers.length > 0) {
+    cursorY += 10;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('PRICING TIERS', MARGIN, cursorY);
+    cursorY += 12;
+
+    for (const li of partsWithTiers) {
+      // Page-break guard.
+      const reservedBottom = 160;
+      if (cursorY + 50 > pageHeight - reservedBottom) {
+        doc.addPage();
+        cursorY = MARGIN;
+      }
+
+      const tiers = [...(tiersByPart[li.part_id] ?? [])].sort(
+        (a, b) => a.quantity - b.quantity,
+      );
+      const matchedId = li.source_tier_id;
+
+      // Part header
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(50);
+      const partLabel = li.parts?.part_name ?? 'Part';
+      const desc = li.parts?.description?.trim();
+      doc.text(desc ? `${partLabel}  —  ${desc}` : partLabel, MARGIN, cursorY + 10);
+      cursorY += 16;
+
+      // Tier sub-table: marker / order qty / unit price (with "each") / note.
+      const tierBody = tiers.map((tier) => {
+        const isMatched = tier.id === matchedId;
+        return [
+          isMatched ? '>' : '',
+          String(tier.quantity),
+          `${formatCurrency(tier.unit_price)} each`,
+          isMatched ? `your order of ${li.quantity}` : '',
+        ];
+      });
+
+      autoTable(doc, {
+        startY: cursorY,
+        margin: { left: MARGIN + 8, right: MARGIN },
+        body: tierBody,
+        styles: {
+          font: 'helvetica',
+          fontSize: 9,
+          cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
+          textColor: [80, 80, 80],
+          lineColor: [240, 240, 240],
+          lineWidth: 0.4,
+        },
+        columnStyles: {
+          0: { cellWidth: 14, halign: 'center', fontStyle: 'bold', textColor: [30, 30, 30] },
+          1: { cellWidth: 60, halign: 'right' },
+          2: { cellWidth: 100, halign: 'right' },
+          3: { cellWidth: 'auto', textColor: [120, 120, 120], fontStyle: 'italic' },
+        },
+        didParseCell: (data) => {
+          const markerCell = data.row.cells[0];
+          if (markerCell && markerCell.raw === '>') {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.textColor = [30, 30, 30];
+          }
+        },
+        theme: 'plain',
+      });
+
+      const tierEndY =
+        (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY;
+      cursorY = tierEndY + 10;
+    }
+  }
+
+  // ---------- Acceptance block (compact) ----------
+  const acceptanceHeight = 70;
+  const footerReserve = 50;
 
   if (cursorY + acceptanceHeight > pageHeight - MARGIN - footerReserve) {
     doc.addPage();
     cursorY = MARGIN;
+  } else {
+    cursorY += 10;
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
   doc.text('ACCEPTANCE', MARGIN, cursorY);
-  cursorY += 18;
+  cursorY += 14;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
@@ -329,26 +403,24 @@ export async function generateQuotePdf(
     : 'To accept, sign below or reply with a PO referencing this quote.';
   const wrappedCopy = doc.splitTextToSize(acceptCopy, pageWidth - MARGIN * 2);
   doc.text(wrappedCopy, MARGIN, cursorY);
-  cursorY += wrappedCopy.length * 12 + 18;
+  cursorY += wrappedCopy.length * 12 + 14;
 
-  // Signature line
   doc.setDrawColor(160);
   doc.setLineWidth(0.5);
-  const sigLineY = cursorY + 14;
+  const sigLineY = cursorY + 8;
   doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
   doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
+  doc.line(MARGIN + 460, sigLineY, pageWidth - MARGIN, sigLineY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('Signature', MARGIN, sigLineY + 12);
-  doc.text('Date', MARGIN + 270, sigLineY + 12);
+  doc.text('Signature', MARGIN, sigLineY + 11);
+  doc.text('Date', MARGIN + 270, sigLineY + 11);
+  doc.text('PO #', MARGIN + 460, sigLineY + 11);
 
-  // PO # line
-  const poLineY = sigLineY + 40;
-  doc.line(MARGIN, poLineY, MARGIN + 430, poLineY);
-  doc.text('PO #', MARGIN, poLineY + 12);
-
-  // ---------- Footer (on every page) ----------
+  // ---------- Footer (every page) ----------
+  // Created-by info now lives in the body (left of BILL TO), so the footer is
+  // generated-on/page-of only.
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
@@ -363,7 +435,7 @@ export async function generateQuotePdf(
     doc.text(
       `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
       MARGIN,
-      footerY
+      footerY,
     );
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-04-20T21:05:05Z
+-- Generated: 2026-05-01T00:51:04Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -155,6 +155,19 @@ CREATE TABLE IF NOT EXISTS "public"."invitations"
     CONSTRAINT "invitations_status_check" CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'expired'::character varying, 'revoked'::character varying])::text[])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."markup_rates"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "name" text NOT NULL,
+    "breakpoints" jsonb NOT NULL DEFAULT '[]'::jsonb,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "is_default" boolean NOT NULL DEFAULT false,
+    CONSTRAINT "markup_rates_pkey" PRIMARY KEY (id),
+    CONSTRAINT "markup_rates_name_unique_per_company" UNIQUE (company_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."operation_types"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -169,19 +182,6 @@ CREATE TABLE IF NOT EXISTS "public"."operation_types"
     CONSTRAINT "operation_types_company_id_name_key" UNIQUE (company_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS "public"."part_categories"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "name" text NOT NULL,
-    "default_markup_percent" numeric(5,2),
-    "description" text,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "part_categories_pkey" PRIMARY KEY (id),
-    CONSTRAINT "part_categories_company_id_name_key" UNIQUE (company_id, name)
-);
-
 CREATE TABLE IF NOT EXISTS "public"."parts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -190,7 +190,6 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "description" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "category_id" uuid,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name)
 );
@@ -205,7 +204,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "base_cost_per_unit" numeric(12,4),
     "markup_percent" numeric(5,2),
     "unit_price" numeric(12,4),
-    "is_price_override" boolean NOT NULL DEFAULT false,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
@@ -260,6 +258,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "markup_percent" numeric(5,2),
     "base_cost_per_unit" numeric(12,4),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "is_quote_override" boolean NOT NULL DEFAULT false,
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
     CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
@@ -548,9 +547,9 @@ ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operation_types" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."part_categories" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_attachments" ENABLE ROW LEVEL SECURITY;
@@ -961,6 +960,45 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."markup_rates";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."markup_rates"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "markup_rates_delete" ON "public"."markup_rates";
+CREATE POLICY "markup_rates_delete"
+    ON "public"."markup_rates"
+    FOR DELETE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "markup_rates_insert" ON "public"."markup_rates";
+CREATE POLICY "markup_rates_insert"
+    ON "public"."markup_rates"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "markup_rates_select" ON "public"."markup_rates";
+CREATE POLICY "markup_rates_select"
+    ON "public"."markup_rates"
+    FOR SELECT
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "markup_rates_update" ON "public"."markup_rates";
+CREATE POLICY "markup_rates_update"
+    ON "public"."markup_rates"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT user_company_access.company_id
+   FROM user_company_access
+  WHERE (user_company_access.user_id = auth.uid()))));
+
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operation_types";
 CREATE POLICY "ai_readonly_select"
     ON "public"."operation_types"
@@ -1037,38 +1075,6 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "part_categories_delete" ON "public"."part_categories";
-CREATE POLICY "part_categories_delete"
-    ON "public"."part_categories"
-    FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_insert" ON "public"."part_categories";
-CREATE POLICY "part_categories_insert"
-    ON "public"."part_categories"
-    FOR INSERT
-    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_select" ON "public"."part_categories";
-CREATE POLICY "part_categories_select"
-    ON "public"."part_categories"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "part_categories_update" ON "public"."part_categories";
-CREATE POLICY "part_categories_update"
-    ON "public"."part_categories"
-    FOR UPDATE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."part_pricing_tiers";
 CREATE POLICY "ai_readonly_select"
@@ -1698,6 +1704,9 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_source_quote_line_item_id_fkey" FOREIGN KEY (source_quote_line_item_id) REFERENCES quote_line_items(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."markup_rates"
+    ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."operation_types"
     ADD CONSTRAINT "operation_types_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1713,17 +1722,11 @@ ALTER TABLE "public"."operator_sessions"
 ALTER TABLE "public"."operator_sessions"
     ADD CONSTRAINT "operator_sessions_operation_type_id_fkey" FOREIGN KEY (operation_type_id) REFERENCES operation_types(id) ON DELETE RESTRICT;
 
-ALTER TABLE "public"."part_categories"
-    ADD CONSTRAINT "part_categories_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."parts"
-    ADD CONSTRAINT "parts_category_id_fkey" FOREIGN KEY (category_id) REFERENCES part_categories(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1856,16 +1859,16 @@ CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (custome
 CREATE INDEX IF NOT EXISTS idx_jobs_part ON public.jobs USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs USING btree (company_id, status);
+CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
+CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_operation_types_company ON public.operation_types USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_company ON public.operator_sessions USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
-CREATE INDEX IF NOT EXISTS idx_part_categories_company ON public.part_categories USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
-CREATE INDEX IF NOT EXISTS idx_parts_category ON public.parts USING btree (category_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_quote_attachments_company ON public.quote_attachments USING btree (company_id);
@@ -2389,6 +2392,34 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.seed_default_markup_rates()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  INSERT INTO public.markup_rates (company_id, name, breakpoints, is_default) VALUES
+    (NEW.id,
+     'Default',
+     '[{"qty": 1, "markup_percent": 25}]'::jsonb,
+     true),
+    (NEW.id,
+     'Volume tiers',
+     '[{"qty": 1, "markup_percent": 25},
+       {"qty": 10, "markup_percent": 22},
+       {"qty": 100, "markup_percent": 18},
+       {"qty": 1000, "markup_percent": 15}]'::jsonb,
+     false),
+    (NEW.id,
+     'Premium small batch',
+     '[{"qty": 1, "markup_percent": 40},
+       {"qty": 10, "markup_percent": 32}]'::jsonb,
+     false);
+  RETURN NEW;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.seed_demo_data(p_company_id uuid, p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
  RETURNS void
  LANGUAGE plpgsql
@@ -2787,6 +2818,9 @@ $function$
 DROP TRIGGER IF EXISTS "ai_config_updated_at" ON "public"."ai_config";
 CREATE TRIGGER ai_config_updated_at BEFORE UPDATE ON public.ai_config FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "companies_seed_default_markup_rates" ON "public"."companies";
+CREATE TRIGGER companies_seed_default_markup_rates AFTER INSERT ON public.companies FOR EACH ROW EXECUTE FUNCTION seed_default_markup_rates();
+
 DROP TRIGGER IF EXISTS "companies_updated_at" ON "public"."companies";
 CREATE TRIGGER companies_updated_at BEFORE UPDATE ON public.companies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -2813,6 +2847,9 @@ CREATE TRIGGER trigger_job_status_change BEFORE UPDATE ON public.jobs FOR EACH R
 
 DROP TRIGGER IF EXISTS "trigger_set_job_number" ON "public"."jobs";
 CREATE TRIGGER trigger_set_job_number BEFORE INSERT ON public.jobs FOR EACH ROW EXECUTE FUNCTION set_job_number();
+
+DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
+CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "update_operation_types_updated_at" ON "public"."operation_types";
 CREATE TRIGGER update_operation_types_updated_at BEFORE UPDATE ON public.operation_types FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2896,14 +2933,14 @@ COMMENT ON TABLE "public"."job_operations"
 COMMENT ON TABLE "public"."jobs"
     IS 'Active manufacturing work orders. Created from quotes or directly. Tracks quantities ordered/completed/scrapped, due dates, priority, and current status. Contains job_operations as child records for step-by-step tracking.';
 
+COMMENT ON TABLE "public"."markup_rates"
+    IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
+
 COMMENT ON TABLE "public"."operation_types"
     IS 'Operation types available in the shop (e.g., HURCO Mill, Mazak Lathe). Defines what work can be done and at what hourly cost.';
 
 COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
-
-COMMENT ON TABLE "public"."part_categories"
-    IS 'Categories for organizing parts within a company. Each category can define a default markup percentage used in cost-plus pricing calculations. Category names must be unique per company.';
 
 COMMENT ON TABLE "public"."part_pricing_tiers"
     IS 'Quantity price breaks for a part (the "estimate" layer). Seeded from part_categories.default_markup_percent. Selected tiers are snapshotted into quote_line_items at quote creation.';
@@ -3280,6 +3317,9 @@ COMMENT ON COLUMN "public"."jobs"."lead_time_days"
 COMMENT ON COLUMN "public"."jobs"."source_quote_line_item_id"
     IS 'Identifies which specific quote line item (part + tier) produced this job via convertQuoteToJob.';
 
+COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
+    IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';
+
 COMMENT ON COLUMN "public"."operation_types"."id"
     IS 'Primary key (auto-generated UUID)';
 
@@ -3312,30 +3352,6 @@ COMMENT ON COLUMN "public"."operator_sessions"."operation_type_id"
 
 COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
     IS 'NULL while session is active. Set when operator stops or completes work.';
-
-COMMENT ON COLUMN "public"."part_categories"."id"
-    IS 'Primary key. UUID auto-generated.';
-
-COMMENT ON COLUMN "public"."part_categories"."company_id"
-    IS 'FK to companies. Cascades on delete. Categories are per-company.';
-
-COMMENT ON COLUMN "public"."part_categories"."name"
-    IS 'Category display name. Example: "CNC Turned Parts", "Sheet Metal". Must be unique within the company.';
-
-COMMENT ON COLUMN "public"."part_categories"."default_markup_percent"
-    IS 'Default markup percentage for parts in this category. Used in cost-plus pricing. Example: 25.00 means 25% markup. Nullable if no default.';
-
-COMMENT ON COLUMN "public"."part_categories"."description"
-    IS 'Optional description of this part category.';
-
-COMMENT ON COLUMN "public"."part_categories"."created_at"
-    IS 'Timestamp when the category was created. Auto-set on insert.';
-
-COMMENT ON COLUMN "public"."part_categories"."updated_at"
-    IS 'Timestamp of last update. Auto-updated via trigger.';
-
-COMMENT ON COLUMN "public"."part_pricing_tiers"."is_price_override"
-    IS 'True when the user manually set unit_price. Recalcs from routing changes skip this tier''s unit_price.';
 
 COMMENT ON COLUMN "public"."parts"."id"
     IS 'Primary key. UUID auto-generated.';

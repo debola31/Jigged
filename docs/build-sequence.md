@@ -79,7 +79,7 @@ JOB (shipped)
 
 - [x] **Operations module** (Resource groups + operation types with labor rates + AI import)
 
-- [x] **Quotes module** (Quote lifecycle, convert to job, file attachments)
+- [x] **Quotes module** (Quote lifecycle, convert to job)
 
 - [x] **Jobs module** (Job workflow, operations tracking, status transitions)
 
@@ -974,54 +974,6 @@ Phase 0 is complete when Shane can:
 
   ---
 
-## File Attachments
-
-  Quotes support PDF file attachments for drawings, specifications, and other documents.
-
-  **Attachment Limits:**
-
-  - Maximum 5 attachments per quote
-
-  - Maximum file size: 50MB per file
-
-  - Allowed file types: PDF only
-
-  **Behavior:**
-
-  - Attachments can only be added/modified in Pending Approval or Rejected status
-
-  - Multiple files can be uploaded at once via drag-and-drop or file picker
-
-  - When quote is converted to a job, attachments are automatically copied to the job
-
-  ---
-
-## Quote Attachments
-
-  Quotes support PDF file attachments for customer drawings, specifications, or related documents.
-
-  **Constraints:**
-
-  - File type: PDF only
-
-  - Maximum size: 50MB per file
-
-  - Maximum count: 5 attachments per quote
-
-  **Operations:**
-
-  - Upload via drag-and-drop or file picker
-
-  - Download via signed URL
-
-  - Replace existing attachment
-
-  - Delete attachment (pending_approval/rejected quotes only)
-
-  **Job Conversion:** First attachment is automatically copied to the job when converting.
-
-  ---
-
 ## Inline Entity Creation
 
   While creating/editing a quote, users can create new entities without leaving the form:
@@ -1104,8 +1056,6 @@ Phase 0 is complete when Shane can:
 
   - quantity_scrapped = 0
 
-  - First attachment copied to job_attachments table
-
   **Quote Updated:**
 
   - converted_to_job_id set to new job ID
@@ -1123,14 +1073,6 @@ Phase 0 is complete when Shane can:
   - `converted_to_job_id` (uuid FK) - Reference to job if converted
 
   - `converted_at` (timestamp) - When converted to job
-
-  The `quote_attachments` table stores file attachments:
-
-  - id, quote_id, company_id - Primary and foreign keys
-
-  - file_name, file_path, file_size, mime_type - File metadata
-
-  - uploaded_by, uploaded_at - Audit fields
 
 [Operations Module](modules/operations.md)
 ## Overview
@@ -2742,8 +2684,6 @@ Phase 0 is complete when Shane can:
   - [ ] Timestamps auto-set on status transitions
 
   - [ ] Jobs created from quotes show link back to quote
-
-  - [ ] Jobs created from quotes show attachments added to quote
 
   ---
 

@@ -121,9 +121,9 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 | Company scoping | Must contain `$1` at least once |
 | Nesting limit | Max 3 levels of subquery nesting |
 
-### Allowed Tables (17 business tables)
+### Allowed Tables (16 business tables)
 
-`companies`, `customers`, `quotes`, `quote_attachments`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
+`companies`, `customers`, `quotes`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
 
 ### Excluded Tables (auth/system/AI)
 

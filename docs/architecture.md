@@ -192,7 +192,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - routings, routing_nodes, routing_materials - Process definitions (1:1 with parts). `routing_nodes` is a linear, sequence-ordered list of operations; `routing_materials` is the routing-level materials list.
 
-- quotes, quote_line_items, quote_attachments - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
+- quotes, quote_line_items - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
 
 - jobs, job_operations, job_materials - Work orders (no routing_id; routing auto-resolved from part). `job_materials` snapshots `routing_materials` at job creation for consumption tracking.
 
@@ -372,7 +372,6 @@ routings             -- Process routings (1:1 with parts, unique part_id)
 routing_nodes        -- Linear, sequence-ordered list of operations per routing
 routing_materials    -- Routing-level materials list (inventory_item_id, quantity, unit)
 quotes               -- Customer quotes (no routing_id)
-quote_attachments    -- Quote files
 jobs                 -- Work orders (no routing_id; routing auto-resolved from part)
 job_operations       -- Steps in jobs
 job_materials        -- Per-job materials snapshot (expected + actual consumption)

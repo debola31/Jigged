@@ -4,7 +4,7 @@
 export type JobStatus = 'not_started' | 'in_progress' | 'completed' | 'shipped' | 'cancelled';
 
 /**
- * Job attachment record from database
+ * Job attachment record from database. Job attachments are independent of quotes.
  */
 export interface JobAttachment {
   id: string;
@@ -14,7 +14,6 @@ export interface JobAttachment {
   file_path: string;
   file_size: number;
   mime_type: string;
-  source_quote_attachment_id: string | null;
   uploaded_by: string | null;
   uploaded_at: string;
 }

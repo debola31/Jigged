@@ -5,36 +5,18 @@ import type {
   QuoteWithRelations,
   QuoteFormData,
   QuoteFilters,
-  QuoteAttachment,
   QuoteCostBreakdown,
   QuoteOperationSnapshot,
   QuoteMaterialSnapshot,
   QuotePartCostBreakdown,
   QuoteLineItem,
-  TempAttachment,
   CompanyMember,
 } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
-import type { JobAttachment } from '@/types/job';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
-import { getTier } from '@/utils/partPricingTiersAccess';
-import { insertLineItemFromTier, getLineItemsForQuote } from '@/utils/quoteLineItemsAccess';
-import {
-  generateStoragePath,
-  uploadFileToStorage,
-  deleteFileFromStorage,
-  getSignedUrl,
-  downloadFileFromStorage,
-  moveFileInStorage,
-  generateTempStoragePath,
-} from './storageHelpers';
-
-// Maximum attachments per quote
-export const MAX_ATTACHMENTS_PER_QUOTE = 5;
-
-// Maximum file size (50MB)
-export const MAX_FILE_SIZE = 50 * 1024 * 1024;
+import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { insertLineItemForPart, getLineItemsForQuote } from '@/utils/quoteLineItemsAccess';
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -91,8 +73,7 @@ const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(id, name, website, contact_name, contact_phone, contact_email, address_line1, address_line2, city, state, postal_code, country),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
-  jobs!left(id, job_number, status, source_quote_line_item_id),
-  quote_attachments(*)
+  jobs!left(id, job_number, status, source_quote_line_item_id)
 `;
 
 /**
@@ -302,24 +283,29 @@ export async function getQuoteWithRelations(
 }
 
 /**
- * Create a new quote with multiple parts, each with one or more pricing tiers
- * snapshotted into quote_line_items. Also writes per-part cost snapshots into
- * quote_operations + quote_materials.
+ * Create a new quote with one line item per part. The unit price is auto-resolved
+ * from the part's pricing tiers at the chosen order quantity (or hand-entered via
+ * an override). Also writes per-part cost snapshots into quote_operations +
+ * quote_materials.
  */
 export async function createQuote(
   companyId: string,
   formData: QuoteFormData,
-  tempAttachments?: TempAttachment[],
-): Promise<{ quote: Quote; attachmentErrors: string[] }> {
+): Promise<{ quote: Quote }> {
   const supabase = getSupabase();
 
   if (!formData.parts || formData.parts.length === 0) {
     throw new Error('A quote must include at least one part.');
   }
+  const seenPartsForValidation = new Set<string>();
   for (const block of formData.parts) {
     if (!block.part_id) throw new Error('Every part selection must reference a real part.');
-    if (!block.tier_ids || block.tier_ids.length === 0) {
-      throw new Error('Every part must include at least one pricing tier.');
+    if (seenPartsForValidation.has(block.part_id)) {
+      throw new Error('A part can only appear once on a quote — adjust the order quantity instead of duplicating it.');
+    }
+    seenPartsForValidation.add(block.part_id);
+    if (!Number.isFinite(block.order_quantity) || block.order_quantity <= 0) {
+      throw new Error('Every part needs an order quantity greater than zero.');
     }
   }
 
@@ -350,48 +336,32 @@ export async function createQuote(
     throw error;
   }
 
-  // Snapshot each selected tier into quote_line_items and write per-part cost snapshots.
+  // Snapshot one line item per part (auto-resolving the tier from order qty)
+  // and write per-part cost snapshots.
   let sequence = 10;
-  const seenPartIds = new Set<string>();
 
   for (const block of formData.parts) {
-    for (const tierId of block.tier_ids) {
-      const tier = await getTier(tierId);
-      if (!tier) {
-        throw new Error(`Pricing tier ${tierId} not found — it may have been deleted.`);
-      }
-      if (tier.part_id !== block.part_id) {
-        throw new Error(`Pricing tier ${tierId} does not belong to part ${block.part_id}.`);
-      }
-      const override = block.overrides?.[tierId];
-      await insertLineItemFromTier(quote.id, companyId, tier, sequence, override);
-      sequence += 10;
-    }
+    const tiers = await getTiersForPart(block.part_id);
+    await insertLineItemForPart(
+      quote.id,
+      companyId,
+      block.part_id,
+      block.order_quantity,
+      tiers,
+      sequence,
+      block.override,
+    );
+    sequence += 10;
 
-    if (!seenPartIds.has(block.part_id)) {
-      seenPartIds.add(block.part_id);
-      try {
-        await writeCostSnapshotsForPart(quote.id, companyId, block.part_id);
-      } catch (snapshotError) {
-        console.warn('Failed to write cost snapshot for part:', block.part_id, snapshotError);
-        Sentry.captureException(snapshotError, { level: 'warning' });
-      }
+    try {
+      await writeCostSnapshotsForPart(quote.id, companyId, block.part_id);
+    } catch (snapshotError) {
+      console.warn('Failed to write cost snapshot for part:', block.part_id, snapshotError);
+      Sentry.captureException(snapshotError, { level: 'warning' });
     }
   }
 
-  const attachmentErrors: string[] = [];
-  if (tempAttachments && tempAttachments.length > 0 && quote.id) {
-    for (const tempAttachment of tempAttachments) {
-      try {
-        await moveTempAttachmentToPermanent(tempAttachment, quote.id, companyId);
-      } catch (attachmentError) {
-        console.error('Failed to move temp attachment:', attachmentError);
-        attachmentErrors.push(`Failed to save attachment: ${tempAttachment.file_name}`);
-      }
-    }
-  }
-
-  return { quote, attachmentErrors };
+  return { quote };
 }
 
 /**
@@ -442,27 +412,10 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
 }
 
 /**
- * Delete a quote and its attachments from storage
+ * Delete a quote (cascades to its line items and cost snapshots).
  */
 export async function deleteQuote(quoteId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
-
-  const { data: attachments } = await supabase
-    .from('quote_attachments')
-    .select('file_path')
-    .eq('quote_id', quoteId)
-    .eq('company_id', companyId);
-
-  if (attachments && attachments.length > 0) {
-    for (const attachment of attachments) {
-      try {
-        await deleteFileFromStorage(attachment.file_path);
-      } catch (storageError) {
-        console.warn('Failed to delete storage file:', attachment.file_path, storageError);
-        Sentry.captureException(storageError, { level: 'warning' });
-      }
-    }
-  }
 
   const { error } = await supabase
     .from('quotes')
@@ -477,7 +430,7 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
 }
 
 /**
- * Bulk delete quotes and their attachments from storage
+ * Bulk delete quotes.
  */
 export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): Promise<void> {
   if (quoteIds.length === 0) return;
@@ -485,23 +438,6 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
-
-  const { data: attachments } = await supabase
-    .from('quote_attachments')
-    .select('file_path')
-    .in('quote_id', validIds)
-    .eq('company_id', companyId);
-
-  if (attachments && attachments.length > 0) {
-    for (const attachment of attachments) {
-      try {
-        await deleteFileFromStorage(attachment.file_path);
-      } catch (storageError) {
-        console.warn('Failed to delete storage file:', attachment.file_path, storageError);
-        Sentry.captureException(storageError, { level: 'warning' });
-      }
-    }
-  }
 
   const BATCH_SIZE = 100;
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
@@ -713,7 +649,6 @@ export async function convertQuoteToJob(
     .from('quotes')
     .select(`
       *,
-      quote_attachments (*),
       line_items:quote_line_items (
         id, quote_id, company_id, part_id, source_tier_id, sequence,
         quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at
@@ -823,15 +758,6 @@ export async function convertQuoteToJob(
       throw new Error('Job created but failed to copy operations from routing.');
     }
 
-    const primaryAttachment = quote.quote_attachments?.[0];
-    if (primaryAttachment) {
-      try {
-        await copyAttachmentToJob(primaryAttachment, job.id, quote.company_id, user.id);
-      } catch (attachmentError) {
-        console.error('Failed to copy attachment to job:', attachmentError);
-      }
-    }
-
     createdJobs.push({
       id: job.id,
       job_number: job.job_number,
@@ -894,306 +820,6 @@ export async function getPartWithCostInfo(partId: string): Promise<{
     category_id: string | null;
     part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
   } | null;
-}
-
-// ============== Attachment Operations ==============
-
-export async function getQuoteAttachments(quoteId: string): Promise<QuoteAttachment[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('quote_attachments')
-    .select('*')
-    .eq('quote_id', quoteId)
-    .order('uploaded_at', { ascending: false });
-  if (error) {
-    console.error('Error fetching quote attachments:', error);
-    throw error;
-  }
-  return data || [];
-}
-
-export async function getQuoteAttachmentCount(quoteId: string): Promise<number> {
-  const supabase = getSupabase();
-  const { count, error } = await supabase
-    .from('quote_attachments')
-    .select('*', { count: 'exact', head: true })
-    .eq('quote_id', quoteId);
-  if (error) {
-    console.error('Error counting quote attachments:', error);
-    throw error;
-  }
-  return count || 0;
-}
-
-export async function uploadQuoteAttachment(
-  quoteId: string,
-  companyId: string,
-  file: File,
-): Promise<QuoteAttachment> {
-  const supabase = getSupabase();
-
-  if (file.type !== 'application/pdf') throw new Error('Only PDF files are allowed');
-  if (file.size > MAX_FILE_SIZE) throw new Error('File size must be 50MB or less');
-
-  const { data: quote, error: quoteError } = await supabase
-    .from('quotes')
-    .select('status, converted_at')
-    .eq('id', quoteId)
-    .single();
-
-  if (quoteError || !quote) throw new Error('Quote not found');
-  if (!isQuoteEditable(quote)) {
-    throw new Error('Attachments can only be added to active quotes that have not been converted.');
-  }
-
-  const existingCount = await getQuoteAttachmentCount(quoteId);
-  if (existingCount >= MAX_ATTACHMENTS_PER_QUOTE) {
-    throw new Error(
-      `Maximum ${MAX_ATTACHMENTS_PER_QUOTE} attachment(s) allowed. Delete existing attachment first.`,
-    );
-  }
-
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const filePath = generateStoragePath(companyId, 'quotes', quoteId, file.name);
-  await uploadFileToStorage(filePath, file);
-
-  const { data: attachment, error: insertError } = await supabase
-    .from('quote_attachments')
-    .insert({
-      quote_id: quoteId,
-      company_id: companyId,
-      file_name: file.name,
-      file_path: filePath,
-      file_size: file.size,
-      mime_type: file.type,
-      uploaded_by: user?.id || null,
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    await deleteFileFromStorage(filePath).catch((err) => {
-      console.error(err);
-      Sentry.captureException(err, { level: 'warning' });
-    });
-    console.error('Error creating attachment record:', insertError);
-    throw new Error('Failed to save attachment');
-  }
-
-  return attachment;
-}
-
-export async function deleteQuoteAttachment(
-  attachmentId: string,
-  companyId: string,
-): Promise<void> {
-  const supabase = getSupabase();
-
-  const { data: attachment, error: fetchError } = await supabase
-    .from('quote_attachments')
-    .select(`
-      id,
-      file_path,
-      quotes!inner (status, converted_at)
-    `)
-    .eq('id', attachmentId)
-    .eq('company_id', companyId)
-    .single();
-
-  if (fetchError || !attachment) throw new Error('Attachment not found');
-
-  const parentQuote = attachment.quotes as { status: string; converted_at: string | null };
-  if (!isQuoteEditable(parentQuote)) {
-    throw new Error(
-      'Attachments can only be deleted from active quotes that have not been converted.',
-    );
-  }
-
-  await deleteFileFromStorage(attachment.file_path);
-
-  const { error: dbError } = await supabase
-    .from('quote_attachments')
-    .delete()
-    .eq('id', attachmentId)
-    .eq('company_id', companyId);
-
-  if (dbError) {
-    console.error('Error deleting attachment record:', dbError);
-    throw new Error('Failed to delete attachment');
-  }
-}
-
-export async function replaceQuoteAttachment(
-  attachmentId: string,
-  companyId: string,
-  quoteId: string,
-  newFile: File,
-): Promise<QuoteAttachment> {
-  const supabase = getSupabase();
-
-  if (newFile.type !== 'application/pdf') throw new Error('Only PDF files are allowed');
-  if (newFile.size > MAX_FILE_SIZE) throw new Error('File size must be 50MB or less');
-
-  const { data: existing, error: fetchError } = await supabase
-    .from('quote_attachments')
-    .select(`
-      file_path,
-      quotes!inner (status, converted_at)
-    `)
-    .eq('id', attachmentId)
-    .eq('company_id', companyId)
-    .single();
-
-  if (fetchError || !existing) throw new Error('Attachment not found');
-
-  const parentQuote = existing.quotes as { status: string; converted_at: string | null };
-  if (!isQuoteEditable(parentQuote)) {
-    throw new Error(
-      'Attachments can only be replaced on active quotes that have not been converted.',
-    );
-  }
-
-  const oldFilePath = existing.file_path;
-
-  const newPath = generateStoragePath(companyId, 'quotes', quoteId, newFile.name);
-  await uploadFileToStorage(newPath, newFile);
-
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const { data: updated, error: updateError } = await supabase
-    .from('quote_attachments')
-    .update({
-      file_name: newFile.name,
-      file_path: newPath,
-      file_size: newFile.size,
-      uploaded_by: user?.id || null,
-      uploaded_at: new Date().toISOString(),
-    })
-    .eq('id', attachmentId)
-    .select()
-    .single();
-
-  if (updateError) {
-    await deleteFileFromStorage(newPath).catch((err) => {
-      console.error(err);
-      Sentry.captureException(err, { level: 'warning' });
-    });
-    throw new Error('Failed to update attachment');
-  }
-
-  if (oldFilePath) {
-    await deleteFileFromStorage(oldFilePath).catch((err) => {
-      console.warn('Failed to delete old file:', err);
-      Sentry.captureException(err, { level: 'warning' });
-    });
-  }
-
-  return updated;
-}
-
-export async function getQuoteAttachmentUrl(filePath: string): Promise<string> {
-  return getSignedUrl(filePath, 3600);
-}
-
-export async function uploadTempQuoteAttachment(
-  companyId: string,
-  sessionId: string,
-  file: File,
-): Promise<TempAttachment> {
-  if (file.type !== 'application/pdf') throw new Error('Only PDF files are allowed');
-  if (file.size > MAX_FILE_SIZE) throw new Error('File size must be 50MB or less');
-
-  const filePath = generateTempStoragePath(companyId, sessionId, file.name);
-  await uploadFileToStorage(filePath, file);
-
-  return {
-    file_name: file.name,
-    file_path: filePath,
-    file_size: file.size,
-    mime_type: file.type,
-  };
-}
-
-export async function deleteTempQuoteAttachment(filePath: string): Promise<void> {
-  await deleteFileFromStorage(filePath);
-}
-
-async function moveTempAttachmentToPermanent(
-  tempAttachment: TempAttachment,
-  quoteId: string,
-  companyId: string,
-): Promise<void> {
-  const supabase = getSupabase();
-
-  const permanentPath = generateStoragePath(
-    companyId,
-    'quotes',
-    quoteId,
-    tempAttachment.file_name,
-  );
-
-  await moveFileInStorage(tempAttachment.file_path, permanentPath);
-
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const { error: insertError } = await supabase
-    .from('quote_attachments')
-    .insert({
-      quote_id: quoteId,
-      company_id: companyId,
-      file_name: tempAttachment.file_name,
-      file_path: permanentPath,
-      file_size: tempAttachment.file_size,
-      mime_type: tempAttachment.mime_type,
-      uploaded_by: user?.id || null,
-    });
-
-  if (insertError) {
-    console.error('Failed to create attachment record:', insertError);
-    throw new Error('Failed to save attachment');
-  }
-}
-
-async function copyAttachmentToJob(
-  quoteAttachment: QuoteAttachment,
-  jobId: string,
-  companyId: string,
-  userId: string | null,
-): Promise<JobAttachment> {
-  const supabase = getSupabase();
-
-  const fileData = await downloadFileFromStorage(quoteAttachment.file_path);
-
-  const newPath = generateStoragePath(companyId, 'jobs', jobId, quoteAttachment.file_name);
-
-  await uploadFileToStorage(newPath, fileData);
-
-  const { data: jobAttachment, error: insertError } = await supabase
-    .from('job_attachments')
-    .insert({
-      job_id: jobId,
-      company_id: companyId,
-      file_name: quoteAttachment.file_name,
-      file_path: newPath,
-      file_size: quoteAttachment.file_size,
-      mime_type: quoteAttachment.mime_type,
-      source_quote_attachment_id: quoteAttachment.id,
-      uploaded_by: userId,
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    console.error('Failed to create job attachment record:', insertError);
-    await deleteFileFromStorage(newPath).catch((err) => {
-      console.error(err);
-      Sentry.captureException(err, { level: 'warning' });
-    });
-    throw new Error('Failed to copy attachment to job');
-  }
-
-  return jobAttachment;
 }
 
 // Re-export the expired-status helper so consumers don't need a separate import.

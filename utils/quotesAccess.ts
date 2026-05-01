@@ -66,14 +66,14 @@ const QUOTE_LIST_SELECT = `
   *,
   customers!left(id, name),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
-  jobs!left(id, job_number, status, source_quote_line_item_id)
+  jobs!left(id, job_number, status)
 `;
 
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(id, name, website, contact_name, contact_phone, contact_email, address_line1, address_line2, city, state, postal_code, country),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
-  jobs!left(id, job_number, status, source_quote_line_item_id)
+  jobs!left(id, job_number, status)
 `;
 
 /**
@@ -605,45 +605,41 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
 
 // ============== Convert to Job ==============
 
-/**
- * User picks one line item per distinct part at conversion time.
- */
-export interface ConvertToJobSelection {
-  line_item_id: string;
-}
-
 export interface ConvertToJobOptions {
-  /** One selection per distinct part in the quote. */
-  selections: ConvertToJobSelection[];
-  /** Override the quote's lead time for the resulting jobs. */
+  /** Override the quote's lead time on the resulting job. */
   leadTimeDays?: number | null;
 }
 
 export interface ConvertToJobResult {
   quote: Quote;
-  jobs: Array<{
+  job: {
     id: string;
     job_number: string;
-    line_item_id: string;
-    part_id: string;
-    quantity: number;
-  }>;
+    parts: Array<{
+      id: string;
+      part_id: string;
+      quantity: number;
+      source_quote_line_item_id: string;
+    }>;
+  };
 }
 
 /**
- * Convert a quote into one or more jobs. The caller picks exactly one line item
- * per distinct part in the quote; each selected line item spawns one job with that
- * line item's quantity.
+ * Convert a quote into a single job that owns one job_part per quote_line_item.
+ * The job number mirrors the quote number (Q-NNNN → J-NNNN). Each part's routing
+ * is cloned into job_operations + job_materials via the
+ * `create_job_part_operations_from_routing` RPC.
+ *
+ * The flow is sequential because Supabase doesn't expose multi-statement
+ * transactions to the JS client; on partial failure the partial job stays in
+ * place and the caller can retry/clean up. The single insert path makes the
+ * "Job not found" race observed pre-refactor impossible.
  */
 export async function convertQuoteToJob(
   quoteId: string,
-  options: ConvertToJobOptions,
+  options: ConvertToJobOptions = {},
 ): Promise<ConvertToJobResult> {
   const supabase = getSupabase();
-
-  if (!options.selections || options.selections.length === 0) {
-    throw new Error('Pick at least one quantity tier per part before converting.');
-  }
 
   const { data: quote, error: quoteError } = await supabase
     .from('quotes')
@@ -661,35 +657,38 @@ export async function convertQuoteToJob(
     console.error('Error fetching quote:', quoteError);
     throw quoteError;
   }
-
   if (quote.converted_at) {
-    throw new Error('This quote has already been converted to jobs.');
+    throw new Error('This quote has already been converted to a job.');
   }
 
-  const lineItems = (quote.line_items || []) as QuoteLineItem[];
+  const lineItems = ((quote.line_items || []) as QuoteLineItem[])
+    .slice()
+    .sort((a, b) => a.sequence - b.sequence);
   if (lineItems.length === 0) {
     throw new Error('This quote has no line items to convert.');
   }
 
-  // Validate selections: exactly one per distinct part, each referencing a real line item.
-  const lineItemsById = new Map(lineItems.map((li) => [li.id, li]));
-  const seenParts = new Set<string>();
-  const resolved: QuoteLineItem[] = [];
-  for (const sel of options.selections) {
-    const li = lineItemsById.get(sel.line_item_id);
-    if (!li) throw new Error(`Line item ${sel.line_item_id} is not on this quote.`);
-    if (seenParts.has(li.part_id)) {
-      throw new Error(`Part ${li.part_id} has more than one tier selected.`);
-    }
-    seenParts.add(li.part_id);
-    resolved.push(li);
+  // Pre-flight: every part must have a routing. Fail fast before writing anything.
+  const partIds = Array.from(new Set(lineItems.map((li) => li.part_id)));
+  const { data: routings, error: routingsErr } = await supabase
+    .from('routings')
+    .select('id, part_id')
+    .in('part_id', partIds);
+  if (routingsErr) {
+    console.error('Error fetching routings:', routingsErr);
+    throw routingsErr;
   }
-
-  const distinctPartIds = new Set(lineItems.map((li) => li.part_id));
-  for (const partId of distinctPartIds) {
-    if (!seenParts.has(partId)) {
-      throw new Error(`No tier selected for part ${partId}.`);
-    }
+  const routingByPart = new Map<string, string>();
+  for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
+    routingByPart.set(r.part_id, r.id);
+  }
+  const missingRoutingPartIds = partIds.filter((pid) => !routingByPart.has(pid));
+  if (missingRoutingPartIds.length > 0) {
+    throw new Error(
+      `No routing defined for ${missingRoutingPartIds.length} part${
+        missingRoutingPartIds.length === 1 ? '' : 's'
+      } on this quote. Create routings before converting.`,
+    );
   }
 
   const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -710,61 +709,75 @@ export async function convertQuoteToJob(
     dueDate = d.toISOString().slice(0, 10);
   }
 
-  const createdJobs: ConvertToJobResult['jobs'] = [];
+  // Job number mirrors the quote number (Q-0141 → J-0141). Manual jobs are
+  // not supported, so this is unique by construction.
+  const jobNumber = quote.quote_number.replace(/^Q-/, 'J-');
 
-  for (const li of resolved) {
-    const { data: routing, error: routingErr } = await supabase
-      .from('routings')
-      .select('id')
-      .eq('part_id', li.part_id)
-      .maybeSingle();
-    if (routingErr) {
-      console.error('Error fetching routing for part:', routingErr);
-      throw routingErr;
-    }
-    if (!routing) {
-      throw new Error(
-        'No routing defined for one of the parts on this quote. Create a routing before converting.',
-      );
+  const { data: job, error: jobError } = await supabase
+    .from('jobs')
+    .insert({
+      company_id: quote.company_id,
+      quote_id: quoteId,
+      customer_id: quote.customer_id,
+      job_number: jobNumber,
+      status: 'not_started',
+      due_date: dueDate,
+      lead_time_days: resolvedLeadTime,
+      created_by: user.id,
+    })
+    .select('id, job_number')
+    .single();
+
+  if (jobError) {
+    console.error('Error creating job:', jobError);
+    throw jobError;
+  }
+
+  const partsCreated: ConvertToJobResult['job']['parts'] = [];
+
+  let sequence = 10;
+  for (const li of lineItems) {
+    const routingId = routingByPart.get(li.part_id);
+    if (!routingId) {
+      // Should be impossible after the pre-flight, but guard anyway.
+      throw new Error(`Routing for part ${li.part_id} disappeared mid-conversion.`);
     }
 
-    const { data: job, error: jobError } = await supabase
-      .from('jobs')
+    const { data: jobPart, error: jpErr } = await supabase
+      .from('job_parts')
       .insert({
+        job_id: job.id,
         company_id: quote.company_id,
-        quote_id: quoteId,
-        customer_id: quote.customer_id,
         part_id: li.part_id,
         source_quote_line_item_id: li.id,
+        sequence,
+        quantity: li.quantity,
         status: 'not_started',
-        due_date: dueDate,
-        lead_time_days: resolvedLeadTime,
-        created_by: user.id,
       })
-      .select('id, job_number')
+      .select('id, part_id')
       .single();
-
-    if (jobError) {
-      console.error('Error creating job:', jobError);
-      throw jobError;
+    if (jpErr) {
+      console.error('Error creating job_part:', jpErr);
+      throw jpErr;
     }
 
-    const { error: rpcError } = await supabase.rpc('create_job_operations_from_routing', {
-      p_job_id: job.id,
-      p_routing_id: routing.id,
+    const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+      p_job_part_id: jobPart.id,
+      p_routing_id: routingId,
     });
-    if (rpcError) {
-      console.error('Failed to copy operations from routing:', rpcError);
+    if (rpcErr) {
+      console.error('Failed to copy operations from routing:', rpcErr);
       throw new Error('Job created but failed to copy operations from routing.');
     }
 
-    createdJobs.push({
-      id: job.id,
-      job_number: job.job_number,
-      line_item_id: li.id,
-      part_id: li.part_id,
+    partsCreated.push({
+      id: jobPart.id,
+      part_id: jobPart.part_id,
       quantity: li.quantity,
+      source_quote_line_item_id: li.id,
     });
+
+    sequence += 10;
   }
 
   const { data: updatedQuote, error: updateError } = await supabase
@@ -783,7 +796,14 @@ export async function convertQuoteToJob(
     throw updateError;
   }
 
-  return { quote: updatedQuote, jobs: createdJobs };
+  return {
+    quote: updatedQuote,
+    job: {
+      id: job.id,
+      job_number: job.job_number,
+      parts: partsCreated,
+    },
+  };
 }
 
 // ============== Helper Functions ==============

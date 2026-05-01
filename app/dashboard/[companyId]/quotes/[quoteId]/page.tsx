@@ -469,10 +469,8 @@ export default function QuoteDetailPage() {
         open={convertModalOpen}
         onClose={() => setConvertModalOpen(false)}
         quote={quote}
-        onConverted={(jobIds) => {
-          const first = jobIds[0];
-          if (first) router.push(`/dashboard/${companyId}/jobs/${first}`);
-          else router.push(`/dashboard/${companyId}/jobs`);
+        onConverted={(jobId) => {
+          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
         }}
       />
 

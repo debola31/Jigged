@@ -412,9 +412,8 @@ BEGIN
     -- Delete all data in demo company (reverse FK order)
     DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
-    DELETE FROM job_attachments WHERE company_id = v_demo_company_id;
-    DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
     DELETE FROM jobs WHERE company_id = v_demo_company_id;
+    -- (job_parts, job_operations, job_materials cascade-deleted via jobs)
     DELETE FROM quotes WHERE company_id = v_demo_company_id;
     DELETE FROM routing_edges WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
     DELETE FROM routing_nodes WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);

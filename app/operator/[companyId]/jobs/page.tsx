@@ -108,8 +108,8 @@ export default function OperatorJobsPage() {
     };
   }, [companyId, stationId, operatorId]);
 
-  const handleJobClick = (jobId: string) => {
-    router.push(`/operator/${companyId}/jobs/${jobId}`);
+  const handlePartClick = (jobIdParam: string, jobPartId: string) => {
+    router.push(`/operator/${companyId}/jobs/${jobIdParam}/parts/${jobPartId}`);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'success' | 'warning' | 'error' => {
@@ -173,7 +173,7 @@ export default function OperatorJobsPage() {
             <Chip
               label="View"
               size="small"
-              onClick={() => handleJobClick(activeSession.job_id)}
+              onClick={() => router.push(`/operator/${companyId}/jobs/${activeSession.job_id}`)}
             />
           }
         >
@@ -207,19 +207,16 @@ export default function OperatorJobsPage() {
         </Box>
       )}
 
-      {/* Job Cards */}
+      {/* Job/Part Cards — one row per (job, part) ready at this station. */}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {jobs.map((job) => (
+        {jobs.map((row) => (
           <Card
-            key={job.id}
+            key={row.id}
             elevation={2}
-            sx={{
-              bgcolor: 'rgba(26, 31, 74, 0.55)',
-              backdropFilter: 'blur(8px)',
-            }}
+            sx={{ bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
           >
             <CardActionArea
-              onClick={() => handleJobClick(job.id)}
+              onClick={() => handlePartClick(row.job_id, row.id)}
               sx={{ minHeight: 100 }}
             >
               <CardContent>
@@ -231,44 +228,47 @@ export default function OperatorJobsPage() {
                     mb: 1,
                   }}
                 >
-                  <Typography variant="h6" component="div" fontWeight={600}>
-                    {job.job_number}
-                  </Typography>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="h6" component="div" fontWeight={600}>
+                      {row.job_number} · {row.part_name ?? 'Part'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Order qty {row.part_quantity}
+                    </Typography>
+                  </Box>
                   <Chip
-                    label={job.operation_status || job.status}
+                    label={row.operation_status || row.status}
                     size="small"
-                    color={getStatusColor(job.operation_status || job.status)}
+                    color={getStatusColor(row.operation_status || row.status)}
                   />
                 </Box>
 
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mb: 0.5 }}
-                >
-                  {job.customer_name || 'No customer'}
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  {row.customer_name || 'No customer'}
                 </Typography>
 
-                <Typography variant="body1" sx={{ mb: 1 }}>
-                  {job.part_name || 'No part specified'}
-                </Typography>
-
-                {job.current_operator_name && (
-                  <Typography variant="caption" color="text.secondary">
-                    In progress: {job.current_operator_name}
+                {row.operation_name && (
+                  <Typography variant="body1" sx={{ mb: 1 }}>
+                    Op: {row.operation_name}
                   </Typography>
                 )}
 
-                {job.operations_total > 1 && (
+                {row.current_operator_name && (
+                  <Typography variant="caption" color="text.secondary">
+                    In progress: {row.current_operator_name}
+                  </Typography>
+                )}
+
+                {row.operations_total > 1 && (
                   <Box sx={{ mt: 1 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                       <Typography variant="caption" color="text.secondary">
-                        {job.operations_completed}/{job.operations_total} operations
+                        Part progress: {row.operations_completed}/{row.operations_total}
                       </Typography>
                     </Box>
                     <LinearProgress
                       variant="determinate"
-                      value={(job.operations_completed / job.operations_total) * 100}
+                      value={(row.operations_completed / row.operations_total) * 100}
                       sx={{ height: 4, borderRadius: 1 }}
                     />
                   </Box>

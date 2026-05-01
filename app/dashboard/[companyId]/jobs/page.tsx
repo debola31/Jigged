@@ -264,14 +264,20 @@ export default function JobsPage() {
       },
     },
     {
-      colId: 'part',
-      headerName: 'Part',
+      colId: 'parts',
+      headerName: 'Parts',
       flex: 1,
-      minWidth: 150,
+      minWidth: 200,
       valueGetter: (params) => {
         if (!params.data) return '';
-        if (!params.data.parts) return '—';
-        return params.data.parts.part_name;
+        const parts = params.data.job_parts ?? [];
+        if (parts.length === 0) return '—';
+        const names = parts
+          .map((p) => p.parts?.part_name)
+          .filter((n): n is string => Boolean(n))
+          .sort();
+        if (names.length <= 2) return names.join(', ');
+        return `${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
       },
     },
     {

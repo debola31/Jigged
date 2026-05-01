@@ -53,6 +53,10 @@ class InventoryValidateRequest(BaseModel):
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # All parsed CSV rows
+    # Optional: pre-resolved canonical UOMs keyed by 1-based row_number.
+    # When provided (e.g. when execute_import re-validates internally), the
+    # validator will skip the AI inference step and trust these values.
+    pre_resolved_uoms: dict[int, str] = {}
 
 
 class InventoryValidateResponse(BaseModel):
@@ -65,6 +69,9 @@ class InventoryValidateResponse(BaseModel):
     conflict_rows_count: int
     error_rows_count: int
     skipped_rows_count: int
+    # Map of 1-based row_number to canonical UOM resolved from raw input.
+    # Rows without an entry should fall back to the raw value during execute.
+    uom_resolutions: dict[int, str] = {}
 
 
 class InventoryImportError(BaseModel):
@@ -82,6 +89,9 @@ class InventoryExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Map of 1-based row_number to pre-resolved canonical UOM (from validate).
+    # Empty dict means execute will run alias resolution itself.
+    uom_resolutions: dict[int, str] = {}
 
 
 class InventoryExecuteResponse(BaseModel):

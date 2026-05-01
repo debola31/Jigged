@@ -80,6 +80,7 @@ export default function ImportInventoryPage() {
   const [conflicts, setConflicts] = useState<InventoryConflictInfo[]>([]);
   const [validationErrors, setValidationErrors] = useState<InventoryValidationError[]>([]);
   const [validRowsCount, setValidRowsCount] = useState(0);
+  const [uomResolutions, setUomResolutions] = useState<Record<number, string>>({});
   const [importResult, setImportResult] = useState<InventoryExecuteResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -253,6 +254,7 @@ export default function ImportInventoryPage() {
       setConflicts(data.conflicts);
       setValidationErrors(data.validation_errors);
       setValidRowsCount(data.valid_rows_count);
+      setUomResolutions(data.uom_resolutions || {});
 
       if (data.has_conflicts || data.validation_errors.length > 0) {
         setCurrentStep('conflicts');
@@ -285,6 +287,16 @@ export default function ImportInventoryPage() {
       for (let i = 0; i < rowObjects.length; i += MAX_ROWS_PER_REQUEST) {
         const batch = rowObjects.slice(i, i + MAX_ROWS_PER_REQUEST);
 
+        // Translate global row_numbers (from validate) to per-batch indices.
+        const batchUomResolutions: Record<number, string> = {};
+        for (const [rowNumStr, unit] of Object.entries(uomResolutions)) {
+          const globalRow = parseInt(rowNumStr, 10);
+          const localRow = globalRow - i;
+          if (localRow >= 1 && localRow <= batch.length) {
+            batchUomResolutions[localRow] = unit;
+          }
+        }
+
         const response = await fetch(`${API_BASE_URL}/api/inventory/import/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -293,6 +305,7 @@ export default function ImportInventoryPage() {
             mappings: mappingDict,
             rows: batch,
             skip_conflicts: skipConflicts,
+            uom_resolutions: batchUomResolutions,
           }),
         });
 
@@ -332,6 +345,7 @@ export default function ImportInventoryPage() {
     setConflicts([]);
     setValidationErrors([]);
     setValidRowsCount(0);
+    setUomResolutions({});
     setImportResult(null);
     setError(null);
   };

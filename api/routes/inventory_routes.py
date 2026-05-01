@@ -25,6 +25,10 @@ from models.inventory_models import (
     INVENTORY_SCHEMA,
 )
 from services.ai import get_provider
+from services.uom_normalizer import (
+    normalize_uom_alias,
+    resolve_units_for_rows,
+)
 from utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -212,6 +216,7 @@ async def validate_import(
         }
 
         name_column = None
+        description_column = None
         primary_unit_column = None
         quantity_column = None
         cost_column = None
@@ -219,12 +224,24 @@ async def validate_import(
         for csv_col, db_field in request.mappings.items():
             if db_field == "name":
                 name_column = csv_col
+            elif db_field == "description":
+                description_column = csv_col
             elif db_field == "primary_unit":
                 primary_unit_column = csv_col
             elif db_field == "quantity":
                 quantity_column = csv_col
             elif db_field == "cost_per_unit":
                 cost_column = csv_col
+
+        if request.pre_resolved_uoms:
+            uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
+        else:
+            uom_resolutions = resolve_units_for_rows(
+                request.rows,
+                name_column=name_column,
+                description_column=description_column,
+                uom_column=primary_unit_column,
+            )
 
         # Track name occurrences for internal duplicate detection
         name_occurrences: dict[str, list[int]] = {}
@@ -266,13 +283,20 @@ async def validate_import(
                 validation_error_rows.add(row_number)
                 continue
 
-            if not csv_unit:
+            resolved_unit = uom_resolutions.get(row_number)
+            if not resolved_unit:
+                if csv_unit:
+                    message = (
+                        f"Could not normalize unit '{csv_unit}' to a known canonical value"
+                    )
+                else:
+                    message = "Primary unit is required"
                 validation_errors.append(
                     InventoryValidationError(
                         row_number=row_number,
                         error_type="missing_primary_unit",
                         field="primary_unit",
-                        message="Primary unit is required",
+                        message=message,
                     )
                 )
                 validation_error_rows.add(row_number)
@@ -361,6 +385,9 @@ async def validate_import(
             conflict_rows_count=len(conflict_rows),
             error_rows_count=len(validation_error_rows),
             skipped_rows_count=len(total_skipped),
+            uom_resolutions={
+                row: unit for row, unit in uom_resolutions.items() if unit
+            },
         )
 
     except Exception as e:
@@ -384,12 +411,14 @@ async def execute_import(
     If skip_conflicts is True, only imports rows without conflicts.
     """
     try:
-        # First validate
+        # First validate. Reuse the resolutions from the frontend (which got
+        # them from the original validate call) so we don't re-run AI inference.
         validate_response = await validate_import(
             InventoryValidateRequest(
                 company_id=request.company_id,
                 mappings=request.mappings,
                 rows=request.rows,
+                pre_resolved_uoms=request.uom_resolutions,
             ),
             supabase=supabase,
         )
@@ -403,6 +432,10 @@ async def execute_import(
         # Build skip set
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
+
+        # Prefer the resolutions the frontend already received from validate;
+        # fall back to validate's response when they were not passed through.
+        uom_resolutions = request.uom_resolutions or validate_response.uom_resolutions
 
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
@@ -426,7 +459,6 @@ async def execute_import(
                 if csv_column and csv_column in row:
                     value = row[csv_column].strip()
                     if value and value.lower() != "undefined":
-                        # Convert numeric fields
                         if db_field in ("quantity", "cost_per_unit"):
                             try:
                                 item_data[db_field] = float(value)
@@ -435,7 +467,14 @@ async def execute_import(
                         else:
                             item_data[db_field] = value
 
-            # Set defaults
+            # Override primary_unit with the canonical resolution. Fall back to
+            # alias normalization for safety (idempotent — covers stale state).
+            resolved = uom_resolutions.get(row_number)
+            if not resolved and "primary_unit" in item_data:
+                resolved = normalize_uom_alias(item_data["primary_unit"])
+            if resolved:
+                item_data["primary_unit"] = resolved
+
             if "quantity" not in item_data:
                 item_data["quantity"] = 0
 

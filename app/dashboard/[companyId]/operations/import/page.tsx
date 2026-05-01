@@ -17,7 +17,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { MappingReviewTable } from '@/components/import';
+import { MappingReviewTable, ConflictDialog } from '@/components/import';
 import type { ColumnMapping, FieldDefinition } from '@/components/import';
 import { parseCSV } from '@/utils/csvParser';
 import { API_BASE_URL } from '@/lib/api';
@@ -31,7 +31,7 @@ const MAX_ROWS_PER_REQUEST = 500;
 
 const steps = ['Upload', 'AI Analysis', 'Review Mappings', 'Validate', 'Import'];
 
-type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'importing' | 'complete';
+type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'conflicts' | 'importing' | 'complete';
 
 // Operation fields for mapping
 const OPERATION_FIELDS: FieldDefinition[] = [
@@ -40,6 +40,21 @@ const OPERATION_FIELDS: FieldDefinition[] = [
   { key: 'description', label: 'Description', required: false },
   { key: 'legacy_id', label: 'Legacy ID', required: false },
 ];
+
+interface OperationConflictInfo {
+  row_number: number;
+  csv_name: string | null;
+  conflict_type: string;
+  existing_operation_id: string;
+  existing_value: string;
+}
+
+interface OperationValidationError {
+  row_number: number;
+  error_type: string;
+  field: string;
+  message: string;
+}
 
 export default function ImportOperationsPage() {
   const router = useRouter();
@@ -56,13 +71,15 @@ export default function ImportOperationsPage() {
   const [unmappedOptional, setUnmappedOptional] = useState<string[]>([]);
 
   // Validation & import
+  const [conflicts, setConflicts] = useState<OperationConflictInfo[]>([]);
+  const [validationErrors, setValidationErrors] = useState<OperationValidationError[]>([]);
   const [validRowsCount, setValidRowsCount] = useState(0);
   const [importedCount, setImportedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
 
-  // Get active step index for stepper
   const getActiveStepIndex = (): number => {
     switch (currentStep) {
       case 'upload':
@@ -72,6 +89,7 @@ export default function ImportOperationsPage() {
       case 'review':
         return 2;
       case 'validating':
+      case 'conflicts':
         return 3;
       case 'importing':
       case 'complete':
@@ -81,13 +99,11 @@ export default function ImportOperationsPage() {
     }
   };
 
-  // Handle file selection
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // Check file size
       if (file.size > MAX_FILE_SIZE_BYTES) {
         setError(`File too large. Maximum size is ${MAX_FILE_SIZE_MB}MB`);
         return;
@@ -112,7 +128,6 @@ export default function ImportOperationsPage() {
         setHeaders(fileHeaders);
         setAllRows(fileRows);
 
-        // Start analysis
         setCurrentStep('analyzing');
         await analyzeCSV(fileHeaders, fileRows.slice(0, 5));
       } catch (err) {
@@ -123,7 +138,6 @@ export default function ImportOperationsPage() {
     [companyId]
   );
 
-  // Analyze CSV with AI
   const analyzeCSV = async (fileHeaders: string[], sampleRows: string[][]) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/operations/import/analyze`, {
@@ -146,7 +160,6 @@ export default function ImportOperationsPage() {
       setUnmappedRequired(data.unmapped_required || []);
       setDiscardedColumns(data.discarded_columns || []);
 
-      // Calculate unmapped optional fields
       const mappedFields = new Set(
         (data.mappings || []).map((m: ColumnMapping) => m.db_field).filter(Boolean)
       );
@@ -162,7 +175,6 @@ export default function ImportOperationsPage() {
     }
   };
 
-  // Handle mapping change
   const handleMappingChange = (csvColumn: string, newDbField: string | null) => {
     setMappings((prev) =>
       prev.map((m) =>
@@ -172,7 +184,6 @@ export default function ImportOperationsPage() {
       )
     );
 
-    // Update unmapped required/optional
     const mappedFields = new Set(
       mappings
         .filter((m) => m.csv_column !== csvColumn)
@@ -187,29 +198,33 @@ export default function ImportOperationsPage() {
     setUnmappedOptional(optional.filter((f) => !mappedFields.has(f)));
   };
 
-  // Proceed to validation
+  const buildMappingsDict = (): Record<string, string> => {
+    const dict: Record<string, string> = {};
+    for (const m of mappings) {
+      if (m.db_field) {
+        dict[m.csv_column] = m.db_field;
+      }
+    }
+    return dict;
+  };
+
+  const buildAllRowObjects = (): Record<string, string>[] =>
+    allRows.map((row) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[i] || '';
+      });
+      return obj;
+    });
+
   const handleProceedToValidation = async () => {
     setCurrentStep('validating');
     setLoading(true);
     setError(null);
 
     try {
-      // Build mappings dict
-      const mappingsDict: Record<string, string> = {};
-      for (const m of mappings) {
-        if (m.db_field) {
-          mappingsDict[m.csv_column] = m.db_field;
-        }
-      }
-
-      // Convert rows to objects (limit for validation to avoid payload size issues)
-      const rows = allRows.slice(0, MAX_ROWS_PER_REQUEST).map((row) => {
-        const obj: Record<string, string> = {};
-        headers.forEach((h, i) => {
-          obj[h] = row[i] || '';
-        });
-        return obj;
-      });
+      const mappingsDict = buildMappingsDict();
+      const validationRows = buildAllRowObjects().slice(0, MAX_ROWS_PER_REQUEST);
 
       const response = await fetch(`${API_BASE_URL}/api/operations/import/validate`, {
         method: 'POST',
@@ -217,7 +232,7 @@ export default function ImportOperationsPage() {
         body: JSON.stringify({
           company_id: companyId,
           mappings: mappingsDict,
-          rows,
+          rows: validationRows,
           total_rows: allRows.length,
         }),
       });
@@ -228,16 +243,16 @@ export default function ImportOperationsPage() {
 
       const data = await response.json();
 
+      setConflicts(data.conflicts || []);
+      setValidationErrors(data.validation_errors || []);
       setValidRowsCount(data.valid_rows_count || 0);
 
-      if (data.has_conflicts || data.validation_errors?.length > 0) {
-        setError(
-          `Found ${data.conflict_rows_count || 0} conflicts and ${data.error_rows_count || 0} validation errors. These rows will be skipped.`
-        );
+      if (data.has_conflicts || (data.validation_errors?.length ?? 0) > 0) {
+        setCurrentStep('conflicts');
+        setShowConflictDialog(true);
+      } else {
+        await executeImport();
       }
-
-      // Proceed to import
-      await executeImport(mappingsDict);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed');
       setCurrentStep('review');
@@ -246,29 +261,19 @@ export default function ImportOperationsPage() {
     }
   };
 
-  // Execute import
-  const executeImport = async (
-    mappingsDict: Record<string, string>
-  ) => {
+  const executeImport = async () => {
+    setShowConflictDialog(false);
     setCurrentStep('importing');
 
     try {
-      // Convert ALL rows to objects for import
-      const allRowObjects = allRows.map((row) => {
-        const obj: Record<string, string> = {};
-        headers.forEach((h, i) => {
-          obj[h] = row[i] || '';
-        });
-        return obj;
-      });
+      const mappingsDict = buildMappingsDict();
+      const allRowObjects = buildAllRowObjects();
 
-      // Split into batches to avoid Vercel's 4.5MB payload limit
       const batches: Record<string, string>[][] = [];
       for (let i = 0; i < allRowObjects.length; i += MAX_ROWS_PER_REQUEST) {
         batches.push(allRowObjects.slice(i, i + MAX_ROWS_PER_REQUEST));
       }
 
-      // Execute batches sequentially and aggregate results
       let totalImported = 0;
       let totalSkipped = 0;
 
@@ -304,7 +309,22 @@ export default function ImportOperationsPage() {
     }
   };
 
-  // Render content based on step
+  const handleReset = () => {
+    setCurrentStep('upload');
+    setMappings([]);
+    setHeaders([]);
+    setAllRows([]);
+    setUnmappedRequired([]);
+    setUnmappedOptional([]);
+    setDiscardedColumns([]);
+    setConflicts([]);
+    setValidationErrors([]);
+    setValidRowsCount(0);
+    setImportedCount(0);
+    setSkippedCount(0);
+    setError(null);
+  };
+
   const renderContent = () => {
     switch (currentStep) {
       case 'upload':
@@ -366,15 +386,7 @@ export default function ImportOperationsPage() {
               </CardContent>
             </Card>
             <Box display="flex" justifyContent="flex-end" gap={2}>
-              <Button
-                variant="outlined"
-                onClick={() => {
-                  setCurrentStep('upload');
-                  setMappings([]);
-                  setHeaders([]);
-                  setAllRows([]);
-                }}
-              >
+              <Button variant="outlined" onClick={handleReset}>
                 Start Over
               </Button>
               <Button
@@ -419,17 +431,7 @@ export default function ImportOperationsPage() {
                 </Typography>
               )}
               <Box mt={3} display="flex" gap={2} justifyContent="center">
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setCurrentStep('upload');
-                    setMappings([]);
-                    setHeaders([]);
-                    setAllRows([]);
-                    setImportedCount(0);
-                    setSkippedCount(0);
-                  }}
-                >
+                <Button variant="outlined" onClick={handleReset}>
                   Import Another File
                 </Button>
                 <Button
@@ -450,7 +452,6 @@ export default function ImportOperationsPage() {
 
   return (
     <Box>
-      {/* Header */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Button
           startIcon={<ArrowBackIcon />}
@@ -461,7 +462,6 @@ export default function ImportOperationsPage() {
         </Button>
       </Box>
 
-      {/* Stepper */}
       <Stepper activeStep={getActiveStepIndex()} sx={{ mb: 4 }}>
         {steps.map((label) => (
           <Step key={label}>
@@ -470,15 +470,39 @@ export default function ImportOperationsPage() {
         ))}
       </Stepper>
 
-      {/* Error Alert */}
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Content */}
       {renderContent()}
+
+      <ConflictDialog
+        open={showConflictDialog}
+        conflicts={conflicts}
+        validationErrors={validationErrors}
+        validRowsCount={validRowsCount}
+        totalRows={allRows.length}
+        onCancel={() => {
+          setShowConflictDialog(false);
+          setCurrentStep('review');
+        }}
+        onConfirm={() => executeImport()}
+        entityName="Operations"
+        conflictColumns={[{ key: 'csv_name', label: 'Name' }]}
+        getConflictLabel={(conflict) => {
+          switch (conflict.conflict_type) {
+            case 'csv_duplicate':
+              return 'Duplicate Name in CSV';
+            case 'duplicate_name':
+              return 'Name Exists in Database';
+            default:
+              return 'Duplicate';
+          }
+        }}
+        getErrorMessage={(error) => `${error.field}: ${error.message}`}
+      />
     </Box>
   );
 }

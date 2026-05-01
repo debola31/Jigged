@@ -1,22 +1,15 @@
-import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import type {
   Job,
   JobWithRelations,
-  JobFormData,
   JobFilters,
   JobStatus,
   JobOperation,
-  JobAttachment,
   JobMaterial,
   CompleteOperationData,
   OperationUpdateResult,
   CurrentOperationInfo,
 } from '@/types/job';
-import {
-  deleteFileFromStorage,
-  getSignedUrl,
-} from './storageHelpers';
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -29,17 +22,18 @@ function sanitizeSearchString(search: string): string {
     .substring(0, 100);
 }
 
-// ============== CRUD Operations ==============
+// ============== Read Queries ==============
 
 /**
- * Get all jobs for a company (batch fetch for AG Grid).
- * Fetches in batches of 1000 to bypass Supabase's default row limit.
+ * Get all jobs for a company (batch fetch for AG Grid). Pulls each job's
+ * job_parts list with the linked part name + qty so the dashboard list can
+ * show "ADP-001, ADP-002" style summaries without extra round-trips.
  */
 export async function getAllJobs(
   companyId: string,
   filters: JobFilters = {},
   sortField: string = 'created_at',
-  sortDirection: 'asc' | 'desc' = 'desc'
+  sortDirection: 'asc' | 'desc' = 'desc',
 ): Promise<JobWithRelations[]> {
   const supabase = getSupabase();
   const BATCH_SIZE = 1000;
@@ -50,32 +44,29 @@ export async function getAllJobs(
   while (hasMore) {
     let query = supabase
       .from('jobs')
-      .select(
-        `
+      .select(`
         *,
         customers!left(id, name),
-        parts!left(id, part_name, description),
-        quotes!jobs_quote_id_fkey(id, quote_number, total_price)
-      `
-      )
+        quotes!jobs_quote_id_fkey(id, quote_number),
+        job_parts(
+          id, sequence, quantity, status,
+          parts(id, part_name, description)
+        )
+      `)
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    // Apply filters
     if (filters.status && filters.status !== 'all') {
       query = query.eq('status', filters.status);
     }
-
     if (filters.customerId) {
       query = query.eq('customer_id', filters.customerId);
     }
-
     if (filters.search?.trim()) {
       const sanitized = sanitizeSearchString(filters.search.trim());
       query = query.or(`job_number.ilike.%${sanitized}%`);
     }
-
     if (filters.overdue) {
       const today = new Date().toISOString().slice(0, 10);
       query = query
@@ -85,7 +76,6 @@ export async function getAllJobs(
     }
 
     const { data, error } = await query;
-
     if (error) {
       console.error('Error fetching jobs batch:', error);
       throw error;
@@ -100,33 +90,34 @@ export async function getAllJobs(
 }
 
 /**
- * Get a single job with all relations
+ * Get a single job with all relations: job_parts (each with their part,
+ * operations, and materials), customer, source quote.
  */
 export async function getJobWithRelations(
   jobId: string,
-  companyId: string
+  companyId: string,
 ): Promise<JobWithRelations | null> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('jobs')
-    .select(
-      `
+    .select(`
       *,
       customers!left(id, name),
-      parts!left(id, part_name, description),
-      quotes!jobs_quote_id_fkey(id, quote_number, total_price),
-      job_operations(
+      quotes!jobs_quote_id_fkey(id, quote_number),
+      job_parts(
         *,
-        operation_types!left(id, name, labor_rate)
-      ),
-      job_materials(
-        *,
-        inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
-      ),
-      job_attachments(*)
-    `
-    )
+        parts(id, part_name, description),
+        job_operations(
+          *,
+          operation_types!left(id, name, labor_rate)
+        ),
+        job_materials(
+          *,
+          inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+        )
+      )
+    `)
     .eq('id', jobId)
     .eq('company_id', companyId)
     .single();
@@ -135,38 +126,24 @@ export async function getJobWithRelations(
     console.error('Error fetching job with relations:', error);
     throw error;
   }
+  if (!data) return null;
 
-  // Sort operations by sequence
-  if (data?.job_operations) {
-    data.job_operations.sort((a: JobOperation, b: JobOperation) => a.sequence - b.sequence);
+  const job = data as JobWithRelations;
+
+  // Sort parts by sequence; sort each part's operations by sequence.
+  if (job.job_parts) {
+    job.job_parts.sort((a, b) => a.sequence - b.sequence);
+    for (const part of job.job_parts) {
+      if (part.job_operations) {
+        part.job_operations.sort((a, b) => a.sequence - b.sequence);
+      }
+    }
   }
 
-  return data as JobWithRelations | null;
+  return job;
 }
 
 // ============== Job Materials ==============
-
-/**
- * Fetch the materials for a single job (joined with inventory item info).
- */
-export async function getJobMaterials(jobId: string): Promise<JobMaterial[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('job_materials')
-    .select(`
-      *,
-      inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
-    `)
-    .eq('job_id', jobId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching job materials:', error);
-    throw error;
-  }
-
-  return (data as JobMaterial[]) || [];
-}
 
 /**
  * Update a job material (e.g., record actual quantity, mark consumed).
@@ -174,7 +151,7 @@ export async function getJobMaterials(jobId: string): Promise<JobMaterial[]> {
  */
 export async function updateJobMaterial(
   materialId: string,
-  updates: Partial<Pick<JobMaterial, 'actual_quantity' | 'unit' | 'status' | 'expected_quantity'>>
+  updates: Partial<Pick<JobMaterial, 'actual_quantity' | 'unit' | 'status' | 'expected_quantity'>>,
 ): Promise<JobMaterial> {
   const supabase = getSupabase();
 
@@ -207,164 +184,16 @@ export async function updateJobMaterial(
   return data as JobMaterial;
 }
 
-/**
- * Create a new job directly (not from quote)
- */
-export async function createJob(
-  companyId: string,
-  formData: JobFormData
-): Promise<Job> {
-  const supabase = getSupabase();
-
-  if (!formData.customer_id) {
-    throw new Error('Customer is required');
-  }
-
-  if (!formData.part_id) {
-    throw new Error('Part is required');
-  }
-
-  // Auto-resolve routing from part (1:1 relationship)
-  const { data: routing, error: routingError } = await supabase
-    .from('routings')
-    .select('id')
-    .eq('part_id', formData.part_id)
-    .maybeSingle();
-
-  if (routingError) {
-    console.error('Error fetching routing for part:', routingError);
-    throw routingError;
-  }
-
-  if (!routing) {
-    throw new Error('No routing defined for this part. Create a routing before creating a job.');
-  }
-
-  // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError || !user) {
-    throw new Error('Authentication required. Please log in and try again.');
-  }
-
-  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
-  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
-    throw new Error('Lead time must be between 0 and 3,650 days');
-  }
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .insert({
-      company_id: companyId,
-      customer_id: formData.customer_id,
-      part_id: formData.part_id,
-      status: 'not_started',
-      due_date: formData.due_date || null,
-      lead_time_days: leadTimeDays,
-      created_by: user.id,
-      // job_number is auto-generated by database trigger
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating job:', error);
-    throw error;
-  }
-
-  // Copy operations from routing to job
-  try {
-    await createJobOperationsFromRouting(data.id, routing.id);
-  } catch (opsError) {
-    console.error('Failed to copy operations from routing:', opsError);
-  }
-
-  return data;
-}
+// ============== Job Lifecycle ==============
 
 /**
- * Update an existing job
- */
-export async function updateJob(jobId: string, formData: JobFormData): Promise<Job> {
-  const supabase = getSupabase();
-
-  // First check if job can be edited (only not_started jobs are editable)
-  const { data: existing, error: checkError } = await supabase
-    .from('jobs')
-    .select('status')
-    .eq('id', jobId)
-    .single();
-
-  if (checkError) {
-    console.error('Error checking job status:', checkError);
-    throw checkError;
-  }
-
-  // Allow editing of due_date and lead_time_days on jobs in any status except
-  // cancelled/shipped. For not_started jobs, all fields remain editable.
-  const canEditAllFields = existing.status === 'not_started';
-  const canEditScheduling = existing.status !== 'cancelled' && existing.status !== 'shipped';
-
-  if (!canEditScheduling) {
-    throw new Error('Shipped or cancelled jobs cannot be edited');
-  }
-
-  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
-  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
-    throw new Error('Lead time must be between 0 and 3,650 days');
-  }
-
-  const updatePatch: Record<string, unknown> = {
-    due_date: formData.due_date || null,
-    lead_time_days: leadTimeDays,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (canEditAllFields) {
-    updatePatch.customer_id = formData.customer_id;
-    updatePatch.part_id = formData.part_id || null;
-  }
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .update(updatePatch)
-    .eq('id', jobId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating job:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-/**
- * Delete a job and its attachments from storage
+ * Delete a job. Cascades remove job_parts, job_operations, and job_materials.
+ * (job_attachments was dropped in the pilot cleanup migration; nothing to
+ * orphan in storage.)
  */
 export async function deleteJob(jobId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Get job's attachments for storage cleanup
-  const { data: attachments } = await supabase
-    .from('job_attachments')
-    .select('file_path')
-    .eq('job_id', jobId)
-    .eq('company_id', companyId);
-
-  // 2. Delete storage files (best effort)
-  if (attachments && attachments.length > 0) {
-    for (const attachment of attachments) {
-      try {
-        await deleteFileFromStorage(attachment.file_path);
-      } catch (storageError) {
-        console.warn('Failed to delete storage file:', attachment.file_path, storageError);
-        Sentry.captureException(storageError, { level: 'warning' });
-      }
-    }
-  }
-
-  // 3. Delete the job record (cascade will delete operations and attachments from DB)
   const { error } = await supabase
     .from('jobs')
     .delete()
@@ -378,40 +207,18 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 }
 
 /**
- * Bulk delete jobs and their attachments
+ * Bulk delete jobs.
  */
 export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promise<void> {
   if (jobIds.length === 0) return;
-
   const validIds = jobIds.filter((id) => id && typeof id === 'string');
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
-
-  // 1. Get all attachments for these jobs
-  const { data: attachments } = await supabase
-    .from('job_attachments')
-    .select('file_path')
-    .in('job_id', validIds)
-    .eq('company_id', companyId);
-
-  // 2. Delete storage files (best effort)
-  if (attachments && attachments.length > 0) {
-    for (const attachment of attachments) {
-      try {
-        await deleteFileFromStorage(attachment.file_path);
-      } catch (storageError) {
-        console.warn('Failed to delete storage file:', attachment.file_path, storageError);
-        Sentry.captureException(storageError, { level: 'warning' });
-      }
-    }
-  }
-
-  // 3. Delete jobs in batches
   const BATCH_SIZE = 100;
+
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
-
     const { error } = await supabase
       .from('jobs')
       .delete()
@@ -425,268 +232,266 @@ export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promi
   }
 }
 
-// ============== Status Transitions ==============
-
 /**
- * Helper to update job status with validation
- */
-async function updateJobStatus(
-  jobId: string,
-  expectedCurrentStatus: JobStatus | JobStatus[],
-  newStatus: JobStatus,
-  additionalUpdates: Record<string, unknown> = {}
-): Promise<Job> {
-  const supabase = getSupabase();
-
-  const { data: existing, error: checkError } = await supabase
-    .from('jobs')
-    .select('status')
-    .eq('id', jobId)
-    .single();
-
-  if (checkError) {
-    console.error('Error checking job status:', checkError);
-    throw checkError;
-  }
-
-  const allowedStatuses = Array.isArray(expectedCurrentStatus)
-    ? expectedCurrentStatus
-    : [expectedCurrentStatus];
-
-  if (!allowedStatuses.includes(existing.status as JobStatus)) {
-    throw new Error(`Cannot change status from ${existing.status} to ${newStatus}`);
-  }
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .update({
-      status: newStatus,
-      ...additionalUpdates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', jobId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating job status:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-/**
- * Start a job (NOT_STARTED → IN_PROGRESS)
- */
-export async function startJob(jobId: string): Promise<Job> {
-  return updateJobStatus(jobId, 'not_started', 'in_progress', {
-    started_at: new Date().toISOString(),
-  });
-}
-
-/**
- * Complete a job (IN_PROGRESS → COMPLETED)
- */
-export async function completeJob(jobId: string): Promise<Job> {
-  return updateJobStatus(jobId, 'in_progress', 'completed', {
-    completed_at: new Date().toISOString(),
-  });
-}
-
-/**
- * Ship a job (COMPLETED → SHIPPED)
- */
-export async function shipJob(jobId: string): Promise<Job> {
-  return updateJobStatus(jobId, 'completed', 'shipped', {
-    shipped_at: new Date().toISOString(),
-  });
-}
-
-/**
- * Cancel a job (any status → CANCELLED)
+ * Mark all of a job's parts as cancelled. The status-aggregation trigger on
+ * job_parts then flips jobs.status to 'cancelled'.
  */
 export async function cancelJob(jobId: string): Promise<Job> {
   const supabase = getSupabase();
 
-  const { data, error } = await supabase
-    .from('jobs')
+  const { error: partsError } = await supabase
+    .from('job_parts')
     .update({
       status: 'cancelled',
+      status_changed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
+    .eq('job_id', jobId);
+
+  if (partsError) {
+    console.error('Error cancelling job parts:', partsError);
+    throw partsError;
+  }
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
     .eq('id', jobId)
-    .select()
     .single();
 
   if (error) {
-    console.error('Error cancelling job:', error);
+    console.error('Error fetching cancelled job:', error);
     throw error;
   }
+  return data as Job;
+}
 
-  return data;
+/**
+ * Mark all of a job's parts as shipped (only valid when every part is
+ * already 'completed'). Trigger flips jobs.status to 'shipped'.
+ */
+export async function shipJob(jobId: string): Promise<Job> {
+  const supabase = getSupabase();
+
+  const { data: parts, error: readErr } = await supabase
+    .from('job_parts')
+    .select('id, status')
+    .eq('job_id', jobId);
+
+  if (readErr) {
+    console.error('Error reading job parts to ship:', readErr);
+    throw readErr;
+  }
+  type PartRow = { id: string; status: string };
+  const partRows = (parts ?? []) as PartRow[];
+  if (partRows.length === 0) {
+    throw new Error('Cannot ship: job has no parts.');
+  }
+  const notReady = partRows.filter((p) => p.status !== 'completed' && p.status !== 'shipped');
+  if (notReady.length > 0) {
+    throw new Error('Cannot ship: not every part on the job is completed yet.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: shipErr } = await supabase
+    .from('job_parts')
+    .update({
+      status: 'shipped',
+      shipped_at: nowIso,
+      status_changed_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq('job_id', jobId)
+    .neq('status', 'shipped');
+
+  if (shipErr) {
+    console.error('Error shipping job parts:', shipErr);
+    throw shipErr;
+  }
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching shipped job:', error);
+    throw error;
+  }
+  return data as Job;
 }
 
 // ============== Operations ==============
 
 /**
- * Get operations for a job
+ * Get operations for a single job_part, ordered by sequence.
  */
-export async function getJobOperations(jobId: string): Promise<JobOperation[]> {
+export async function getJobPartOperations(jobPartId: string): Promise<JobOperation[]> {
   const supabase = getSupabase();
-
   const { data, error } = await supabase
     .from('job_operations')
     .select(`
       *,
       operation_types!left(id, name, labor_rate)
     `)
-    .eq('job_id', jobId)
+    .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
 
   if (error) {
-    console.error('Error fetching job operations:', error);
+    console.error('Error fetching job part operations:', error);
     throw error;
   }
-
   return (data || []) as JobOperation[];
 }
 
 /**
- * Create job operations from a routing
+ * Recompute a job_part's status from its operations and persist the change
+ * if it differs from the current value. Returns the resolved status and a
+ * flag indicating whether it changed. Skips when the part is already in a
+ * terminal user-initiated state (cancelled/shipped).
  */
-export async function createJobOperationsFromRouting(
-  jobId: string,
-  routingId: string
-): Promise<number> {
+async function recomputeJobPartStatus(
+  jobPartId: string,
+): Promise<{ changed: boolean; newStatus: JobStatus }> {
   const supabase = getSupabase();
 
-  // Use the database function to create operations
-  const { data, error } = await supabase.rpc('create_job_operations_from_routing', {
-    p_job_id: jobId,
-    p_routing_id: routingId,
-  });
-
-  if (error) {
-    console.error('Error creating job operations from routing:', error);
-    throw error;
-  }
-
-  return data as number;
-}
-
-/**
- * Update a job operation
- */
-export async function updateJobOperation(
-  operationId: string,
-  updates: {
-    status?: JobOperation['status'];
-    actual_setup_minutes?: number;
-    actual_run_minutes?: number;
-    notes?: string;
-  }
-): Promise<JobOperation> {
-  const supabase = getSupabase();
-
-  // Get current user for completed_by
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const updateData: Record<string, unknown> = {
-    ...updates,
-    updated_at: new Date().toISOString(),
-  };
-
-  // Set timestamps based on status changes
-  if (updates.status === 'in_progress') {
-    updateData.started_at = new Date().toISOString();
-  } else if (updates.status === 'completed') {
-    updateData.completed_at = new Date().toISOString();
-    updateData.completed_by = user?.id || null;
-  }
-
-  const { data, error } = await supabase
-    .from('job_operations')
-    .update(updateData)
-    .eq('id', operationId)
-    .select(`
-      *,
-      operation_types!left(id, name, labor_rate)
-    `)
+  const { data: part, error: partErr } = await supabase
+    .from('job_parts')
+    .select('status, started_at, completed_at')
+    .eq('id', jobPartId)
     .single();
-
-  if (error) {
-    console.error('Error updating job operation:', error);
-    throw error;
+  if (partErr || !part) {
+    throw partErr || new Error('job_part not found');
   }
 
-  return data as JobOperation;
-}
+  if (part.status === 'cancelled' || part.status === 'shipped') {
+    return { changed: false, newStatus: part.status as JobStatus };
+  }
 
-// ============== Operation Step-Through Functions ==============
-
-/**
- * Check if all operations are done (completed or skipped)
- * and at least one is completed (not all skipped)
- */
-async function checkAllOperationsDone(jobId: string): Promise<{
-  allDone: boolean;
-  hasAtLeastOneCompleted: boolean;
-}> {
-  const supabase = getSupabase();
-
-  const { data: operations, error } = await supabase
+  const { data: ops, error: opsErr } = await supabase
     .from('job_operations')
     .select('status')
-    .eq('job_id', jobId);
-
-  if (error) {
-    console.error('Error checking operations status:', error);
-    throw error;
+    .eq('job_part_id', jobPartId);
+  if (opsErr) throw opsErr;
+  type OpStatus = { status: string };
+  const opRows = (ops ?? []) as OpStatus[];
+  if (opRows.length === 0) {
+    return { changed: false, newStatus: part.status as JobStatus };
   }
 
-  if (!operations || operations.length === 0) {
-    return { allDone: false, hasAtLeastOneCompleted: false };
+  const allDone = opRows.every((o) => o.status === 'completed' || o.status === 'skipped');
+  const hasCompleted = opRows.some((o) => o.status === 'completed');
+  const anyTouched = opRows.some((o) => o.status !== 'pending');
+
+  let newStatus: JobStatus;
+  if (allDone && hasCompleted) newStatus = 'completed';
+  else if (anyTouched) newStatus = 'in_progress';
+  else newStatus = 'not_started';
+
+  if (newStatus === part.status) {
+    return { changed: false, newStatus };
   }
 
-  const allDone = operations.every(
-    (op: { status: string }) => op.status === 'completed' || op.status === 'skipped'
-  );
-  const hasAtLeastOneCompleted = operations.some(
-    (op: { status: string }) => op.status === 'completed'
-  );
+  const nowIso = new Date().toISOString();
+  const updates: Record<string, unknown> = {
+    status: newStatus,
+    status_changed_at: nowIso,
+    updated_at: nowIso,
+  };
+  if (newStatus === 'in_progress' && !part.started_at) {
+    updates.started_at = nowIso;
+  }
+  if (newStatus === 'completed' && !part.completed_at) {
+    updates.completed_at = nowIso;
+  }
 
-  return { allDone, hasAtLeastOneCompleted };
+  const { error: updErr } = await supabase
+    .from('job_parts')
+    .update(updates)
+    .eq('id', jobPartId);
+  if (updErr) {
+    console.error('Error updating job_part status:', updErr);
+    throw updErr;
+  }
+
+  return { changed: true, newStatus };
 }
 
 /**
- * Start a job operation (pending → in_progress)
- * Auto-starts the job if this is the first operation and job is pending
- * Only one operation can be in_progress at a time
+ * Snapshot the parent job's status before/after a job_part update so the
+ * caller can react when the aggregation trigger flips it (e.g., to celebrate
+ * the entire job finishing).
+ */
+async function detectJobStatusChange(
+  jobId: string,
+  before: JobStatus,
+): Promise<{ changed: boolean; newStatus?: JobStatus }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('status')
+    .eq('id', jobId)
+    .single();
+  if (error || !data) return { changed: false };
+  const newStatus = data.status as JobStatus;
+  if (newStatus === before) return { changed: false };
+  return { changed: true, newStatus };
+}
+
+async function getJobIdForOperation(
+  operationId: string,
+): Promise<{ jobId: string; jobPartId: string; jobStatus: JobStatus }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('job_operations')
+    .select('job_id, job_part_id, jobs(status)')
+    .eq('id', operationId)
+    .single();
+  if (error || !data) throw error || new Error('operation not found');
+  type OpRow = {
+    job_id: string;
+    job_part_id: string;
+    jobs?: { status: string } | { status: string }[] | null;
+  };
+  const row = data as OpRow;
+  const jobsField = row.jobs;
+  const jobsRow = Array.isArray(jobsField) ? jobsField[0] : jobsField;
+  if (!jobsRow) throw new Error('parent job not found');
+  return {
+    jobId: row.job_id,
+    jobPartId: row.job_part_id,
+    jobStatus: jobsRow.status as JobStatus,
+  };
+}
+
+/**
+ * Start a job_operation (pending → in_progress). At most one operation can
+ * be in_progress on a single job_part at a time. Auto-flips the job_part's
+ * status to 'in_progress'; the trigger then auto-flips the parent job.
  */
 export async function startJobOperation(
   operationId: string,
-  jobId: string
+  jobId: string,
 ): Promise<OperationUpdateResult> {
   const supabase = getSupabase();
+  const ctx = await getJobIdForOperation(operationId);
+  void jobId; // Caller passes for backward compat; we trust the lookup.
 
-  // Check if there's already an in_progress operation
+  // Concurrency guard: no other in-progress op on this part.
   const { data: inProgressOps, error: checkError } = await supabase
     .from('job_operations')
     .select('id')
-    .eq('job_id', jobId)
+    .eq('job_part_id', ctx.jobPartId)
     .eq('status', 'in_progress');
-
   if (checkError) {
     console.error('Error checking in-progress operations:', checkError);
     throw checkError;
   }
-
   if (inProgressOps && inProgressOps.length > 0) {
-    throw new Error('Another operation is already in progress. Complete it first.');
+    throw new Error('Another operation is already in progress on this part. Complete it first.');
   }
 
-  // Update the operation to in_progress
   const { data: operation, error: updateError } = await supabase
     .from('job_operations')
     .update({
@@ -701,66 +506,36 @@ export async function startJobOperation(
       operation_types!left(id, name, labor_rate)
     `)
     .single();
-
   if (updateError) {
     console.error('Error starting operation:', updateError);
     throw updateError;
   }
 
-  // Check if job needs to be auto-started
-  const { data: job, error: jobError } = await supabase
-    .from('jobs')
-    .select('status')
-    .eq('id', jobId)
-    .single();
-
-  if (jobError) {
-    console.error('Error fetching job status:', jobError);
-    throw jobError;
-  }
-
-  let jobStatusChanged = false;
-  let newJobStatus: JobStatus | undefined;
-
-  if (job.status === 'not_started') {
-    // Auto-start the job
-    const { error: startError } = await supabase
-      .from('jobs')
-      .update({
-        status: 'in_progress',
-        started_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', jobId);
-
-    if (startError) {
-      console.error('Error auto-starting job:', startError);
-      // Don't throw, operation was already started
-    } else {
-      jobStatusChanged = true;
-      newJobStatus = 'in_progress';
-    }
-  }
+  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
+  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
 
   return {
     operation: operation as JobOperation,
-    jobStatusChanged,
-    newJobStatus,
+    jobPartStatusChanged: partResult.changed,
+    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
+    jobStatusChanged: jobResult.changed,
+    newJobStatus: jobResult.newStatus,
   };
 }
 
 /**
- * Complete a job operation with optional time entry
- * Auto-completes the job if all operations are done
+ * Complete a job_operation with optional time-entry data. Flips the
+ * job_part to 'completed' once every op on that part is completed/skipped.
  */
 export async function completeJobOperation(
   operationId: string,
   jobId: string,
-  data: CompleteOperationData = {}
+  data: CompleteOperationData = {},
 ): Promise<OperationUpdateResult> {
   const supabase = getSupabase();
+  const ctx = await getJobIdForOperation(operationId);
+  void jobId;
 
-  // Get current user for completed_by
   const { data: { user } } = await supabase.auth.getUser();
 
   const updateData: Record<string, unknown> = {
@@ -769,16 +544,9 @@ export async function completeJobOperation(
     completed_by: user?.id || null,
     updated_at: new Date().toISOString(),
   };
-
-  if (data.actual_setup_minutes !== undefined) {
-    updateData.actual_setup_minutes = data.actual_setup_minutes;
-  }
-  if (data.actual_run_minutes !== undefined) {
-    updateData.actual_run_minutes = data.actual_run_minutes;
-  }
-  if (data.notes !== undefined) {
-    updateData.notes = data.notes;
-  }
+  if (data.actual_setup_minutes !== undefined) updateData.actual_setup_minutes = data.actual_setup_minutes;
+  if (data.actual_run_minutes !== undefined) updateData.actual_run_minutes = data.actual_run_minutes;
+  if (data.notes !== undefined) updateData.notes = data.notes;
 
   const { data: operation, error: updateError } = await supabase
     .from('job_operations')
@@ -790,70 +558,40 @@ export async function completeJobOperation(
       operation_types!left(id, name, labor_rate)
     `)
     .single();
-
   if (updateError) {
     console.error('Error completing operation:', updateError);
     throw updateError;
   }
 
-  // Check if job should be auto-completed
-  const { allDone, hasAtLeastOneCompleted } = await checkAllOperationsDone(jobId);
-
-  let jobStatusChanged = false;
-  let newJobStatus: JobStatus | undefined;
-
-  if (allDone && hasAtLeastOneCompleted) {
-    // Check current job status
-    const { data: job, error: jobError } = await supabase
-      .from('jobs')
-      .select('status')
-      .eq('id', jobId)
-      .single();
-
-    if (!jobError && job.status === 'in_progress') {
-      // Auto-complete the job
-      const { error: completeError } = await supabase
-        .from('jobs')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', jobId);
-
-      if (!completeError) {
-        jobStatusChanged = true;
-        newJobStatus = 'completed';
-      }
-    }
-  }
+  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
+  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
 
   return {
     operation: operation as JobOperation,
-    jobStatusChanged,
-    newJobStatus,
+    jobPartStatusChanged: partResult.changed,
+    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
+    jobStatusChanged: jobResult.changed,
+    newJobStatus: jobResult.newStatus,
   };
 }
 
 /**
- * Skip a job operation with optional reason
- * Auto-completes the job if all operations are done (requires at least 1 completed)
+ * Skip a job_operation with optional reason.
  */
 export async function skipJobOperation(
   operationId: string,
   jobId: string,
-  reason?: string
+  reason?: string,
 ): Promise<OperationUpdateResult> {
   const supabase = getSupabase();
+  const ctx = await getJobIdForOperation(operationId);
+  void jobId;
 
   const updateData: Record<string, unknown> = {
     status: 'skipped',
     updated_at: new Date().toISOString(),
   };
-
-  if (reason) {
-    updateData.notes = reason;
-  }
+  if (reason) updateData.notes = reason;
 
   const { data: operation, error: updateError } = await supabase
     .from('job_operations')
@@ -865,58 +603,31 @@ export async function skipJobOperation(
       operation_types!left(id, name, labor_rate)
     `)
     .single();
-
   if (updateError) {
     console.error('Error skipping operation:', updateError);
     throw updateError;
   }
 
-  // Check if job should be auto-completed
-  const { allDone, hasAtLeastOneCompleted } = await checkAllOperationsDone(jobId);
-
-  let jobStatusChanged = false;
-  let newJobStatus: JobStatus | undefined;
-
-  if (allDone && hasAtLeastOneCompleted) {
-    // Check current job status
-    const { data: job, error: jobError } = await supabase
-      .from('jobs')
-      .select('status')
-      .eq('id', jobId)
-      .single();
-
-    if (!jobError && job.status === 'in_progress') {
-      // Auto-complete the job
-      const { error: completeError } = await supabase
-        .from('jobs')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', jobId);
-
-      if (!completeError) {
-        jobStatusChanged = true;
-        newJobStatus = 'completed';
-      }
-    }
-  }
+  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
+  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
 
   return {
     operation: operation as JobOperation,
-    jobStatusChanged,
-    newJobStatus,
+    jobPartStatusChanged: partResult.changed,
+    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
+    jobStatusChanged: jobResult.changed,
+    newJobStatus: jobResult.newStatus,
   };
 }
 
 /**
- * Undo a job operation (completed/skipped → pending)
- * Clears timestamps, hours, and completed_by
- * Does NOT revert job status
+ * Undo a job_operation (completed/skipped → pending). Clears timestamps,
+ * actuals, and completed_by. Recomputes the parent job_part status (it may
+ * fall back to in_progress or not_started).
  */
 export async function undoJobOperation(operationId: string): Promise<JobOperation> {
   const supabase = getSupabase();
+  const ctx = await getJobIdForOperation(operationId);
 
   const { data: operation, error } = await supabase
     .from('job_operations')
@@ -936,42 +647,13 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
       operation_types!left(id, name, labor_rate)
     `)
     .single();
-
   if (error) {
     console.error('Error undoing operation:', error);
     throw error;
   }
 
+  await recomputeJobPartStatus(ctx.jobPartId);
   return operation as JobOperation;
-}
-
-// ============== Attachments ==============
-
-/**
- * Get attachments for a job
- */
-export async function getJobAttachments(jobId: string): Promise<JobAttachment[]> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('job_attachments')
-    .select('*')
-    .eq('job_id', jobId)
-    .order('uploaded_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching job attachments:', error);
-    throw error;
-  }
-
-  return data || [];
-}
-
-/**
- * Get signed URL for job attachment download
- */
-export async function getJobAttachmentUrl(filePath: string): Promise<string> {
-  return getSignedUrl(filePath, 3600);
 }
 
 // ============== Helper Functions ==============
@@ -980,7 +662,7 @@ export async function getJobAttachmentUrl(filePath: string): Promise<string> {
  * Get customers for dropdown (simple list)
  */
 export async function getCustomersForSelect(
-  companyId: string
+  companyId: string,
 ): Promise<Array<{ id: string; name: string }>> {
   const supabase = getSupabase();
 
@@ -1002,7 +684,6 @@ export async function getCustomersForSelect(
 
 /**
  * Count jobs that are past their due date and not yet completed/shipped/cancelled.
- * Used by the dashboard "Overdue jobs" tile. "Overdue" is derived, never stored.
  */
 export async function getOverdueJobsCount(companyId: string): Promise<number> {
   const supabase = getSupabase();
@@ -1029,7 +710,7 @@ export async function getOverdueJobsCount(companyId: string): Promise<number> {
  */
 export async function getOverdueJobs(
   companyId: string,
-  limit: number = 50
+  limit: number = 50,
 ): Promise<JobWithRelations[]> {
   const supabase = getSupabase();
   const today = new Date().toISOString().slice(0, 10);
@@ -1039,7 +720,7 @@ export async function getOverdueJobs(
     .select(`
       *,
       customers!left(id, name),
-      parts!left(id, part_name, description)
+      job_parts(id, sequence, parts(id, part_name))
     `)
     .eq('company_id', companyId)
     .not('due_date', 'is', null)
@@ -1059,12 +740,12 @@ export async function getOverdueJobs(
 // ============== Current Operation Batch Query ==============
 
 /**
- * Get ready/current operations for a batch of jobs.
- * Calls the get_ready_operations_batch DB function which returns
- * in-progress or DAG-aware ready operations per job.
+ * Get ready/current operations for a batch of jobs. Calls
+ * get_ready_operations_batch which now scopes the readiness DAG to
+ * job_part_id but still returns one row per job_id.
  */
 export async function getReadyOperationsForJobs(
-  jobIds: string[]
+  jobIds: string[],
 ): Promise<Map<string, CurrentOperationInfo>> {
   if (jobIds.length === 0) return new Map();
 

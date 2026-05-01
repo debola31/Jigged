@@ -35,7 +35,6 @@ export interface RoutingNode {
   operation_type_id: string;
   run_time_per_unit: number | null;
   setup_time: number;
-  instructions: string | null;
   metadata: Record<string, unknown>;
   sequence: number;
   created_at: string;
@@ -129,14 +128,12 @@ export interface RoutingNodeFormData {
   operation_type_id: string;
   run_time_per_unit: string;
   setup_time: string;
-  instructions: string;
 }
 
 export const EMPTY_NODE_FORM: RoutingNodeFormData = {
   operation_type_id: '',
   run_time_per_unit: '',
   setup_time: '',
-  instructions: '',
 };
 
 /**
@@ -163,7 +160,6 @@ export function nodeToFormData(node: RoutingNode): RoutingNodeFormData {
     operation_type_id: node.operation_type_id,
     run_time_per_unit: node.run_time_per_unit !== null ? String(node.run_time_per_unit) : '',
     setup_time: node.setup_time ? String(node.setup_time) : '',
-    instructions: node.instructions || '',
   };
 }
 

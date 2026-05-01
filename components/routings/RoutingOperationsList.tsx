@@ -79,7 +79,6 @@ export default function RoutingOperationsList({
         laborRate: value.operation.labor_rate,
         runTimePerUnit: value.runTimePerUnit,
         setupTime: value.setupTime,
-        instructions: null,
       };
       onChange([...rows, newRow]);
     } else if (editorState.mode === 'edit') {
@@ -114,7 +113,6 @@ export default function RoutingOperationsList({
       operation_type_id: r.operationTypeId,
       run_time_per_unit: r.runTimePerUnit,
       setup_time: r.setupTime,
-      instructions: r.instructions,
       metadata: {},
       sequence: 0,
       created_at: '',

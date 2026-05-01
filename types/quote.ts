@@ -74,39 +74,39 @@ export interface QuoteWithRelations extends Quote {
   } | null;
   // Hydrated line items (ordered by sequence).
   line_items?: QuoteLineItem[];
-  // Jobs created from this quote via conversion.
+  // Jobs created from this quote via conversion. With the multi-part-jobs
+  // refactor at most one job is created per quote, but the array shape is
+  // preserved so legacy multi-job quotes still render.
   jobs?: Array<{
     id: string;
     job_number: string;
     status: string;
-    source_quote_line_item_id: string | null;
   }>;
-  // Joined attachments
-  quote_attachments?: QuoteAttachment[];
   // Resolved creator profile from user_company_access (populated client-side
   // via a second query — keeps the main PostgREST query simple).
   created_by_member?: CompanyMember | null;
 }
 
 /**
- * Per-tier price/markup override the salesperson typed on the quote form
- * (one-off concession that diverges from the part's tier).
+ * One-off price/markup override the salesperson typed on the quote form
+ * for a single part — diverges from the auto-resolved tier price.
  */
-export interface QuoteTierOverride {
+export interface QuoteLineOverride {
   unit_price: number;
   markup_percent: number | null;
 }
 
 /**
- * Selection shape for a single part inside the quote form —
- * picks which of the part's pricing tiers to snapshot, with optional
- * per-tier price overrides.
+ * Selection shape for a single part inside the quote form. The salesperson
+ * commits to one Order Quantity per part; the unit price is auto-resolved
+ * from the part's pricing tiers (highest tier with `tier_qty <= order_qty`)
+ * unless an explicit override is supplied.
  */
 export interface QuoteFormPartBlock {
   part_id: string;
-  tier_ids: string[];
-  /** tier_id → override values; only present for tiers the user adjusted */
-  overrides?: Record<string, QuoteTierOverride>;
+  order_quantity: number;
+  /** Optional hand-entered price+markup; bypasses tier resolution when present. */
+  override?: QuoteLineOverride;
 }
 
 /**
@@ -162,19 +162,32 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
 
 /**
  * Convert Quote to QuoteFormData for edit forms.
- * Note: tier selection is derived from existing line_items — metadata-only edits
- * are all that's supported on existing quotes (snapshots are immutable).
+ * Each existing line item maps to one part block (one row per part on the new model).
+ * If multiple rows somehow exist for the same part (pre-collapse data), the lowest-qty
+ * one wins to mirror the migration's choice.
  */
 export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
-  const byPart = new Map<string, string[]>();
+  const byPart = new Map<string, QuoteLineItem>();
   for (const li of quote.line_items || []) {
-    const list = byPart.get(li.part_id) || [];
-    if (li.source_tier_id) list.push(li.source_tier_id);
-    byPart.set(li.part_id, list);
+    const existing = byPart.get(li.part_id);
+    if (!existing || li.quantity < existing.quantity) {
+      byPart.set(li.part_id, li);
+    }
   }
   return {
     customer_id: quote.customer_id,
-    parts: Array.from(byPart.entries()).map(([part_id, tier_ids]) => ({ part_id, tier_ids })),
+    parts: Array.from(byPart.values()).map((li) => ({
+      part_id: li.part_id,
+      order_quantity: li.quantity,
+      ...(li.is_quote_override
+        ? {
+            override: {
+              unit_price: li.unit_price,
+              markup_percent: li.markup_percent,
+            },
+          }
+        : {}),
+    })),
     lead_time_days: quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,
@@ -247,31 +260,6 @@ export const QUOTE_STATUS_CONFIG: Record<
   active: { label: 'Active', color: 'primary' },
   expired: { label: 'Expired', color: 'warning' },
 };
-
-/**
- * Quote attachment record from database
- */
-export interface QuoteAttachment {
-  id: string;
-  quote_id: string;
-  company_id: string;
-  file_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  uploaded_by: string | null;
-  uploaded_at: string;
-}
-
-/**
- * Temporary attachment info (before quote is created)
- */
-export interface TempAttachment {
-  file_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-}
 
 /**
  * Per-operation cost snapshot captured at quote creation.

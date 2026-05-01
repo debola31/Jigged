@@ -61,51 +61,82 @@ export interface ActiveSession {
 // ============================================================================
 
 /**
- * Job data as seen by operators in the job list.
+ * One row in the station-scoped operator job list. Each row represents a
+ * specific (job, job_part) pair where the operator can do work at the
+ * selected station — so a multi-part job that has the station's operation
+ * ready on N parts produces N rows. The `id` is the job_part_id so the
+ * row can navigate directly into the per-part work view.
  */
 export interface OperatorJob {
+  /** job_part_id — primary navigation key on this row. */
   id: string;
+  /** Parent job id (for grouping / navigation back to the parts hub). */
+  job_id: string;
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
+  part_quantity: number;
+  /** job_parts.status. */
   status: string;
-  // Current operation for this station
+  // Current operation for this station on this part
   operation_id: string | null;
   operation_name: string | null;
   operation_status: string | null;
   // Who is currently working on this operation
   current_operator_name: string | null;
-  // Job progress
+  // Per-part progress
   operations_total: number;
   operations_completed: number;
 }
 
 /**
- * Detailed job data for active job view.
+ * Per-part operator detail view — the page where Start/Stop/Complete lives.
  */
 export interface OperatorJobDetail {
+  /** job_part_id (primary key for this view). */
   id: string;
+  /** Parent job id (for the back-to-parts-hub navigation). */
+  job_id: string;
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
+  part_quantity: number;
+  /** job_parts.status. */
   status: string;
-  // Operation details
+  // Operation details (the one current operation on this part)
   operation_id: string | null;
   operation_name: string | null;
   operation_status: string | null;
-  instructions: string | null;
   estimated_minutes: number | null;
   // Active session info
   active_session_id: string | null;
   session_started_at: string | null;
   current_operator_id: string | null;
   current_operator_name: string | null;
-  // Job progress
+  // Per-part operation progress
   operations_total: number;
   operations_completed: number;
-  // Material requirements for the job as a whole (sourced from job_materials,
-  // not per-operation — materials are routing/job-level, not operation-level).
+  // Material requirements scoped to this part.
   materials: Array<{ name: string; quantity: number; unit: string }>;
+}
+
+/**
+ * One card on the operator parts-hub view (operator scans a job QR with >1 parts).
+ */
+export interface OperatorJobPartSummary {
+  /** job_part_id. */
+  id: string;
+  job_id: string;
+  part_name: string;
+  part_description: string | null;
+  quantity: number;
+  status: string;
+  /** Next ready operation on this part, when one exists. */
+  next_operation_name: string | null;
+  next_operation_id: string | null;
+  /** Per-part progress. */
+  operations_total: number;
+  operations_completed: number;
 }
 
 // ============================================================================

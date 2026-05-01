@@ -17,34 +17,29 @@ import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import PrintIcon from '@mui/icons-material/Print';
-import DownloadIcon from '@mui/icons-material/Download';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
+import Chip from '@mui/material/Chip';
 
-import {
-  getQuoteWithRelations,
-  deleteQuote,
-  getQuoteAttachmentUrl,
-  deleteQuoteAttachment,
-} from '@/utils/quotesAccess';
+import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
 import { getCompany } from '@/utils/companyAccess';
 import { generateQuotePdf } from '@/utils/quotePdf';
+import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import {
   quoteToFormData,
   isQuoteExpired,
   daysUntilExpiration,
 } from '@/types/quote';
-import type { QuoteWithRelations, QuoteAttachment } from '@/types/quote';
+import type { QuoteWithRelations } from '@/types/quote';
+import type { PartPricingTier } from '@/types/partPricing';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
-import QuoteCostBreakdownAccordion from '@/components/quotes/QuoteCostBreakdown';
 
 export default function QuoteDetailPage() {
   const params = useParams();
@@ -63,10 +58,35 @@ export default function QuoteDetailPage() {
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
+  /** Tier reference data: part_id → all tiers for that part. */
+  const [tiersByPart, setTiersByPart] = useState<Record<string, PartPricingTier[]>>({});
 
   useEffect(() => {
     fetchQuote();
   }, [quoteId]);
+
+  // Once the quote loads, fetch the master tier list for each part on it
+  // (read-only reference for the PRICING TIERS section).
+  useEffect(() => {
+    if (!quote) return;
+    const partIds = Array.from(new Set((quote.line_items ?? []).map((li) => li.part_id)));
+    const missing = partIds.filter((id) => !(id in tiersByPart));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    Promise.all(missing.map((id) => getTiersForPart(id).then((tiers) => [id, tiers] as const)))
+      .then((entries) => {
+        if (cancelled) return;
+        setTiersByPart((prev) => {
+          const next = { ...prev };
+          for (const [id, tiers] of entries) next[id] = tiers;
+          return next;
+        });
+      })
+      .catch((err) => console.warn('Failed to load tiers for quote detail page:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [quote, tiersByPart]);
 
   const fetchQuote = async () => {
     try {
@@ -103,21 +123,6 @@ export default function QuoteDetailPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const handleDownloadAttachment = async (attachment: QuoteAttachment) => {
-    try {
-      const url = await getQuoteAttachmentUrl(attachment.file_path);
-      window.open(url, '_blank');
-    } catch {
-      setError('Failed to download attachment');
-    }
-  };
-
   const handlePrintPdf = async () => {
     if (!quote) return;
     setError(null);
@@ -132,18 +137,6 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
       setPrinting(false);
-    }
-  };
-
-  const handleDeleteAttachment = async (attachmentId: string) => {
-    setActionLoading(true);
-    try {
-      await deleteQuoteAttachment(attachmentId, companyId);
-      await fetchQuote();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete attachment');
-    } finally {
-      setActionLoading(false);
     }
   };
 
@@ -169,12 +162,10 @@ export default function QuoteDetailPage() {
   const daysLeft = daysUntilExpiration(quote.expiration_date);
   const linkedJobs = quote.jobs ?? [];
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
-  const lineItemsByPart = new Map<string, typeof lineItems>();
-  for (const li of lineItems) {
-    const list = lineItemsByPart.get(li.part_id) ?? [];
-    list.push(li);
-    lineItemsByPart.set(li.part_id, list);
-  }
+  const grandTotal = lineItems.reduce(
+    (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
+    0,
+  );
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -345,8 +336,8 @@ export default function QuoteDetailPage() {
 
       <Grid container spacing={3}>
         {/* Customer Info */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
+        <Grid size={{ xs: 12 }}>
+          <Card elevation={2}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
                 Customer
@@ -366,105 +357,6 @@ export default function QuoteDetailPage() {
             </CardContent>
           </Card>
         </Grid>
-
-        {/* Parts & tiers */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Parts
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              {lineItemsByPart.size === 0 ? (
-                <Typography color="text.secondary">No parts on this quote</Typography>
-              ) : (
-                Array.from(lineItemsByPart.entries()).map(([partId, items]) => {
-                  const partName = items[0]?.parts?.part_name ?? 'Part';
-                  const description = items[0]?.parts?.description;
-                  return (
-                    <Box key={partId} sx={{ mb: 2 }}>
-                      <MuiLink
-                        component={Link}
-                        href={`/dashboard/${companyId}/parts/${partId}`}
-                        sx={{ fontWeight: 500 }}
-                      >
-                        {partName}
-                      </MuiLink>
-                      {description && (
-                        <Typography variant="body2" color="text.secondary">
-                          {description}
-                        </Typography>
-                      )}
-                      <Typography variant="caption" color="text.secondary">
-                        {items.length} tier{items.length === 1 ? '' : 's'}
-                      </Typography>
-                    </Box>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Attachments */}
-        {quote.quote_attachments && quote.quote_attachments.length > 0 && (
-          <Grid size={{ xs: 12 }}>
-            <Card elevation={2}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Attachments
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-                {quote.quote_attachments.map((attachment) => (
-                  <Box
-                    key={attachment.id}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: 2,
-                      p: 2,
-                      bgcolor: 'rgba(255, 255, 255, 0.05)',
-                      borderRadius: 1,
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      mb: 1,
-                      '&:last-child': { mb: 0 },
-                    }}
-                  >
-                    <PictureAsPdfIcon sx={{ fontSize: 40, color: 'error.main' }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body1" fontWeight={500}>
-                        {attachment.file_name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatFileSize(attachment.file_size)} • Uploaded{' '}
-                        {formatDate(attachment.uploaded_at)}
-                      </Typography>
-                    </Box>
-                    <Button
-                      variant="outlined"
-                      startIcon={<DownloadIcon />}
-                      onClick={() => handleDownloadAttachment(attachment)}
-                      disabled={actionLoading}
-                    >
-                      Download
-                    </Button>
-                    {isEditable && (
-                      <IconButton
-                        color="error"
-                        onClick={() => handleDeleteAttachment(attachment.id)}
-                        disabled={actionLoading}
-                        title="Delete attachment"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    )}
-                  </Box>
-                ))}
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
 
         {/* Line items table */}
         <Grid size={{ xs: 12 }}>
@@ -490,7 +382,8 @@ export default function QuoteDetailPage() {
                     <thead>
                       <tr>
                         <th>Part</th>
-                        <th className="num">Qty</th>
+                        <th>Description</th>
+                        <th className="num">Order qty</th>
                         <th className="num">Unit price</th>
                         <th className="num">Total</th>
                       </tr>
@@ -498,31 +391,76 @@ export default function QuoteDetailPage() {
                     <tbody>
                       {lineItems.map((li) => (
                         <tr key={li.id}>
-                          <td>{li.parts?.part_name ?? 'Part'}</td>
+                          <td style={{ fontWeight: 600 }}>{li.parts?.part_name ?? 'Part'}</td>
+                          <td>{li.parts?.description ?? ''}</td>
                           <td className="num">{li.quantity}</td>
-                          <td className="num">{formatCurrency(li.unit_price)}</td>
+                          <td className="num">
+                            {formatCurrency(li.unit_price)}
+                            {li.is_quote_override && (
+                              <Chip
+                                size="small"
+                                label="custom"
+                                color="success"
+                                variant="outlined"
+                                sx={{ ml: 1, height: 18 }}
+                              />
+                            )}
+                          </td>
                           <td className="num">{formatCurrency(li.total_price)}</td>
                         </tr>
                       ))}
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>
+                          Total
+                        </td>
+                        <td className="num" style={{ fontWeight: 700, paddingTop: 12 }}>
+                          {formatCurrency(grandTotal)}
+                        </td>
+                      </tr>
                     </tbody>
                   </Box>
-                  {lineItems.length > 1 && (
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      Multiple tiers — grand total is withheld until the customer picks a quantity per part.
-                    </Typography>
-                  )}
+                </Box>
+              )}
+
+              {/* Pricing tiers reference per part */}
+              {lineItems.some(
+                (li) => (tiersByPart[li.part_id]?.length ?? 0) > 1 && !li.is_quote_override,
+              ) && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Pricing tiers (reference)
+                  </Typography>
+                  {lineItems.map((li) => {
+                    const tiers = tiersByPart[li.part_id];
+                    if (!tiers || tiers.length <= 1) return null;
+                    if (li.is_quote_override) return null;
+                    const sorted = [...tiers].sort((a, b) => a.quantity - b.quantity);
+                    return (
+                      <Box key={li.id} sx={{ mb: 1.5 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
+                          {li.parts?.part_name ?? 'Part'}
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                          {sorted.map((tier) => {
+                            const matched = tier.id === li.source_tier_id;
+                            return (
+                              <Chip
+                                key={tier.id}
+                                size="small"
+                                label={`${tier.quantity} · ${formatCurrency(tier.unit_price)} each`}
+                                color={matched ? 'primary' : 'default'}
+                                variant={matched ? 'filled' : 'outlined'}
+                              />
+                            );
+                          })}
+                        </Box>
+                      </Box>
+                    );
+                  })}
                 </Box>
               )}
             </CardContent>
           </Card>
-        </Grid>
-
-        {/* Cost breakdown accordion */}
-        <Grid size={{ xs: 12 }}>
-          <QuoteCostBreakdownAccordion
-            quoteId={quote.id}
-            companyId={companyId}
-          />
         </Grid>
       </Grid>
 
@@ -531,10 +469,8 @@ export default function QuoteDetailPage() {
         open={convertModalOpen}
         onClose={() => setConvertModalOpen(false)}
         quote={quote}
-        onConverted={(jobIds) => {
-          const first = jobIds[0];
-          if (first) router.push(`/dashboard/${companyId}/jobs/${first}`);
-          else router.push(`/dashboard/${companyId}/jobs`);
+        onConverted={(jobId) => {
+          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
         }}
       />
 

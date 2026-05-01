@@ -1,6 +1,7 @@
 import { getSupabase } from '@/lib/supabase';
 import type { QuoteLineItem } from '@/types/quote';
 import type { PartPricingTier } from '@/types/partPricing';
+import { resolveTier } from '@/utils/quotePricingResolver';
 
 /**
  * Load line items for a quote (ordered by sequence) with the part joined in.
@@ -38,44 +39,65 @@ export interface QuoteLineItemOverride {
 }
 
 /**
- * Snapshot a tier into a new line item for a quote. Called once per selected
- * tier during createQuote. The snapshot is immutable — later edits to the
- * tier do not flow back into an existing line item.
- *
- * Pass `override` when the user adjusted the price on the quote form; the
- * snapshot stores the typed values and flags the line as quote-overridden.
+ * Snapshot a single (part, order_quantity) commitment into a new line item.
+ * The unit price is auto-resolved from the part's tier table (highest tier with
+ * `tier_qty <= order_qty`) unless an explicit override is supplied. The matched
+ * tier id is recorded in `source_tier_id` so the PDF can highlight which break
+ * was used.
  */
-export async function insertLineItemFromTier(
+export async function insertLineItemForPart(
   quoteId: string,
   companyId: string,
-  tier: PartPricingTier,
+  partId: string,
+  orderQuantity: number,
+  tiers: PartPricingTier[],
   sequence: number,
   override?: QuoteLineItemOverride,
 ): Promise<QuoteLineItem> {
   const supabase = getSupabase();
 
-  const unitPrice = override?.unit_price ?? tier.unit_price;
-  if (unitPrice == null) {
-    throw new Error(
-      `Cannot create quote line item: tier ${tier.id} has no unit price. Set a markup or adjust the price on the quote form.`,
-    );
+  let unitPrice: number;
+  let markupPercent: number | null;
+  let baseCost: number | null;
+  let sourceTierId: string | null;
+
+  if (override) {
+    unitPrice = override.unit_price;
+    markupPercent = override.markup_percent;
+    const resolved = resolveTier(tiers, orderQuantity);
+    sourceTierId = resolved?.source_tier_id ?? null;
+    baseCost = resolved
+      ? tiers.find((t) => t.id === resolved.source_tier_id)?.base_cost_per_unit ?? null
+      : null;
+  } else {
+    const resolved = resolveTier(tiers, orderQuantity);
+    if (!resolved) {
+      throw new Error(
+        'Cannot create quote line item: this part has no priced pricing tiers. Add tiers on the part page first.',
+      );
+    }
+    unitPrice = resolved.unit_price;
+    sourceTierId = resolved.source_tier_id;
+    const matchedTier = tiers.find((t) => t.id === resolved.source_tier_id);
+    markupPercent = matchedTier?.markup_percent ?? null;
+    baseCost = matchedTier?.base_cost_per_unit ?? null;
   }
-  const markupPercent = override !== undefined ? override.markup_percent : tier.markup_percent;
-  const totalPrice = Math.round(unitPrice * tier.quantity * 100) / 100;
+
+  const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;
 
   const { data, error } = await supabase
     .from('quote_line_items')
     .insert({
       quote_id: quoteId,
       company_id: companyId,
-      part_id: tier.part_id,
-      source_tier_id: tier.id,
+      part_id: partId,
+      source_tier_id: sourceTierId,
       sequence,
-      quantity: tier.quantity,
+      quantity: orderQuantity,
       unit_price: unitPrice,
       total_price: totalPrice,
       markup_percent: markupPercent,
-      base_cost_per_unit: tier.base_cost_per_unit,
+      base_cost_per_unit: baseCost,
       is_quote_override: !!override,
     })
     .select('*')

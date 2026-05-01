@@ -594,10 +594,8 @@ BEGIN
     -- Delete in reverse FK order for tables that don't CASCADE automatically
     DELETE FROM inventory_transactions WHERE company_id = p_company_id;
     DELETE FROM operator_sessions WHERE company_id = p_company_id;
-    DELETE FROM job_attachments WHERE company_id = p_company_id;
-    DELETE FROM quote_attachments WHERE company_id = p_company_id;
     DELETE FROM jobs WHERE company_id = p_company_id;
-    -- (job_operations cascade-deleted via jobs)
+    -- (job_parts, job_operations, job_materials cascade-deleted via jobs)
     DELETE FROM quotes WHERE company_id = p_company_id;
     DELETE FROM routings WHERE company_id = p_company_id;
     -- (routing_nodes, routing_edges cascade-deleted via routings)

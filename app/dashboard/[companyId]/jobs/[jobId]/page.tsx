@@ -11,18 +11,13 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
+import Chip from '@mui/material/Chip';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
-import EditIcon from '@mui/icons-material/Edit';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import CheckIcon from '@mui/icons-material/Check';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import DownloadIcon from '@mui/icons-material/Download';
-import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
@@ -33,15 +28,11 @@ import DialogActions from '@mui/material/DialogActions';
 import {
   getJobWithRelations,
   deleteJob,
-  startJob,
-  completeJob,
   shipJob,
   cancelJob,
-  getJobAttachmentUrl,
 } from '@/utils/jobsAccess';
-import { getRoutingSummaryForPart } from '@/utils/routingsAccess';
-import type { JobWithRelations, JobOperation, JobAttachment } from '@/types/job';
-import { JobStatusChip, OperationsPanel, ViewRoutingModal, JobQRCode } from '@/components/jobs';
+import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
+import { JobStatusChip, OperationsPanel, JobQRCode } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 
 export default function JobDetailPage() {
@@ -56,33 +47,11 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
-  const [routingInfo, setRoutingInfo] = useState<{
-    id: string;
-    nodeCount: number;
-    totalRunTime: number | null;
-  } | null>(null);
 
   useEffect(() => {
     fetchJob();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
-
-  // Fetch routing info through the part (1:1 relationship)
-  useEffect(() => {
-    const fetchRoutingInfo = async () => {
-      if (!job?.part_id) {
-        setRoutingInfo(null);
-        return;
-      }
-      try {
-        const summary = await getRoutingSummaryForPart(job.part_id);
-        setRoutingInfo(summary);
-      } catch (err) {
-        console.error('Error fetching routing info:', err);
-      }
-    };
-    fetchRoutingInfo();
-  }, [job?.part_id]);
 
   const fetchJob = async () => {
     try {
@@ -145,21 +114,6 @@ export default function JobDetailPage() {
     return new Date(dateStr).toLocaleString();
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const handleDownloadAttachment = async (attachment: JobAttachment) => {
-    try {
-      const url = await getJobAttachmentUrl(attachment.file_path);
-      window.open(url, '_blank');
-    } catch (err) {
-      setError('Failed to download attachment');
-    }
-  };
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -176,17 +130,12 @@ export default function JobDetailPage() {
     );
   }
 
-  const canEdit = job.status === 'not_started';
-  const hasOperations = job.job_operations && job.job_operations.length > 0;
-  // Hide manual Start/Complete buttons when operations exist (auto-progression handles these)
-  const canStart = job.status === 'not_started' && !hasOperations;
-  const canComplete = job.status === 'in_progress' && !hasOperations;
+  const parts: JobPartWithRelations[] = job.job_parts ?? [];
   const canShip = job.status === 'completed';
   const canCancel = job.status !== 'shipped' && job.status !== 'cancelled';
 
   return (
     <Box>
-      {/* Back Button */}
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => router.push(`/dashboard/${companyId}/jobs`)}
@@ -229,43 +178,7 @@ export default function JobDetailPage() {
           </Box>
         </Box>
 
-        {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {canEdit && (
-            <Button
-              variant="outlined"
-              startIcon={<EditIcon />}
-              onClick={() => router.push(`/dashboard/${companyId}/jobs/${jobId}/edit`)}
-              disabled={actionLoading}
-            >
-              Edit
-            </Button>
-          )}
-
-          {canStart && (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<PlayArrowIcon />}
-              onClick={() => handleAction(() => startJob(jobId))}
-              disabled={actionLoading}
-            >
-              Start Job
-            </Button>
-          )}
-
-          {canComplete && (
-            <Button
-              variant="contained"
-              color="success"
-              startIcon={<CheckIcon />}
-              onClick={() => handleAction(() => completeJob(jobId))}
-              disabled={actionLoading}
-            >
-              Mark Complete
-            </Button>
-          )}
-
           {canShip && (
             <Button
               variant="contained"
@@ -331,82 +244,29 @@ export default function JobDetailPage() {
       )}
 
       <Grid container spacing={3}>
-        {/* Job Summary */}
+        {/* Customer + Timeline */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Job Summary
+                Customer
               </Typography>
               <Divider sx={{ mb: 2 }} />
-
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Customer</Typography>
-                  {job.customers ? (
-                    <MuiLink
-                      component={Link}
-                      href={`/dashboard/${companyId}/customers/${job.customer_id}`}
-                      sx={{ fontWeight: 500 }}
-                    >
-                      {job.customers.name}
-                    </MuiLink>
-                  ) : (
-                    <Typography>—</Typography>
-                  )}
-                </Box>
-
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Part</Typography>
-                  {job.parts ? (
-                    <MuiLink
-                      component={Link}
-                      href={`/dashboard/${companyId}/parts/${job.part_id}`}
-                      sx={{ fontWeight: 500 }}
-                    >
-                      {job.parts.part_name}
-                    </MuiLink>
-                  ) : (
-                    <Typography>—</Typography>
-                  )}
-                </Box>
-
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Routing</Typography>
-                  {routingInfo ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <MuiLink
-                        component={Link}
-                        href={`/dashboard/${companyId}/parts/${job.part_id}`}
-                        sx={{ fontWeight: 500 }}
-                      >
-                        {routingInfo.nodeCount} operation{routingInfo.nodeCount !== 1 ? 's' : ''}
-                      </MuiLink>
-                      <Tooltip title="View Workflow">
-                        <IconButton
-                          size="small"
-                          onClick={() => setWorkflowModalOpen(true)}
-                          sx={{
-                            color: 'text.secondary',
-                            p: 0.5,
-                            '&:hover': { color: 'primary.main' },
-                          }}
-                        >
-                          <AccountTreeIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  ) : (
-                    <Typography>{'\u2014'}</Typography>
-                  )}
-                </Box>
-              </Box>
-
+              {job.customers ? (
+                <MuiLink
+                  component={Link}
+                  href={`/dashboard/${companyId}/customers/${job.customer_id}`}
+                  sx={{ fontWeight: 500 }}
+                >
+                  {job.customers.name}
+                </MuiLink>
+              ) : (
+                <Typography color="text.secondary">—</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Timeline */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2}>
             <CardContent>
@@ -414,7 +274,6 @@ export default function JobDetailPage() {
                 Timeline
               </Typography>
               <Divider sx={{ mb: 2 }} />
-
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="body2" color="text.secondary">Created</Typography>
@@ -451,76 +310,71 @@ export default function JobDetailPage() {
                 Job QR Code
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <JobQRCode
-                jobId={jobId}
-                jobNumber={job.job_number}
-                partName={job.parts?.part_name}
-                companyId={companyId}
-              />
+              <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Operations */}
-        {hasOperations && (
-          <Grid size={{ xs: 12 }}>
-            <OperationsPanel
-              job={job}
-              operations={job.job_operations!}
-              onOperationUpdate={fetchJob}
-              disabled={actionLoading}
-            />
-          </Grid>
-        )}
-
-        {/* Attachments */}
-        {job.job_attachments && job.job_attachments.length > 0 && (
-          <Grid size={{ xs: 12 }}>
-            <Card elevation={2}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Attachments
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-                {job.job_attachments.map((attachment) => (
-                  <Box
-                    key={attachment.id}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: 2,
-                      p: 2,
-                      bgcolor: 'rgba(255, 255, 255, 0.05)',
-                      borderRadius: 1,
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      mb: 1,
-                      '&:last-child': { mb: 0 },
-                    }}
-                  >
-                    <PictureAsPdfIcon sx={{ fontSize: 40, color: 'error.main' }} />
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body1" fontWeight={500}>
-                        {attachment.file_name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatFileSize(attachment.file_size)} • Uploaded {formatDate(attachment.uploaded_at)}
-                      </Typography>
+        {/* Parts list — one card per job_part with its own OperationsPanel */}
+        <Grid size={{ xs: 12 }}>
+          <Card elevation={2}>
+            <CardContent>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                Parts ({parts.length})
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              {parts.length === 0 ? (
+                <Typography color="text.secondary">No parts on this job.</Typography>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {parts.map((part) => (
+                    <Box key={part.id}>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 1,
+                          mb: 1,
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
+                          <MuiLink
+                            component={Link}
+                            href={`/dashboard/${companyId}/parts/${part.part_id}`}
+                            sx={{ fontWeight: 600, fontSize: '1.05rem' }}
+                          >
+                            {part.parts?.part_name ?? 'Part'}
+                          </MuiLink>
+                          {part.parts?.description && (
+                            <Typography variant="body2" color="text.secondary">
+                              {part.parts.description}
+                            </Typography>
+                          )}
+                          <Chip size="small" label={`Order qty ${part.quantity}`} variant="outlined" />
+                        </Box>
+                        <JobStatusChip status={part.status} size="small" />
+                      </Box>
+                      {part.job_operations && part.job_operations.length > 0 ? (
+                        <OperationsPanel
+                          job={job}
+                          operations={part.job_operations}
+                          onOperationUpdate={fetchJob}
+                          disabled={actionLoading}
+                        />
+                      ) : (
+                        <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>
+                          No operations on this part.
+                        </Typography>
+                      )}
                     </Box>
-                    <Button
-                      variant="outlined"
-                      startIcon={<DownloadIcon />}
-                      onClick={() => handleDownloadAttachment(attachment)}
-                      disabled={actionLoading}
-                    >
-                      Download
-                    </Button>
-                  </Box>
-                ))}
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
+                  ))}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
       </Grid>
 
       {/* Cancel Confirmation Dialog */}
@@ -528,7 +382,9 @@ export default function JobDetailPage() {
         <DialogTitle>Cancel Job?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to cancel <strong>{job.job_number}</strong>? This action can be undone by an admin.
+            Are you sure you want to cancel <strong>{job.job_number}</strong>? Every part on the
+            job will be marked cancelled. This action can be reversed by editing each part&apos;s
+            status individually.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -552,7 +408,9 @@ export default function JobDetailPage() {
         <DialogTitle>Delete Job?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{job.job_number}</strong>? This will also delete all operations and attachments. This action cannot be undone.
+            Are you sure you want to delete <strong>{job.job_number}</strong>? This will also
+            delete every part, every operation, and every material on the job. This action cannot
+            be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -570,18 +428,6 @@ export default function JobDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* View Routing Workflow Modal */}
-      {routingInfo && (
-        <ViewRoutingModal
-          open={workflowModalOpen}
-          onClose={() => setWorkflowModalOpen(false)}
-          routingId={routingInfo.id}
-          routingName={`Routing (${routingInfo.nodeCount} operation${routingInfo.nodeCount !== 1 ? 's' : ''})`}
-          companyId={companyId}
-          partId={job.part_id || ''}
-        />
-      )}
     </Box>
   );
 }

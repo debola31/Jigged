@@ -71,11 +71,22 @@ export default function OperationsPanel({
     setSnackbar((prev) => ({ ...prev, open: false }));
   };
 
-  const handleJobStatusChange = (newStatus?: JobStatus) => {
-    if (newStatus === 'in_progress') {
-      showSnackbar('Job started automatically', 'info');
-    } else if (newStatus === 'completed') {
-      showSnackbar('All operations complete - Job marked as completed!', 'success');
+  const handleStatusChanges = (
+    jobPartStatus?: JobStatus,
+    jobStatus?: JobStatus,
+  ) => {
+    if (jobStatus === 'completed') {
+      showSnackbar('Every part on this job is complete — job marked as completed!', 'success');
+      return;
+    }
+    if (jobPartStatus === 'completed') {
+      showSnackbar('All operations on this part are done — part marked complete.', 'success');
+      return;
+    }
+    if (jobPartStatus === 'in_progress' && jobStatus === 'in_progress') {
+      showSnackbar('Job started.', 'info');
+    } else if (jobPartStatus === 'in_progress') {
+      showSnackbar('Part started.', 'info');
     }
   };
 
@@ -83,9 +94,10 @@ export default function OperationsPanel({
     setLoading(true);
     try {
       const result = await startJobOperation(operationId, job.id);
-      if (result.jobStatusChanged) {
-        handleJobStatusChange(result.newJobStatus);
-      }
+      handleStatusChanges(
+        result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
+        result.jobStatusChanged ? result.newJobStatus : undefined,
+      );
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to start operation', 'error');
@@ -110,8 +122,11 @@ export default function OperationsPanel({
     setCompleteModalOpen(false);
     try {
       const result = await completeJobOperation(selectedOperationId, job.id, data);
-      if (result.jobStatusChanged) {
-        handleJobStatusChange(result.newJobStatus);
+      if (result.jobStatusChanged || result.jobPartStatusChanged) {
+        handleStatusChanges(
+          result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
+          result.jobStatusChanged ? result.newJobStatus : undefined,
+        );
       } else {
         showSnackbar('Operation completed', 'success');
       }
@@ -136,8 +151,11 @@ export default function OperationsPanel({
     setSkipDialogOpen(false);
     try {
       const result = await skipJobOperation(selectedOperationId, job.id, reason);
-      if (result.jobStatusChanged) {
-        handleJobStatusChange(result.newJobStatus);
+      if (result.jobStatusChanged || result.jobPartStatusChanged) {
+        handleStatusChanges(
+          result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
+          result.jobStatusChanged ? result.newJobStatus : undefined,
+        );
       } else {
         showSnackbar('Operation skipped', 'warning');
       }

@@ -21,7 +21,7 @@ When the quote has more than one tier overall, the printed PDF intentionally omi
 
 - Parts module — quotes select from each part's pricing tiers (see [Parts — Pricing Tiers](parts.md#part-pricing-tiers-table-part_pricing_tiers))
 
-**Database Tables:** `quotes`, `quote_line_items`, `quote_operations`, `quote_materials`, `quote_attachments`
+**Database Tables:** `quotes`, `quote_line_items`, `quote_operations`, `quote_materials`
 
 ---
 
@@ -195,16 +195,10 @@ If the chosen part has no pricing tiers yet, the block shows a warning ("This pa
 - Lead time (days, optional)
 - Expiration date (defaults to today + 10 days)
 
-▸ **Attachments**
-
-- Drag-and-drop or file picker for PDFs (up to 5, 50MB each)
-- New quote: temp uploads keyed by a session id; promoted to permanent on save
-- Edit mode: persisted attachments edit-in-place
-
 **Actions:**
 
 - Create quote / Save changes → returns to detail page
-- Cancel → discards temp attachments and returns
+- Cancel → returns to the previous page
 
 **Validation guards:**
 
@@ -226,10 +220,8 @@ If the chosen part has no pricing tiers yet, the block shows a warning ("This pa
 
 - **Converted-to-Jobs banner** — only when `converted_at` is set. Lists every linked job by number with click-through links.
 - **Customer card** — name + click-through to the customer record.
-- **Parts card** — one section per distinct `part_id` in the quote with the part name, optional description, and a "{N} tiers" caption.
-- **Attachments card** — only when attachments exist. Per-attachment download + (when editable) delete.
-- **Line items table** — Part, Qty, Unit price, Total (one row per `quote_line_item`). When the quote has more than one line item, a footer note reads *"Multiple tiers — grand total is withheld until the customer picks a quantity per part."*
-- **Cost Breakdown** — expandable card grouped per part. Shows the per-part operations table, materials table, and a "Quantity tiers on this quote" sub-table per part with Qty, Base/unit, Setup/unit (amortized at the tier's qty), Markup %, Unit price, Total, and an `override` chip on tiers whose unit price was locked.
+- **Line items table** — Part, Description, Order qty, Unit price, Total (one row per `quote_line_item`, one line item per part). A **Total** row summing every line item is rendered at the bottom of the table.
+- **Pricing tiers (reference)** — beneath the line items table, one row per part with > 1 master tier shows the part's full price-break list as chips, with the matched tier highlighted. Suppressed when a line uses a custom price override.
 
 **Actions (based on status):**
 
@@ -267,7 +259,7 @@ A single **Lead time** input applies to all jobs created in this conversion (def
 
 **Actions:**
 
-- Create Jobs → calls `convertQuoteToJob(quote_id, { selections: [{ line_item_id }, …], leadTimeDays })` → creates one job per selection, copies the routing into each via `create_job_operations_from_routing`, copies the first quote attachment to each job, sets `quote.converted_at`, and redirects to the first created job's detail page.
+- Create Jobs → calls `convertQuoteToJob(quote_id, { selections: [{ line_item_id }, …], leadTimeDays })` → creates one job per selection, copies the routing into each via `create_job_operations_from_routing`, sets `quote.converted_at`, and redirects to the first created job's detail page.
 - Cancel → closes the modal without changes.
 
 The submit button stays disabled until **every** part on the quote has a tier selected.
@@ -460,7 +452,6 @@ When the user creates a quote selecting all three tiers, three `quote_line_items
 4. For each selected line item:
    - Insert a `jobs` row carrying `quote_id`, `customer_id`, `part_id`, `source_quote_line_item_id = line_item.id`, `due_date`, `lead_time_days`, `status = 'not_started'`.
    - Call the `create_job_operations_from_routing(job_id, routing_id)` RPC to clone the part's routing into `job_operations`.
-   - Copy the quote's first attachment into `job_attachments` (best-effort).
 5. Set `quote.converted_at` (status unchanged).
 6. Return `{ quote, jobs: [{ id, job_number, line_item_id, part_id, quantity }, …] }`.
 
@@ -530,8 +521,6 @@ This follows the same pattern as Customers, Parts, and Operations:
 - [ ] Single lead-time input applies to all created jobs
 
 - [ ] N selected tiers (across distinct parts) produce N jobs, each with `source_quote_line_item_id` set
-
-- [ ] First quote attachment is copied into each created job
 
 - [ ] Quote sets `converted_at` (status unchanged); detail page shows the linked jobs banner
 
@@ -612,18 +601,3 @@ While creating a quote, users can create new entities without leaving the form:
 
 ---
 
-## Quote Attachments
-
-Quotes support PDF file attachments for customer drawings, specifications, and related documents.
-
-**Constraints:**
-
-- PDF only, max 50 MB per file, max 5 attachments per quote.
-
-**Operations:**
-
-- Upload via drag-and-drop or file picker.
-- Download via signed URL (1-hour TTL).
-- Replace or delete (only while the parent quote is editable: `status = 'active'` and `converted_at IS NULL`).
-
-**Job conversion:** the first attachment on the quote is copied to **every** job created during conversion.

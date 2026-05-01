@@ -21,7 +21,6 @@ export interface OperationRowData {
   laborRate: number | null;
   runTimePerUnit: number | null;
   setupTime: number;
-  instructions: string | null;
 }
 
 interface RoutingOperationRowProps {

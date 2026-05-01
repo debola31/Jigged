@@ -1,5 +1,4 @@
 export { default as JobStatusChip } from "./JobStatusChip";
-export { default as JobForm } from "./JobForm";
 export { default as OperationStatusChip } from "./OperationStatusChip";
 export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";

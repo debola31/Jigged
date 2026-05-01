@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Jobs module tracks production work through the shop. Jobs represent actual work to be done - they're created from accepted quotes (or directly) and tracked through to completion and shipping.
+The Jobs module tracks production work through the shop. A **Job** is the project header — it mirrors a quote 1:1 (`Q-0141 → J-0141`) and owns the customer, due date, and aggregate status. Each part on the source quote becomes a child **`job_part`** with its own routing-derived operations + materials, status, and timestamps. Operators work on one `job_part` at a time.
 
 **Priority:** Must Have (Build Fourth)
 
@@ -10,11 +10,11 @@ The Jobs module tracks production work through the shop. Jobs represent actual w
 
 - Customers module (jobs have a customer)
 
-- Parts module (jobs reference parts; routing is auto-resolved from the part)
+- Parts module (each `job_part` references a part; routing is auto-resolved from the part)
 
-- Quotes module (jobs are typically created from quotes)
+- Quotes module (jobs are created exclusively by converting an accepted quote — no manual job creation)
 
-**Database Table:** `jobs`
+**Database Tables:** `jobs`, `job_parts`, `job_operations`, `job_materials`
 
 ---
 
@@ -50,32 +50,48 @@ Overdue surfaces as:
 |---|---|---|
 | Owner | View all active jobs | I can see what's in production |
 | Owner | Filter jobs by status, customer | I can focus on specific work |
-| Owner | Create a job directly (without quote) | I can handle rush orders or internal work |
-| Operator | See what jobs are pending | I know what to work on next |
-| Operator | Mark a job as in progress | Others know I'm working on it |
-| Operator | Mark a job as complete | It moves to the shipping queue |
-| Admin | Mark a job as shipped | I can track what's been sent out |
+| Operator | See ready operations at my station across all jobs and parts | I know what to work on next |
+| Operator | Scan a job QR code, then pick which part I'm holding | I can drill into the correct routing |
+| Operator | Mark an operation complete | The next operation on that part becomes ready |
+| Operator | See when every operation on a part is done | I know that part is finished |
+| Admin | Mark a fully-completed job as shipped | I can track what's been sent out |
 
 ---
 
 ## Data Model
 
+### `jobs` (project header)
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| id | UUID | Yes | Primary key (auto-generated) |
-| job_number | Text | Auto | Auto-generated: J-0001, J-0002, etc. |
-| quote_id | UUID (FK) | No | Link to source quote (if created from quote) |
+| id | UUID | Yes | Primary key |
+| job_number | Text | Yes | Mirrors source quote (`Q-0141` → `J-0141`); set explicitly by `convertQuoteToJob`. No manual creation, no auto-numbering trigger |
+| quote_id | UUID (FK) | Yes | Source quote (1:1 with the job) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| part_id | UUID (FK) | Yes | Link to part (routing is auto-resolved from the part's routing) |
-| status | Text | Yes | not_started, in_progress, completed, shipped, cancelled |
-| due_date | Date | No | Date the job is due to ship. Used to derive the "Overdue" badge |
-| lead_time_days | Integer | No | Lead time in days, typically copied from the source quote. Editable on the job |
-| started_at | Timestamp | No | When job moved to in_progress |
-| completed_at | Timestamp | No | When job moved to complete |
-| shipped_at | Timestamp | No | When job moved to shipped |
-| notes | Text | No | Internal notes |
+| status | Text | Yes | Aggregate status (`not_started` / `in_progress` / `completed` / `shipped` / `cancelled`) — DERIVED from `job_parts.status` via the `compute_job_status()` function and the `trigger_sync_job_status_from_parts_*` triggers |
+| due_date | Date | No | Date the job is due to ship |
+| lead_time_days | Integer | No | Lead time in days, typically copied from the source quote |
+| started_at | Timestamp | No | First time any part on the job moved to in_progress |
+| completed_at | Timestamp | No | When all parts hit completed/shipped |
+| shipped_at | Timestamp | No | When all parts moved to shipped |
 
-**Due date & conversion:** When a quote is converted to a job via `convert_quote_to_job()`, the caller can pass `p_lead_time_days` to override the quote's value. If a lead time is present, `jobs.due_date = CURRENT_DATE + lead_time_days`. Both fields remain editable on the job after creation.
+### `job_parts` (one row per physical part)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | UUID | Yes | Primary key |
+| job_id | UUID (FK) | Yes | Parent job |
+| part_id | UUID (FK) | Yes | Link to the master part record |
+| source_quote_line_item_id | UUID (FK) | No | The quote line that spawned this part |
+| sequence | Integer | Yes | Display order within the job |
+| quantity | Integer | Yes | Order qty (copied from the quote line) |
+| status | Text | Yes | Per-part status — same enum as `jobs.status`, but owned at this level. Updates here trigger an aggregate refresh on `jobs.status` |
+| current_operation_sequence | Integer | No | Cursor pointing at the next operation to start |
+| started_at / completed_at / shipped_at | Timestamps | No | Per-part lifecycle timestamps |
+
+`job_operations` and `job_materials` carry a `job_part_id` FK so each row belongs to exactly one part of one job. The `(job_part_id, sequence)` unique constraint replaces the old `(job_id, sequence)` so each part has its own independent operations sequence.
+
+**Due date & conversion:** When a quote is converted via `convertQuoteToJob`, the caller can pass `leadTimeDays` to override the quote's value. If a lead time is present, `jobs.due_date = CURRENT_DATE + lead_time_days`. The job's due date is shared by every part — split-shipping deadlines are a future enhancement.
 
 ---
 
@@ -87,13 +103,13 @@ Overdue surfaces as:
 
 **Features:**
 
-- Table showing: Job #, Customer, Part, Current Op, Status, Created
+- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status, Due, Created
 
-- Search box (searches job number, customer name, part number)
+- Search box (searches job number, customer name)
 
 - Filter dropdown: Status (All Jobs / Not Started / In Progress / Completed / Shipped / Cancelled)
 
-- "+ New Job" button
+- No "create" button — jobs are produced exclusively by converting an accepted quote (Convert to Job button on the quote detail page)
 
 - Click row to view detail
 
@@ -185,15 +201,17 @@ Overdue surfaces as:
 
 - Notes text
 
-**Actions (based on status):**
+**Actions (based on aggregate status):**
 
 | Current Status | Available Actions |
 |---|---|
-| Not Started | Start Job, Edit, Cancel Job |
-| In Progress | Update Progress, Mark Complete, Cancel Job |
-| Completed | Mark Shipped, Reopen (back to In Progress) |
+| Not Started | Cancel Job (cancels every part) |
+| In Progress | Cancel Job |
+| Completed | Mark Shipped, Cancel Job |
 | Shipped | (read only) |
 | Cancelled | (read only) |
+
+Status transitions for `not_started → in_progress → completed` are NOT manual on the dashboard — they emerge from operator activity on individual `job_parts`, then aggregate up via the trigger. Manual "Start Job" / "Mark Complete" buttons were removed.
 
 ### 4. Cancel Job Confirmation
 
@@ -254,21 +272,19 @@ Overdue surfaces as:
 
 - [ ] Can mark complete job as shipped
 
-- [ ] Can reopen a complete job back to in_progress
+- [ ] Can cancel a job (cancels every job_part)
 
-- [ ] Can cancel a job from not started or in_progress
-
-- [ ] Timestamps auto-set on status transitions
+- [ ] `jobs.status` aggregates from `job_parts.status` via the database trigger — never manually set on the dashboard
 
 - [ ] Jobs created from quotes show link back to quote
 
-- [ ] Jobs created from quotes show attachments added to quote
+- [ ] Job number mirrors the source quote (`Q-NNNN → J-NNNN`)
 
-- [ ] Part is required when creating a job (no ad-hoc jobs without a part)
+- [ ] Every part on the source quote produces exactly one `job_part`
 
-- [ ] Part must have a routing to create a job (routing auto-resolved from part)
+- [ ] Each `job_part` requires its part to have a routing — convert-to-job aborts before any insert if any part is missing one
 
-- [ ] No routing dropdown in job form — routing is auto-resolved
+- [ ] No manual "create job" UI exists
 
 - [ ] Customer and part selection are independent (not cascading)
 

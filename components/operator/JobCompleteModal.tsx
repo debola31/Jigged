@@ -19,7 +19,7 @@ import Fade from '@mui/material/Fade';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import { completeJob, getJobMaterialsForCompletion } from '@/utils/operatorAccess';
+import { completeJob, getJobPartMaterialsForCompletion } from '@/utils/operatorAccess';
 import { getAllInventoryItems } from '@/utils/inventoryAccess';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
@@ -29,9 +29,11 @@ interface JobCompleteModalProps {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  jobId: string;
+  /** The job_part_id whose materials we're confirming and consuming. */
+  jobPartId: string;
   operatorId: string | null;
   sessionStartedAt: string | null;
+  /** Currently-active job_operation on this part (used for traceability). */
   jobOperationId: string | null;
   companyId: string;
 }
@@ -49,12 +51,13 @@ export default function JobCompleteModal({
   open,
   onClose,
   onConfirm,
-  jobId,
+  jobPartId,
   operatorId,
   sessionStartedAt,
-  jobOperationId,
+  jobOperationId: _jobOperationId,
   companyId,
 }: JobCompleteModalProps) {
+  void _jobOperationId; // currently unused — reserved for future traceability hooks
   const [materials, setMaterials] = useState<MaterialConfirmation[]>([]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
@@ -94,11 +97,11 @@ export default function JobCompleteModal({
     setShowAddMaterial(false);
 
     setLoadingMaterials(true);
-    getJobMaterialsForCompletion(jobId)
-      .then((mats) => setMaterials(mats))
+    getJobPartMaterialsForCompletion(jobPartId)
+      .then((mats: MaterialConfirmation[]) => setMaterials(mats))
       .catch(() => setMaterials([]))
       .finally(() => setLoadingMaterials(false));
-  }, [open, jobId]);
+  }, [open, jobPartId]);
 
   const handleConfirmedQtyChange = (index: number, value: number) => {
     setMaterials((prev) => {
@@ -161,7 +164,7 @@ export default function JobCompleteModal({
       // Only send materials with confirmed_quantity > 0
       const materialsToSend = materials.filter((m) => m.confirmed_quantity > 0);
 
-      await completeJob(jobId, operatorId, {
+      await completeJob(jobPartId, operatorId, {
         notes: notes.trim() || undefined,
         materials: materialsToSend.length > 0 ? materialsToSend : undefined,
       });

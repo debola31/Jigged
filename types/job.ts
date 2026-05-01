@@ -1,29 +1,18 @@
 /**
- * Job status values
+ * Job status values. Applied at the job (project header) level — derived from
+ * the aggregate of its job_parts via a Postgres trigger — and at the
+ * job_part level — owned by the operator workflow.
  */
 export type JobStatus = 'not_started' | 'in_progress' | 'completed' | 'shipped' | 'cancelled';
 
 /**
- * Job attachment record from database. Job attachments are independent of quotes.
- */
-export interface JobAttachment {
-  id: string;
-  job_id: string;
-  company_id: string;
-  file_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  uploaded_by: string | null;
-  uploaded_at: string;
-}
-
-/**
- * Job operation record from database
+ * Job operation record. Each operation belongs to one job_part — multi-part
+ * jobs have several parallel operation lists, one per part.
  */
 export interface JobOperation {
   id: string;
   job_id: string;
+  job_part_id: string;
   sequence: number;
   operation_name: string;
   operation_type_id: string | null;
@@ -37,11 +26,9 @@ export interface JobOperation {
   completed_at: string | null;
   assigned_to: string | null;
   completed_by: string | null;
-  instructions: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
-  // Joined operation type data
   operation_type?: {
     id: string;
     name: string;
@@ -50,7 +37,9 @@ export interface JobOperation {
 }
 
 /**
- * Job record from database
+ * Job (project header). Owns the customer, due date, source quote, and an
+ * aggregate status mirrored from job_parts. The actual part-level routing,
+ * status, and timestamps live on JobPart.
  */
 export interface Job {
   id: string;
@@ -58,16 +47,36 @@ export interface Job {
   job_number: string;
   quote_id: string | null;
   customer_id: string;
-  part_id: string | null;
   status: JobStatus;
   status_changed_at: string | null;
-  current_operation_sequence: number | null;
   started_at: string | null;
   completed_at: string | null;
   shipped_at: string | null;
   due_date: string | null;
   lead_time_days: number | null;
   created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * One physical part / workpiece-group inside a job. Each job_part has its own
+ * routing-derived operations + materials, status, and timestamps.
+ */
+export interface JobPart {
+  id: string;
+  job_id: string;
+  company_id: string;
+  part_id: string;
+  source_quote_line_item_id: string | null;
+  sequence: number;
+  quantity: number;
+  status: JobStatus;
+  status_changed_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  shipped_at: string | null;
+  current_operation_sequence: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,7 +96,7 @@ export function isJobOverdue(job: Pick<Job, 'due_date' | 'status'>): boolean {
 }
 
 /**
- * Current operation info for the jobs list "Current Op" column
+ * Current operation info for the jobs list "Current Op" column.
  */
 export interface CurrentOperationInfo {
   operationName: string;
@@ -95,14 +104,15 @@ export interface CurrentOperationInfo {
 }
 
 /**
- * Material expected/consumed for a job. Snapshot from routing_materials at job
- * creation time.
+ * Material expected/consumed for a (job, part). Snapshot from routing_materials
+ * at job-part creation time.
  */
 export type JobMaterialStatus = 'pending' | 'consumed' | 'skipped';
 
 export interface JobMaterial {
   id: string;
   job_id: string;
+  job_part_id: string;
   routing_material_id: string | null;
   inventory_item_id: string;
   expected_quantity: number;
@@ -113,7 +123,6 @@ export interface JobMaterial {
   consumed_by: string | null;
   created_at: string;
   updated_at: string;
-  // Joined inventory item data
   inventory_item?: {
     id: string;
     name: string;
@@ -124,48 +133,38 @@ export interface JobMaterial {
 }
 
 /**
- * Job with joined relation data
+ * Hydrated JobPart with its part metadata, operations, and materials.
  */
-export interface JobWithRelations extends Job {
-  // Joined customer data
-  customers?: {
-    id: string;
-    name: string;
-  } | null;
-  // Joined part data
+export interface JobPartWithRelations extends JobPart {
   parts?: {
     id: string;
     part_name: string;
     description: string | null;
   } | null;
-  // Joined quote data (if created from quote)
+  job_operations?: JobOperation[];
+  job_materials?: JobMaterial[];
+}
+
+/**
+ * Job with joined relation data — used by the dashboard detail page.
+ */
+export interface JobWithRelations extends Job {
+  customers?: {
+    id: string;
+    name: string;
+  } | null;
   quotes?: {
     id: string;
     quote_number: string;
-    total_price: number | null;
   } | null;
-  // Joined operations
-  job_operations?: JobOperation[];
-  // Joined materials (from job_materials, snapshot of routing_materials)
-  job_materials?: JobMaterial[];
-  // Joined attachments
-  job_attachments?: JobAttachment[];
-  // Current operation info (populated by batch query on list page)
+  /** One row per physical part inside the job. */
+  job_parts?: JobPartWithRelations[];
+  /** Summary of the most-progressed operation across parts (list view). */
   currentOperation?: CurrentOperationInfo | null;
 }
 
 /**
- * Form data for creating/editing jobs
- */
-export interface JobFormData {
-  customer_id: string;
-  part_id: string;
-  due_date: string; // ISO date (YYYY-MM-DD), '' when not set
-  lead_time_days: string;
-}
-
-/**
- * Filters for jobs list
+ * Filters for the jobs list.
  */
 export interface JobFilters {
   status?: JobStatus | 'all';
@@ -175,29 +174,7 @@ export interface JobFilters {
 }
 
 /**
- * Empty form defaults for NEW jobs
- */
-export const EMPTY_JOB_FORM: JobFormData = {
-  customer_id: '',
-  part_id: '',
-  due_date: '',
-  lead_time_days: '',
-};
-
-/**
- * Convert Job to JobFormData for edit forms
- */
-export function jobToFormData(job: Job): JobFormData {
-  return {
-    customer_id: job.customer_id,
-    part_id: job.part_id || '',
-    due_date: job.due_date || '',
-    lead_time_days: job.lead_time_days !== null ? String(job.lead_time_days) : '',
-  };
-}
-
-/**
- * Status display configuration
+ * Status display configuration.
  */
 export const JOB_STATUS_CONFIG: Record<
   JobStatus,
@@ -213,12 +190,12 @@ export const JOB_STATUS_CONFIG: Record<
 // ============== Operation Types ==============
 
 /**
- * Operation status values
+ * Operation status values.
  */
 export type OperationStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 
 /**
- * Operation status display configuration
+ * Operation status display configuration.
  */
 export const OPERATION_STATUS_CONFIG: Record<
   OperationStatus,
@@ -231,7 +208,7 @@ export const OPERATION_STATUS_CONFIG: Record<
 };
 
 /**
- * Data for completing an operation
+ * Data for completing an operation.
  */
 export interface CompleteOperationData {
   actual_setup_minutes?: number;
@@ -240,10 +217,15 @@ export interface CompleteOperationData {
 }
 
 /**
- * Result of an operation update with job status change info
+ * Result of an operation update with status-change info — emitted by
+ * operatorAccess.completeOperation so the UI can display status transitions.
  */
 export interface OperationUpdateResult {
   operation: JobOperation;
+  /** True when this operation finished the parent job_part (job_part flipped to completed). */
+  jobPartStatusChanged: boolean;
+  newJobPartStatus?: JobStatus;
+  /** True when the parent job's aggregate status changed as a side effect. */
   jobStatusChanged: boolean;
   newJobStatus?: JobStatus;
 }

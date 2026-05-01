@@ -194,7 +194,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - quotes, quote_line_items - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
 
-- jobs, job_operations, job_materials - Work orders (no routing_id; routing auto-resolved from part). `job_materials` snapshots `routing_materials` at job creation for consumption tracking.
+- jobs, job_parts, job_operations, job_materials - Multi-part work orders. A `job` mirrors a quote 1:1 (`J-NNNN ↔ Q-NNNN`) and owns customer/due-date/aggregate-status. Each part on the source quote becomes a `job_part` carrying its own status + cloned routing operations + materials. `jobs.status` is derived from the aggregate of `job_parts.status` via a Postgres trigger.
 
 **Status Workflows:**
 
@@ -372,9 +372,10 @@ routings             -- Process routings (1:1 with parts, unique part_id)
 routing_nodes        -- Linear, sequence-ordered list of operations per routing
 routing_materials    -- Routing-level materials list (inventory_item_id, quantity, unit)
 quotes               -- Customer quotes (no routing_id)
-jobs                 -- Work orders (no routing_id; routing auto-resolved from part)
-job_operations       -- Steps in jobs
-job_materials        -- Per-job materials snapshot (expected + actual consumption)
+jobs                 -- Project header; mirrors a quote 1:1 (J-NNNN ↔ Q-NNNN); aggregate status derived from job_parts
+job_parts            -- One row per physical part inside a job; owns per-part status + lifecycle timestamps
+job_operations       -- Steps in jobs (keyed on job_part_id; one independent sequence per part)
+job_materials        -- Per-(job, part) materials snapshot (expected + actual consumption)
 ```
 
 ---

@@ -74,12 +74,13 @@ export interface QuoteWithRelations extends Quote {
   } | null;
   // Hydrated line items (ordered by sequence).
   line_items?: QuoteLineItem[];
-  // Jobs created from this quote via conversion.
+  // Jobs created from this quote via conversion. With the multi-part-jobs
+  // refactor at most one job is created per quote, but the array shape is
+  // preserved so legacy multi-job quotes still render.
   jobs?: Array<{
     id: string;
     job_number: string;
     status: string;
-    source_quote_line_item_id: string | null;
   }>;
   // Resolved creator profile from user_company_access (populated client-side
   // via a second query — keeps the main PostgREST query simple).

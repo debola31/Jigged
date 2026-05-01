@@ -123,7 +123,7 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 
 ### Allowed Tables (16 business tables)
 
-`companies`, `customers`, `quotes`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_operations`, `job_attachments`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
+`companies`, `customers`, `quotes`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
 
 ### Excluded Tables (auth/system/AI)
 

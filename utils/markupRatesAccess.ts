@@ -79,10 +79,22 @@ export async function createMarkupRate(
   return data as MarkupRate;
 }
 
+/**
+ * Result of an update that cascaded to linked parts. `partsUpdated` is the
+ * count of parts whose tiers were re-snapshotted from the new breakpoints;
+ * `partsFailed` lists per-part errors so the edit UI can surface them instead
+ * of swallowing them silently.
+ */
+export interface MarkupRateUpdateResult {
+  rate: MarkupRate;
+  partsUpdated: number;
+  partsFailed: Array<{ partId: string; error: string }>;
+}
+
 export async function updateMarkupRate(
   rateId: string,
   formData: MarkupRateFormData,
-): Promise<MarkupRate> {
+): Promise<MarkupRateUpdateResult> {
   const supabase = getSupabase();
 
   // Promoting this rate to default? Demote any existing default in the same
@@ -118,7 +130,14 @@ export async function updateMarkupRate(
     throw error;
   }
 
-  return data as MarkupRate;
+  const rate = data as MarkupRate;
+
+  // Cascade: every part linked to this rate gets its tiers re-snapshotted from
+  // the new breakpoints. Per-part unit_price recomputes against each part's
+  // own routing inside replaceTiersForPart.
+  const cascade = await cascadeRateUpdateToParts(rate.company_id, rate.id);
+
+  return { rate, partsUpdated: cascade.updated, partsFailed: cascade.failed };
 }
 
 /**
@@ -167,6 +186,34 @@ export async function getDefaultMarkupRate(companyId: string): Promise<MarkupRat
   return (data as MarkupRate) ?? null;
 }
 
+function breakpointsToTierInputs(rate: MarkupRate): PartPricingTierInput[] {
+  return [...rate.breakpoints]
+    .sort((a, b) => a.qty - b.qty)
+    .map((bp, i) => ({
+      sequence: (i + 1) * 10,
+      quantity: bp.qty,
+      markup_percent: bp.markup_percent,
+    }));
+}
+
+/**
+ * Apply a specific markup rate to a single part: replaces the part's tiers
+ * with the rate's breakpoints and links the part to that rate. Used by the
+ * per-part PartPricing UI and by the bulk-apply flow.
+ */
+export async function applyRateToPart(
+  companyId: string,
+  partId: string,
+  rateId: string,
+): Promise<void> {
+  const rate = await getMarkupRate(rateId);
+  if (!rate) {
+    throw new Error(`Markup rate ${rateId} not found`);
+  }
+  const tiers = breakpointsToTierInputs(rate);
+  await replaceTiersForPart(companyId, partId, tiers, { rateId: rate.id });
+}
+
 /**
  * Snapshot the company's default markup rate's breakpoints into a part's
  * pricing tiers. Used by createPart to give new parts an initial set of
@@ -183,15 +230,85 @@ export async function applyDefaultRateToPart(
   const defaultRate = await getDefaultMarkupRate(companyId);
   if (!defaultRate || defaultRate.breakpoints.length === 0) return;
 
-  const tiers: PartPricingTierInput[] = [...defaultRate.breakpoints]
-    .sort((a, b) => a.qty - b.qty)
-    .map((bp, i) => ({
-      sequence: (i + 1) * 10,
-      quantity: bp.qty,
-      markup_percent: bp.markup_percent,
-    }));
+  const tiers = breakpointsToTierInputs(defaultRate);
+  await replaceTiersForPart(companyId, partId, tiers, { rateId: defaultRate.id });
+}
 
-  await replaceTiersForPart(companyId, partId, tiers);
+/**
+ * Re-apply a rate's current breakpoints to every part linked to it. Called
+ * after a rate edit so the live-link semantic holds: editing a rate updates
+ * every part whose markup_rate_id points to it. Sequential per-part to keep
+ * recompute logic simple — pilot scale (hundreds of parts per company) is
+ * fine; revisit if a single rate ends up linked to thousands of parts.
+ */
+export async function cascadeRateUpdateToParts(
+  companyId: string,
+  rateId: string,
+): Promise<{ updated: number; failed: Array<{ partId: string; error: string }> }> {
+  const supabase = getSupabase();
+
+  const { data: linkedParts, error } = await supabase
+    .from('parts')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('markup_rate_id', rateId);
+
+  if (error) {
+    console.error('Error fetching parts linked to rate:', error);
+    throw error;
+  }
+
+  const ids = ((linkedParts || []) as Array<{ id: string }>).map((r) => r.id);
+  if (ids.length === 0) return { updated: 0, failed: [] };
+
+  const failed: Array<{ partId: string; error: string }> = [];
+  let updated = 0;
+  for (const partId of ids) {
+    try {
+      await applyRateToPart(companyId, partId, rateId);
+      updated += 1;
+    } catch (err) {
+      failed.push({
+        partId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+  return { updated, failed };
+}
+
+/**
+ * Apply a rate to many parts in one shot. Each part gets its tiers replaced
+ * with the rate's breakpoints and its markup_rate_id set. Iterates
+ * sequentially so a single failure doesn't abort the whole batch — failures
+ * are collected and returned alongside the successes.
+ */
+export async function bulkApplyMarkupRate(
+  companyId: string,
+  partIds: string[],
+  rateId: string,
+): Promise<{ succeeded: string[]; failed: Array<{ partId: string; error: string }> }> {
+  if (partIds.length === 0) return { succeeded: [], failed: [] };
+
+  const rate = await getMarkupRate(rateId);
+  if (!rate) {
+    throw new Error(`Markup rate ${rateId} not found`);
+  }
+
+  const succeeded: string[] = [];
+  const failed: Array<{ partId: string; error: string }> = [];
+  for (const partId of partIds) {
+    try {
+      await applyRateToPart(companyId, partId, rateId);
+      succeeded.push(partId);
+    } catch (err) {
+      failed.push({
+        partId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+  return { succeeded, failed };
 }
 
 export async function deleteMarkupRate(rateId: string): Promise<void> {

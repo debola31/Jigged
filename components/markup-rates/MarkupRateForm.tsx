@@ -173,7 +173,19 @@ export default function MarkupRateForm({
       if (mode === 'create') {
         await createMarkupRate(companyId, formData);
       } else if (rateId) {
-        await updateMarkupRate(rateId, formData);
+        const result = await updateMarkupRate(rateId, formData);
+        // Surface cascade outcomes so users know whether the edit propagated
+        // to linked parts. Partial failures are treated as warnings rather
+        // than save errors — the rate itself was saved successfully.
+        if (result.partsFailed.length > 0) {
+          setError(
+            `Saved, but ${result.partsFailed.length} part${
+              result.partsFailed.length === 1 ? '' : 's'
+            } failed to update. Try editing the rate again.`,
+          );
+          setSaving(false);
+          return;
+        }
       }
       router.push(`/dashboard/${companyId}/markup-rates`);
     } catch (err) {
@@ -397,8 +409,9 @@ export default function MarkupRateForm({
         <DialogTitle sx={{ pb: 2 }}>Delete Rate</DialogTitle>
         <DialogContent sx={{ pt: 0 }}>
           <Typography variant="body1" sx={{ mb: 1 }}>
-            Delete <strong>{initialData?.name ?? 'this rate'}</strong>? Parts that previously
-            had it applied keep their pricing tiers — snapshot semantics mean nothing cascades.
+            Delete <strong>{initialData?.name ?? 'this rate'}</strong>? Parts linked to this
+            rate flip to <em>Custom</em> and keep their last tier values — no pricing data is
+            lost, but they'll no longer follow this rate's edits.
           </Typography>
           <Typography variant="body2" color="text.secondary">
             This action cannot be undone.

@@ -20,7 +20,7 @@ export async function getAllParts(
   while (hasMore) {
     let query = supabase
       .from('parts')
-      .select('*, routings(id)')
+      .select('*, routings(id), markup_rates(id, name)')
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -44,11 +44,14 @@ export async function getAllParts(
   return allData.map((part) => {
     const routings = part.routings as Array<{ id: string }> | { id: string } | null;
     const routingRecord = Array.isArray(routings) ? routings[0] : routings;
+    const rateRel = part.markup_rates as { id: string; name: string } | null;
     return {
       id: part.id as string,
       company_id: part.company_id as string,
       part_name: part.part_name as string,
       description: part.description as string | null,
+      markup_rate_id: (part.markup_rate_id as string | null) ?? null,
+      markup_rate_name: rateRel?.name ?? null,
       created_at: part.created_at as string,
       updated_at: part.updated_at as string,
       routing: routingRecord
@@ -94,6 +97,7 @@ export async function getPartsPaginated(
     company_id: part.company_id as string,
     part_name: part.part_name as string,
     description: part.description as string | null,
+    markup_rate_id: (part.markup_rate_id as string | null) ?? null,
     created_at: part.created_at as string,
     updated_at: part.updated_at as string,
   }));

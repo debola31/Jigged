@@ -15,20 +15,15 @@ import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import Autocomplete from '@mui/material/Autocomplete';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
-import ListSubheader from '@mui/material/ListSubheader';
+import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CheckIcon from '@mui/icons-material/Check';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
 import PercentIcon from '@mui/icons-material/Percent';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
@@ -40,10 +35,8 @@ import {
 import {
   getTiersForPart,
   replaceTiersForPart,
-  copyTiersFromPart,
 } from '@/utils/partPricingTiersAccess';
-import { getPartsForSelect } from '@/utils/partsAccess';
-import { getAllMarkupRates } from '@/utils/markupRatesAccess';
+import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
 import {
   type MarkupRate,
   summarizeBreakpoints,
@@ -132,14 +125,9 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
-  const [copyOptions, setCopyOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [copyTarget, setCopyTarget] = useState<{ id: string; label: string } | null>(null);
-  const [copying, setCopying] = useState(false);
-
-  // Markup rate picker — built-in starters + user-created rates from this company.
-  // Applying a rate is snapshot semantics: copy the breakpoints into tier rows
-  // and persist immediately. No link back to the rate after apply.
+  // Markup rate picker. Applying a rate sets the part's markup_rate_id so
+  // future rate edits cascade into this part's tiers; manually editing tiers
+  // (via the autosave path) clears the link and the part flips to "Custom".
   const [rateMenuAnchor, setRateMenuAnchor] = useState<HTMLElement | null>(null);
   const [userRates, setUserRates] = useState<MarkupRate[]>([]);
   const [applyingRateName, setApplyingRateName] = useState<string | null>(null);
@@ -338,18 +326,10 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     setApplyingRateName(rate.name);
     setError(null);
     try {
-      // Snapshot apply: convert the rate's breakpoints into tier rows and
-      // persist directly. Bypass the debounced scheduleSave path because we
-      // want this commit to be atomic and immediate.
-      const payload = rate.breakpoints
-        .slice()
-        .sort((a, b) => a.qty - b.qty)
-        .map((bp, i) => ({
-          sequence: (i + 1) * 10,
-          quantity: bp.qty,
-          markup_percent: bp.markup_percent,
-        }));
-      await replaceTiersForPart(companyId, partId, payload);
+      // applyRateToPart snapshots the breakpoints into tier rows AND sets
+      // parts.markup_rate_id, so future edits to the rate cascade into this
+      // part automatically.
+      await applyRateToPart(companyId, partId, rate.id);
       await loadAll();
       setAppliedRateName(rate.name);
     } catch (err) {
@@ -357,37 +337,6 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
       setError(err instanceof Error ? err.message : 'Failed to apply markup rate');
     } finally {
       setApplyingRateName(null);
-    }
-  };
-
-  const openCopyDialog = async (): Promise<void> => {
-    setCopyTarget(null);
-    setCopyDialogOpen(true);
-    try {
-      const options = await getPartsForSelect(companyId);
-      setCopyOptions(
-        options
-          .filter((p) => p.id !== partId)
-          .map((p) => ({ id: p.id, label: p.part_name + (p.description ? ` — ${p.description}` : '') })),
-      );
-    } catch (err) {
-      console.error('Failed to load parts for copy:', err);
-      setCopyOptions([]);
-    }
-  };
-
-  const handleCopyConfirm = async (): Promise<void> => {
-    if (!copyTarget) return;
-    setCopying(true);
-    setError(null);
-    try {
-      await copyTiersFromPart(companyId, copyTarget.id, partId);
-      setCopyDialogOpen(false);
-      await loadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to copy markup');
-    } finally {
-      setCopying(false);
     }
   };
 
@@ -567,13 +516,6 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
             >
               {applyingRateName ? `Applying ${applyingRateName}…` : 'Apply markup rate'}
             </Button>
-            <Button
-              size="small"
-              startIcon={<ContentCopyIcon />}
-              onClick={openCopyDialog}
-            >
-              Copy markup from another part
-            </Button>
             <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
               Add tier
             </Button>
@@ -581,9 +523,10 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
         </>
       )}
 
-      {/* Apply rate menu — every rate (defaults + user-created) lives in the
-          DB now and is treated identically. Snapshot semantics: the rate's
-          breakpoints replace the part's current tier rows. */}
+      {/* Apply rate menu. The currently-linked rate (if any) gets a check
+          icon so users can see which rate this part follows; selecting any
+          rate snapshots its breakpoints into the part's tiers and switches
+          the link to that rate. */}
       <Menu
         anchorEl={rateMenuAnchor}
         open={Boolean(rateMenuAnchor)}
@@ -602,18 +545,28 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
             />
           </MenuItem>
         )}
-        {userRates.map((rate) => (
-          <MenuItem key={rate.id} onClick={() => handleApplyRate(rate)}>
-            <ListItemText
-              primary={rate.name}
-              secondary={summarizeBreakpoints(rate.breakpoints)}
-              slotProps={{
-                primary: { sx: { fontWeight: 500 } },
-                secondary: { sx: { fontSize: '0.75rem' } },
-              }}
-            />
-          </MenuItem>
-        ))}
+        {userRates.map((rate) => {
+          const isApplied = part.markup_rate_id === rate.id;
+          return (
+            <MenuItem key={rate.id} onClick={() => handleApplyRate(rate)} selected={isApplied}>
+              <ListItemIcon sx={{ minWidth: 32 }}>
+                {isApplied ? <CheckIcon fontSize="small" color="primary" /> : null}
+              </ListItemIcon>
+              <ListItemText
+                primary={rate.name}
+                secondary={
+                  isApplied
+                    ? `Currently applied · ${summarizeBreakpoints(rate.breakpoints)}`
+                    : summarizeBreakpoints(rate.breakpoints)
+                }
+                slotProps={{
+                  primary: { sx: { fontWeight: 500 } },
+                  secondary: { sx: { fontSize: '0.75rem' } },
+                }}
+              />
+            </MenuItem>
+          );
+        })}
 
         <MenuItem
           component={Link}
@@ -632,37 +585,6 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
         onClose={() => setAppliedRateName(null)}
         message={appliedRateName ? `Applied "${appliedRateName}"` : ''}
       />
-
-      <Dialog open={copyDialogOpen} onClose={() => !copying && setCopyDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Copy markup from another part</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Copies the source part&apos;s tier quantities and markup percentages onto this part.
-            Unit prices are recomputed against this part&apos;s own routing.
-          </Typography>
-          <Autocomplete
-            options={copyOptions}
-            value={copyTarget}
-            onChange={(_, v) => setCopyTarget(v)}
-            isOptionEqualToValue={(o, v) => o.id === v.id}
-            renderInput={(params) => <TextField {...params} label="Source part" autoFocus />}
-            disabled={copying}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCopyDialogOpen(false)} disabled={copying}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleCopyConfirm}
-            disabled={!copyTarget || copying}
-            startIcon={copying ? <CircularProgress size={14} color="inherit" /> : null}
-          >
-            {copying ? 'Copying…' : 'Copy markup'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

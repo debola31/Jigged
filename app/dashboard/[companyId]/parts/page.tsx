@@ -22,6 +22,7 @@ import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
 import CheckIcon from '@mui/icons-material/Check';
+import PercentIcon from '@mui/icons-material/Percent';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -33,6 +34,7 @@ import type {
   ICellRendererParams,
   RowClickedEvent,
   CellKeyDownEvent,
+  ValueFormatterParams,
 } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -40,6 +42,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, deletePart, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import BulkApplyRateDialog from '@/components/parts/BulkApplyRateDialog';
 import type { Part } from '@/types/part';
 
 export default function PartsPage() {
@@ -66,6 +69,8 @@ export default function PartsPage() {
     count?: number;
   }>({ open: false, type: 'part' });
   const [deleting, setDeleting] = useState(false);
+
+  const [bulkRateDialogOpen, setBulkRateDialogOpen] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -218,6 +223,14 @@ export default function PartsPage() {
         );
       },
     },
+    {
+      field: 'markup_rate_name',
+      headerName: 'Markup',
+      width: 180,
+      sortable: true,
+      valueFormatter: (params: ValueFormatterParams<Part, string | null | undefined>) =>
+        params.value ?? 'Custom',
+    },
   ];
 
   return (
@@ -247,6 +260,13 @@ export default function PartsPage() {
               fileName="parts-export"
               selectedCount={selectedPartIds.length}
             />
+            <Button
+              variant="contained"
+              startIcon={<PercentIcon />}
+              onClick={() => setBulkRateDialogOpen(true)}
+            >
+              Apply rate ({selectedPartIds.length})
+            </Button>
             <Button
               variant="contained"
               color="error"
@@ -392,6 +412,33 @@ export default function PartsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <BulkApplyRateDialog
+        open={bulkRateDialogOpen}
+        companyId={companyId}
+        partIds={selectedPartIds}
+        onClose={() => setBulkRateDialogOpen(false)}
+        onApplied={(succeeded, failed) => {
+          setSelectedPartIds([]);
+          if (partsGridRef.current?.api) {
+            partsGridRef.current.api.deselectAll();
+          }
+          fetchParts();
+          if (failed > 0) {
+            setSnackbar({
+              open: true,
+              message: `Applied to ${succeeded} part${succeeded === 1 ? '' : 's'}, ${failed} failed.`,
+              severity: 'error',
+            });
+          } else {
+            setSnackbar({
+              open: true,
+              message: `Applied to ${succeeded} part${succeeded === 1 ? '' : 's'}.`,
+              severity: 'success',
+            });
+          }
+        }}
+      />
 
       <Snackbar
         open={snackbar.open}

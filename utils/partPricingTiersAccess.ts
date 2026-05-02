@@ -44,11 +44,19 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
  * `base_cost × (1 + markup/100)` against the current routing. There is no
  * lock concept — typing a unit price in the UI back-calculates markup before
  * calling this function, so the markup field captured here always governs.
+ *
+ * Also updates `parts.markup_rate_id`. `opts.rateId` should be set when the
+ * caller is applying a markup rate (the rate's id), and omitted/null when the
+ * caller is committing a manual edit — manual edits flip the part to "Custom"
+ * (rate_id = null). Centralising this in one access function guarantees the
+ * invariant that tier writes and rate-link state stay in sync no matter which
+ * UI path triggered the save.
  */
 export async function replaceTiersForPart(
   companyId: string,
   partId: string,
   tiers: PartPricingTierInput[],
+  opts: { rateId?: string | null } = {},
 ): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
 
@@ -112,30 +120,17 @@ export async function replaceTiersForPart(
     }
   }
 
+  // Sync the part's rate link with the caller's intent. A rate-apply path
+  // passes the rate id; a manual-edit path omits it and the part flips to
+  // Custom (null). Done last so the FK update reflects a successful tier write.
+  const nextRateId = opts.rateId ?? null;
+  const { error: rateLinkErr } = await supabase
+    .from('parts')
+    .update({ markup_rate_id: nextRateId })
+    .eq('id', partId);
+  if (rateLinkErr) throw rateLinkErr;
+
   return getTiersForPart(partId);
-}
-
-/**
- * Copy pricing tiers from one part to another. Source qty + markup are copied
- * verbatim; unit_price and base_cost_per_unit are recomputed against the
- * target part's own routing so the prices reflect target-part economics.
- */
-export async function copyTiersFromPart(
-  companyId: string,
-  sourcePartId: string,
-  targetPartId: string,
-): Promise<PartPricingTier[]> {
-  const sourceTiers = await getTiersForPart(sourcePartId);
-  if (sourceTiers.length === 0) return getTiersForPart(targetPartId);
-
-  // Existing target tiers are replaced — copy semantics, not merge.
-  const inputs: PartPricingTierInput[] = sourceTiers.map((t, i) => ({
-    sequence: (i + 1) * 10,
-    quantity: t.quantity,
-    markup_percent: t.markup_percent,
-  }));
-
-  return replaceTiersForPart(companyId, targetPartId, inputs);
 }
 
 /**

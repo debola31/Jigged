@@ -6,6 +6,13 @@ export interface Part {
   company_id: string;
   part_name: string;
   description: string | null;
+  // Null when the part's pricing tiers are custom (manually edited or no rate
+  // ever applied). Otherwise points to the markup_rates row driving this
+  // part's tier breakpoints — edits to that rate cascade into the part's tiers.
+  markup_rate_id: string | null;
+  // Populated by getAllParts via the markup_rates join. Undefined when the
+  // caller didn't request the join.
+  markup_rate_name?: string | null;
   created_at: string;
   updated_at: string;
   // Optional relation counts (populated by getPartWithRelations)

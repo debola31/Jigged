@@ -27,6 +27,9 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
 import PercentIcon from '@mui/icons-material/Percent';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
+import TuneIcon from '@mui/icons-material/Tune';
 import {
   calculateRoutingCost,
   calculateTierPricing,
@@ -35,6 +38,7 @@ import {
 import {
   getTiersForPart,
   replaceTiersForPart,
+  setPartMarkupRate,
 } from '@/utils/partPricingTiersAccess';
 import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
 import {
@@ -52,21 +56,14 @@ interface PartPricingProps {
 }
 
 /**
- * Working-copy of a tier inside the editor.
+ * Working-copy of a tier inside the editor (Custom mode only).
  *
  * Markup % is the source of truth — `unit_price` is always derived from
  * `base_cost × (1 + markup/100)`. Typing a unit price back-calculates markup
  * before the next save.
- *
- * `phantom: true` rows are UI-only seeds — they show users what a tier looks
- * like for parts that have no tiers yet, but they don't write to the database
- * until the user demonstrates intent (types markup, types a unit price, or
- * edits the seeded qty). If the user navigates away without touching them,
- * no DB rows are created.
  */
 interface EditRow {
   id?: string;
-  phantom?: boolean;
   sequence: number;
   quantity: string;
   markupPercent: string;
@@ -75,6 +72,7 @@ interface EditRow {
 }
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
+const DEFAULT_CUSTOM_MARKUP = '25';
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -94,26 +92,11 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
   }
   const markup = parseNumber(row.markupPercent);
   const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
-  // Phantom rows leave unitPrice empty so the input renders the suggested price
-  // as a placeholder rather than a committed value — typing in either Markup
-  // or Unit price flips the row out of phantom and the value becomes real.
-  if (row.phantom) {
-    return { ...row, baseCostPerUnit };
-  }
   return {
     ...row,
     baseCostPerUnit,
     unitPrice: unitPrice !== null ? String(unitPrice) : '',
   };
-}
-
-function makePhantomRows(breakdown: RoutingCostBreakdown | null): EditRow[] {
-  // Single phantom row — qty 1 with a suggested 25% markup. Multi-quantity
-  // exploration lives behind a separate UX (TBD).
-  const rows: EditRow[] = [
-    { phantom: true, sequence: 10, quantity: '1', markupPercent: '25', unitPrice: '', baseCostPerUnit: 0 },
-  ];
-  return rows.map((r) => recomputeRow(r, breakdown));
 }
 
 export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPricingProps) {
@@ -125,9 +108,16 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Markup rate picker. Applying a rate sets the part's markup_rate_id so
-  // future rate edits cascade into this part's tiers; manually editing tiers
-  // (via the autosave path) clears the link and the part flips to "Custom".
+  // Local mirror of part.markup_rate_id so the UI flips instantly between
+  // rate-linked (read-only) and Custom (editable) without waiting for the
+  // parent to refetch the part.
+  const [linkedRateId, setLinkedRateId] = useState<string | null>(part.markup_rate_id);
+  useEffect(() => {
+    setLinkedRateId(part.markup_rate_id);
+  }, [part.markup_rate_id]);
+
+  // Mode-picker menu. Anchor is set by clicking the chip in the header OR by
+  // clicking "Pick a markup rate" in the empty state.
   const [rateMenuAnchor, setRateMenuAnchor] = useState<HTMLElement | null>(null);
   const [userRates, setUserRates] = useState<MarkupRate[]>([]);
   const [applyingRateName, setApplyingRateName] = useState<string | null>(null);
@@ -135,6 +125,9 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
 
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const linkedRate = userRates.find((r) => r.id === linkedRateId) ?? null;
+  const isCustom = linkedRateId === null;
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -146,22 +139,15 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
       ]);
       setBreakdown(routingBreakdown);
 
-      if (tiers.length === 0) {
-        // Pre-seed phantom example rows so the user immediately sees what a tier
-        // looks like. Phantoms are UI-only — they don't hit the database until
-        // the user types something to demonstrate intent.
-        setRows(makePhantomRows(routingBreakdown));
-      } else {
-        const asRows: EditRow[] = tiers.map((t) => ({
-          id: t.id,
-          sequence: t.sequence,
-          quantity: String(t.quantity),
-          markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-          unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
-          baseCostPerUnit: t.base_cost_per_unit ?? 0,
-        }));
-        setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
-      }
+      const asRows: EditRow[] = tiers.map((t) => ({
+        id: t.id,
+        sequence: t.sequence,
+        quantity: String(t.quantity),
+        markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
+        unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
+        baseCostPerUnit: t.base_cost_per_unit ?? 0,
+      }));
+      setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
     } finally {
@@ -173,9 +159,6 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     loadAll();
   }, [loadAll, refreshKey]);
 
-  // Load this company's user-created rates once. Built-ins are constants and
-  // don't need a fetch. Failures are silent — the picker still works with
-  // built-ins only, and a missing rates table shouldn't break the part page.
   useEffect(() => {
     let cancelled = false;
     getAllMarkupRates(companyId)
@@ -193,10 +176,8 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         const job = queueRef.current.then(async () => {
-          // Skip phantoms — they exist only as UI hints until the user touches them.
-          const persisted = next.filter((r) => !r.phantom);
-          // Skip if any persisted row has an invalid qty (markup might still be in flight).
-          const allValid = persisted.every((r) => {
+          // Skip if any row has an invalid qty (markup might still be in flight).
+          const allValid = next.every((r) => {
             const q = parseNumber(r.quantity);
             return q !== null && q > 0;
           });
@@ -205,21 +186,22 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           setSaving(true);
           setError(null);
           try {
-            const sortedRows = [...persisted].sort((a, b) => a.sequence - b.sequence);
+            const sortedRows = [...next].sort((a, b) => a.sequence - b.sequence);
             const payload = sortedRows.map((r, i) => ({
               id: r.id,
               sequence: (i + 1) * 10,
               quantity: parseNumber(r.quantity) as number,
               markup_percent: parseNumber(r.markupPercent),
             }));
+            // No rateId arg → manual edit path; replaceTiersForPart will set
+            // markup_rate_id to null, flipping the part to Custom.
             await replaceTiersForPart(companyId, partId, payload);
+            setLinkedRateId(null);
 
-            // Reload so newly-inserted rows pick up real ids; preserve user's
-            // typed strings where possible.
             const fresh = await getTiersForPart(partId);
             setRows((prev) => {
               const byId = new Map(prev.filter((r) => r.id).map((r) => [r.id, r]));
-              const mergedReal: EditRow[] = fresh.map((t) => {
+              return fresh.map((t) => {
                 const existing = t.id ? byId.get(t.id) : undefined;
                 return existing
                   ? { ...existing, id: t.id, baseCostPerUnit: t.base_cost_per_unit ?? 0 }
@@ -232,10 +214,6 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
                       baseCostPerUnit: t.base_cost_per_unit ?? 0,
                     };
               });
-              // Re-seed phantoms only if the persisted set is empty after a save
-              // (e.g., the user deleted everything).
-              if (mergedReal.length === 0) return makePhantomRows(breakdown);
-              return mergedReal;
             });
           } catch (err) {
             console.error('Failed to save pricing tiers:', err);
@@ -247,7 +225,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
         queueRef.current = job.catch(() => undefined);
       }, AUTOSAVE_DEBOUNCE_MS);
     },
-    [companyId, partId, breakdown],
+    [companyId, partId],
   );
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
@@ -262,10 +240,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     if (!/^\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow(
-        { ...next[idx], quantity: value, phantom: false },
-        breakdown,
-      );
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, breakdown);
       return next;
     });
   };
@@ -274,10 +249,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow(
-        { ...next[idx], markupPercent: value, phantom: false },
-        breakdown,
-      );
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, breakdown);
       return next;
     });
   };
@@ -294,7 +266,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
         const back = calculateMarkupFromUnitPrice(base, unitPrice);
         if (back !== null) markupStr = String(back);
       }
-      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr, phantom: false };
+      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr };
       return next;
     });
   };
@@ -314,11 +286,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
   };
 
   const removeRow = (idx: number): void => {
-    updateRows((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      // If user deletes everything, fall back to phantoms so the editor isn't blank.
-      return next.length === 0 ? makePhantomRows(breakdown) : next;
-    });
+    updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleApplyRate = async (rate: MarkupRate): Promise<void> => {
@@ -326,10 +294,8 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     setApplyingRateName(rate.name);
     setError(null);
     try {
-      // applyRateToPart snapshots the breakpoints into tier rows AND sets
-      // parts.markup_rate_id, so future edits to the rate cascade into this
-      // part automatically.
       await applyRateToPart(companyId, partId, rate.id);
+      setLinkedRateId(rate.id);
       await loadAll();
       setAppliedRateName(rate.name);
     } catch (err) {
@@ -340,9 +306,50 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
     }
   };
 
+  const handleSwitchToCustom = async (): Promise<void> => {
+    setRateMenuAnchor(null);
+    if (linkedRateId === null) return;
+    setError(null);
+    try {
+      // Flip the FK to null without rewriting the tiers — the user wants to
+      // start editing from the rate's current values.
+      await setPartMarkupRate(partId, null);
+      setLinkedRateId(null);
+    } catch (err) {
+      console.error('Failed to switch to custom:', err);
+      setError(err instanceof Error ? err.message : 'Failed to switch to custom');
+    }
+  };
+
+  const handleStartCustomFromEmpty = (): void => {
+    // From the empty state "Set custom tiers" CTA: drop in one editable row
+    // at qty=1 with the suggested 25% markup. Autosave will persist it as
+    // soon as the row is valid.
+    updateRows(() => [
+      recomputeRow(
+        {
+          sequence: 10,
+          quantity: '1',
+          markupPercent: DEFAULT_CUSTOM_MARKUP,
+          unitPrice: '',
+          baseCostPerUnit: 0,
+        },
+        breakdown,
+      ),
+    ]);
+  };
+
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
   const materialPerUnit = breakdown ? Math.round(breakdown.total_material_cost * 100) / 100 : 0;
+
+  // What renders below the cost build-up depends on three states:
+  //   1. linked to a rate                → read-only tier table + switch/edit bar
+  //   2. Custom with at least one tier   → editable table + Add tier
+  //   3. Custom with zero tiers          → empty-state cards prompting a choice
+  const showReadOnly = linkedRateId !== null;
+  const showEmptyState = isCustom && rows.length === 0;
+  const showEditable = isCustom && rows.length > 0;
 
   return (
     <Box>
@@ -367,6 +374,23 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
             </Box>
           )}
         </Box>
+
+        {/* Mode chip — always visible, always clickable. The label tells the
+            user which markup source drives this part's pricing; clicking it
+            opens the picker so the choice is one tap away. */}
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={isCustom ? <TuneIcon /> : <PercentIcon />}
+          endIcon={<KeyboardArrowDownIcon />}
+          onClick={(e) => setRateMenuAnchor(e.currentTarget)}
+          disabled={applyingRateName !== null}
+          sx={{ borderRadius: 4, textTransform: 'none', fontWeight: 500 }}
+        >
+          {applyingRateName
+            ? `Applying ${applyingRateName}…`
+            : `Markup: ${isCustom ? 'Custom' : (linkedRate?.name ?? 'rate')}`}
+        </Button>
       </Box>
 
       {error && (
@@ -415,9 +439,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
 
       {!loading && breakdown && (
         <>
-          {/* Compact cost build-up — context for the tier rows below.
-              The full per-op / per-material breakdown lives in the routing
-              side panel, so this card stays focused on the per-unit totals. */}
+          {/* Compact cost build-up — context for the tier rows below. */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
             <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
             <SummaryRow
@@ -432,107 +454,254 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
 
           <Divider sx={{ mb: 2 }} />
 
-          {/* Tier table */}
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Qty</TableCell>
-                  <TableCell align="right">Base / unit</TableCell>
-                  <TableCell align="right">Markup %</TableCell>
-                  <TableCell align="right">Unit price</TableCell>
-                  <TableCell align="right"></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row, idx) => {
-                  // Suggested unit price = base × (1 + markup/100). Used as the
-                  // placeholder in the unit price input — phantom rows show this
-                  // as a hint instead of a committed value.
-                  const markupNum = parseNumber(row.markupPercent);
-                  const suggestedUnitPrice =
-                    row.baseCostPerUnit > 0 && markupNum !== null
-                      ? (Math.round(row.baseCostPerUnit * (1 + markupNum / 100) * 100) / 100).toFixed(2)
-                      : '0.00';
-                  return (
-                    <TableRow
-                      key={row.id ?? `tier-${idx}`}
-                      sx={row.phantom ? { opacity: 0.7 } : undefined}
-                    >
-                      <TableCell sx={{ minWidth: 90 }}>
-                        <TextField
-                          size="small"
-                          value={row.quantity}
-                          onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                          inputMode="numeric"
-                          placeholder="1"
-                        />
-                      </TableCell>
-                      <TableCell align="right">{formatCurrency(row.baseCostPerUnit)}</TableCell>
-                      <TableCell align="right" sx={{ minWidth: 120 }}>
-                        <TextField
-                          size="small"
-                          value={row.markupPercent}
-                          onChange={(e) => handleMarkupChange(idx, e.target.value)}
-                          inputMode="decimal"
-                          placeholder="25"
-                          sx={{ width: 100 }}
-                        />
-                      </TableCell>
-                      <TableCell align="right" sx={{ minWidth: 130 }}>
-                        <TextField
-                          size="small"
-                          value={row.unitPrice}
-                          onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
-                          inputMode="decimal"
-                          placeholder={suggestedUnitPrice}
-                          sx={{ width: 120 }}
-                        />
-                      </TableCell>
-                      <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => removeRow(idx)}
-                          aria-label="Remove tier"
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </TableCell>
+          {/* (1) RATE-LINKED — read-only tier display. The values are owned
+              by the rate; editing them requires either switching to Custom
+              (this part only) or editing the rate (cascades to every part
+              using it). */}
+          {showReadOnly && (
+            <>
+              <TableContainer
+                sx={{
+                  border: (theme) => `1px solid ${theme.palette.divider}`,
+                  borderLeft: (theme) => `3px solid ${theme.palette.primary.main}`,
+                  borderRadius: 1,
+                }}
+              >
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Qty</TableCell>
+                      <TableCell align="right">Base / unit</TableCell>
+                      <TableCell align="right">Markup %</TableCell>
+                      <TableCell align="right">Unit price</TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {rows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+                            This rate has no breakpoints yet. Edit the rate to add some,
+                            or switch to Custom to set tiers just for this part.
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      rows.map((row) => {
+                        const markupNum = parseNumber(row.markupPercent);
+                        const unitPriceNum = parseNumber(row.unitPrice);
+                        return (
+                          <TableRow key={row.id}>
+                            <TableCell>{row.quantity || '—'}</TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(row.baseCostPerUnit)}
+                            </TableCell>
+                            <TableCell align="right">
+                              {markupNum !== null ? `${markupNum}%` : '—'}
+                            </TableCell>
+                            <TableCell align="right">
+                              {formatCurrency(unitPriceNum)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
 
-          <Box sx={{ display: 'flex', gap: 1, mt: 2, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <Button
-              size="small"
-              startIcon={<PercentIcon />}
-              endIcon={<KeyboardArrowDownIcon />}
-              onClick={(e) => setRateMenuAnchor(e.currentTarget)}
-              disabled={applyingRateName !== null}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  mt: 2,
+                  flexWrap: 'wrap',
+                  gap: 1,
+                }}
+              >
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<TuneIcon />}
+                  onClick={handleSwitchToCustom}
+                >
+                  Switch to Custom to edit
+                </Button>
+                {linkedRate && (
+                  <Button
+                    size="small"
+                    component={Link}
+                    href={`/dashboard/${companyId}/markup-rates/${linkedRate.id}/edit`}
+                    endIcon={<OpenInNewIcon fontSize="small" />}
+                  >
+                    Edit the {linkedRate.name} rate
+                  </Button>
+                )}
+              </Box>
+            </>
+          )}
+
+          {/* (2) CUSTOM with tiers — editable table. Manual edits keep the
+              part on Custom (replaceTiersForPart writes markup_rate_id = null
+              by default). */}
+          {showEditable && (
+            <>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Qty</TableCell>
+                      <TableCell align="right">Base / unit</TableCell>
+                      <TableCell align="right">Markup %</TableCell>
+                      <TableCell align="right">Unit price</TableCell>
+                      <TableCell align="right"></TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((row, idx) => {
+                      const markupNum = parseNumber(row.markupPercent);
+                      const suggestedUnitPrice =
+                        row.baseCostPerUnit > 0 && markupNum !== null
+                          ? (Math.round(row.baseCostPerUnit * (1 + markupNum / 100) * 100) / 100).toFixed(2)
+                          : '0.00';
+                      return (
+                        <TableRow key={row.id ?? `tier-${idx}`}>
+                          <TableCell sx={{ minWidth: 90 }}>
+                            <TextField
+                              size="small"
+                              value={row.quantity}
+                              onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                              inputMode="numeric"
+                              placeholder="1"
+                            />
+                          </TableCell>
+                          <TableCell align="right">{formatCurrency(row.baseCostPerUnit)}</TableCell>
+                          <TableCell align="right" sx={{ minWidth: 120 }}>
+                            <TextField
+                              size="small"
+                              value={row.markupPercent}
+                              onChange={(e) => handleMarkupChange(idx, e.target.value)}
+                              inputMode="decimal"
+                              placeholder="25"
+                              sx={{ width: 100 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right" sx={{ minWidth: 130 }}>
+                            <TextField
+                              size="small"
+                              value={row.unitPrice}
+                              onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
+                              inputMode="decimal"
+                              placeholder={suggestedUnitPrice}
+                              sx={{ width: 120 }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => removeRow(idx)}
+                              aria-label="Remove tier"
+                            >
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
+                  Add tier
+                </Button>
+              </Box>
+            </>
+          )}
+
+          {/* (3) CUSTOM with no tiers — explicit choice prompt. Most users
+              never see this because createPart auto-applies the company's
+              default rate; it shows up after deleting all tiers, or when no
+              default rate exists. */}
+          {showEmptyState && (
+            <Box
+              sx={{
+                py: 4,
+                px: 2,
+                textAlign: 'center',
+                border: (theme) => `1px dashed ${theme.palette.divider}`,
+                borderRadius: 1,
+              }}
             >
-              {applyingRateName ? `Applying ${applyingRateName}…` : 'Apply markup rate'}
-            </Button>
-            <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
-              Add tier
-            </Button>
-          </Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                How should this part be priced?
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Pick a markup rate to follow company-wide pricing rules, or set custom
+                tiers just for this part.
+              </Typography>
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 2,
+                  justifyContent: 'center',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Button
+                  variant="contained"
+                  startIcon={<PercentIcon />}
+                  endIcon={<KeyboardArrowDownIcon />}
+                  onClick={(e) => setRateMenuAnchor(e.currentTarget)}
+                  disabled={applyingRateName !== null}
+                >
+                  {userRates.length > 0 ? 'Pick a markup rate' : 'Create a markup rate'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<TuneIcon />}
+                  onClick={handleStartCustomFromEmpty}
+                >
+                  Set custom tiers
+                </Button>
+              </Box>
+            </Box>
+          )}
         </>
       )}
 
-      {/* Apply rate menu. The currently-linked rate (if any) gets a check
-          icon so users can see which rate this part follows; selecting any
-          rate snapshots its breakpoints into the part's tiers and switches
-          the link to that rate. */}
+      {/* Mode picker menu — top-level options are Custom + every rate, plus
+          a tail link to the rates management page. The currently-selected
+          option gets a check icon. */}
       <Menu
         anchorEl={rateMenuAnchor}
         open={Boolean(rateMenuAnchor)}
         onClose={() => setRateMenuAnchor(null)}
         slotProps={{ paper: { sx: { minWidth: 320, maxWidth: 420 } } }}
       >
+        <MenuItem
+          onClick={handleSwitchToCustom}
+          selected={isCustom}
+          disabled={isCustom}
+        >
+          <ListItemIcon sx={{ minWidth: 32 }}>
+            {isCustom ? <CheckIcon fontSize="small" color="primary" /> : <TuneIcon fontSize="small" />}
+          </ListItemIcon>
+          <ListItemText
+            primary="Custom"
+            secondary="Set tier values just for this part"
+            slotProps={{
+              primary: { sx: { fontWeight: 500 } },
+              secondary: { sx: { fontSize: '0.75rem' } },
+            }}
+          />
+        </MenuItem>
+
+        <Divider sx={{ my: 0.5 }} />
+
         {userRates.length === 0 && (
           <MenuItem disabled>
             <ListItemText
@@ -546,7 +715,7 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           </MenuItem>
         )}
         {userRates.map((rate) => {
-          const isApplied = part.markup_rate_id === rate.id;
+          const isApplied = linkedRateId === rate.id;
           return (
             <MenuItem key={rate.id} onClick={() => handleApplyRate(rate)} selected={isApplied}>
               <ListItemIcon sx={{ minWidth: 32 }}>
@@ -568,14 +737,18 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           );
         })}
 
+        <Divider sx={{ my: 0.5 }} />
+
         <MenuItem
           component={Link}
-          href={`/dashboard/${companyId}/markup-rates/new`}
+          href={`/dashboard/${companyId}/markup-rates`}
           onClick={() => setRateMenuAnchor(null)}
-          sx={{ mt: 1, color: 'primary.main' }}
+          sx={{ color: 'primary.main' }}
         >
-          <AddIcon fontSize="small" sx={{ mr: 1 }} />
-          Create new rate…
+          <ListItemIcon sx={{ minWidth: 32 }}>
+            <SettingsOutlinedIcon fontSize="small" color="primary" />
+          </ListItemIcon>
+          <ListItemText primary="Manage rates…" />
         </MenuItem>
       </Menu>
 

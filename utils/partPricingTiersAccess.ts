@@ -134,6 +134,25 @@ export async function replaceTiersForPart(
 }
 
 /**
+ * Update only the part's markup_rate_id without touching its tiers. Used by
+ * the "Switch to Custom" affordance — flips the part to Custom while
+ * preserving the current tier values as the editable starting point. Pass
+ * `null` to clear, or a rate id to link without re-snapshotting (the apply-
+ * rate paths already handle re-snapshotting).
+ */
+export async function setPartMarkupRate(
+  partId: string,
+  rateId: string | null,
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('parts')
+    .update({ markup_rate_id: rateId })
+    .eq('id', partId);
+  if (error) throw error;
+}
+
+/**
  * Delete a single tier.
  */
 export async function deleteTier(tierId: string): Promise<void> {

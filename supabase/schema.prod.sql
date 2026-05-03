@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-01T02:34:02Z
+-- Generated: 2026-05-03T20:01:29Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -115,7 +115,6 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_items"
     "company_id" uuid NOT NULL,
     "name" text NOT NULL,
     "description" text,
-    "sku" text,
     "primary_unit" text NOT NULL,
     "quantity" numeric NOT NULL DEFAULT 0,
     "cost_per_unit" numeric(12,4),
@@ -190,6 +189,7 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "description" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "markup_rate_id" uuid,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name)
 );
@@ -386,7 +386,6 @@ CREATE TABLE IF NOT EXISTS "public"."routing_nodes"
     "routing_id" uuid NOT NULL,
     "operation_type_id" uuid NOT NULL,
     "run_time_per_unit" numeric,
-    "instructions" text,
     "metadata" jsonb DEFAULT '{}'::jsonb,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
@@ -412,7 +411,6 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "completed_at" timestamp with time zone,
     "assigned_to" uuid,
     "completed_by" uuid,
-    "instructions" text,
     "notes" text,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
@@ -1690,6 +1688,9 @@ ALTER TABLE "public"."part_pricing_tiers"
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."parts"
+    ADD CONSTRAINT "parts_markup_rate_id_fkey" FOREIGN KEY (markup_rate_id) REFERENCES markup_rates(id) ON DELETE SET NULL;
+
 ALTER TABLE "public"."quote_line_items"
     ADD CONSTRAINT "quote_line_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1786,7 +1787,6 @@ CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS inventory_items_company_id_idx ON public.inventory_items USING btree (company_id);
 CREATE INDEX IF NOT EXISTS inventory_items_company_id_name_idx ON public.inventory_items USING btree (company_id, name);
-CREATE INDEX IF NOT EXISTS inventory_items_company_id_sku_idx ON public.inventory_items USING btree (company_id, sku) WHERE (sku IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_company_id_created_at_idx ON public.inventory_transactions USING btree (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_transactions_discrepancy_idx ON public.inventory_transactions USING btree (company_id, created_at DESC) WHERE (has_discrepancy = true);
 CREATE INDEX IF NOT EXISTS inventory_transactions_item_id_created_at_idx ON public.inventory_transactions USING btree (inventory_item_id, created_at DESC);
@@ -1825,6 +1825,7 @@ CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_ses
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_parts_markup_rate_id ON public.parts USING btree (markup_rate_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_company ON public.quote_line_items USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_part ON public.quote_line_items USING btree (part_id);
@@ -2093,18 +2094,17 @@ BEGIN
     LOOP
         INSERT INTO job_operations (
             job_id, job_part_id, sequence, operation_name, operation_type_id,
-            instructions, estimated_setup_minutes, estimated_run_minutes_per_unit,
+            estimated_setup_minutes, estimated_run_minutes_per_unit,
             status, routing_node_id
         ) VALUES (
             v_job_id, p_job_part_id, v_seq, v_node.operation_name, v_node.operation_type_id,
-            v_node.instructions, COALESCE(v_node.setup_time, 0), v_node.run_time_per_unit,
+            COALESCE(v_node.setup_time, 0), v_node.run_time_per_unit,
             'pending', v_node.id
         );
         v_seq := v_seq + 10;
         v_count := v_count + 1;
     END LOOP;
 
-    -- Copy routing_materials → job_materials (idempotent on routing_material_id)
     INSERT INTO job_materials (job_id, job_part_id, routing_material_id, inventory_item_id, expected_quantity, unit)
     SELECT v_job_id, p_job_part_id, rm.id, rm.inventory_item_id, rm.quantity, rm.unit
     FROM routing_materials rm
@@ -2114,7 +2114,6 @@ BEGIN
           WHERE jm.job_part_id = p_job_part_id AND jm.routing_material_id = rm.id
       );
 
-    -- Set the job_part's current operation cursor to the lowest sequence we wrote.
     SELECT MIN(sequence) INTO v_min_seq FROM job_operations WHERE job_part_id = p_job_part_id;
     IF v_min_seq IS NOT NULL THEN
         UPDATE job_parts SET current_operation_sequence = v_min_seq WHERE id = p_job_part_id;
@@ -2480,10 +2479,7 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Routings, routing_nodes, routing_materials, quotes, quote_line_items —
-    -- carried over from the previous seed_demo_data definition. Templates that
-    -- pre-date this change still work as long as they don't reference the
-    -- now-dropped jobs.part_id field.
+    -- Routings, routing_nodes, routing_materials
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings') LOOP
             v_new_id := gen_random_uuid();
@@ -2502,7 +2498,7 @@ BEGIN
                     v_new_id := gen_random_uuid();
                     v_ref_map := jsonb_set(v_ref_map, ARRAY[v_op->>'_ref'], to_jsonb(v_new_id::text));
                     INSERT INTO routing_nodes (id, routing_id, operation_type_id, sequence,
-                                               run_time_per_unit, setup_time, instructions,
+                                               run_time_per_unit, setup_time,
                                                metadata, created_at, updated_at)
                     VALUES (v_new_id,
                             (v_ref_map->>(v_item->>'_ref'))::uuid,
@@ -2510,7 +2506,6 @@ BEGIN
                             (v_op->>'sequence')::integer,
                             COALESCE((v_op->>'run_time_per_unit')::numeric, 0),
                             COALESCE((v_op->>'setup_time')::numeric, 0),
-                            v_op->>'instructions',
                             COALESCE((v_op->'metadata'), '{}'::jsonb),
                             COALESCE((v_op->>'created_at')::timestamptz, now()),
                             COALESCE((v_op->>'updated_at')::timestamptz, now()));
@@ -2568,8 +2563,6 @@ BEGIN
                     (v_ref_map->>(v_item->>'customer_ref'))::uuid,
                     CASE WHEN v_item->>'quote_ref' IS NOT NULL
                          THEN (v_ref_map->>(v_item->>'quote_ref'))::uuid ELSE NULL END,
-                    -- Demo templates can pre-set job_number; otherwise derive
-                    -- a placeholder so the unique constraint holds.
                     COALESCE(v_item->>'job_number', 'J-DEMO-' || substr(v_new_id::text, 1, 8)),
                     COALESCE(v_item->>'status', 'not_started'),
                     p_user_id,
@@ -2606,7 +2599,7 @@ BEGIN
                                                     operation_type_id, estimated_setup_minutes,
                                                     estimated_run_minutes_per_unit,
                                                     actual_setup_minutes, actual_run_minutes,
-                                                    status, routing_node_id, instructions,
+                                                    status, routing_node_id,
                                                     started_at, completed_at, created_at)
                         VALUES (v_new_id, v_job_id, v_job_part_id,
                                 (v_op->>'sequence')::integer,
@@ -2624,7 +2617,6 @@ BEGIN
                                 COALESCE(v_op->>'status', 'pending'),
                                 CASE WHEN v_op->>'routing_node_ref' IS NOT NULL
                                      THEN (v_ref_map->>(v_op->>'routing_node_ref'))::uuid ELSE NULL END,
-                                v_op->>'instructions',
                                 (v_op->>'started_at')::timestamptz,
                                 (v_op->>'completed_at')::timestamptz,
                                 COALESCE((v_op->>'created_at')::timestamptz, now()));
@@ -2641,7 +2633,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- Link converted quotes to first job (one-quote-one-job model)
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes') LOOP
             IF v_item->>'converted_to_job_ref' IS NOT NULL THEN
@@ -3221,9 +3212,6 @@ COMMENT ON COLUMN "public"."job_operations"."assigned_to"
 COMMENT ON COLUMN "public"."job_operations"."completed_by"
     IS 'UUID of operator who completed this operation.';
 
-COMMENT ON COLUMN "public"."job_operations"."instructions"
-    IS 'Work instructions for this specific job. May be copied from routing or customized.';
-
 COMMENT ON COLUMN "public"."job_operations"."notes"
     IS 'Operator notes, issues encountered, etc.';
 
@@ -3388,10 +3376,6 @@ COMMENT ON COLUMN "public"."routing_nodes"."operation_type_id"
 
 COMMENT ON COLUMN "public"."routing_nodes"."run_time_per_unit"
     IS 'Estimated run time per unit in minutes for this operation';
-
-COMMENT ON COLUMN "public"."routing_nodes"."instructions"
-    IS 'Work 
- instructions or notes for the operator performing this operation';
 
 COMMENT ON COLUMN "public"."routing_nodes"."metadata"
     IS 'Optional 

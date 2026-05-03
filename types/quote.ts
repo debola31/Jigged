@@ -290,7 +290,7 @@ export interface QuoteMaterialSnapshot {
   company_id: string;
   part_id: string;
   sequence: number;
-  inventory_item_id: string | null;
+  material_part_id: string | null;
   item_name: string;
   quantity: number;
   unit: string | null;

@@ -2,9 +2,12 @@
  * Routings Module Types
  *
  * Types for the linear routing system. A routing is an ordered list of
- * operations plus a routing-level material list. Operations are ordered by
- * `sequence` (steps of 10 leave room for inserts).
+ * routing_operations. Operations are ordered by `sequence` (steps of 10
+ * leave room for inserts). BOM lives separately on the part itself
+ * (`parts_bom`), not on the routing.
  */
+
+import type { WorkCenterKind } from './workCenter';
 
 // ============================================
 // Core Database Entities
@@ -12,8 +15,7 @@
 
 /**
  * A routing is an ordered list of operations that defines how a part is
- * manufactured, plus the materials needed for the job as a whole. There
- * is exactly one routing per part.
+ * manufactured. There is exactly one routing per part.
  */
 export interface Routing {
   id: string;
@@ -28,30 +30,25 @@ export interface Routing {
 
 /**
  * A single operation in the routing, ordered by `sequence`.
+ *
+ * The cost-relevant fields split by the work_center's kind:
+ * - kind='internal' uses `setup_minutes` + `cycle_minutes_per_unit` priced at
+ *   `COALESCE(labor_rate_override, work_center.labor_rate)`.
+ * - kind='external' uses `external_unit_price` + `external_setup_cost` and
+ *   ignores the time/rate fields.
  */
-export interface RoutingNode {
+export interface RoutingOperation {
   id: string;
   routing_id: string;
-  operation_type_id: string;
-  run_time_per_unit: number | null;
-  setup_time: number;
+  work_center_id: string;
+  sequence: number;
+  setup_minutes: number | null;
+  cycle_minutes_per_unit: number | null;
+  labor_rate_override: number | null;
+  external_unit_price: number | null;
+  external_setup_cost: number | null;
+  instructions: string | null;
   metadata: Record<string, unknown>;
-  sequence: number;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * A material listed on the routing. Materials are routing-level, not per
- * operation, and snapshot into job_materials when a job is created.
- */
-export interface RoutingMaterial {
-  id: string;
-  routing_id: string;
-  inventory_item_id: string;
-  quantity: number;
-  unit: string;
-  sequence: number;
   created_at: string;
   updated_at: string;
 }
@@ -72,39 +69,29 @@ export interface RoutingWithPart extends Routing {
 }
 
 /**
- * Routing with node count and total time estimates for display.
+ * Routing with operation count and total time estimates for display.
  */
 export interface RoutingWithStats extends RoutingWithPart {
-  nodes_count: number;
+  operations_count: number;
   total_run_time_per_unit: number | null;
 }
 
 /**
- * Routing node joined with its operation type for display.
+ * Routing operation joined with its work center for display.
  */
-export interface RoutingNodeWithOperation extends RoutingNode {
-  operation_type: {
+export interface RoutingOperationWithWorkCenter extends RoutingOperation {
+  work_center: {
     id: string;
     name: string;
+    kind: WorkCenterKind;
     labor_rate: number | null;
+    vendor: { id: string; name: string } | null;
   } | null;
 }
 
 /**
- * Routing material joined with its inventory item for display and costing.
- */
-export interface RoutingMaterialWithItem extends RoutingMaterial {
-  inventory_item: {
-    id: string;
-    name: string;
-    primary_unit: string;
-    cost_per_unit: number | null;
-  } | null;
-}
-
-/**
- * Full routing data: ordered operations + routing-level materials.
- * Used by the linear builder, viewer, and cost calculator.
+ * Full routing data: ordered operations only. BOM lives on the part itself
+ * (`parts_bom`) and is loaded separately by the part detail page.
  */
 export interface RoutingWithGraph extends Routing {
   part: {
@@ -112,8 +99,7 @@ export interface RoutingWithGraph extends Routing {
     part_name: string;
     description: string | null;
   } | null;
-  nodes: RoutingNodeWithOperation[];
-  materials: RoutingMaterialWithItem[];
+  operations: RoutingOperationWithWorkCenter[];
 }
 
 // ============================================
@@ -121,69 +107,62 @@ export interface RoutingWithGraph extends Routing {
 // ============================================
 
 /**
- * Form data for creating/editing a routing operation. Inline-edited in the
- * linear list — no modal.
+ * Form data for creating/editing a routing operation.
  */
-export interface RoutingNodeFormData {
-  operation_type_id: string;
-  run_time_per_unit: string;
-  setup_time: string;
+export interface RoutingOperationFormData {
+  work_center_id: string;
+  setup_minutes: string;
+  cycle_minutes_per_unit: string;
+  labor_rate_override: string;
+  external_unit_price: string;
+  external_setup_cost: string;
+  instructions: string;
 }
 
-export const EMPTY_NODE_FORM: RoutingNodeFormData = {
-  operation_type_id: '',
-  run_time_per_unit: '',
-  setup_time: '',
-};
-
-/**
- * Form data for creating/editing a routing material.
- */
-export interface RoutingMaterialFormData {
-  inventory_item_id: string;
-  quantity: string;
-  unit: string;
-}
-
-export const EMPTY_MATERIAL_FORM: RoutingMaterialFormData = {
-  inventory_item_id: '',
-  quantity: '',
-  unit: '',
+export const EMPTY_OPERATION_FORM: RoutingOperationFormData = {
+  work_center_id: '',
+  setup_minutes: '',
+  cycle_minutes_per_unit: '',
+  labor_rate_override: '',
+  external_unit_price: '',
+  external_setup_cost: '',
+  instructions: '',
 };
 
 // ============================================
 // Utility Functions
 // ============================================
 
-export function nodeToFormData(node: RoutingNode): RoutingNodeFormData {
+export function routingOperationToFormData(op: RoutingOperation): RoutingOperationFormData {
   return {
-    operation_type_id: node.operation_type_id,
-    run_time_per_unit: node.run_time_per_unit !== null ? String(node.run_time_per_unit) : '',
-    setup_time: node.setup_time ? String(node.setup_time) : '',
-  };
-}
-
-export function materialToFormData(material: RoutingMaterial): RoutingMaterialFormData {
-  return {
-    inventory_item_id: material.inventory_item_id,
-    quantity: String(material.quantity),
-    unit: material.unit,
+    work_center_id: op.work_center_id,
+    setup_minutes: op.setup_minutes !== null ? String(op.setup_minutes) : '',
+    cycle_minutes_per_unit:
+      op.cycle_minutes_per_unit !== null ? String(op.cycle_minutes_per_unit) : '',
+    labor_rate_override: op.labor_rate_override !== null ? String(op.labor_rate_override) : '',
+    external_unit_price: op.external_unit_price !== null ? String(op.external_unit_price) : '',
+    external_setup_cost: op.external_setup_cost !== null ? String(op.external_setup_cost) : '',
+    instructions: op.instructions || '',
   };
 }
 
 /**
- * Sum setup + per-unit run time across all operations in a routing.
+ * Sum setup + per-unit cycle time across all internal operations in a
+ * routing. External ops contribute zero minutes (they price by unit, not time)
+ * — caller should fold in their flat costs separately if a duration estimate
+ * is needed.
  */
 export function calculateRoutingTime(
-  nodes: RoutingNodeWithOperation[],
-  quantity: number = 1
+  operations: RoutingOperationWithWorkCenter[],
+  quantity: number = 1,
 ): { runTime: number; setupTime: number; totalTime: number } {
   let runTime = 0;
   let setupTime = 0;
 
-  for (const node of nodes) {
-    runTime += (node.run_time_per_unit || 0) * quantity;
-    setupTime += node.setup_time || 0;
+  for (const op of operations) {
+    if (op.work_center?.kind === 'external') continue;
+    runTime += (op.cycle_minutes_per_unit || 0) * quantity;
+    setupTime += op.setup_minutes || 0;
   }
 
   return {

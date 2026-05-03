@@ -505,7 +505,7 @@ async function writeCostSnapshotsForPart(
       company_id: companyId,
       part_id: partId,
       sequence: index,
-      inventory_item_id: null,
+      material_part_id: null,
       item_name: item.item_name,
       quantity: item.quantity,
       unit: item.unit,

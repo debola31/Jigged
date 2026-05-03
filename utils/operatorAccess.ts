@@ -29,7 +29,7 @@ import type {
   JobCompleteResponse,
   MaterialConfirmation,
 } from '@/types/operator';
-import { removeStockGraceful } from '@/utils/inventoryAccess';
+import { removePartStockGraceful } from '@/utils/partsAccess';
 
 // Operator type from user_company_access
 interface OperatorAccess {
@@ -172,13 +172,13 @@ interface ReadyRow {
 
 async function getReadyOperationsForStation(
   companyId: string,
-  operationTypeId: string,
+  workCenterId: string,
 ): Promise<ReadyRow[]> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase.rpc('get_ready_operations_for_station', {
     p_company_id: companyId,
-    p_operation_type_id: operationTypeId,
+    p_work_center_id: workCenterId,
   });
 
   if (error) {
@@ -347,12 +347,12 @@ export async function getOperatorJobPartDetail(
 
   let opsQuery = supabase
     .from('job_operations')
-    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, operation_type_id, routing_node_id')
+    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, routing_operation_id')
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
 
   if (operationTypeId) {
-    opsQuery = opsQuery.eq('operation_type_id', operationTypeId);
+    opsQuery = opsQuery.eq('work_center_id', operationTypeId);
   }
 
   const { data: ops } = await opsQuery;
@@ -364,8 +364,8 @@ export async function getOperatorJobPartDetail(
     status: string;
     estimated_setup_minutes: number | null;
     estimated_run_minutes_per_unit: number | null;
-    operation_type_id: string;
-    routing_node_id: string | null;
+    work_center_id: string;
+    routing_operation_id: string | null;
   };
   const opRows = (ops ?? []) as OpRow[];
 
@@ -430,20 +430,22 @@ export async function getOperatorJobPartDetail(
   let materials: Array<{ name: string; quantity: number; unit: string }> = [];
   const { data: jobMats } = await supabase
     .from('job_materials')
-    .select('expected_quantity, unit, inventory_item:inventory_items(name)')
+    .select('expected_quantity, unit, material_part:parts!job_materials_material_part_id_fkey(part_name)')
     .eq('job_part_id', jobPartId)
     .order('created_at', { ascending: true });
 
   type JobMatRow = {
     expected_quantity: number;
     unit: string;
-    inventory_item: { name: string } | { name: string }[] | null;
+    material_part: { part_name: string } | { part_name: string }[] | null;
   };
   if (jobMats) {
     materials = (jobMats as JobMatRow[])
       .map((m) => {
-        const inv = Array.isArray(m.inventory_item) ? m.inventory_item[0] : m.inventory_item;
-        return inv ? { name: inv.name, quantity: Number(m.expected_quantity), unit: m.unit } : null;
+        const part = Array.isArray(m.material_part) ? m.material_part[0] : m.material_part;
+        return part
+          ? { name: part.part_name, quantity: Number(m.expected_quantity), unit: m.unit }
+          : null;
       })
       .filter((m): m is { name: string; quantity: number; unit: string } => m !== null);
   }
@@ -597,11 +599,13 @@ export async function startJob(
   }
 
   // 1. Find the matching job_operation on this part for the chosen station.
+  // The operator API still calls the field `operation_type_id` on the request
+  // for source-compatibility; the value is now a work_center_id.
   const { data: jobOp, error: opError } = await supabase
     .from('job_operations')
     .select('*')
     .eq('job_part_id', jobPartId)
-    .eq('operation_type_id', request.operation_type_id)
+    .eq('work_center_id', request.operation_type_id)
     .in('status', ['pending', 'in_progress'])
     .single();
 
@@ -639,7 +643,7 @@ export async function startJob(
       operator_id: operatorId,
       job_id: part.job_id,
       job_operation_id: jobOp.id,
-      operation_type_id: request.operation_type_id,
+      work_center_id: request.operation_type_id,
       started_at: now,
     })
     .select()
@@ -672,7 +676,7 @@ export async function startJob(
     operator_id: operatorId,
     job_id: part.job_id,
     job_operation_id: jobOp.id,
-    operation_type_id: request.operation_type_id,
+    operation_type_id: request.operation_type_id, // OperatorSession type holds the work_center id under this legacy field name
     started_at: now,
     ended_at: null,
     notes: null,
@@ -728,7 +732,7 @@ export async function stopJob(
     operator_id: operatorId,
     job_id: part.job_id,
     job_operation_id: session.job_operation_id,
-    operation_type_id: session.operation_type_id,
+    operation_type_id: session.work_center_id,
     started_at: session.started_at,
     ended_at: now,
     notes: request?.notes || null,
@@ -747,8 +751,8 @@ export async function getJobPartMaterialsForCompletion(
   const { data: jobMats, error } = await supabase
     .from('job_materials')
     .select(`
-      id, inventory_item_id, expected_quantity, actual_quantity, unit, status,
-      inventory_item:inventory_items(name, primary_unit, quantity)
+      id, material_part_id, expected_quantity, actual_quantity, unit, status,
+      material_part:parts!job_materials_material_part_id_fkey(part_name, primary_unit, quantity)
     `)
     .eq('job_part_id', jobPartId)
     .order('created_at', { ascending: true });
@@ -757,27 +761,32 @@ export async function getJobPartMaterialsForCompletion(
 
   type MatRow = {
     id: string;
-    inventory_item_id: string;
+    material_part_id: string;
     expected_quantity: number;
     actual_quantity: number | null;
     unit: string;
     status: string;
-    inventory_item: { name: string; primary_unit: string; quantity: number } | { name: string; primary_unit: string; quantity: number }[] | null;
+    material_part:
+      | { part_name: string; primary_unit: string | null; quantity: number }
+      | { part_name: string; primary_unit: string | null; quantity: number }[]
+      | null;
   };
 
   return (jobMats as MatRow[])
     .map((m) => {
-      const item = Array.isArray(m.inventory_item) ? m.inventory_item[0] : m.inventory_item;
-      if (!item) return null;
+      const part = Array.isArray(m.material_part) ? m.material_part[0] : m.material_part;
+      if (!part) return null;
       return {
-        inventory_item_id: m.inventory_item_id,
-        item_name: item.name,
+        // MaterialConfirmation type still uses inventory_item_id as the legacy
+        // field name; the value is now a part_id (the unified item master).
+        inventory_item_id: m.material_part_id,
+        item_name: part.part_name,
         expected_quantity: Number(m.expected_quantity),
         confirmed_quantity:
           m.actual_quantity != null ? Number(m.actual_quantity) : Number(m.expected_quantity),
         unit: m.unit,
-        current_stock: Number(item.quantity),
-        primary_unit: item.primary_unit,
+        current_stock: Number(part.quantity),
+        primary_unit: part.primary_unit ?? '',
       } as MaterialConfirmation;
     })
     .filter((m): m is MaterialConfirmation => m !== null);
@@ -892,7 +901,8 @@ export async function completeJob(
   if (partCompleted && request.materials && request.materials.length > 0) {
     for (const material of request.materials) {
       if (material.confirmed_quantity > 0) {
-        await removeStockGraceful(
+        // material.inventory_item_id holds the part_id under its legacy name.
+        await removePartStockGraceful(
           material.inventory_item_id,
           material.confirmed_quantity,
           material.unit,
@@ -907,7 +917,7 @@ export async function completeJob(
           .from('job_materials')
           .select('id')
           .eq('job_part_id', jobPartId)
-          .eq('inventory_item_id', material.inventory_item_id)
+          .eq('material_part_id', material.inventory_item_id)
           .eq('unit', material.unit)
           .eq('status', 'pending')
           .limit(1);
@@ -951,7 +961,7 @@ export async function getActiveSession(
   const { data: session } = await supabase
     .from('operator_sessions')
     .select(`
-      id, job_id, job_operation_id, operation_type_id, started_at, notes,
+      id, job_id, job_operation_id, work_center_id, started_at, notes,
       jobs(job_number),
       job_operations(operation_name)
     `)
@@ -975,7 +985,7 @@ export async function getActiveSession(
     job_number: jobJoin?.job_number ?? null,
     job_operation_id: session.job_operation_id,
     operation_name: opJoin?.operation_name ?? null,
-    operation_type_id: session.operation_type_id,
+    operation_type_id: session.work_center_id,
     started_at: session.started_at,
     notes: session.notes,
   };
@@ -990,7 +1000,7 @@ export async function getOperatorSessions(
   const { data, error } = await supabase
     .from('operator_sessions')
     .select(`
-      id, operator_id, job_id, job_operation_id, operation_type_id,
+      id, operator_id, job_id, job_operation_id, work_center_id,
       started_at, ended_at, notes,
       jobs(job_number),
       job_operations(operation_name)
@@ -1006,7 +1016,7 @@ export async function getOperatorSessions(
     operator_id: string;
     job_id: string;
     job_operation_id: string | null;
-    operation_type_id: string;
+    work_center_id: string;
     started_at: string;
     ended_at: string | null;
     notes: string | null;
@@ -1029,7 +1039,7 @@ export async function getOperatorSessions(
       operator_id: s.operator_id,
       job_id: s.job_id,
       job_operation_id: s.job_operation_id,
-      operation_type_id: s.operation_type_id,
+      operation_type_id: s.work_center_id,
       started_at: s.started_at,
       ended_at: s.ended_at,
       notes: s.notes,
@@ -1050,16 +1060,16 @@ export async function getStationOperationTypes(
   const supabase = getSupabase();
 
   const { data, error } = await supabase
-    .from('operation_types')
+    .from('work_centers')
     .select('id, name')
     .eq('company_id', companyId)
     .order('name');
 
   if (error) throw new Error(error.message);
 
-  return (data || []).map((ot: { id: string; name: string }) => ({
-    id: ot.id,
-    name: ot.name,
+  return (data || []).map((wc: { id: string; name: string }) => ({
+    id: wc.id,
+    name: wc.name,
   }));
 }
 
@@ -1069,7 +1079,7 @@ export async function getStationName(
   const supabase = getSupabase();
 
   const { data } = await supabase
-    .from('operation_types')
+    .from('work_centers')
     .select('name')
     .eq('id', stationId)
     .single();
@@ -1100,7 +1110,7 @@ export async function getStationsForJobPart(
 
   const { data: ops } = await supabase
     .from('job_operations')
-    .select('id, operation_type_id, status, sequence, operation_types(name)')
+    .select('id, work_center_id, status, sequence, work_center:work_centers(name)')
     .eq('job_part_id', jobPartId)
     .in('status', ['pending', 'in_progress'])
     .order('sequence', { ascending: true });
@@ -1109,27 +1119,27 @@ export async function getStationsForJobPart(
 
   type OpRow = {
     id: string;
-    operation_type_id: string;
+    work_center_id: string | null;
     status: string;
     sequence: number;
-    operation_types: { name: string } | { name: string }[] | null;
+    work_center: { name: string } | { name: string }[] | null;
   };
 
   const seen = new Set<string>();
   const stations: Array<{ id: string; name: string }> = [];
   for (const op of ops as OpRow[]) {
-    if (!op.operation_type_id || seen.has(op.operation_type_id)) continue;
+    if (!op.work_center_id || seen.has(op.work_center_id)) continue;
 
     if (op.status === 'pending') {
       const ready = await isJobOperationReady(op.id);
       if (!ready) continue;
     }
 
-    seen.add(op.operation_type_id);
-    const otJoin = Array.isArray(op.operation_types) ? op.operation_types[0] : op.operation_types;
+    seen.add(op.work_center_id);
+    const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
     stations.push({
-      id: op.operation_type_id,
-      name: otJoin?.name || 'Unknown Station',
+      id: op.work_center_id,
+      name: wcJoin?.name || 'Unknown Station',
     });
   }
 

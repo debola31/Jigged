@@ -3,11 +3,6 @@
  */
 
 /**
- * Customer match mode for parts import.
- */
-export type CustomerMatchMode = 'by_column' | 'all_to_one' | 'all_generic';
-
-/**
  * A single column mapping suggestion from AI.
  */
 export interface PartColumnMapping {
@@ -44,7 +39,7 @@ export interface PartAnalyzeResponse {
 export interface PartConflictInfo {
   row_number: number;
   csv_part_name: string | null;
-  conflict_type: 'duplicate_part_name' | 'customer_not_found' | 'csv_duplicate';
+  conflict_type: 'duplicate_part_name' | 'csv_duplicate';
   existing_part_id: string; // Empty string for non-DB conflicts
   existing_value: string;
 }
@@ -66,8 +61,6 @@ export interface PartValidateRequest {
   company_id: string;
   mappings: Record<string, string>; // csv_column -> db_field
   rows: Record<string, string>[]; // All parsed CSV rows
-  customer_match_mode: CustomerMatchMode;
-  selected_customer_id?: string; // For ALL_TO_ONE mode
 }
 
 /**
@@ -99,8 +92,6 @@ export interface PartExecuteRequest {
   company_id: string;
   mappings: Record<string, string>; // csv_column -> db_field
   rows: Record<string, string>[]; // CSV rows to import
-  customer_match_mode: CustomerMatchMode;
-  selected_customer_id?: string; // For ALL_TO_ONE mode
   skip_conflicts?: boolean; // If true, skip rows with conflicts
 }
 

@@ -5,12 +5,14 @@ import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add';
 import BuildIcon from '@mui/icons-material/Build';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
-import RoutingOperationRowEditor, { type OperationEditorValue } from './RoutingOperationRowEditor';
-import { getAllOperations } from '@/utils/operationsAccess';
-import type { Operation } from '@/types/operations';
-import { calculateRoutingTime, formatTime } from '@/types/routings';
+import RoutingOperationRowEditor, {
+  type OperationEditorValue,
+  type WorkCenterOption,
+} from './RoutingOperationRowEditor';
+import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
+import { formatTime } from '@/types/routings';
 
-const generateTempId = () => `temp-node-${crypto.randomUUID()}`;
+const generateTempId = () => `temp-op-${crypto.randomUUID()}`;
 
 export interface RoutingOperationsListProps {
   rows: OperationRowData[];
@@ -32,7 +34,7 @@ export default function RoutingOperationsList({
   companyId,
   disabled = false,
 }: RoutingOperationsListProps) {
-  const [operations, setOperations] = useState<Operation[]>([]);
+  const [workCenters, setWorkCenters] = useState<WorkCenterOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorState, setEditorState] = useState<
@@ -42,11 +44,11 @@ export default function RoutingOperationsList({
   >({ mode: 'closed' });
 
   useEffect(() => {
-    getAllOperations(companyId)
-      .then(setOperations)
-      .catch((err) => {
-        console.error('Failed to load operations:', err);
-        setError('Failed to load operations.');
+    getWorkCentersForRouting(companyId)
+      .then(setWorkCenters)
+      .catch((err: unknown) => {
+        console.error('Failed to load work centers:', err);
+        setError('Failed to load work centers.');
       })
       .finally(() => setLoading(false));
   }, [companyId]);
@@ -70,24 +72,33 @@ export default function RoutingOperationsList({
   }, [rows, onChange]);
 
   const handleEditorSave = (value: OperationEditorValue) => {
-    if (!value.operation) return;
+    if (!value.workCenter) return;
     if (editorState.mode === 'add') {
       const newRow: OperationRowData = {
         tempId: generateTempId(),
-        operationTypeId: value.operation.id,
-        operationName: value.operation.name,
-        laborRate: value.operation.labor_rate,
-        runTimePerUnit: value.runTimePerUnit,
-        setupTime: value.setupTime,
+        workCenterId: value.workCenter.id,
+        workCenterName: value.workCenter.name,
+        workCenterKind: value.workCenter.kind,
+        vendorName: value.workCenter.vendor_name,
+        setupMinutes: value.setupMinutes,
+        cycleMinutesPerUnit: value.cycleMinutesPerUnit,
+        laborRateOverride: value.laborRateOverride,
+        externalUnitPrice: value.externalUnitPrice,
+        externalSetupCost: value.externalSetupCost,
+        instructions: value.instructions,
       };
       onChange([...rows, newRow]);
     } else if (editorState.mode === 'edit') {
       const copy = [...rows];
       copy[editorState.rowIndex] = {
         ...copy[editorState.rowIndex],
-        // operation type is locked in edit mode (delete + re-add to swap)
-        runTimePerUnit: value.runTimePerUnit,
-        setupTime: value.setupTime,
+        // work center is locked in edit mode (delete + re-add to swap)
+        setupMinutes: value.setupMinutes,
+        cycleMinutesPerUnit: value.cycleMinutesPerUnit,
+        laborRateOverride: value.laborRateOverride,
+        externalUnitPrice: value.externalUnitPrice,
+        externalSetupCost: value.externalSetupCost,
+        instructions: value.instructions,
       };
       onChange(copy);
     }
@@ -97,31 +108,38 @@ export default function RoutingOperationsList({
   const editingRow = editorState.mode === 'edit' ? rows[editorState.rowIndex] : null;
   const editingInitial: OperationEditorValue | undefined = editingRow
     ? {
-        operation: operations.find((o) => o.id === editingRow.operationTypeId) || null,
-        setupTime: editingRow.setupTime,
-        runTimePerUnit: editingRow.runTimePerUnit,
+        workCenter:
+          workCenters.find((wc) => wc.id === editingRow.workCenterId) ||
+          (editingRow.workCenterId
+            ? {
+                id: editingRow.workCenterId,
+                name: editingRow.workCenterName,
+                kind: editingRow.workCenterKind,
+                labor_rate: null,
+                vendor_name: editingRow.vendorName,
+              }
+            : null),
+        setupMinutes: editingRow.setupMinutes,
+        cycleMinutesPerUnit: editingRow.cycleMinutesPerUnit,
+        laborRateOverride: editingRow.laborRateOverride,
+        externalUnitPrice: editingRow.externalUnitPrice,
+        externalSetupCost: editingRow.externalSetupCost,
+        instructions: editingRow.instructions,
       }
     : undefined;
 
   const isEditingExisting = editorState.mode === 'edit';
   const editorOpen = editorState.mode !== 'closed';
 
-  const time = calculateRoutingTime(
-    rows.map((r) => ({
-      id: r.tempId,
-      routing_id: '',
-      operation_type_id: r.operationTypeId,
-      run_time_per_unit: r.runTimePerUnit,
-      setup_time: r.setupTime,
-      metadata: {},
-      sequence: 0,
-      created_at: '',
-      updated_at: '',
-      operation_type: r.operationTypeId
-        ? { id: r.operationTypeId, name: r.operationName, labor_rate: r.laborRate }
-        : null,
-    }))
-  );
+  // Sum internal-only time across the routing for the header caption.
+  // External operations price by unit (not time) and contribute zero minutes.
+  let setupMinutesTotal = 0;
+  let cycleMinutesTotal = 0;
+  for (const r of rows) {
+    if (r.workCenterKind === 'external') continue;
+    setupMinutesTotal += r.setupMinutes ?? 0;
+    cycleMinutesTotal += r.cycleMinutesPerUnit ?? 0;
+  }
 
   return (
     <Box>
@@ -133,7 +151,8 @@ export default function RoutingOperationsList({
           </Typography>
           {rows.length > 0 && (
             <Typography variant="caption" color="text.secondary">
-              {rows.length} step{rows.length === 1 ? '' : 's'} • setup {formatTime(time.setupTime)} + run {formatTime(time.runTime)}/unit
+              {rows.length} step{rows.length === 1 ? '' : 's'} • setup{' '}
+              {formatTime(setupMinutesTotal)} + run {formatTime(cycleMinutesTotal)}/unit
             </Typography>
           )}
         </Box>
@@ -182,7 +201,7 @@ export default function RoutingOperationsList({
             isEditingExisting && editorState.rowIndex === idx ? (
               <RoutingOperationRowEditor
                 key={row.tempId}
-                operations={operations}
+                workCenters={workCenters}
                 initial={editingInitial}
                 index={idx}
                 onSave={handleEditorSave}
@@ -204,7 +223,7 @@ export default function RoutingOperationsList({
           )}
           {editorState.mode === 'add' && (
             <RoutingOperationRowEditor
-              operations={operations}
+              workCenters={workCenters}
               index={rows.length}
               onSave={handleEditorSave}
               onCancel={() => setEditorState({ mode: 'closed' })}

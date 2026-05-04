@@ -82,7 +82,15 @@ describe('partsAccess utilities', () => {
     company_id: 'company-1',
     part_name: 'PART001',
     description: 'Test Part',
-    category_id: null,
+    is_manufacturable: true,
+    is_stockable: false,
+    primary_unit: null,
+    quantity: 0,
+    cost_per_unit: null,
+    cost_recalculated_at: null,
+    reorder_point: null,
+    preferred_vendor_id: null,
+    legacy_id: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -159,11 +167,11 @@ describe('partsAccess utilities', () => {
 
   describe('getPartWithRelations', () => {
     it('returns part with counts and routing info', async () => {
-      // This function makes 4 Supabase calls (parts, quotes, jobs, routings)
-      let callCount = 0;
-
+      // After the unified parts/BOM refactor, this fans out to:
+      //   parts (for the row), quote_line_items (distinct quote_ids), job_parts
+      //   (count), routings (with operations join), parts_bom × 2 (lines as
+      //   parent + parents as child).
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
         if (table === 'parts') {
           return {
             ...mockQueryBuilder,
@@ -179,9 +187,8 @@ describe('partsAccess utilities', () => {
             }),
           };
         } else if (table === 'quote_line_items') {
-          // After the categories refactor, we count distinct quote_ids by walking
-          // line items rather than reading parts.quote_id (which no longer exists).
-          // Five distinct quote_ids → quotes_count = 5.
+          // Five distinct quote_ids → quotes_count = 5 (the duplicate q-1 is
+          // collapsed by the Set in getPartWithRelations).
           return {
             ...mockQueryBuilder,
             select: vi.fn().mockReturnValue({
@@ -193,14 +200,13 @@ describe('partsAccess utilities', () => {
                   { quote_id: 'q-3' },
                   { quote_id: 'q-4' },
                   { quote_id: 'q-5' },
-                  // dup of q-1 — should still be counted once
                   { quote_id: 'q-1' },
                 ],
                 error: null,
               }),
             }),
           };
-        } else if (table === 'jobs') {
+        } else if (table === 'job_parts') {
           return {
             ...mockQueryBuilder,
             select: vi.fn().mockReturnValue({
@@ -219,9 +225,23 @@ describe('partsAccess utilities', () => {
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
                 maybeSingle: vi.fn().mockReturnValue({
-                  data: { id: 'routing-1', routing_nodes: [{ id: 'node-1', run_time_per_unit: 5 }] },
+                  data: {
+                    id: 'routing-1',
+                    routing_operations: [{ id: 'op-1', cycle_minutes_per_unit: 5 }],
+                  },
                   error: null,
                 }),
+              }),
+            }),
+          };
+        } else if (table === 'parts_bom') {
+          return {
+            ...mockQueryBuilder,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                count: 0,
+                error: null,
               }),
             }),
           };
@@ -278,7 +298,14 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_name: 'NEW001',
       description: 'New Part',
-      category_id: '',
+      is_manufacturable: true,
+      is_stockable: false,
+      primary_unit: null,
+      quantity: 0,
+      cost_per_unit: null,
+      reorder_point: null,
+      preferred_vendor_id: null,
+      unit_conversions: [],
     };
 
     it('inserts part and returns data', async () => {
@@ -287,7 +314,15 @@ describe('partsAccess utilities', () => {
         company_id: 'company-1',
         part_name: 'NEW001',
         description: 'New Part',
-        category_id: null,
+        is_manufacturable: true,
+        is_stockable: false,
+        primary_unit: null,
+        quantity: 0,
+        cost_per_unit: null,
+        cost_recalculated_at: null,
+        reorder_point: null,
+        preferred_vendor_id: null,
+        legacy_id: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -319,7 +354,14 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_name: 'PART001',
       description: 'Updated Part',
-      category_id: '',
+      is_manufacturable: true,
+      is_stockable: false,
+      primary_unit: null,
+      quantity: 0,
+      cost_per_unit: null,
+      reorder_point: null,
+      preferred_vendor_id: null,
+      unit_conversions: [],
     };
 
     it('updates part and returns data', async () => {
@@ -357,7 +399,7 @@ describe('partsAccess utilities', () => {
       mockQueryBuilder.error = { message: 'FK violation', code: '23503' };
 
       await expect(deletePart('part-1')).rejects.toThrow(
-        'Cannot delete this part because it is referenced by quotes or jobs. Remove those references first.'
+        "Cannot delete this part because it is referenced by quotes, jobs, or another part's BOM. Remove those references first."
       );
     });
   });
@@ -379,7 +421,7 @@ describe('partsAccess utilities', () => {
       mockQueryBuilder.error = { message: 'FK violation', code: '23503' };
 
       await expect(bulkDeleteParts(['part-1'])).rejects.toThrow(
-        'Cannot delete some parts because they are referenced by quotes or jobs. Remove those references first.'
+        'Cannot delete some parts because they are referenced by quotes, jobs, or BOM rows. Remove those references first.'
       );
     });
   });

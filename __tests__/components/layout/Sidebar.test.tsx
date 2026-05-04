@@ -27,12 +27,14 @@ describe('Sidebar', () => {
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
     expect(screen.getByText('Quotes')).toBeInTheDocument();
     expect(screen.getByText('Jobs')).toBeInTheDocument();
-    expect(screen.getByText('Operations')).toBeInTheDocument();
-    expect(screen.getByText('Inventory')).toBeInTheDocument();
     expect(screen.getByText('Parts')).toBeInTheDocument();
     expect(screen.getByText('Customers')).toBeInTheDocument();
     expect(screen.getByText('Team')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
+    // Operations and Inventory entries removed in PR 1 — the unified Parts
+    // page in PR 3 covers both surfaces.
+    expect(screen.queryByText('Operations')).not.toBeInTheDocument();
+    expect(screen.queryByText('Inventory')).not.toBeInTheDocument();
   });
 
   it('hides Team and Settings for user role', () => {
@@ -52,7 +54,7 @@ describe('Sidebar', () => {
 
     render(<Sidebar />);
 
-    const alwaysVisible = ['Dashboard', 'Quotes', 'Jobs', 'Operations', 'Inventory', 'Parts', 'Customers'];
+    const alwaysVisible = ['Dashboard', 'Quotes', 'Jobs', 'Parts', 'Customers'];
     for (const item of alwaysVisible) {
       expect(screen.getByText(item)).toBeInTheDocument();
     }

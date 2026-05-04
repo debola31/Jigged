@@ -2,6 +2,7 @@
 
 import {
   Box,
+  Chip,
   IconButton,
   Typography,
   Tooltip,
@@ -13,14 +14,34 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { formatTime } from '@/types/routings';
+import type { WorkCenterKind } from '@/types/workCenter';
 
+/**
+ * One row in the linear routing builder. Mirrors a `routing_operations`
+ * record but holds form-builder state — `tempId` is a synthetic id for
+ * unsaved rows; existing rows reuse their real DB uuid.
+ *
+ * The display branches on `workCenterKind`:
+ *   - 'internal' → setup minutes + cycle minutes/unit
+ *   - 'external' → vendor name + flat per-unit price + setup cost
+ */
 export interface OperationRowData {
   tempId: string;
-  operationTypeId: string;
-  operationName: string;
-  laborRate: number | null;
-  runTimePerUnit: number | null;
-  setupTime: number;
+  workCenterId: string;
+  workCenterName: string;
+  workCenterKind: WorkCenterKind;
+  vendorName: string | null;
+  /** Internal: minutes of one-time setup per batch. */
+  setupMinutes: number | null;
+  /** Internal: minutes of cycle time per unit produced. */
+  cycleMinutesPerUnit: number | null;
+  /** Internal: optional override for the work center's labor_rate. */
+  laborRateOverride: number | null;
+  /** External: per-unit price the vendor charges. */
+  externalUnitPrice: number | null;
+  /** External: flat per-batch setup cost the vendor charges. */
+  externalSetupCost: number | null;
+  instructions: string | null;
 }
 
 interface RoutingOperationRowProps {
@@ -34,15 +55,6 @@ interface RoutingOperationRowProps {
   disabled?: boolean;
 }
 
-/**
- * Compact one-line operation row.
- *   [↑] [↓] | N. Operation Name (group) | Setup 10 min · Run 2 min/unit | ✏️ | 🗑
- *
- * Times are subtle caption text. "No setup" is the common case and is
- * rendered neutrally; "No run time" is the unusual shape (setup-only ops
- * like Engineering/Programming) and is flagged in warning color so the user
- * can confirm it's intentional.
- */
 export default function RoutingOperationRow({
   row,
   index,
@@ -56,15 +68,28 @@ export default function RoutingOperationRow({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const placeholder = !row.operationTypeId;
-  const setupSet = row.setupTime > 0;
-  const runSet = row.runTimePerUnit !== null && row.runTimePerUnit > 0;
+  const placeholder = !row.workCenterId;
+  const isExternal = row.workCenterKind === 'external';
 
-  const setupLabel = setupSet ? `Setup ${formatTime(row.setupTime)}` : 'No setup';
-  const runLabel = runSet ? `Run ${formatTime(row.runTimePerUnit)}/unit` : 'No run time';
-
-  const setupSx = { color: 'text.secondary' };
-  const runSx = { color: runSet ? 'text.secondary' : 'warning.main' };
+  // Build the per-row caption based on kind.
+  let captionLeft: string;
+  let captionRight: string;
+  let captionRightWarning = false;
+  if (isExternal) {
+    captionLeft = row.externalSetupCost && row.externalSetupCost > 0
+      ? `Setup $${row.externalSetupCost.toFixed(2)}`
+      : 'No setup cost';
+    captionRight = row.externalUnitPrice && row.externalUnitPrice > 0
+      ? `$${row.externalUnitPrice.toFixed(2)}/unit`
+      : 'No unit price';
+    captionRightWarning = !(row.externalUnitPrice && row.externalUnitPrice > 0);
+  } else {
+    const setupSet = (row.setupMinutes ?? 0) > 0;
+    const cycleSet = row.cycleMinutesPerUnit !== null && row.cycleMinutesPerUnit > 0;
+    captionLeft = setupSet ? `Setup ${formatTime(row.setupMinutes ?? 0)}` : 'No setup';
+    captionRight = cycleSet ? `Run ${formatTime(row.cycleMinutesPerUnit)}/unit` : 'No run time';
+    captionRightWarning = !cycleSet;
+  }
 
   return (
     <Box
@@ -118,19 +143,36 @@ export default function RoutingOperationRow({
               fontStyle: placeholder ? 'italic' : 'normal',
             }}
           >
-            {placeholder ? 'Click pencil to choose an operation' : row.operationName}
+            {placeholder ? 'Click pencil to choose a work center' : row.workCenterName}
           </Typography>
+          {!placeholder && (
+            <Chip
+              label={isExternal ? 'External' : 'Internal'}
+              size="small"
+              variant="outlined"
+              color={isExternal ? 'secondary' : 'default'}
+              sx={{ height: 18, fontSize: '0.7rem' }}
+            />
+          )}
+          {!placeholder && isExternal && row.vendorName && (
+            <Typography variant="caption" color="text.secondary">
+              {row.vendorName}
+            </Typography>
+          )}
         </Box>
         {!placeholder && !isMobile && (
           <Typography variant="caption" component="div">
-            <Box component="span" sx={setupSx}>
-              {setupLabel}
+            <Box component="span" sx={{ color: 'text.secondary' }}>
+              {captionLeft}
             </Box>
             <Box component="span" sx={{ color: 'text.secondary', mx: 0.5 }}>
               ·
             </Box>
-            <Box component="span" sx={runSx}>
-              {runLabel}
+            <Box
+              component="span"
+              sx={{ color: captionRightWarning ? 'warning.main' : 'text.secondary' }}
+            >
+              {captionRight}
             </Box>
           </Typography>
         )}
@@ -138,11 +180,14 @@ export default function RoutingOperationRow({
 
       {!placeholder && isMobile && (
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mr: 0.5 }}>
-          <Typography variant="caption" sx={setupSx}>
-            {setupLabel}
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            {captionLeft}
           </Typography>
-          <Typography variant="caption" sx={runSx}>
-            {runLabel}
+          <Typography
+            variant="caption"
+            sx={{ color: captionRightWarning ? 'warning.main' : 'text.secondary' }}
+          >
+            {captionRight}
           </Typography>
         </Box>
       )}

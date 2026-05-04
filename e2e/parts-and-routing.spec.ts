@@ -5,7 +5,7 @@ import { navigateTo } from './helpers/navigation';
  * E2E: Parts + Routing workflow
  *
  * Prerequisites (in test company):
- * - At least 1 operation type exists (for adding to a routing)
+ * - At least 1 work center exists (for adding to a routing)
  */
 test.describe('Parts and Routing workflow', () => {
   const uniqueSuffix = Date.now().toString().slice(-6);
@@ -53,8 +53,9 @@ test.describe('Parts and Routing workflow', () => {
     // editor row at the bottom of the Operations list (no dialog).
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // Open the Operation autocomplete and select the first available option.
-    await page.getByLabel(/^Operation$/).click();
+    // Open the Work center autocomplete and select the first available option.
+    // (Renamed from "Operation" in PR 1 — operations now reference work_centers.)
+    await page.getByLabel(/^Work center$/).click();
 
     const listbox = page.getByRole('listbox');
     const firstOption = listbox.getByRole('option').first();
@@ -63,14 +64,14 @@ test.describe('Parts and Routing workflow', () => {
       .catch(() => false);
 
     if (!hasOperations) {
-      test.skip(true, 'No operation types exist in test company');
+      test.skip(true, 'No work centers exist in test company');
     }
 
     await firstOption.click();
 
-    // Editor requires at least one of run time / setup time before save will
-    // commit (see RoutingOperationRowEditor validation). Fill run time.
-    await page.getByLabel(/Run time per unit/i).fill('2');
+    // Editor requires at least one of cycle / setup minutes before save will
+    // commit (see RoutingOperationRowEditor validation). Fill cycle minutes.
+    await page.getByLabel(/Cycle minutes per unit/i).fill('2');
 
     // Confirm: "Add to routing" (the inline editor's primary action)
     await page.getByRole('button', { name: /Add to routing/i }).click();

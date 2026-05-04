@@ -16,9 +16,11 @@ import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+// Use the canonical `getLowStockPartsAlerts` (the legacy `getInventoryAlerts`
+// alias still exists but the new name reflects the unified parts model).
 import {
   getAtRiskJobs,
-  getInventoryAlerts,
+  getLowStockPartsAlerts,
   type AtRiskJob,
   type InventoryAlert,
 } from '@/utils/alertsAccess';
@@ -46,7 +48,7 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
     try {
       const [jobs, inventory] = await Promise.all([
         getAtRiskJobs(companyId),
-        getInventoryAlerts(companyId),
+        getLowStockPartsAlerts(companyId),
       ]);
       setAtRiskJobs(jobs);
       setInventoryAlerts(inventory);
@@ -197,7 +199,7 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
                         key={alert.item_name}
                         onClick={() => {
                           setAnchorEl(null);
-                          router.push(`/dashboard/${companyId}/inventory`);
+                          router.push(`/dashboard/${companyId}/parts?view=inventory`);
                         }}
                         sx={{ pl: 3, py: 1 }}
                       >

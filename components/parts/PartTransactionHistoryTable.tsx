@@ -18,25 +18,29 @@ import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
 import NextLink from 'next/link';
-import type { InventoryTransactionWithRelations } from '@/types/inventory';
-import { getTransactionTypeDisplay, formatTransactionDate, formatQuantityWithUnit } from '@/types/inventory';
-import { getItemTransactions, updateTransactionNotes } from '@/utils/inventoryAccess';
+import type { InventoryTransactionWithRelations } from '@/types/partTransaction';
+import {
+  getTransactionTypeDisplay,
+  formatTransactionDate,
+  formatQuantityWithUnit,
+} from '@/types/partTransaction';
+import { getPartTransactions, updateTransactionNotes } from '@/utils/partsAccess';
 
-interface TransactionHistoryTableProps {
-  itemId: string;
+interface PartTransactionHistoryTableProps {
+  partId: string;
   companyId: string;
-  /** The item's primary unit of measurement */
+  /** The part's primary unit of measurement */
   primaryUnit: string;
   /** Trigger a refresh from parent */
   refreshKey?: number;
 }
 
-export default function TransactionHistoryTable({
-  itemId,
+export default function PartTransactionHistoryTable({
+  partId,
   companyId,
   primaryUnit,
   refreshKey = 0,
-}: TransactionHistoryTableProps) {
+}: PartTransactionHistoryTableProps) {
   const [transactions, setTransactions] = useState<InventoryTransactionWithRelations[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -52,12 +56,12 @@ export default function TransactionHistoryTable({
     const fetchTransactions = async () => {
       setLoading(true);
       try {
-        const { transactions: data, total: count } = await getItemTransactions(
-          itemId,
+        const { transactions: data, total: count } = await getPartTransactions(
+          partId,
           page * rowsPerPage,
-          rowsPerPage
+          rowsPerPage,
         );
-        setTransactions(data);
+        setTransactions(data as InventoryTransactionWithRelations[]);
         setTotal(count);
       } catch (err) {
         console.error('Error fetching transactions:', err);
@@ -67,7 +71,7 @@ export default function TransactionHistoryTable({
     };
 
     fetchTransactions();
-  }, [itemId, page, rowsPerPage, refreshKey]);
+  }, [partId, page, rowsPerPage, refreshKey]);
 
   const handleChangePage = (_: unknown, newPage: number) => {
     setPage(newPage);

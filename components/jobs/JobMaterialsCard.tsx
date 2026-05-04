@@ -48,7 +48,7 @@ export default function JobMaterialsCard({ materials }: JobMaterialsCardProps) {
         ) : (
           <List dense disablePadding>
             {materials.map((mat, idx) => {
-              const itemName = mat.inventory_item?.name || 'Unknown item';
+              const itemName = mat.material_part?.part_name || 'Unknown item';
               const expected = `${mat.expected_quantity} ${mat.unit}`;
               const actualLabel =
                 mat.actual_quantity != null

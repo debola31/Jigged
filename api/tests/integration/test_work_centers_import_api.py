@@ -1,0 +1,232 @@
+"""
+Integration tests for the Work Centers Import API endpoints.
+
+Covers analyze / validate / execute for both internal and external work_centers,
+including vendor name resolution and the kind/vendor pairing constraints.
+"""
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from httpx import AsyncClient, ASGITransport
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from index import app
+from routes.work_centers_import_routes import get_supabase
+
+
+class MockAIProvider:
+    provider_name = "mock-ai"
+
+    async def suggest_column_mappings(self, csv_headers, sample_rows, target_schema, column_samples=None):
+        suggestions = []
+        rules = {
+            "name": ("name", 0.9),
+            "kind": ("kind", 0.9),
+            "vendor": ("vendor_name", 0.9),
+            "labor rate": ("labor_rate", 0.9),
+        }
+
+        class S:
+            def __init__(self, csv_column, db_field, confidence, reasoning):
+                self.csv_column = csv_column
+                self.db_field = db_field
+                self.confidence = confidence
+                self.reasoning = reasoning
+
+        for h in csv_headers:
+            db_field, conf = rules.get(h.lower().strip(), (None, 0.0))
+            suggestions.append(S(h, db_field, conf, "ok"))
+        return suggestions
+
+
+class MockSupabaseTable:
+    def __init__(self, data=None, on_insert=None):
+        self._data = data or []
+        self._inserted = None
+        self._on_insert = on_insert
+
+    def select(self, *a, **k): return self
+    def eq(self, *a, **k): return self
+    def in_(self, *a, **k): return self
+    def is_(self, *a, **k): return self
+    def delete(self): return self
+
+    def insert(self, data):
+        self._inserted = data
+        if self._on_insert is not None:
+            self._on_insert(data)
+        return self
+
+    def execute(self):
+        result = MagicMock()
+        result.data = self._data
+        if self._inserted is not None:
+            items = self._inserted if isinstance(self._inserted, list) else [self._inserted]
+            result.data = [{**dict(r), "id": f"wc-{i}"} for i, r in enumerate(items)]
+        return result
+
+
+class MockSupabase:
+    def __init__(self, existing_wcs=None, existing_vendors=None, insert_log=None):
+        self._existing_wcs = existing_wcs or []
+        self._existing_vendors = existing_vendors or []
+        self._insert_log = insert_log if insert_log is not None else []
+
+    def table(self, name):
+        cb = lambda d: self._insert_log.append({"table": name, "data": d})
+        if name == "work_centers":
+            return MockSupabaseTable(data=self._existing_wcs, on_insert=cb)
+        if name == "vendors":
+            return MockSupabaseTable(data=self._existing_vendors, on_insert=cb)
+        return MockSupabaseTable(on_insert=cb)
+
+
+def create_override(**kwargs):
+    mock = MockSupabase(**kwargs)
+    return lambda: mock
+
+
+@pytest.fixture
+async def test_client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+class TestWorkCentersValidate:
+    @pytest.mark.unit
+    async def test_internal_no_vendor_ok(self, test_client):
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Kind": "kind", "Labor Rate": "labor_rate"},
+            "rows": [{"Name": "Mazak Lathe", "Kind": "internal", "Labor Rate": "135"}],
+        }
+        app.dependency_overrides[get_supabase] = create_override()
+        r = await test_client.post(
+            "/api/work-centers/import/validate", json=request
+        )
+        app.dependency_overrides.clear()
+        assert r.status_code == 200
+        data = r.json()
+        assert data["has_conflicts"] is False
+        assert data["valid_rows_count"] == 1
+
+    @pytest.mark.unit
+    async def test_external_requires_vendor(self, test_client):
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Kind": "kind"},
+            "rows": [{"Name": "PerformCoat", "Kind": "external"}],
+        }
+        app.dependency_overrides[get_supabase] = create_override()
+        r = await test_client.post(
+            "/api/work-centers/import/validate", json=request
+        )
+        app.dependency_overrides.clear()
+        data = r.json()
+        errors = [
+            e for e in data["validation_errors"]
+            if e["error_type"] == "vendor_required_for_external"
+        ]
+        assert len(errors) == 1
+
+    @pytest.mark.unit
+    async def test_external_unknown_vendor(self, test_client):
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
+            "rows": [
+                {"Name": "PerformCoat", "Kind": "external", "Vendor": "Nonexistent"},
+            ],
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            existing_vendors=[{"id": "v1", "name": "Other Vendor"}]
+        )
+        r = await test_client.post(
+            "/api/work-centers/import/validate", json=request
+        )
+        app.dependency_overrides.clear()
+        data = r.json()
+        unknown = [
+            c for c in data["conflicts"] if c["conflict_type"] == "unknown_vendor"
+        ]
+        assert len(unknown) == 1
+
+    @pytest.mark.unit
+    async def test_internal_with_vendor_rejected(self, test_client):
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
+            "rows": [
+                {"Name": "Mill", "Kind": "internal", "Vendor": "Acme"},
+            ],
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            existing_vendors=[{"id": "v1", "name": "Acme"}]
+        )
+        r = await test_client.post(
+            "/api/work-centers/import/validate", json=request
+        )
+        app.dependency_overrides.clear()
+        data = r.json()
+        errors = [
+            e for e in data["validation_errors"]
+            if e["error_type"] == "vendor_forbidden_for_internal"
+        ]
+        assert len(errors) == 1
+
+
+class TestWorkCentersExecute:
+    @pytest.mark.unit
+    async def test_execute_internal(self, test_client):
+        insert_log = []
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Labor Rate": "labor_rate"},
+            "rows": [{"Name": "HURCO Mill", "Labor Rate": "120.00"}],
+            "skip_conflicts": False,
+        }
+        app.dependency_overrides[get_supabase] = create_override(insert_log=insert_log)
+        r = await test_client.post(
+            "/api/work-centers/import/execute", json=request
+        )
+        app.dependency_overrides.clear()
+        assert r.status_code == 200
+        wc_inserts = [x for x in insert_log if x["table"] == "work_centers"]
+        assert len(wc_inserts) == 1
+        row = wc_inserts[0]["data"][0]
+        assert row["kind"] == "internal"
+        assert row["labor_rate"] == 120.0
+        assert row["vendor_id"] is None
+
+    @pytest.mark.unit
+    async def test_execute_external_resolves_vendor(self, test_client):
+        insert_log = []
+        request = {
+            "company_id": "co1",
+            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
+            "rows": [
+                {
+                    "Name": "PerformCoat",
+                    "Kind": "external",
+                    "Vendor": "Acme Coatings",
+                }
+            ],
+            "skip_conflicts": False,
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            existing_vendors=[{"id": "vendor-x", "name": "Acme Coatings"}],
+            insert_log=insert_log,
+        )
+        r = await test_client.post(
+            "/api/work-centers/import/execute", json=request
+        )
+        app.dependency_overrides.clear()
+        assert r.status_code == 200
+        wc_inserts = [x for x in insert_log if x["table"] == "work_centers"]
+        row = wc_inserts[0]["data"][0]
+        assert row["kind"] == "external"
+        assert row["vendor_id"] == "vendor-x"

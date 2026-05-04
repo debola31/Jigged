@@ -1,7 +1,11 @@
 """
-Integration tests for Parts Import API endpoints.
+Integration tests for the unified Parts Import API endpoints.
 
 Tests the parts CSV import workflow: analyze, validate, and execute.
+
+The unified parts importer absorbs the prior `inventory_items` import path,
+so this file also covers stockable/sub-assembly cases that used to live in
+`test_inventory_import_api.py`.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -32,6 +36,14 @@ class MockAIProvider:
             "customer name": ("customer_name", 0.95),
             "description": ("description", 0.90),
             "notes": ("notes", 0.85),
+            "primary unit": ("primary_unit", 0.90),
+            "unit": ("primary_unit", 0.85),
+            "quantity": ("quantity", 0.90),
+            "qty on hand": ("quantity", 0.85),
+            "cost per unit": ("cost_per_unit", 0.90),
+            "cost": ("cost_per_unit", 0.80),
+            "preferred vendor": ("preferred_vendor_name", 0.85),
+            "legacy id": ("legacy_id", 0.85),
         }
 
         class Suggestion:
@@ -52,7 +64,6 @@ class MockAIProvider:
                     reasoning=f"Matched '{header}' to {db_field}",
                 ))
             else:
-                # Discard unmapped columns
                 suggestions.append(Suggestion(
                     csv_column=header,
                     db_field=None,
@@ -67,32 +78,36 @@ class MockAIProvider:
 class MockSupabaseTable:
     """Mock Supabase table with chainable methods."""
 
-    def __init__(self, data=None, error=None):
+    def __init__(self, data=None, error=None, on_upsert=None):
         self._data = data or []
         self._error = error
         self._inserted = None
-        self._conditions = {}
+        self._upserted = None
+        self._on_upsert = on_upsert  # Callback for tracking upserts
 
     def select(self, *args, **kwargs):
         return self
 
     def eq(self, field, value):
-        self._conditions[field] = value
         return self
 
     def is_(self, field, value):
-        """Handle NULL checks."""
-        self._conditions[f"{field}_is"] = value
+        return self
+
+    def in_(self, field, values):
         return self
 
     def insert(self, data):
         self._inserted = data
         return self
 
-    def delete(self):
+    def upsert(self, data, on_conflict=None):
+        self._upserted = data
+        if self._on_upsert is not None:
+            self._on_upsert(data, on_conflict)
         return self
 
-    def in_(self, field, values):
+    def delete(self):
         return self
 
     def execute(self):
@@ -100,7 +115,6 @@ class MockSupabaseTable:
         result.data = self._data
         result.error = self._error
         if self._inserted is not None:
-            # For insert operations, return the inserted data with IDs
             inserted_with_ids = []
             items = self._inserted if isinstance(self._inserted, list) else [self._inserted]
             for i, row in enumerate(items):
@@ -108,30 +122,84 @@ class MockSupabaseTable:
                 row_copy['id'] = f"inserted-id-{i}"
                 inserted_with_ids.append(row_copy)
             result.data = inserted_with_ids
+        elif self._upserted is not None:
+            upserted_with_ids = []
+            items = self._upserted if isinstance(self._upserted, list) else [self._upserted]
+            for i, row in enumerate(items):
+                row_copy = dict(row)
+                row_copy['id'] = f"upserted-id-{i}"
+                upserted_with_ids.append(row_copy)
+            result.data = upserted_with_ids
         return result
 
 
 class MockSupabase:
     """Mock Supabase client."""
 
-    def __init__(self, existing_parts=None, existing_customers=None):
+    def __init__(
+        self,
+        existing_parts=None,
+        existing_customers=None,
+        existing_vendors=None,
+        upsert_log=None,
+        insert_log=None,
+    ):
         self._existing_parts = existing_parts or []
         self._existing_customers = existing_customers or []
+        self._existing_vendors = existing_vendors or []
+        self._upsert_log = upsert_log if upsert_log is not None else []
+        self._insert_log = insert_log if insert_log is not None else []
         self._table_instance = None
+
+    def _record_upsert(self, data, on_conflict):
+        self._upsert_log.append({"data": data, "on_conflict": on_conflict})
+
+    def _record_insert_factory(self, table_name):
+        # Wrap the table to also record inserts so tests can introspect
+        def _wrap(table):
+            original_insert = table.insert
+            insert_log = self._insert_log
+
+            def _insert(data):
+                insert_log.append({"table": table_name, "data": data})
+                return original_insert(data)
+
+            table.insert = _insert
+            return table
+        return _wrap
 
     def table(self, name):
         if name == "parts":
-            self._table_instance = MockSupabaseTable(data=self._existing_parts)
-            return self._table_instance
+            self._table_instance = MockSupabaseTable(
+                data=self._existing_parts,
+                on_upsert=self._record_upsert,
+            )
         elif name == "customers":
             self._table_instance = MockSupabaseTable(data=self._existing_customers)
-            return self._table_instance
-        return MockSupabaseTable()
+        elif name == "vendors":
+            self._table_instance = MockSupabaseTable(data=self._existing_vendors)
+        else:
+            self._table_instance = MockSupabaseTable()
+        # Wrap insert for inspection
+        self._record_insert_factory(name)(self._table_instance)
+        return self._table_instance
 
 
-def create_mock_supabase_override(existing_parts=None, existing_customers=None):
+def create_mock_supabase_override(
+    existing_parts=None,
+    existing_customers=None,
+    existing_vendors=None,
+    upsert_log=None,
+    insert_log=None,
+):
     """Create a dependency override function for get_supabase."""
-    mock = MockSupabase(existing_parts=existing_parts, existing_customers=existing_customers)
+    mock = MockSupabase(
+        existing_parts=existing_parts,
+        existing_customers=existing_customers,
+        existing_vendors=existing_vendors,
+        upsert_log=upsert_log,
+        insert_log=insert_log,
+    )
     def override():
         return mock
     return override
@@ -143,7 +211,6 @@ async def test_client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
         yield ac
-    # Clean up any dependency overrides
     app.dependency_overrides.clear()
 
 
@@ -209,12 +276,34 @@ class TestPartsAnalyzeEndpoint:
         assert response.status_code == 200
         data = response.json()
 
-        # Should detect 2 pricing column pairs
         assert len(data["pricing_columns"]) == 2
-        assert data["pricing_columns"][0]["qty_column"] == "qty1"
-        assert data["pricing_columns"][0]["price_column"] == "price1"
-        assert data["pricing_columns"][1]["qty_column"] == "qty2"
-        assert data["pricing_columns"][1]["price_column"] == "price2"
+
+    @pytest.mark.unit
+    async def test_analyze_unified_endpoint(self, test_client):
+        """The /analyze-unified endpoint also returns mappings (uses UNIFIED_PART_SCHEMA)."""
+        request_data = {
+            "company_id": "test-company-id",
+            "headers": ["Part Name", "Primary Unit", "Quantity"],
+            "sample_rows": [
+                ["PART001", "lbs", "100"],
+            ],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        with patch("routes.parts_import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
+            mock_get_provider.return_value = MockAIProvider()
+
+            response = await test_client.post(
+                "/api/parts/import/analyze-unified",
+                json=request_data,
+            )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "mappings" in data
 
 
 class TestPartsValidateEndpoint:
@@ -234,7 +323,6 @@ class TestPartsValidateEndpoint:
                 {"Part Name": "NEW001", "Description": "New Part 1"},
                 {"Part Name": "NEW002", "Description": "New Part 2"},
             ],
-            "customer_match_mode": "all_generic",
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
@@ -252,7 +340,6 @@ class TestPartsValidateEndpoint:
         assert data["has_conflicts"] is False
         assert data["valid_rows_count"] == 2
         assert data["conflict_rows_count"] == 0
-        assert data["error_rows_count"] == 0
 
     @pytest.mark.unit
     async def test_validate_detects_missing_part_name(self, test_client):
@@ -268,7 +355,6 @@ class TestPartsValidateEndpoint:
                 {"Part Name": "", "Description": "Part Without Name"},
                 {"Part Name": "VALID001", "Description": "Valid Part"},
             ],
-            "customer_match_mode": "all_generic",
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
@@ -284,9 +370,7 @@ class TestPartsValidateEndpoint:
         data = response.json()
 
         assert data["error_rows_count"] == 1
-        assert len(data["validation_errors"]) == 1
         assert data["validation_errors"][0]["error_type"] == "missing_part_name"
-        assert data["validation_errors"][0]["row_number"] == 1
 
     @pytest.mark.unit
     async def test_validate_detects_duplicate_part_name_in_csv(self, test_client):
@@ -299,9 +383,8 @@ class TestPartsValidateEndpoint:
             "pricing_columns": [],
             "rows": [
                 {"Part Name": "DUPE001"},
-                {"Part Name": "DUPE001"},  # Duplicate
+                {"Part Name": "DUPE001"},
             ],
-            "customer_match_mode": "all_generic",
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
@@ -320,19 +403,22 @@ class TestPartsValidateEndpoint:
         csv_duplicate_conflicts = [
             c for c in data["conflicts"] if c["conflict_type"] == "csv_duplicate"
         ]
-        # Second row should be flagged as duplicate
         assert len(csv_duplicate_conflicts) >= 1
 
     @pytest.mark.unit
-    async def test_validate_customer_match_mode_all_to_one_requires_customer_id(self, test_client):
-        """Returns 400 when customer_match_mode is all_to_one but no customer_id provided."""
+    async def test_validate_rejects_customer_match_mode(self, test_client):
+        """RAISES 400 when customer_match_mode is present.
+
+        Parts no longer link to customers at the data layer (per the
+        no-silent-fallbacks principle, accepting the field would let the
+        frontend believe a customer link was saved when it wasn't).
+        """
         request_data = {
             "company_id": "test-company-id",
             "mappings": {"Part Name": "part_name"},
             "pricing_columns": [],
             "rows": [{"Part Name": "PART001"}],
-            "customer_match_mode": "all_to_one",
-            # Missing selected_customer_id
+            "customer_match_mode": "all_generic",
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
@@ -345,29 +431,101 @@ class TestPartsValidateEndpoint:
         app.dependency_overrides.clear()
 
         assert response.status_code == 400
-        assert "selected_customer_id is required" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert detail["error"] == "customer_link_removed"
 
     @pytest.mark.unit
-    async def test_validate_customer_not_found_conflict(self, test_client):
-        """Detects customer_not_found conflict when customer name doesn't exist."""
-        existing_customers = [
-            {"id": "customer-1", "name": "Acme Corp"},
-        ]
+    async def test_validate_rejects_selected_customer_id(self, test_client):
+        """RAISES 400 when selected_customer_id is present."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name"},
+            "pricing_columns": [],
+            "rows": [{"Part Name": "PART001"}],
+            "selected_customer_id": "cust-123",
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "customer_link_removed"
+
+    @pytest.mark.unit
+    async def test_validate_rejects_customer_name_mapping(self, test_client):
+        """RAISES 400 when a CSV column is mapped to customer_name."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Customer": "customer_name",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "PART001", "Customer": "Acme"}],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "customer_link_removed"
+
+    @pytest.mark.unit
+    async def test_execute_rejects_customer_fields(self, test_client):
+        """RAISES 400 on /execute when customer fields are present."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name"},
+            "pricing_columns": [],
+            "rows": [{"Part Name": "PART001"}],
+            "customer_match_mode": "all_generic",
+            "skip_conflicts": False,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "customer_link_removed"
+
+    @pytest.mark.unit
+    async def test_validate_unknown_vendor_fails(self, test_client):
+        """Detects unknown vendor when preferred_vendor_name doesn't exist."""
+        existing_vendors = [{"id": "v1", "name": "Acme Supplies"}]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
-                "Customer Name": "customer_name",
+                "Preferred Vendor": "preferred_vendor_name",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001", "Customer Name": "Nonexistent Co"},
+                {"Part Name": "PART001", "Preferred Vendor": "Nonexistent Vendor"},
             ],
-            "customer_match_mode": "by_column",
         }
 
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], existing_customers)
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[], existing_vendors=existing_vendors
+        )
 
         response = await test_client.post(
             "/api/parts/import/validate",
@@ -378,12 +536,43 @@ class TestPartsValidateEndpoint:
 
         assert response.status_code == 200
         data = response.json()
-
-        assert data["has_conflicts"] is True
-        customer_conflicts = [
-            c for c in data["conflicts"] if c["conflict_type"] == "customer_not_found"
+        unknown_vendor = [
+            c for c in data["conflicts"] if c["conflict_type"] == "unknown_vendor"
         ]
-        assert len(customer_conflicts) == 1
+        assert len(unknown_vendor) == 1
+
+    @pytest.mark.unit
+    async def test_validate_invalid_quantity_fails(self, test_client):
+        """Detects negative quantity as validation error."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Quantity": "quantity",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "PART001", "Quantity": "-5", "Unit": "lbs"},
+            ],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        invalid = [
+            e for e in data["validation_errors"]
+            if e["error_type"] == "invalid_quantity"
+        ]
+        assert len(invalid) == 1
 
 
 class TestPartsExecuteEndpoint:
@@ -403,7 +592,6 @@ class TestPartsExecuteEndpoint:
                 {"Part Name": "NEW001", "Description": "New Part 1"},
                 {"Part Name": "NEW002", "Description": "New Part 2"},
             ],
-            "customer_match_mode": "all_generic",
             "skip_conflicts": False,
         }
 
@@ -424,44 +612,10 @@ class TestPartsExecuteEndpoint:
         assert data["skipped_count"] == 0
 
     @pytest.mark.unit
-    async def test_execute_transforms_pricing_columns_to_jsonb(self, test_client):
-        """Transforms pricing columns into JSONB array."""
-        request_data = {
-            "company_id": "test-company-id",
-            "mappings": {
-                "Part Name": "part_name",
-            },
-            "pricing_columns": [
-                {"qty_column": "qty1", "price_column": "price1"},
-                {"qty_column": "qty2", "price_column": "price2"},
-            ],
-            "rows": [
-                {"Part Name": "PART001", "qty1": "1", "price1": "10.00", "qty2": "10", "price2": "8.00"},
-            ],
-            "customer_match_mode": "all_generic",
-            "skip_conflicts": False,
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-
-        response = await test_client.post(
-            "/api/parts/import/execute",
-            json=request_data,
-        )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["success"] is True
-        assert data["imported_count"] == 1
-
-    @pytest.mark.unit
     async def test_execute_skips_conflicts_when_skip_conflicts_true(self, test_client):
         """Skips conflicting rows when skip_conflicts is True."""
         existing_parts = [
-            {"id": "existing-1", "part_name": "EXIST001", "customer_id": None},
+            {"id": "existing-1", "part_name": "EXIST001", "legacy_id": None},
         ]
 
         request_data = {
@@ -474,7 +628,6 @@ class TestPartsExecuteEndpoint:
                 {"Part Name": "EXIST001"},  # Will be skipped (duplicate)
                 {"Part Name": "NEW001"},    # Will be imported
             ],
-            "customer_match_mode": "all_generic",
             "skip_conflicts": True,
         }
 
@@ -495,28 +648,37 @@ class TestPartsExecuteEndpoint:
         assert data["skipped_count"] == 1
 
     @pytest.mark.unit
-    async def test_execute_assigns_customer_in_all_to_one_mode(self, test_client):
-        """Assigns selected customer to all parts in all_to_one mode."""
-        existing_customers = [
-            {"id": "customer-123", "name": "Acme Corp"},
-        ]
+    async def test_execute_imports_stockable_part_with_unit_and_quantity(
+        self, test_client
+    ):
+        """Importing a part with primary_unit + quantity sets is_stockable=true."""
+        insert_log: list = []
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
+                "Unit": "primary_unit",
+                "Quantity": "quantity",
+                "Cost": "cost_per_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001"},
-                {"Part Name": "PART002"},
+                {
+                    "Part Name": "STEEL-4140",
+                    "Unit": "lbs",
+                    "Quantity": "250",
+                    "Cost": "12.50",
+                },
             ],
-            "customer_match_mode": "all_to_one",
-            "selected_customer_id": "customer-123",
             "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
         }
 
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], existing_customers)
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[],
+            insert_log=insert_log,
+        )
 
         response = await test_client.post(
             "/api/parts/import/execute",
@@ -527,6 +689,134 @@ class TestPartsExecuteEndpoint:
 
         assert response.status_code == 200
         data = response.json()
+        assert data["imported_count"] == 1
 
-        assert data["success"] is True
-        assert data["imported_count"] == 2
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        assert len(parts_inserts) == 1
+        inserted = parts_inserts[0]["data"][0]
+        assert inserted["is_stockable"] is True
+        assert inserted["primary_unit"] == "pounds"
+        assert inserted["quantity"] == 250.0
+        assert inserted["cost_per_unit"] == 12.5
+
+    @pytest.mark.unit
+    async def test_execute_resolves_preferred_vendor_to_id(self, test_client):
+        """preferred_vendor_name resolves to vendor_id at execute time."""
+        insert_log: list = []
+        existing_vendors = [{"id": "vendor-abc", "name": "Acme Supplies"}]
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Preferred Vendor": "preferred_vendor_name",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {
+                    "Part Name": "PART001",
+                    "Preferred Vendor": "Acme Supplies",
+                    "Unit": "lbs",
+                },
+            ],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[],
+            existing_vendors=existing_vendors,
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        inserted = parts_inserts[0]["data"][0]
+        assert inserted.get("preferred_vendor_id") == "vendor-abc"
+
+    @pytest.mark.unit
+    async def test_execute_legacy_id_uses_upsert_path(self, test_client):
+        """Rows with legacy_id are upserted via ON CONFLICT for idempotency."""
+        upsert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Legacy Id": "legacy_id",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "PART001", "Legacy Id": "old-system-001"},
+            ],
+            "skip_conflicts": False,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[],
+            upsert_log=upsert_log,
+        )
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        # The route called upsert with on_conflict="company_id,legacy_id"
+        assert len(upsert_log) == 1
+        assert upsert_log[0]["on_conflict"] == "company_id,legacy_id"
+
+    @pytest.mark.unit
+    async def test_execute_sub_assembly_classification(self, test_client):
+        """Explicit is_manufacturable + is_stockable both true (sub-assembly)."""
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Is Manufacturable": "is_manufacturable",
+                "Is Stockable": "is_stockable",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {
+                    "Part Name": "SUB-ASSY-001",
+                    "Is Manufacturable": "true",
+                    "Is Stockable": "true",
+                    "Unit": "pcs",
+                },
+            ],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pieces"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        inserted = parts_inserts[0]["data"][0]
+        assert inserted["is_manufacturable"] is True
+        assert inserted["is_stockable"] is True

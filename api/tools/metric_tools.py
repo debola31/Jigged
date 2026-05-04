@@ -123,9 +123,13 @@ METRIC_TOOLS: list[dict] = [
     {
         "name": "get_part_profitability",
         "description": (
-            "Get part profitability analysis. Compares revenue (quote total_price) "
-            "against estimated labor cost (job_operations estimated hours * operation_types labor_rate). "
-            "Returns top parts by profit margin, suitable for a bar chart."
+            "Get part profitability analysis. Walks shipped jobs -> job_parts -> parts. "
+            "Revenue per part comes from the linked quote_line_items.total_price. "
+            "Estimated labor cost rolls up job_operations: for internal work_centers, "
+            "(estimated_setup_minutes + estimated_run_minutes_per_unit * quantity) / 60 "
+            "* COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate); "
+            "for external work_centers, external_unit_price * quantity + external_setup_cost. "
+            "Returns top parts by profit, suitable for a bar chart."
         ),
         "input_schema": {
             "type": "object",

@@ -1,8 +1,13 @@
 """
 Database schema context for the AI system prompt.
 
-Handcrafted representation of the 17 business tables available for SQL queries.
+Handcrafted representation of the business tables available for SQL queries.
 This string is injected into the system prompt so the AI can generate correct SQL.
+
+Reflects the unified `parts` schema (parts absorbed inventory_items),
+`work_centers` (replaces operation_types), `vendors`, `routing_operations`
+(replaces routing_nodes), `parts_bom` (replaces routing_materials), and
+`job_parts` (the new intermediary that lets a single job ship multiple parts).
 """
 
 SCHEMA_CONTEXT = """
@@ -11,133 +16,246 @@ SCHEMA_CONTEXT = """
 ### companies
 - id: UUID (PK)
 - name: TEXT
-- slug: TEXT (unique)
 - settings: JSONB
-- is_demo: BOOLEAN
-- created_at: TIMESTAMPTZ
-- updated_at: TIMESTAMPTZ
+- demo_company_id: UUID (FK -> companies.id, nullable)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### customers
 - id: UUID (PK)
 - company_id: UUID (FK -> companies.id) -- ALWAYS filter with $1
 - name: TEXT (unique per company)
 - website: TEXT
-- contact_name: TEXT
-- contact_phone: TEXT
-- contact_email: TEXT
+- contact_name: TEXT, contact_phone: TEXT, contact_email: TEXT
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT (default 'USA')
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+
+### vendors (suppliers and outside-process providers)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- name: TEXT (unique per company)
+- contact_name: TEXT, contact_email: TEXT, contact_phone: TEXT
+- address_line1: TEXT, address_line2: TEXT
+- city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT
+- notes: TEXT
+- legacy_id: TEXT (unique per company; carried from a prior system on import)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: vendors do NOT carry capability flags. Whether a vendor supplies
+  materials vs. performs outside ops is derived from references:
+    * "supplies materials" = some part has parts.preferred_vendor_id = vendor.id
+    * "performs outside ops" = some work_centers row has kind='external' AND
+      vendor_id = vendor.id
+
+### parts (UNIFIED — absorbs the old `inventory_items` table)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- part_name: TEXT (unique per company)
+- description: TEXT
+- is_manufacturable: BOOLEAN (default true) -- this part is made in-house (has a routing)
+- is_stockable: BOOLEAN (default false) -- this part is tracked as on-hand stock
+- primary_unit: TEXT (required when is_stockable=true; e.g. 'ea', 'lb', 'ft')
+- quantity: NUMERIC (default 0; current stock-on-hand, >= 0)
+- cost_per_unit: NUMERIC(12,4) (latest computed unit cost; nullable until recalculated)
+- cost_recalculated_at: TIMESTAMPTZ (nullable; set by recalculate_part_cost())
+- reorder_point: NUMERIC (nullable; reorder when quantity drops to this)
+- preferred_vendor_id: UUID (FK -> vendors.id, nullable)
+- legacy_id: TEXT (unique per company; carried from a prior system on import)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- The four (is_manufacturable, is_stockable) tuples mean:
+    * (true,  false) → custom manufactured part
+    * (false, true)  → raw material / bought item
+    * (true,  true)  → sub-assembly (made AND stocked)
+    * (false, false) → "orphan" customer part (quoted but never made)
+
+### part_pricing_tiers (volume-pricing tiers per part)
+- id: UUID (PK)
+- part_id: UUID (FK -> parts.id)
+- company_id: UUID -- ALWAYS filter with $1
+- sequence: INTEGER (unique per part)
+- quantity: INTEGER (>0; tier breakpoint)
+- base_cost_per_unit: NUMERIC(12,4)
+- markup_percent: NUMERIC(5,2)
+- unit_price: NUMERIC(12,4)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+
+### parts_bom (Bill-Of-Materials — REPLACES routing_materials; NO company_id, join via parts)
+- id: UUID (PK)
+- parent_part_id: UUID (FK -> parts.id) -- the assembly
+- child_part_id: UUID (FK -> parts.id) -- the component (must differ from parent)
+- quantity: NUMERIC (>0; how much of the child this assembly consumes)
+- unit: TEXT (the BOM unit; converted to child.primary_unit via parts_unit_conversions if different)
+- sequence: INTEGER (display order within the BOM)
+- notes: TEXT
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- One row per (parent_part_id, child_part_id). Cycles are blocked by trigger.
+
+### parts_unit_conversions (NO company_id, join via parts)
+- id: UUID (PK)
+- part_id: UUID (FK -> parts.id) -- the part this conversion belongs to
+- from_unit: TEXT (unique per part)
+- to_primary_factor: NUMERIC (>0; multiply a from_unit qty by this to get primary_unit qty)
+
+### markup_rates
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- name: TEXT (unique per company)
+- breakpoints: JSONB (array of quantity → markup_percent rows)
+- is_default: BOOLEAN
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### quotes
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
-- quote_number: TEXT (unique per company, e.g. "Q-001")
-- customer_id: UUID (FK -> customers.id)
-- part_id: UUID (FK -> parts.id)
-- description: TEXT
-- quantity: INTEGER (default 1)
-- unit_price: NUMERIC(12,4)
-- total_price: NUMERIC(12,4)
-- status: TEXT -- one of: 'pending_approval', 'approved', 'rejected', 'accepted', 'expired', 'converted'
+- quote_number: TEXT (unique per company, e.g. 'Q-001'; auto-generated)
+- customer_id: UUID (FK -> customers.id, nullable)
+- status: TEXT -- one of: 'active', 'expired'
 - status_changed_at: TIMESTAMPTZ
-- converted_to_job_id: UUID (FK -> jobs.id, set when quote becomes a job)
-- converted_at: TIMESTAMPTZ
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- converted_at: TIMESTAMPTZ (when accepted/converted to a job)
+- lead_time_days: INTEGER, expiration_date: DATE
+- created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: revenue is NOT on quotes anymore. Sum quote_line_items.total_price
+  for per-quote revenue.
 
-### quote_attachments
+### quote_line_items (one row per part on a quote)
 - id: UUID (PK)
 - quote_id: UUID (FK -> quotes.id)
 - company_id: UUID -- ALWAYS filter with $1
-- file_name: TEXT, file_path: TEXT, file_size: INTEGER, mime_type: TEXT
+- part_id: UUID (FK -> parts.id)
+- source_tier_id: UUID (FK -> part_pricing_tiers.id, nullable)
+- sequence: INTEGER (unique per quote)
+- quantity: INTEGER (>0)
+- unit_price: NUMERIC(12,4)
+- total_price: NUMERIC(12,4) -- per-line subtotal; the per-quote revenue is SUM(total_price)
+- markup_percent: NUMERIC(5,2)
+- base_cost_per_unit: NUMERIC(12,4)
+- is_quote_override: BOOLEAN (true when the user manually overrode the price)
+- created_at: TIMESTAMPTZ
 
-### parts
+### quote_materials (extra material lines on a quote, beyond the part's BOM)
 - id: UUID (PK)
+- quote_id: UUID (FK -> quotes.id)
 - company_id: UUID -- ALWAYS filter with $1
-- part_name: TEXT (unique per company, e.g. "P-001")
-- description: TEXT
-- pricing: JSONB (array of pricing tiers)
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- part_id: UUID (FK -> parts.id) -- the parent part this material belongs to
+- material_part_id: UUID (FK -> parts.id, nullable) -- the material itself
+- sequence: INTEGER
+- item_name: TEXT, quantity: NUMERIC, unit: TEXT
+- cost_per_unit: NUMERIC, line_cost: NUMERIC
+- created_at: TIMESTAMPTZ
 
-### routings (1:1 with parts -- each part has one routing)
+### quote_operations (extra operation lines on a quote, beyond the part's routing)
 - id: UUID (PK)
+- quote_id: UUID (FK -> quotes.id)
 - company_id: UUID -- ALWAYS filter with $1
-- part_id: UUID (FK -> parts.id, UNIQUE)
-- name: TEXT
-- description: TEXT
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-
-### routing_nodes (operations in a routing, ordered by `sequence` -- NO company_id, join via routings)
-- id: UUID (PK)
-- routing_id: UUID (FK -> routings.id)
-- operation_type_id: UUID (FK -> operation_types.id)
-- run_time_per_unit: NUMERIC (minutes per unit)
-- setup_time: NUMERIC (one-time setup minutes per batch)
-- instructions: TEXT
-- sequence: INTEGER (linear order within routing, lower runs first)
-
-### routing_materials (materials for the routing as a whole -- NO company_id, join via routings)
-- id: UUID (PK)
-- routing_id: UUID (FK -> routings.id)
-- inventory_item_id: UUID (FK -> inventory_items.id)
-- quantity: NUMERIC (> 0)
-- unit: TEXT
-- sequence: INTEGER (display order)
-
-### job_materials (materials snapshot for a specific job -- NO company_id, join via jobs)
-- id: UUID (PK)
-- job_id: UUID (FK -> jobs.id)
-- routing_material_id: UUID (FK -> routing_materials.id, nullable if source deleted)
-- inventory_item_id: UUID (FK -> inventory_items.id)
-- expected_quantity: NUMERIC, actual_quantity: NUMERIC (nullable until consumed)
-- unit: TEXT
-- status: TEXT -- one of: 'pending', 'consumed', 'skipped'
-- consumed_at: TIMESTAMPTZ, consumed_by: UUID (nullable)
+- part_id: UUID (FK -> parts.id)
+- sequence: INTEGER
+- operation_name: TEXT
+- run_time_minutes: NUMERIC, setup_time_minutes: NUMERIC
+- labor_rate: NUMERIC, run_cost: NUMERIC, setup_cost: NUMERIC
+- created_at: TIMESTAMPTZ
 
 ### jobs
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
-- job_number: TEXT (unique per company, e.g. "J-001")
+- job_number: TEXT (unique per company, e.g. 'J-001')
 - quote_id: UUID (FK -> quotes.id, nullable)
 - customer_id: UUID (FK -> customers.id, nullable)
-- part_id: UUID (FK -> parts.id, nullable)
-- description: TEXT
 - status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'shipped', 'cancelled'
 - status_changed_at: TIMESTAMPTZ
-- current_operation_sequence: INTEGER
-- started_at: TIMESTAMPTZ (when work began, nullable)
-- completed_at: TIMESTAMPTZ (when all operations finished, nullable)
-- shipped_at: TIMESTAMPTZ (when shipped to customer, nullable)
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ, shipped_at: TIMESTAMPTZ
+- due_date: DATE, lead_time_days: INTEGER
+- created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: jobs no longer carry part_id. A job ships one or more parts via job_parts.
 
-### job_operations (steps within a job -- NO company_id, join via jobs)
-- id: UUID (PK)
-- job_id: UUID (FK -> jobs.id)
-- sequence: INTEGER (order within job, unique per job)
-- operation_name: TEXT
-- operation_type_id: UUID (FK -> operation_types.id, nullable)
-- estimated_setup_hours: NUMERIC(8,2) (default 0)
-- estimated_run_hours_per_unit: NUMERIC(8,4) (default 0)
-- actual_setup_hours: NUMERIC(8,2)
-- actual_run_hours: NUMERIC(8,2)
-- status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
-- started_at: TIMESTAMPTZ
-- completed_at: TIMESTAMPTZ
-- assigned_to: UUID (operator user)
-- instructions: TEXT, notes: TEXT
-
-### job_attachments
+### job_parts (intermediate between jobs and parts; lets one job ship multiple parts)
 - id: UUID (PK)
 - job_id: UUID (FK -> jobs.id)
 - company_id: UUID -- ALWAYS filter with $1
-- file_name: TEXT, file_path: TEXT, file_size: INTEGER, mime_type: TEXT
+- part_id: UUID (FK -> parts.id)
+- source_quote_line_item_id: UUID (FK -> quote_line_items.id, nullable)
+- sequence: INTEGER (unique per job)
+- quantity: INTEGER (>0)
+- status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'shipped', 'cancelled'
+- status_changed_at: TIMESTAMPTZ
+- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ, shipped_at: TIMESTAMPTZ
+- current_operation_sequence: INTEGER
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
-### operation_types (e.g. "CNC Milling", "Lathe", "Grinding")
+### job_operations (steps within a job — NO company_id, join via jobs)
+- id: UUID (PK)
+- job_id: UUID (FK -> jobs.id)
+- job_part_id: UUID (FK -> job_parts.id) -- which part this op produces
+- sequence: INTEGER (unique per job_part)
+- operation_name: TEXT (snapshot, immune to renames)
+- work_center_id: UUID (FK -> work_centers.id, nullable; was operation_type_id)
+- routing_operation_id: UUID (FK -> routing_operations.id, nullable; the source row)
+- estimated_setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES, not hours
+- estimated_run_minutes_per_unit: NUMERIC(8,4) (default 0) -- MINUTES per unit
+- actual_setup_minutes: NUMERIC(8,2), actual_run_minutes: NUMERIC(8,2)
+- status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
+- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
+- assigned_to: UUID, completed_by: UUID
+- instructions: TEXT, notes: TEXT
+
+### job_materials (materials snapshot for a specific job_part — NO company_id, join via jobs)
+- id: UUID (PK)
+- job_id: UUID (FK -> jobs.id)
+- job_part_id: UUID (FK -> job_parts.id)
+- parts_bom_id: UUID (FK -> parts_bom.id, nullable if source deleted)
+- material_part_id: UUID (FK -> parts.id) -- the material consumed
+- expected_quantity: NUMERIC (>=0)
+- actual_quantity: NUMERIC (nullable until consumed)
+- unit: TEXT
+- status: TEXT -- one of: 'pending', 'consumed', 'skipped'
+- consumed_at: TIMESTAMPTZ, consumed_by: UUID
+
+### work_centers (REPLACES operation_types; e.g. 'CNC Mill #1', 'Outside Plating')
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- labor_rate: NUMERIC(10,2) (cost per hour)
-- description: TEXT
+- kind: TEXT -- one of: 'internal', 'external'
+- vendor_id: UUID (FK -> vendors.id; required when kind='external', null when internal)
+- labor_rate: NUMERIC(10,2) (per-hour rate; meaningful only for kind='internal')
+- description: TEXT, metadata: JSONB
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+
+### routings (1:1 with manufacturable parts)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- part_id: UUID (FK -> parts.id, UNIQUE)
+- name: TEXT, description: TEXT
+- created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+
+### routing_operations (REPLACES routing_nodes; ordered by `sequence`; NO company_id, join via routings)
+- id: UUID (PK)
+- routing_id: UUID (FK -> routings.id)
+- work_center_id: UUID (FK -> work_centers.id) -- was operation_type_id
+- sequence: INTEGER (unique per routing; lower runs first)
+- setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES; one-time per batch (internal only)
+- cycle_minutes_per_unit: NUMERIC(8,4) -- MINUTES per unit (internal only)
+- labor_rate_override: NUMERIC(10,2) -- per-op override of work_centers.labor_rate (internal only)
+- external_unit_price: NUMERIC(12,4) -- price per output unit (external only)
+- external_setup_cost: NUMERIC(12,4) -- one-time per job (external only)
+- instructions: TEXT, metadata: JSONB
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- COST CONTRACT (mirrors recalculate_part_cost):
+    * internal: cost = (setup_minutes/qty + cycle_minutes_per_unit)
+                       * COALESCE(labor_rate_override, work_centers.labor_rate)
+                       / 60.0
+    * external: cost = external_unit_price + external_setup_cost / qty
+
+### inventory_transactions (stock movements; references parts.id, NOT inventory_items)
+- id: UUID (PK)
+- company_id: UUID -- ALWAYS filter with $1
+- part_id: UUID (FK -> parts.id, nullable) -- the part whose stock moved
+- item_name: TEXT (denormalized snapshot)
+- type: TEXT -- one of: 'addition', 'depletion', 'adjustment'
+- quantity: NUMERIC (>= 0)
+- unit: TEXT, converted_quantity: NUMERIC (in primary units)
+- job_id: UUID (FK -> jobs.id, nullable)
+- job_operation_id: UUID (FK -> job_operations.id, nullable)
+- operator_id: UUID, created_by: UUID
+- has_discrepancy: BOOLEAN (default false)
+- notes: TEXT, created_at: TIMESTAMPTZ
 
 ### operator_sessions (time tracking for operators working on jobs)
 - id: UUID (PK)
@@ -145,86 +263,76 @@ SCHEMA_CONTEXT = """
 - operator_id: UUID
 - job_id: UUID (FK -> jobs.id)
 - job_operation_id: UUID (FK -> job_operations.id, nullable)
-- operation_type_id: UUID (FK -> operation_types.id)
-- started_at: TIMESTAMPTZ
-- ended_at: TIMESTAMPTZ (null = currently active)
-- notes: TEXT
-
-### inventory_items
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- name: TEXT
-- description: TEXT
-- primary_unit: TEXT (e.g. "ft", "ea", "lb")
-- quantity: NUMERIC (current stock level, >= 0)
-- cost_per_unit: NUMERIC(12,4)
-- reorder_point: NUMERIC (nullable -- reorder when quantity drops to this)
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-
-### inventory_unit_conversions (NO company_id, join via inventory_items)
-- id: UUID (PK)
-- inventory_item_id: UUID (FK -> inventory_items.id)
-- from_unit: TEXT (unique per item)
-- to_primary_factor: NUMERIC (> 0, multiply by this to convert to primary_unit)
-
-### inventory_transactions (stock movements)
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- inventory_item_id: UUID (FK -> inventory_items.id, nullable)
-- item_name: TEXT
-- type: TEXT -- one of: 'addition', 'depletion', 'adjustment'
-- quantity: NUMERIC (>= 0)
-- unit: TEXT
-- converted_quantity: NUMERIC (quantity in primary units)
-- job_id: UUID (FK -> jobs.id, nullable)
-- job_operation_id: UUID (nullable)
-- operator_id: UUID (nullable)
-- notes: TEXT
-- created_at: TIMESTAMPTZ
+- work_center_id: UUID (FK -> work_centers.id) -- was operation_type_id
+- started_at: TIMESTAMPTZ, ended_at: TIMESTAMPTZ (null = currently active)
+- notes: TEXT, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)
 - jobs.customer_id -> customers.id
-- jobs.part_id -> parts.id
-- job_operations.job_id -> jobs.id (a job has many operations)
-- job_operations.operation_type_id -> operation_types.id
-- quotes.customer_id -> customers.id
-- quotes.part_id -> parts.id
-- routings.part_id -> parts.id (1:1)
-- routing_nodes.routing_id -> routings.id
-- routing_nodes.operation_type_id -> operation_types.id
-- routing_materials.routing_id -> routings.id
-- routing_materials.inventory_item_id -> inventory_items.id
+- job_parts.job_id -> jobs.id (a job has many job_parts)
+- job_parts.part_id -> parts.id
+- job_parts.source_quote_line_item_id -> quote_line_items.id
+- job_operations.job_id -> jobs.id
+- job_operations.job_part_id -> job_parts.id
+- job_operations.work_center_id -> work_centers.id
+- job_operations.routing_operation_id -> routing_operations.id
 - job_materials.job_id -> jobs.id
-- job_materials.routing_material_id -> routing_materials.id
-- job_materials.inventory_item_id -> inventory_items.id
-- inventory_transactions.inventory_item_id -> inventory_items.id
-- inventory_unit_conversions.inventory_item_id -> inventory_items.id
+- job_materials.job_part_id -> job_parts.id
+- job_materials.material_part_id -> parts.id
+- job_materials.parts_bom_id -> parts_bom.id
+- quotes.customer_id -> customers.id
+- quote_line_items.quote_id -> quotes.id
+- quote_line_items.part_id -> parts.id
+- quote_materials.quote_id -> quotes.id, .part_id -> parts.id, .material_part_id -> parts.id
+- quote_operations.quote_id -> quotes.id, .part_id -> parts.id
+- routings.part_id -> parts.id (1:1)
+- routing_operations.routing_id -> routings.id
+- routing_operations.work_center_id -> work_centers.id
+- work_centers.vendor_id -> vendors.id (when kind='external')
+- parts.preferred_vendor_id -> vendors.id
+- parts_bom.parent_part_id -> parts.id, .child_part_id -> parts.id
+- parts_unit_conversions.part_id -> parts.id
+- inventory_transactions.part_id -> parts.id
 - operator_sessions.job_id -> jobs.id
+- operator_sessions.work_center_id -> work_centers.id
 
 ## Important Notes
-- Tables WITHOUT company_id: job_operations, job_materials, routing_nodes, routing_materials, inventory_unit_conversions. Filter these via JOIN to their parent table.
+- Tables WITHOUT company_id: job_operations, job_materials, routing_operations,
+  parts_bom, parts_unit_conversions. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
-- Revenue = quotes.total_price for shipped jobs (jobs.status = 'shipped', joined via jobs.quote_id)
-- A "started" job means started_at IS NOT NULL or status = 'in_progress'
-- Use DATE_TRUNC('week', timestamp) for weekly grouping, DATE_TRUNC('month', ...) for monthly
-- All TIMESTAMPTZ columns are UTC
+- A "started" job means started_at IS NOT NULL or status = 'in_progress'.
+- Revenue per quote = SUM(quote_line_items.total_price) WHERE quote_id = ?.
+- Revenue per shipped job = SUM through job_parts → quote_line_items
+  (each job_part links to the quote_line_item it was created from).
+- Use DATE_TRUNC('week', timestamp) for weekly grouping, DATE_TRUNC('month', ...) for monthly.
+- All TIMESTAMPTZ columns are UTC.
+- Cost contract for internal routing/job operations:
+    labor_rate = COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate)
+    cost      = (estimated_setup_minutes + estimated_run_minutes_per_unit * qty)
+                / 60.0 * labor_rate
+  For external operations the cost is external_unit_price * qty + external_setup_cost.
+- Time fields are MINUTES on both routing_operations (setup_minutes,
+  cycle_minutes_per_unit) and job_operations (estimated_setup_minutes,
+  estimated_run_minutes_per_unit, actual_setup_minutes, actual_run_minutes).
+  Divide by 60 before multiplying by an hourly labor_rate.
 
 ## Example Queries
 
 -- Jobs started last week
-SELECT COUNT(*) as job_count
+SELECT COUNT(*) AS job_count
 FROM jobs
 WHERE company_id = $1
   AND started_at >= DATE_TRUNC('week', NOW()) - INTERVAL '1 week'
-  AND started_at < DATE_TRUNC('week', NOW());
+  AND started_at <  DATE_TRUNC('week', NOW());
 
--- Revenue by month (last 6 months)
-SELECT DATE_TRUNC('month', j.shipped_at) as month,
-       SUM(q.total_price) as revenue,
-       COUNT(j.id) as job_count
+-- Revenue by month (last 6 months) — sum quote_line_items via job_parts
+SELECT DATE_TRUNC('month', j.shipped_at) AS month,
+       SUM(qli.total_price)              AS revenue,
+       COUNT(DISTINCT j.id)              AS job_count
 FROM jobs j
-JOIN quotes q ON j.quote_id = q.id
+JOIN job_parts jp        ON jp.job_id = j.id
+JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
 WHERE j.company_id = $1
   AND j.status = 'shipped'
   AND j.shipped_at >= NOW() - INTERVAL '6 months'
@@ -232,42 +340,74 @@ GROUP BY DATE_TRUNC('month', j.shipped_at)
 ORDER BY month;
 
 -- Top 5 customers by revenue
-SELECT c.name, SUM(q.total_price) as revenue, COUNT(j.id) as job_count
+SELECT c.name,
+       SUM(qli.total_price) AS revenue,
+       COUNT(DISTINCT j.id) AS job_count
 FROM jobs j
-JOIN customers c ON j.customer_id = c.id
-JOIN quotes q ON j.quote_id = q.id
+JOIN customers c          ON c.id = j.customer_id
+JOIN job_parts jp         ON jp.job_id = j.id
+JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
 WHERE j.company_id = $1 AND j.status = 'shipped'
 GROUP BY c.name
 ORDER BY revenue DESC
 LIMIT 5;
 
--- Inventory items below reorder point
-SELECT name, quantity, reorder_point, primary_unit,
-       (reorder_point - quantity) as deficit
-FROM inventory_items
+-- Stockable parts below their reorder point
+SELECT part_name, quantity, reorder_point, primary_unit,
+       (reorder_point - quantity) AS deficit
+FROM parts
 WHERE company_id = $1
+  AND is_stockable = true
   AND reorder_point IS NOT NULL
   AND quantity <= reorder_point
 ORDER BY (reorder_point - quantity) DESC;
+
+-- Estimated labor hours by work center over the last 30 days
+SELECT wc.name,
+       SUM(jo.estimated_setup_minutes
+           + jo.estimated_run_minutes_per_unit * jp.quantity) / 60.0 AS hours
+FROM job_operations jo
+JOIN jobs j          ON j.id = jo.job_id
+JOIN job_parts jp    ON jp.id = jo.job_part_id
+JOIN work_centers wc ON wc.id = jo.work_center_id
+WHERE j.company_id = $1
+  AND jo.created_at >= NOW() - INTERVAL '30 days'
+GROUP BY wc.name
+ORDER BY hours DESC;
+
+-- BOM children for a given parent part
+SELECT c.part_name AS child_part, b.quantity, b.unit
+FROM parts_bom b
+JOIN parts p ON p.id = b.parent_part_id
+JOIN parts c ON c.id = b.child_part_id
+WHERE p.company_id = $1
+  AND p.part_name = 'WIDGET-A'
+ORDER BY b.sequence;
 """
 
-# Allowlist of tables the AI is permitted to query
+# Allowlist of tables the AI is permitted to query.
+# Mirrors the new schema — old names (operation_types, inventory_items,
+# routing_nodes, routing_materials, inventory_unit_conversions) are gone.
 ALLOWED_TABLES = frozenset({
     "companies",
     "customers",
-    "quotes",
-    "quote_attachments",
+    "vendors",
     "parts",
-    "routings",
-    "routing_nodes",
-    "routing_materials",
+    "part_pricing_tiers",
+    "parts_bom",
+    "parts_unit_conversions",
+    "markup_rates",
+    "quotes",
+    "quote_line_items",
+    "quote_materials",
+    "quote_operations",
     "jobs",
+    "job_parts",
     "job_operations",
     "job_materials",
-    "job_attachments",
-    "operation_types",
+    "work_centers",
+    "routings",
+    "routing_operations",
     "operator_sessions",
-    "inventory_items",
-    "inventory_unit_conversions",
     "inventory_transactions",
 })

@@ -1,4 +1,21 @@
-"""Import routes for parts CSV import with AI-powered mapping."""
+"""Import routes for parts CSV import with AI-powered mapping.
+
+The unified Parts importer absorbs the previous inventory_items import path.
+A row is classified by the (is_manufacturable, is_stockable) tuple:
+
+  - manufacturable=true,  stockable=false → custom manufactured part
+  - manufacturable=false, stockable=true  → raw material / bought item
+  - manufacturable=true,  stockable=true  → sub-assembly (made AND stocked)
+  - manufacturable=false, stockable=false → "orphan" customer part (quoted but never made)
+
+Auto-classification rules at execute time:
+  - Any row with operation columns gets is_manufacturable=true
+  - Any row with primary_unit / quantity / cost_per_unit gets is_stockable=true
+  - Both can be true (sub-assembly)
+
+`legacy_id` is unique per company; rows with a `legacy_id` set are upserted
+via ON CONFLICT so re-importing the same source CSV is idempotent.
+"""
 
 import hashlib
 import json
@@ -14,7 +31,6 @@ from fastapi import APIRouter, HTTPException, Depends
 from supabase import Client
 
 from models.parts_import_models import (
-    CustomerMatchMode,
     PricingColumnPair,
     PartAnalyzeRequest,
     PartAnalyzeResponse,
@@ -27,9 +43,15 @@ from models.parts_import_models import (
     PartExecuteResponse,
     PartImportError,
     PART_SCHEMA,
+    UNIFIED_PART_SCHEMA,
     PRICING_COLUMN_PATTERNS,
+    parse_bool,
 )
 from services.ai import get_provider
+from services.uom_normalizer import (
+    normalize_uom_alias,
+    resolve_units_for_rows,
+)
 from utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -44,9 +66,9 @@ CACHE_DIR = Path(__file__).parent.parent / ".cache" / "ai_responses" / "parts"
 CACHE_ENABLED = os.getenv("AI_CACHE_ENABLED", "true").lower() == "true"
 
 
-def _get_cache_key(company_id: str, headers: list[str]) -> str:
+def _get_cache_key(company_id: str, headers: list[str], variant: str = "parts") -> str:
     """Generate a cache key from company_id and headers."""
-    content = f"parts:{company_id}:{','.join(sorted(headers))}"
+    content = f"{variant}:{company_id}:{','.join(sorted(headers))}"
     return hashlib.md5(content.encode()).hexdigest()
 
 
@@ -81,33 +103,23 @@ def _save_to_cache(cache_key: str, response: PartAnalyzeResponse) -> None:
 
 
 def _detect_pricing_columns(headers: list[str]) -> list[PricingColumnPair]:
-    """
-    Auto-detect pricing column pairs from headers.
-
-    Looks for patterns like qty1/price1, qty2/price2, etc.
-    Returns list of matched column pairs sorted by tier number.
-    """
+    """Auto-detect pricing column pairs from headers."""
     pricing_pairs: list[tuple[int, str, str]] = []  # (tier_num, qty_col, price_col)
     headers_lower = {h.lower().replace(" ", ""): h for h in headers}
-    matched_columns: set[str] = set()  # Track already matched columns to avoid duplicates
+    matched_columns: set[str] = set()
 
-    # Try each pattern
     for qty_pattern, price_pattern in PRICING_COLUMN_PATTERNS:
         qty_regex = re.compile(qty_pattern, re.IGNORECASE)
         price_regex = re.compile(price_pattern, re.IGNORECASE)
 
-        # Find all qty columns matching this pattern
         for header_lower, original in headers_lower.items():
-            # Skip if this column was already matched
             if original in matched_columns:
                 continue
 
             qty_match = qty_regex.match(header_lower)
             if qty_match:
                 tier_num = int(qty_match.group(1))
-                # Look for matching price column
                 for price_lower, price_original in headers_lower.items():
-                    # Skip if price column was already matched
                     if price_original in matched_columns:
                         continue
 
@@ -118,7 +130,6 @@ def _detect_pricing_columns(headers: list[str]) -> list[PricingColumnPair]:
                         matched_columns.add(price_original)
                         break
 
-    # Sort by tier number and return as PricingColumnPair objects
     pricing_pairs.sort(key=lambda x: x[0])
     return [
         PricingColumnPair(qty_column=qty, price_column=price)
@@ -131,33 +142,18 @@ def _get_column_samples(
     sample_rows: list[list[str]],
     skip_columns: set[str],
 ) -> dict[str, str]:
-    """Get one sample value per non-empty column.
-
-    Efficiently collects the first non-empty value found for each column.
-    This minimizes token usage while giving AI context about data format.
-
-    Args:
-        headers: All column headers
-        sample_rows: First 5 rows of sample data
-        skip_columns: Columns to skip (e.g., pricing pairs already handled)
-
-    Returns:
-        Dict mapping column name to one sample value (non-empty columns only)
-    """
+    """Get one sample value per non-empty column."""
     samples: dict[str, str] = {}
 
     for row in sample_rows:
         for i, header in enumerate(headers):
-            # Skip if in skip_columns or we already have a sample
             if header in skip_columns or header in samples:
                 continue
 
-            # Get value if exists and is non-empty
             value = row[i].strip() if i < len(row) else ""
             if value:
                 samples[header] = value
 
-        # Early exit if we have samples for all eligible columns
         eligible_count = len(headers) - len(skip_columns)
         if len(samples) >= eligible_count:
             break
@@ -168,11 +164,7 @@ def _get_column_samples(
 def _transform_pricing_to_jsonb(
     row: dict[str, str], pricing_columns: list[PricingColumnPair]
 ) -> list[dict]:
-    """
-    Transform pricing columns from a CSV row into JSONB array format.
-
-    Returns list of {qty: int, price: float} sorted by qty.
-    """
+    """Transform pricing columns from a CSV row into JSONB array format."""
     tiers = []
     for pair in pricing_columns:
         qty_str = row.get(pair.qty_column, "").strip()
@@ -180,16 +172,42 @@ def _transform_pricing_to_jsonb(
 
         if qty_str and price_str:
             try:
-                qty = int(float(qty_str))  # Handle "100.0" format
+                qty = int(float(qty_str))
                 price = round(float(price_str), 2)
                 if qty > 0 and price >= 0:
                     tiers.append({"qty": qty, "price": price})
             except ValueError:
-                continue  # Skip invalid values
+                continue
 
-    # Sort by quantity ascending
     tiers.sort(key=lambda t: t["qty"])
     return tiers
+
+
+def _has_routing_columns(mappings: dict[str, str]) -> bool:
+    """Detect if the import includes any operation/work_center columns."""
+    db_fields = set(mappings.values())
+    routing_indicators = {
+        "work_center_name",
+        "operation_name",
+        "setup_minutes",
+        "cycle_minutes_per_unit",
+        "labor_rate_override",
+        "external_unit_price",
+        "external_setup_cost",
+    }
+    return bool(db_fields & routing_indicators)
+
+
+def _row_has_inventory_data(
+    row: dict[str, str],
+    reverse_mappings: dict[str, str],
+) -> bool:
+    """Detect if a row carries inventory data (quantity/unit/cost set)."""
+    for db_field in ("primary_unit", "quantity", "cost_per_unit"):
+        col = reverse_mappings.get(db_field)
+        if col and row.get(col, "").strip():
+            return True
+    return False
 
 
 def get_supabase() -> Client:
@@ -204,62 +222,85 @@ def get_supabase() -> Client:
     return supabase
 
 
-@router.post("/analyze", response_model=PartAnalyzeResponse)
-async def analyze_csv(
+def _reject_customer_fields(request) -> None:
+    """RAISE 400 if any customer field is present on a parts-import request.
+
+    Parts no longer link to customers at the data layer (customer association
+    lives on quotes/jobs only). Per the no-silent-fallbacks engineering
+    principle we surface this as a hard error rather than dropping the value
+    on the floor — accepting the field would let the caller believe a customer
+    link was saved when it wasn't.
+
+    Mirrored on /validate and /execute, plus on the column mapping (a
+    `customer_name` mapping is the same kind of dead-end input).
+    """
+    customer_match_mode = getattr(request, "customer_match_mode", None)
+    selected_customer_id = getattr(request, "selected_customer_id", None)
+    mappings = getattr(request, "mappings", {}) or {}
+
+    has_customer_field = (
+        customer_match_mode is not None
+        or selected_customer_id is not None
+        or "customer_name" in mappings.values()
+        or "customer_id" in mappings.values()
+    )
+
+    if has_customer_field:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "customer_link_removed",
+                "message": (
+                    "Parts no longer link to customers at the data layer. "
+                    "Customer association lives on quotes/jobs only. Update "
+                    "the parts import flow to stop sending customer fields."
+                ),
+            },
+        )
+
+
+async def _run_analyze(
     request: PartAnalyzeRequest,
-    supabase: Client = Depends(get_supabase),
-):
-    """
-    Analyze CSV headers and sample data to suggest column mappings for parts using AI.
-
-    Also auto-detects pricing columns (qty1/price1, qty2/price2, etc.).
-
-    Caching: Responses are cached by company_id + headers to avoid repeated
-    API calls during development. Set AI_CACHE_ENABLED=false to disable.
-    """
-    # Check cache first
-    cache_key = _get_cache_key(request.company_id, request.headers)
+    supabase: Client,
+    schema: dict,
+    cache_variant: str,
+) -> PartAnalyzeResponse:
+    """Shared analyze implementation for both /analyze and /analyze-unified."""
+    cache_key = _get_cache_key(request.company_id, request.headers, variant=cache_variant)
     cached = _get_cached_response(cache_key)
     if cached:
         return cached
 
-    # Rate limiting
     if not ai_rate_limiter.check(request.company_id):
         raise HTTPException(
             status_code=429,
             detail="Too many requests. Please wait before trying again.",
         )
 
-    # Auto-detect pricing columns first
     pricing_columns = _detect_pricing_columns(request.headers)
-    pricing_column_names = set()
+    pricing_column_names: set[str] = set()
     for pair in pricing_columns:
         pricing_column_names.add(pair.qty_column)
         pricing_column_names.add(pair.price_column)
 
-    # Get sample values for non-empty columns (efficient token usage)
     column_samples = _get_column_samples(
         headers=request.headers,
         sample_rows=request.sample_rows,
         skip_columns=pricing_column_names,
     )
 
-    # Filter out pricing columns from the headers we send to AI
     headers_for_ai = [h for h in request.headers if h not in pricing_column_names]
 
     try:
-        # Get the configured AI provider for this company
         provider = await get_provider(supabase, request.company_id, "csv_mapping")
 
-        # Get AI suggestions for ALL columns (except pricing), with sample data for non-empty ones
         suggestions = await provider.suggest_column_mappings(
             csv_headers=headers_for_ai,
             sample_rows=request.sample_rows,
-            target_schema=PART_SCHEMA,
+            target_schema=schema,
             column_samples=column_samples,
         )
 
-        # Convert to response format
         mappings = []
         discarded_columns = []
         mapped_db_fields = set()
@@ -282,14 +323,12 @@ async def analyze_csv(
                 )
             )
 
-        # Add pricing columns to discarded list (they're handled separately)
         for col in pricing_column_names:
             if col not in discarded_columns:
                 discarded_columns.append(col)
 
-        # Check for unmapped required fields
         required_fields = [
-            field for field, info in PART_SCHEMA.items() if info.get("required")
+            field for field, info in schema.items() if info.get("required")
         ]
         unmapped_required = [f for f in required_fields if f not in mapped_db_fields]
 
@@ -301,17 +340,14 @@ async def analyze_csv(
             ai_provider=provider.provider_name,
         )
 
-        # Save to cache for future requests
         _save_to_cache(cache_key, response)
 
         return response
 
     except ValueError as e:
-        # AI provider configuration error
         sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        # Unexpected error
         sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
@@ -319,121 +355,160 @@ async def analyze_csv(
         )
 
 
+@router.post("/analyze", response_model=PartAnalyzeResponse)
+async def analyze_csv(
+    request: PartAnalyzeRequest,
+    supabase: Client = Depends(get_supabase),
+):
+    """Analyze CSV headers for the standard parts import (PART_SCHEMA)."""
+    return await _run_analyze(request, supabase, PART_SCHEMA, "parts")
+
+
+@router.post("/analyze-unified", response_model=PartAnalyzeResponse)
+async def analyze_csv_unified(
+    request: PartAnalyzeRequest,
+    supabase: Client = Depends(get_supabase),
+):
+    """Analyze CSV headers for the unified parts import (UNIFIED_PART_SCHEMA).
+
+    Unified imports may include any combination of inventory fields, classification
+    flags, and routing-operation columns on the same row.
+    """
+    return await _run_analyze(request, supabase, UNIFIED_PART_SCHEMA, "parts_unified")
+
+
 @router.post("/validate", response_model=PartValidateResponse)
 async def validate_import(
     request: PartValidateRequest,
     supabase: Client = Depends(get_supabase),
 ):
-    """
-    Validate parts CSV data before import.
+    """Validate parts CSV data before import.
 
-    Checks:
-    - Part number uniqueness per company+customer
-    - Customer existence (for BY_COLUMN mode)
-    - Pricing data validity
+    Checks (in order, per row):
+      1. Required field: part_name
+      2. Numeric ranges: quantity, cost_per_unit, reorder_point all non-negative
+      3. UOM resolution for stockable rows (alias map → AI inference fallback)
+      4. preferred_vendor_name resolves against existing vendors
+      5. CSV duplicate part_name (csv_duplicate)
+      6. legacy_id collision against existing parts is NOT a conflict — it's
+         an upsert path, handled at execute time
+      7. part_name collision against existing parts (duplicate_part_name) — only
+         when no legacy_id provided (otherwise upsert)
+
+    Customer fields (`customer_match_mode`, `selected_customer_id`, or a
+    `customer_name`/`customer_id` mapping) are rejected with 400 — parts no
+    longer link to customers at the data layer.
     """
+    _reject_customer_fields(request)
     try:
-        # Get existing parts for this company
+        # Existing parts (for collision detection and legacy_id upsert path)
         parts_response = (
             supabase.table("parts")
-            .select("id, part_name, customer_id")
+            .select("id, part_name, legacy_id")
             .eq("company_id", request.company_id)
             .execute()
         )
         existing_parts = parts_response.data or []
 
-        # Build lookup: (part_name_lower, customer_id) -> part
-        existing_parts_lookup: dict[tuple[str, Optional[str]], dict] = {}
+        existing_parts_by_name: dict[str, dict] = {}
+        existing_parts_by_legacy_id: dict[str, dict] = {}
         for part in existing_parts:
-            key = (part["part_name"].lower(), part["customer_id"])
-            existing_parts_lookup[key] = part
+            if part.get("part_name"):
+                existing_parts_by_name[part["part_name"].lower()] = part
+            if part.get("legacy_id"):
+                existing_parts_by_legacy_id[part["legacy_id"]] = part
 
-        # Get customers for this company (for name lookup)
-        customers_response = (
-            supabase.table("customers")
+        # Existing vendors (for preferred_vendor_name resolution)
+        vendors_response = (
+            supabase.table("vendors")
             .select("id, name")
             .eq("company_id", request.company_id)
             .execute()
         )
-        existing_customers = customers_response.data or []
-        customer_name_to_id = {
-            c["name"].lower(): c["id"] for c in existing_customers
+        existing_vendors = vendors_response.data or []
+        vendor_name_to_id = {
+            v["name"].lower(): v["id"] for v in existing_vendors
         }
 
-        # Validate selected customer exists (for ALL_TO_ONE mode)
-        selected_customer_id: Optional[str] = None
-        if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
-            if not request.selected_customer_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="selected_customer_id is required when customer_match_mode is ALL_TO_ONE",
-                )
-            # Verify customer exists
-            customer_check = (
-                supabase.table("customers")
-                .select("id")
-                .eq("id", request.selected_customer_id)
-                .eq("company_id", request.company_id)
-                .execute()
-            )
-            if not customer_check.data:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Selected customer not found",
-                )
-            selected_customer_id = request.selected_customer_id
-
-        # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         part_name_column = reverse_mappings.get("part_name")
-        customer_name_column = reverse_mappings.get("customer_name")
+        primary_unit_column = reverse_mappings.get("primary_unit")
+        quantity_column = reverse_mappings.get("quantity")
+        cost_column = reverse_mappings.get("cost_per_unit")
+        reorder_column = reverse_mappings.get("reorder_point")
+        vendor_column = reverse_mappings.get("preferred_vendor_name")
+        legacy_id_column = reverse_mappings.get("legacy_id")
+        is_stockable_column = reverse_mappings.get("is_stockable")
+        is_manufacturable_column = reverse_mappings.get("is_manufacturable")
+        description_column = reverse_mappings.get("description")
+
+        has_routing_cols = _has_routing_columns(request.mappings)
 
         # First pass: track part_name occurrences for CSV duplicate detection
-        part_occurrences: dict[tuple[str, Optional[str]], list[int]] = {}
-
+        part_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
             row_number = i + 1
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
-
-            # Determine customer_id based on match mode
-            customer_id: Optional[str] = None
-            if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
-                customer_id = selected_customer_id
-            elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_name = (
-                    row.get(customer_name_column, "").strip()
-                    if customer_name_column
-                    else ""
-                )
-                if customer_name:
-                    customer_id = customer_name_to_id.get(customer_name.lower())
-                    # Note: customer_id will be None if customer not found (handled in validation)
-            # ALL_GENERIC: customer_id stays None
-
             if part_name:
-                key = (part_name.lower(), customer_id)
-                if key not in part_occurrences:
-                    part_occurrences[key] = []
-                part_occurrences[key].append(row_number)
+                key = part_name.lower()
+                part_occurrences.setdefault(key, []).append(row_number)
 
-        # Find duplicates within CSV
         csv_duplicates = {k: v for k, v in part_occurrences.items() if len(v) > 1}
 
-        # Second pass: validate each row
+        # Second pass: per-row validation
         validation_errors: list[PartValidationError] = []
         conflicts: list[PartConflictInfo] = []
         validation_error_rows: set[int] = set()
         conflict_rows: set[int] = set()
 
+        # Determine which rows look stockable (so we know whether to require unit)
+        stockable_row_numbers: set[int] = set()
+        for i, row in enumerate(request.rows):
+            row_number = i + 1
+            explicit_stockable = None
+            if is_stockable_column:
+                explicit_stockable = parse_bool(row.get(is_stockable_column, ""))
+            if explicit_stockable is True:
+                stockable_row_numbers.add(row_number)
+            elif explicit_stockable is None and _row_has_inventory_data(
+                row, reverse_mappings
+            ):
+                stockable_row_numbers.add(row_number)
+
+        # Resolve UOMs for stockable rows that have a unit column
+        if request.pre_resolved_uoms:
+            uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
+        elif primary_unit_column or description_column:
+            stockable_rows = [
+                row for i, row in enumerate(request.rows) if (i + 1) in stockable_row_numbers
+            ]
+            stockable_index_map = {
+                idx + 1: orig_idx + 1
+                for idx, orig_idx in enumerate(
+                    [i for i in range(len(request.rows)) if (i + 1) in stockable_row_numbers]
+                )
+            }
+            partial = resolve_units_for_rows(
+                stockable_rows,
+                name_column=part_name_column,
+                description_column=description_column,
+                uom_column=primary_unit_column,
+            )
+            uom_resolutions = {
+                stockable_index_map[k]: v for k, v in partial.items()
+            }
+        else:
+            uom_resolutions = {}
+
         for i, row in enumerate(request.rows):
             row_number = i + 1
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
 
-            # Check required field: part_name
+            # Required: part_name
             if not part_name:
                 validation_errors.append(
                     PartValidationError(
@@ -446,46 +521,125 @@ async def validate_import(
                 validation_error_rows.add(row_number)
                 continue
 
-            # Determine customer for this row
-            customer_id: Optional[str] = None
-            customer_name = ""
+            # Numeric validation: quantity
+            qty_str = row.get(quantity_column, "").strip() if quantity_column else ""
+            if qty_str:
+                try:
+                    qty_val = float(qty_str)
+                    if qty_val < 0:
+                        raise ValueError("negative")
+                except ValueError:
+                    validation_errors.append(
+                        PartValidationError(
+                            row_number=row_number,
+                            error_type="invalid_quantity",
+                            field="quantity",
+                            message="Quantity must be a non-negative number",
+                        )
+                    )
+                    validation_error_rows.add(row_number)
+                    continue
 
-            if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
-                customer_id = selected_customer_id
-            elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_name = (
-                    row.get(customer_name_column, "").strip()
-                    if customer_name_column
+            # Numeric validation: cost_per_unit
+            cost_str = row.get(cost_column, "").strip() if cost_column else ""
+            if cost_str:
+                try:
+                    cost_val = float(cost_str)
+                    if cost_val < 0:
+                        raise ValueError("negative")
+                except ValueError:
+                    validation_errors.append(
+                        PartValidationError(
+                            row_number=row_number,
+                            error_type="invalid_cost",
+                            field="cost_per_unit",
+                            message="Cost per unit must be a non-negative number",
+                        )
+                    )
+                    validation_error_rows.add(row_number)
+                    continue
+
+            # Numeric validation: reorder_point
+            reorder_str = row.get(reorder_column, "").strip() if reorder_column else ""
+            if reorder_str:
+                try:
+                    reorder_val = float(reorder_str)
+                    if reorder_val < 0:
+                        raise ValueError("negative")
+                except ValueError:
+                    validation_errors.append(
+                        PartValidationError(
+                            row_number=row_number,
+                            error_type="invalid_reorder_point",
+                            field="reorder_point",
+                            message="Reorder point must be a non-negative number",
+                        )
+                    )
+                    validation_error_rows.add(row_number)
+                    continue
+
+            # UOM required when stockable
+            if row_number in stockable_row_numbers:
+                resolved_unit = uom_resolutions.get(row_number)
+                csv_unit = (
+                    row.get(primary_unit_column, "").strip()
+                    if primary_unit_column
                     else ""
                 )
-                if customer_name:
-                    customer_id = customer_name_to_id.get(customer_name.lower())
-                    # If customer_name provided but not found, that's a conflict
-                    if not customer_id:
-                        conflicts.append(
-                            PartConflictInfo(
-                                row_number=row_number,
-                                csv_part_name=part_name,
-                                csv_customer_code=customer_name,
-                                conflict_type="customer_not_found",
-                                existing_part_id="",
-                                existing_value=f"Customer name '{customer_name}' not found",
-                            )
+                if not resolved_unit and not csv_unit:
+                    validation_errors.append(
+                        PartValidationError(
+                            row_number=row_number,
+                            error_type="missing_primary_unit",
+                            field="primary_unit",
+                            message="primary_unit is required for stockable parts",
                         )
-                        conflict_rows.add(row_number)
-                        continue
-            # ALL_GENERIC: customer_id stays None
-
-            # Check for CSV duplicates
-            key = (part_name.lower(), customer_id)
-            if key in csv_duplicates:
-                other_rows = [r for r in csv_duplicates[key] if r != row_number]
-                if other_rows:  # Don't flag if this is the first occurrence
+                    )
+                    validation_error_rows.add(row_number)
+                    continue
+                if not resolved_unit and csv_unit:
+                    # Could not normalize — surface as conflict (unknown_unit)
                     conflicts.append(
                         PartConflictInfo(
                             row_number=row_number,
                             csv_part_name=part_name,
-                            csv_customer_code=customer_name,
+                            csv_customer_code=None,
+                            conflict_type="unknown_unit",
+                            existing_part_id="",
+                            existing_value=f"Could not normalize unit '{csv_unit}' to a known canonical value",
+                        )
+                    )
+                    conflict_rows.add(row_number)
+                    continue
+
+            # Vendor resolution
+            vendor_name = (
+                row.get(vendor_column, "").strip() if vendor_column else ""
+            )
+            if vendor_name and vendor_name.lower() not in vendor_name_to_id:
+                conflicts.append(
+                    PartConflictInfo(
+                        row_number=row_number,
+                        csv_part_name=part_name,
+                        csv_customer_code=None,
+                        conflict_type="unknown_vendor",
+                        existing_part_id="",
+                        existing_value=f"Vendor '{vendor_name}' not found. Import vendors first.",
+                    )
+                )
+                conflict_rows.add(row_number)
+                continue
+
+            # CSV duplicate (only flag the second-and-later occurrences)
+            key = part_name.lower()
+            if key in csv_duplicates:
+                other_rows = [r for r in csv_duplicates[key] if r != row_number]
+                if other_rows:
+                    conflicts.append(
+                        PartConflictInfo(
+                            row_number=row_number,
+                            csv_part_name=part_name,
+                            csv_customer_code=None,
                             conflict_type="csv_duplicate",
                             existing_part_id="",
                             existing_value=f"Duplicate in CSV at rows {', '.join(map(str, other_rows))}",
@@ -494,27 +648,28 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            # Check for existing part with same part_name + customer_id
-            if key in existing_parts_lookup:
-                existing = existing_parts_lookup[key]
+            # legacy_id idempotency: if provided, this is an upsert — not a conflict
+            legacy_id_val = (
+                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
+            )
+            has_legacy_id = bool(legacy_id_val)
+
+            # Existing part_name collision (only conflicts when not upserting via legacy_id)
+            if not has_legacy_id and key in existing_parts_by_name:
+                existing = existing_parts_by_name[key]
                 conflicts.append(
                     PartConflictInfo(
                         row_number=row_number,
                         csv_part_name=part_name,
-                        csv_customer_code=customer_name,
+                        csv_customer_code=None,
                         conflict_type="duplicate_part_name",
                         existing_part_id=existing["id"],
-                        existing_value=f"Part '{part_name}' already exists for this customer",
+                        existing_value=f"Part '{part_name}' already exists",
                     )
                 )
                 conflict_rows.add(row_number)
                 continue
 
-            # Validate pricing data
-            pricing = _transform_pricing_to_jsonb(row, request.pricing_columns)
-            # Pricing can be empty - that's valid (cost-plus pricing)
-
-        # Calculate counts
         total_skipped = conflict_rows | validation_error_rows
         valid_rows = len(request.rows) - len(total_skipped)
 
@@ -526,6 +681,9 @@ async def validate_import(
             conflict_rows_count=len(conflict_rows),
             error_rows_count=len(validation_error_rows),
             skipped_rows_count=len(total_skipped),
+            uom_resolutions={
+                row: unit for row, unit in uom_resolutions.items() if unit
+            },
         )
 
     except HTTPException:
@@ -543,148 +701,244 @@ async def execute_import(
     request: PartExecuteRequest,
     supabase: Client = Depends(get_supabase),
 ):
-    """
-    Execute the parts import.
+    """Execute the parts import.
 
-    If skip_conflicts is True, only imports rows without conflicts.
-    Otherwise, fails if any conflicts exist.
+    - Auto-classifies rows: any row with operation columns gets is_manufacturable=true;
+      any row with primary_unit/quantity/cost_per_unit gets is_stockable=true.
+    - Resolves preferred_vendor_name to vendor_id (rows that failed validation
+      have already been excluded from the insert set).
+    - Splits insert and upsert paths: rows with legacy_id are upserted via
+      ON CONFLICT (company_id, legacy_id), rows without legacy_id are plain inserts.
+
+    Customer fields on the request are rejected with 400 — parts no longer
+    link to customers at the data layer.
     """
-    logger.info(f"Parts import execute started: {len(request.rows)} rows, company_id={request.company_id}")
-    logger.info(f"Customer match mode: {request.customer_match_mode}, skip_conflicts: {request.skip_conflicts}")
+    _reject_customer_fields(request)
+    logger.info(
+        f"Parts import execute started: {len(request.rows)} rows, company_id={request.company_id}"
+    )
 
     try:
-        # First validate to get conflict info
-        logger.info("Running validation...")
         validate_response = await validate_import(
             PartValidateRequest(
                 company_id=request.company_id,
                 mappings=request.mappings,
                 pricing_columns=request.pricing_columns,
                 rows=request.rows,
-                customer_match_mode=request.customer_match_mode,
-                selected_customer_id=request.selected_customer_id,
+                pre_resolved_uoms=request.uom_resolutions,
             ),
             supabase=supabase,
         )
-        logger.info(f"Validation complete: {len(validate_response.conflicts)} conflicts, {len(validate_response.validation_errors)} validation errors")
 
-        # If conflicts exist and we're not skipping them, fail
         if validate_response.has_conflicts and not request.skip_conflicts:
             raise HTTPException(
                 status_code=400,
                 detail="Conflicts detected. Set skip_conflicts=true to import non-conflicting rows only.",
             )
 
-        # Build set of rows to skip
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Get customer lookup for BY_COLUMN mode
-        customer_name_to_id: dict[str, str] = {}
-        if request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-            customers_response = (
-                supabase.table("customers")
-                .select("id, name")
-                .eq("company_id", request.company_id)
-                .execute()
-            )
-            customer_name_to_id = {
-                c["name"].lower(): c["id"]
-                for c in (customers_response.data or [])
-            }
+        # Vendor lookup for execute-time resolution
+        vendors_response = (
+            supabase.table("vendors")
+            .select("id, name")
+            .eq("company_id", request.company_id)
+            .execute()
+        )
+        vendor_name_to_id = {
+            v["name"].lower(): v["id"] for v in (vendors_response.data or [])
+        }
 
-        # Find column mappings
+        # UOM resolutions (prefer the ones the frontend already received from validate)
+        uom_resolutions = (
+            request.uom_resolutions or validate_response.uom_resolutions
+        )
+
         reverse_mappings = {v: k for k, v in request.mappings.items()}
+        part_name_column = reverse_mappings.get("part_name")
+        description_column = reverse_mappings.get("description")
+        primary_unit_column = reverse_mappings.get("primary_unit")
+        quantity_column = reverse_mappings.get("quantity")
+        cost_column = reverse_mappings.get("cost_per_unit")
+        reorder_column = reverse_mappings.get("reorder_point")
+        vendor_column = reverse_mappings.get("preferred_vendor_name")
+        legacy_id_column = reverse_mappings.get("legacy_id")
+        is_stockable_column = reverse_mappings.get("is_stockable")
+        is_manufacturable_column = reverse_mappings.get("is_manufacturable")
 
-        # Prepare rows for insertion
-        rows_to_insert = []
+        has_routing_cols = _has_routing_columns(request.mappings)
+
+        rows_to_insert: list[dict] = []
+        rows_to_upsert: list[dict] = []
         errors: list[PartImportError] = []
         skipped = 0
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
 
-            # Skip rows that failed validation or have conflicts
             if row_number in skip_row_numbers:
                 skipped += 1
                 continue
 
-            # Determine customer_id
-            customer_id: Optional[str] = None
-            if request.customer_match_mode == CustomerMatchMode.ALL_TO_ONE:
-                customer_id = request.selected_customer_id
-            elif request.customer_match_mode == CustomerMatchMode.BY_COLUMN:
-                customer_name_column = reverse_mappings.get("customer_name")
-                customer_name = (
-                    row.get(customer_name_column, "").strip()
-                    if customer_name_column
-                    else ""
-                )
-                if customer_name:
-                    customer_id = customer_name_to_id.get(customer_name.lower())
-            # ALL_GENERIC: customer_id stays None
-
-            # Build part record
-            part_data = {
+            part_name = (
+                row.get(part_name_column, "").strip() if part_name_column else ""
+            )
+            part_data: dict = {
                 "company_id": request.company_id,
-                "customer_id": customer_id,
+                "part_name": part_name,
             }
 
-            # Map standard fields
-            for db_field in ["part_name", "description"]:
-                csv_column = reverse_mappings.get(db_field)
-                if csv_column and csv_column in row:
-                    value = row[csv_column].strip()
-                    # Filter out empty values and literal "undefined" string from frontend
-                    if value and value.lower() != "undefined":
-                        part_data[db_field] = value
+            if description_column:
+                value = row.get(description_column, "").strip()
+                if value and value.lower() != "undefined":
+                    part_data["description"] = value
 
-            # Transform pricing columns to JSONB
-            pricing = _transform_pricing_to_jsonb(row, request.pricing_columns)
-            part_data["pricing"] = pricing
+            # Inventory fields
+            primary_unit = ""
+            if primary_unit_column:
+                primary_unit = row.get(primary_unit_column, "").strip()
+            resolved_unit = uom_resolutions.get(row_number)
+            if not resolved_unit and primary_unit:
+                resolved_unit = normalize_uom_alias(primary_unit)
 
-            rows_to_insert.append(part_data)
+            quantity_str = (
+                row.get(quantity_column, "").strip() if quantity_column else ""
+            )
+            cost_str = row.get(cost_column, "").strip() if cost_column else ""
+            reorder_str = (
+                row.get(reorder_column, "").strip() if reorder_column else ""
+            )
 
-        # Bulk insert in batches to avoid payload size limits
+            quantity_val: Optional[float] = None
+            if quantity_str:
+                try:
+                    quantity_val = float(quantity_str)
+                except ValueError:
+                    quantity_val = None
+            cost_val: Optional[float] = None
+            if cost_str:
+                try:
+                    cost_val = float(cost_str)
+                except ValueError:
+                    cost_val = None
+            reorder_val: Optional[float] = None
+            if reorder_str:
+                try:
+                    reorder_val = float(reorder_str)
+                except ValueError:
+                    reorder_val = None
+
+            # Auto-classification
+            explicit_stockable = (
+                parse_bool(row.get(is_stockable_column, ""))
+                if is_stockable_column
+                else None
+            )
+            explicit_manufacturable = (
+                parse_bool(row.get(is_manufacturable_column, ""))
+                if is_manufacturable_column
+                else None
+            )
+
+            inferred_stockable = bool(
+                primary_unit or quantity_val is not None or cost_val is not None
+            )
+            inferred_manufacturable = has_routing_cols
+
+            is_stockable_val = (
+                explicit_stockable
+                if explicit_stockable is not None
+                else inferred_stockable
+            )
+            is_manufacturable_val = (
+                explicit_manufacturable
+                if explicit_manufacturable is not None
+                else (inferred_manufacturable or not is_stockable_val)
+            )
+
+            part_data["is_stockable"] = is_stockable_val
+            part_data["is_manufacturable"] = is_manufacturable_val
+
+            if resolved_unit:
+                part_data["primary_unit"] = resolved_unit
+            if quantity_val is not None:
+                part_data["quantity"] = quantity_val
+            else:
+                # Schema NOT NULL DEFAULT 0; explicit for clarity
+                part_data["quantity"] = 0
+            if cost_val is not None:
+                part_data["cost_per_unit"] = cost_val
+            if reorder_val is not None:
+                part_data["reorder_point"] = reorder_val
+
+            # Vendor resolution
+            vendor_name = (
+                row.get(vendor_column, "").strip() if vendor_column else ""
+            )
+            if vendor_name:
+                vendor_id = vendor_name_to_id.get(vendor_name.lower())
+                if vendor_id:
+                    part_data["preferred_vendor_id"] = vendor_id
+
+            # legacy_id (also drives the upsert path)
+            legacy_id_val = (
+                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
+            )
+            if legacy_id_val:
+                part_data["legacy_id"] = legacy_id_val
+                rows_to_upsert.append(part_data)
+            else:
+                rows_to_insert.append(part_data)
+
+        # Bulk insert in batches
         BATCH_SIZE = 500
         imported_count = 0
-        total_rows = len(rows_to_insert)
-        logger.info(f"Starting parts import: {total_rows} rows to insert in batches of {BATCH_SIZE}")
+        updated_count = 0
 
         if rows_to_insert:
             try:
-                total_batches = (total_rows + BATCH_SIZE - 1) // BATCH_SIZE
-                for batch_num, i in enumerate(range(0, total_rows, BATCH_SIZE), 1):
-                    batch = rows_to_insert[i:i + BATCH_SIZE]
-                    logger.info(f"Inserting batch {batch_num}/{total_batches} ({len(batch)} rows)")
+                total = len(rows_to_insert)
+                for batch_start in range(0, total, BATCH_SIZE):
+                    batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
                     response = supabase.table("parts").insert(batch).execute()
-                    batch_count = len(response.data) if response.data else 0
-                    imported_count += batch_count
-                    logger.info(f"Batch {batch_num} complete: {batch_count} rows inserted")
+                    imported_count += len(response.data) if response.data else 0
             except Exception as e:
                 error_str = str(e)
-                logger.error(f"Parts import database error: {error_str}", exc_info=True)
-                logger.error(f"Failed at batch starting index {i}, rows imported so far: {imported_count}")
-                # Log sample of failed batch for debugging
-                if batch:
-                    logger.error(f"Sample row from failed batch: {batch[0]}")
-                # Check for unique constraint violation
+                logger.error(f"Parts import insert error: {error_str}", exc_info=True)
                 if "23505" in error_str or "duplicate key" in error_str.lower():
                     raise HTTPException(
                         status_code=400,
-                        detail="Import failed: A part with this name already exists. Please check your CSV for duplicate part names.",
+                        detail="Import failed: A part with this name already exists.",
                     )
                 sentry_sdk.capture_exception(e)
-                raise HTTPException(
-                    status_code=500,
-                    detail="Internal server error",
-                )
+                raise HTTPException(status_code=500, detail="Internal server error")
 
-        logger.info(f"Parts import complete: {imported_count} rows imported, {skipped} skipped")
+        if rows_to_upsert:
+            try:
+                total = len(rows_to_upsert)
+                for batch_start in range(0, total, BATCH_SIZE):
+                    batch = rows_to_upsert[batch_start : batch_start + BATCH_SIZE]
+                    response = (
+                        supabase.table("parts")
+                        .upsert(batch, on_conflict="company_id,legacy_id")
+                        .execute()
+                    )
+                    updated_count += len(response.data) if response.data else 0
+            except Exception as e:
+                error_str = str(e)
+                logger.error(f"Parts import upsert error: {error_str}", exc_info=True)
+                sentry_sdk.capture_exception(e)
+                raise HTTPException(status_code=500, detail="Internal server error")
+
+        logger.info(
+            f"Parts import complete: {imported_count} inserted, {updated_count} upserted, {skipped} skipped"
+        )
 
         return PartExecuteResponse(
             success=True,
             imported_count=imported_count,
+            updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
         )

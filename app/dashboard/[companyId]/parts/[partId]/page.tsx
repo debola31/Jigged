@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -30,8 +30,22 @@ import PartPricing from '@/components/parts/PartPricing';
 export default function PartDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const partId = params.partId as string;
+
+  // Preserve the active saved view (e.g. ?view=inventory) when the user
+  // navigates back to the parts list. The list page reads this param to pick
+  // the right filter, so the list/detail round trip lands them where they
+  // started.
+  const partsListHref = useMemo(() => {
+    const view = searchParams.get('view');
+    const validViews = ['all', 'manufactured', 'inventory'];
+    if (view && validViews.includes(view) && view !== 'all') {
+      return `/dashboard/${companyId}/parts?view=${view}`;
+    }
+    return `/dashboard/${companyId}/parts`;
+  }, [companyId, searchParams]);
 
   const [part, setPart] = useState<Part | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +76,7 @@ export default function PartDetailPage() {
     setActionLoading(true);
     try {
       await deletePart(partId);
-      router.push(`/dashboard/${companyId}/parts`);
+      router.push(partsListHref);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete part');
       setActionLoading(false);
@@ -102,7 +116,7 @@ export default function PartDetailPage() {
       >
         <Button
           startIcon={<ArrowBackIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/parts`)}
+          onClick={() => router.push(partsListHref)}
           sx={{ color: 'text.secondary' }}
         >
           Back to Parts

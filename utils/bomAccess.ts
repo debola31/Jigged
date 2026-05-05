@@ -76,6 +76,39 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
 }
 
 /**
+ * Bulk lookup: distinct parent_part_id values across all parts_bom rows
+ * whose parent part lives in the given company. Used by the Parts list
+ * page's "Has BOM" column so the grid can show a checkmark per row from a
+ * single small query (vs. one count query per row, which would be O(N)
+ * network roundtrips).
+ *
+ * Filters to parts owned by the requested company by inner-joining the
+ * parent `parts` row, so a user with access to multiple companies still sees
+ * only the BOM-parent ids that belong to the company they're viewing.
+ */
+export async function getPartIdsWithBomLines(companyId: string): Promise<Set<string>> {
+  const supabase = getSupabase();
+
+  // Inner-embed the parent part to scope by company_id. parts_bom has no
+  // company_id column of its own, so we have to pivot through parts.
+  const { data, error } = await supabase
+    .from('parts_bom')
+    .select('parent_part_id, parent_part:parts!parts_bom_parent_part_id_fkey!inner(company_id)')
+    .eq('parent_part.company_id', companyId);
+
+  if (error) {
+    console.error('Error fetching part ids with BOM lines:', error);
+    throw error;
+  }
+
+  const ids = new Set<string>();
+  for (const row of (data || []) as Array<{ parent_part_id: string }>) {
+    ids.add(row.parent_part_id);
+  }
+  return ids;
+}
+
+/**
  * "Where used" view: parents that reference this part as a child in their
  * BOMs. Used by the part detail page's Where Used panel.
  */

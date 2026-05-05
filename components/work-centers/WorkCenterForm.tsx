@@ -1,0 +1,374 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
+import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
+import InputAdornment from '@mui/material/InputAdornment';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Autocomplete from '@mui/material/Autocomplete';
+import Grid from '@mui/material/Grid';
+import FactoryIcon from '@mui/icons-material/Factory';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import type {
+  WorkCenter,
+  WorkCenterFormData,
+  WorkCenterKind,
+} from '@/types/workCenter';
+import {
+  createWorkCenter,
+  updateWorkCenter,
+  checkWorkCenterNameExists,
+} from '@/utils/workCentersAccess';
+import { getAllVendors } from '@/utils/vendorsAccess';
+import type { Vendor } from '@/types/vendor';
+
+interface WorkCenterFormProps {
+  mode: 'create' | 'edit';
+  initialData: WorkCenterFormData;
+  workCenterId?: string;
+  /** Optional: companyId override for modal usage */
+  companyId?: string;
+  /** Optional: Callback when work center is created/updated successfully */
+  onSuccess?: (workCenter: WorkCenter) => void;
+  /** Optional: Callback when cancel is clicked */
+  onCancel?: () => void;
+}
+
+export default function WorkCenterForm({
+  mode,
+  initialData,
+  workCenterId,
+  companyId: companyIdProp,
+  onSuccess,
+  onCancel,
+}: WorkCenterFormProps) {
+  const router = useRouter();
+  const params = useParams();
+  const companyId = companyIdProp || (params.companyId as string);
+
+  const [formData, setFormData] = useState<WorkCenterFormData>(initialData);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [vendorsLoaded, setVendorsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadVendors() {
+      setVendorsLoading(true);
+      try {
+        const data = await getAllVendors(companyId);
+        if (!cancelled) {
+          setVendors(data);
+          setVendorsLoaded(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load vendors');
+        }
+      } finally {
+        if (!cancelled) setVendorsLoading(false);
+      }
+    }
+    loadVendors();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const handleTextChange = (field: keyof WorkCenterFormData) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    const value = e.target.value;
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const handleKindChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    newKind: WorkCenterKind | null,
+  ) => {
+    if (!newKind) return;
+    setFormData((prev) => ({
+      ...prev,
+      kind: newKind,
+      // Clear the field that no longer applies so we never submit an invalid combo.
+      vendor_id: newKind === 'external' ? prev.vendor_id : null,
+      labor_rate: newKind === 'internal' ? prev.labor_rate : '',
+    }));
+    setFieldErrors((prev) => ({ ...prev, vendor_id: '', labor_rate: '' }));
+  };
+
+  const validateForm = async (): Promise<boolean> => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.name.trim()) {
+      errors.name = 'Name is required';
+    }
+
+    // The DB CHECK constraint enforces this — we surface a clear error pre-submit
+    // so the user isn't met with a raw Postgres "violates check constraint" dump.
+    if (formData.kind === 'external' && !formData.vendor_id) {
+      errors.vendor_id = 'Vendor is required for external work centers';
+    }
+
+    if (formData.kind === 'internal' && formData.labor_rate.trim()) {
+      const rate = parseFloat(formData.labor_rate);
+      if (Number.isNaN(rate) || rate < 0) {
+        errors.labor_rate = 'Labor rate must be a non-negative number';
+      }
+    }
+
+    if (formData.name.trim() && !errors.name) {
+      try {
+        const exists = await checkWorkCenterNameExists(
+          companyId,
+          formData.name,
+          mode === 'edit' ? workCenterId : undefined,
+        );
+        if (exists) {
+          errors.name = 'A work center with this name already exists';
+        }
+      } catch {
+        setError('Error validating work center name');
+        return false;
+      }
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setError(null);
+
+    const isValid = await validateForm();
+    if (!isValid) return;
+
+    setLoading(true);
+    try {
+      if (mode === 'create') {
+        const wc = await createWorkCenter(companyId, formData);
+        if (onSuccess) {
+          onSuccess(wc);
+        } else {
+          router.push(`/dashboard/${companyId}/work-centers/${wc.id}`);
+        }
+      } else if (workCenterId) {
+        const wc = await updateWorkCenter(workCenterId, formData);
+        if (onSuccess) {
+          onSuccess(wc);
+        } else {
+          router.push(`/dashboard/${companyId}/work-centers/${workCenterId}`);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+    } else if (mode === 'edit' && workCenterId) {
+      router.push(`/dashboard/${companyId}/work-centers/${workCenterId}`);
+    } else {
+      router.push(`/dashboard/${companyId}/work-centers`);
+    }
+  };
+
+  const selectedVendor = vendors.find((v) => v.id === formData.vendor_id) || null;
+
+  return (
+    <Box component="form" onSubmit={handleSubmit}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+            Basic Information
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                required
+                label="Name"
+                value={formData.name}
+                onChange={handleTextChange('name')}
+                error={!!fieldErrors.name}
+                helperText={
+                  fieldErrors.name ||
+                  'e.g. "HURCO Mill", "Mazak Lathe", "PerformCoat"'
+                }
+                disabled={loading}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <Box>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 1, fontWeight: 500 }}
+                >
+                  Kind
+                </Typography>
+                <ToggleButtonGroup
+                  value={formData.kind}
+                  exclusive
+                  onChange={handleKindChange}
+                  disabled={loading}
+                  fullWidth
+                  color="primary"
+                  size="medium"
+                >
+                  <ToggleButton value="internal" sx={{ gap: 1 }}>
+                    <FactoryIcon fontSize="small" />
+                    Internal
+                  </ToggleButton>
+                  <ToggleButton value="external" sx={{ gap: 1 }}>
+                    <LocalShippingIcon fontSize="small" />
+                    External
+                  </ToggleButton>
+                </ToggleButtonGroup>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 0.5, display: 'block' }}
+                >
+                  {formData.kind === 'internal'
+                    ? 'Runs in your shop. Has a labor rate.'
+                    : 'Performed by an outside vendor.'}
+                </Typography>
+              </Box>
+            </Grid>
+
+            {/* Kind-conditional fields: only one of these is valid at a time per the DB CHECK constraint. */}
+            {formData.kind === 'internal' && (
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Labor Rate"
+                  value={formData.labor_rate}
+                  onChange={handleTextChange('labor_rate')}
+                  error={!!fieldErrors.labor_rate}
+                  helperText={fieldErrors.labor_rate || 'Optional. Hourly rate in dollars.'}
+                  disabled={loading}
+                  type="number"
+                  inputProps={{ min: 0, step: '0.01' }}
+                  slotProps={{
+                    input: {
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                      endAdornment: <InputAdornment position="end">/hr</InputAdornment>,
+                    },
+                  }}
+                />
+              </Grid>
+            )}
+
+            {formData.kind === 'external' && (
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Autocomplete
+                  options={vendors}
+                  getOptionLabel={(opt) => opt.name}
+                  value={selectedVendor}
+                  loading={vendorsLoading}
+                  onChange={(_event, newValue) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      vendor_id: newValue ? newValue.id : null,
+                    }));
+                    if (fieldErrors.vendor_id) {
+                      setFieldErrors((prev) => ({ ...prev, vendor_id: '' }));
+                    }
+                  }}
+                  disabled={loading}
+                  isOptionEqualToValue={(opt, val) => opt.id === val.id}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      required
+                      label="Vendor"
+                      error={!!fieldErrors.vendor_id}
+                      helperText={
+                        fieldErrors.vendor_id ||
+                        (vendorsLoaded && vendors.length === 0
+                          ? 'No vendors yet — add one in Vendors first.'
+                          : 'Vendor performing this outside operation')
+                      }
+                      slotProps={{
+                        input: {
+                          ...params.InputProps,
+                          endAdornment: (
+                            <>
+                              {vendorsLoading ? (
+                                <CircularProgress color="inherit" size={20} />
+                              ) : null}
+                              {params.InputProps.endAdornment}
+                            </>
+                          ),
+                        },
+                      }}
+                    />
+                  )}
+                />
+              </Grid>
+            )}
+
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                fullWidth
+                label="Description"
+                value={formData.description}
+                onChange={handleTextChange('description')}
+                disabled={loading}
+                multiline
+                minRows={3}
+                placeholder="Optional notes about this work center"
+              />
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+        <Button variant="outlined" onClick={handleCancel} disabled={loading}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={loading}
+          startIcon={loading ? <CircularProgress size={20} /> : null}
+        >
+          {loading
+            ? 'Saving...'
+            : mode === 'create'
+              ? 'Create Work Center'
+              : 'Save Changes'}
+        </Button>
+      </Box>
+    </Box>
+  );
+}

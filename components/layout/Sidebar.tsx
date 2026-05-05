@@ -13,6 +13,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import WorkIcon from '@mui/icons-material/Work';
 import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
+import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import PercentIcon from '@mui/icons-material/Percent';
 import GroupIcon from '@mui/icons-material/Group';
@@ -35,6 +36,7 @@ const menuItems: MenuItem[] = [
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
+  { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Markup Rates', path: '/markup-rates', icon: PercentIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },

@@ -149,6 +149,63 @@ export async function getAllVendorsWithDerivedRoles(
 }
 
 /**
+ * Linked parts (preferred-vendor backlink) for the vendor detail page.
+ * Returns a thin row shape — id, name, primary_unit — enough to render a
+ * collapsible list and link out. The detail page uses the count from
+ * `getVendorWithDerivedRoles` to gate the "Show parts" expander.
+ */
+export async function getPartsByPreferredVendor(
+  vendorId: string,
+): Promise<Array<{ id: string; part_name: string; primary_unit: string | null }>> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts')
+    .select('id, part_name, primary_unit')
+    .eq('preferred_vendor_id', vendorId)
+    .order('part_name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching parts by preferred vendor:', error);
+    throw error;
+  }
+
+  return (data || []) as Array<{
+    id: string;
+    part_name: string;
+    primary_unit: string | null;
+  }>;
+}
+
+/**
+ * Linked work_centers (vendor_id backlink) for the vendor detail page.
+ * Returns id + name + kind so the UI can confirm `kind='external'` (the only
+ * kind that can carry a vendor reference per the schema CHECK constraint).
+ */
+export async function getWorkCentersByVendor(
+  vendorId: string,
+): Promise<Array<{ id: string; name: string; kind: 'internal' | 'external' }>> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('work_centers')
+    .select('id, name, kind')
+    .eq('vendor_id', vendorId)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching work centers by vendor:', error);
+    throw error;
+  }
+
+  return (data || []) as Array<{
+    id: string;
+    name: string;
+    kind: 'internal' | 'external';
+  }>;
+}
+
+/**
  * Check if a vendor name already exists for a company.
  */
 export async function checkVendorNameExists(

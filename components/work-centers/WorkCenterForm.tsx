@@ -17,6 +17,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Grid from '@mui/material/Grid';
 import FactoryIcon from '@mui/icons-material/Factory';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import type {
   WorkCenter,
   WorkCenterFormData,
@@ -29,6 +30,7 @@ import {
 } from '@/utils/workCentersAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
 import type { Vendor } from '@/types/vendor';
+import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 
 interface WorkCenterFormProps {
   mode: 'create' | 'edit';
@@ -162,15 +164,25 @@ export default function WorkCenterForm({
 
     setLoading(true);
     try {
+      // Defensive normalization: when kind='external' the form already hides
+      // labor_rate and `handleKindChange` clears it on switch — but if the
+      // submit ever runs with stale formData (e.g. someone wires a new code
+      // path that doesn't go through the toggle handler), force null here so
+      // we never persist a labor rate to an outsourced work center.
+      const submitData: WorkCenterFormData =
+        formData.kind === 'external'
+          ? { ...formData, labor_rate: '' }
+          : formData;
+
       if (mode === 'create') {
-        const wc = await createWorkCenter(companyId, formData);
+        const wc = await createWorkCenter(companyId, submitData);
         if (onSuccess) {
           onSuccess(wc);
         } else {
           router.push(`/dashboard/${companyId}/work-centers/${wc.id}`);
         }
       } else if (workCenterId) {
-        const wc = await updateWorkCenter(workCenterId, formData);
+        const wc = await updateWorkCenter(workCenterId, submitData);
         if (onSuccess) {
           onSuccess(wc);
         } else {
@@ -242,6 +254,7 @@ export default function WorkCenterForm({
                   fullWidth
                   color="primary"
                   size="medium"
+                  sx={highContrastToggleSx}
                 >
                   <ToggleButton value="internal" sx={{ gap: 1 }}>
                     <FactoryIcon fontSize="small" />
@@ -264,7 +277,9 @@ export default function WorkCenterForm({
               </Box>
             </Grid>
 
-            {/* Kind-conditional fields: only one of these is valid at a time per the DB CHECK constraint. */}
+            {/* Kind-conditional fields: only one of these is valid at a time per the DB CHECK constraint.
+                External work centers price per routing operation (external_unit_price +
+                external_setup_cost), so labor_rate is hidden entirely — see hint below. */}
             {formData.kind === 'internal' && (
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
@@ -284,6 +299,25 @@ export default function WorkCenterForm({
                     },
                   }}
                 />
+              </Grid>
+            )}
+
+            {formData.kind === 'external' && (
+              <Grid size={{ xs: 12 }}>
+                <Alert
+                  severity="info"
+                  icon={<InfoOutlinedIcon />}
+                  sx={{ alignItems: 'flex-start' }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
+                    External work centers price per routing operation
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Set <strong>external_unit_price</strong> and{' '}
+                    <strong>external_setup_cost</strong> on each routing operation
+                    that uses this work center, not on the work center itself.
+                  </Typography>
+                </Alert>
               </Grid>
             )}
 

@@ -36,6 +36,8 @@ import {
 import { getAllVendors } from '@/utils/vendorsAccess';
 import type { Vendor } from '@/types/vendor';
 import PartTypeChip from './PartTypeChip';
+import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
+import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -56,10 +58,12 @@ interface PartFormProps {
  * sits at the top and drives every conditional field below. Procurement cost
  * is shown only for source='bought'; UOM only when is_stocked=true; vendor
  * picker when source='bought' OR is_stocked=true. Unit conversions live on
- * the part detail page (chunk 14 wires up inline editing there).
+ * the part detail page — they're managed inline on the Inventory panel and
+ * never appear in this form (chunk 14).
  *
- * Contrast on the toggle group is intentionally inherited from MUI defaults
- * for now; chunk 14 restyles it for high contrast on the dark theme.
+ * The Made/Bought toggle uses `highContrastToggleSx` (shared with the
+ * work-center kind toggle) so the selected state pops on the dark theme
+ * for shop-floor tablet use under bright lighting.
  */
 export default function PartForm({
   mode,
@@ -339,6 +343,7 @@ export default function PartForm({
                 disabled={loading}
                 aria-label="Source"
                 color="primary"
+                sx={highContrastToggleSx}
               >
                 <ToggleButton value="made" aria-label="Made in-house">
                   <BuildIcon fontSize="small" sx={{ mr: 1 }} />
@@ -395,9 +400,10 @@ export default function PartForm({
         </CardContent>
       </Card>
 
-      {/* Stocked-only fields: UOM + on-hand qty + reorder point. UOM is a
-          plain text input for now; chunk 14 swaps it to the standard-units
-          combobox. */}
+      {/* Stocked-only fields: UOM + on-hand qty + reorder point. UOM is the
+          standard-units combobox (chunk 14) — picks from the canonical list
+          shared with the importer + lets the user add a custom unit inline.
+          Unit *conversions* live on the part detail page, not here. */}
       {showUomField && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>
@@ -406,26 +412,22 @@ export default function PartForm({
             </Typography>
             <Grid container spacing={3}>
               <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  required
-                  label="Unit of measurement"
-                  value={formData.primary_unit ?? ''}
-                  onChange={(e) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      primary_unit: e.target.value,
-                    }));
+                <UnitOfMeasurementSelect
+                  value={formData.primary_unit}
+                  onChange={(next) => {
+                    setFormData((prev) => ({ ...prev, primary_unit: next }));
                     if (fieldErrors.primary_unit) {
                       setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
                     }
                   }}
+                  companyId={companyId}
+                  required
+                  disabled={loading}
                   error={!!fieldErrors.primary_unit}
                   helperText={
                     fieldErrors.primary_unit ||
-                    'e.g. each, ft, lb, in. Costs and quantities are denominated in this unit.'
+                    'Costs and quantities are denominated in this unit.'
                   }
-                  disabled={loading}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>

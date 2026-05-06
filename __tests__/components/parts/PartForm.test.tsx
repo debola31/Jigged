@@ -23,6 +23,17 @@ vi.mock('@/utils/vendorsAccess', () => ({
   getAllVendors: vi.fn().mockResolvedValue([]),
 }));
 
+// PartForm transitively imports UnitOfMeasurementSelect which calls into
+// utils/unitsAccess. Mock here too so the real Supabase client isn't loaded.
+vi.mock('@/utils/unitsAccess', () => ({
+  getCompanyCustomUnits: vi.fn().mockResolvedValue([]),
+  addCompanyCustomUnit: vi.fn().mockResolvedValue({
+    id: 'cu-1',
+    company_id: 'test-company-id',
+    unit_name: 'mock-unit',
+  }),
+}));
+
 describe('PartForm', () => {
   const user = userEvent.setup();
 

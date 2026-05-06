@@ -18,7 +18,6 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Chip from '@mui/material/Chip';
-import Stack from '@mui/material/Stack';
 import Snackbar from '@mui/material/Snackbar';
 import Link from '@mui/material/Link';
 
@@ -52,6 +51,7 @@ import PartTransactionHistoryTable from '@/components/parts/PartTransactionHisto
 import PartBomPanel from '@/components/parts/PartBomPanel';
 import PartWhereUsedPanel from '@/components/parts/PartWhereUsedPanel';
 import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
+import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEditor';
 
 const formatCurrency = (n: number | null): string => {
   if (n === null || !Number.isFinite(n)) return '—';
@@ -482,26 +482,20 @@ export default function PartDetailPage() {
                   </Grid>
                 </Grid>
 
-                {/* Unit conversions — read-only display. Edited via the Part
-                    edit form. */}
-                {unitConversions.length > 0 && (
+                {/* Unit conversions — inline-editable list (chunk 14 moved
+                    these out of the Part create/edit form). The editor calls
+                    onChanged after each save so the page-level conversions
+                    cache (consumed by PartTransactionModal) stays fresh. */}
+                {part.primary_unit && (
                   <Box sx={{ mt: 3 }}>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                       Unit conversions
                     </Typography>
-                    <Stack spacing={0.5}>
-                      {unitConversions.map((uc) => (
-                        <Typography
-                          key={uc.id}
-                          variant="body2"
-                          fontFamily="monospace"
-                          color="text.secondary"
-                        >
-                          1 {uc.from_unit} = {uc.to_primary_factor}{' '}
-                          {part.primary_unit ?? ''}
-                        </Typography>
-                      ))}
-                    </Stack>
+                    <PartUnitConversionsEditor
+                      partId={partId}
+                      primaryUnit={part.primary_unit}
+                      onChanged={(next) => setUnitConversions(next)}
+                    />
                   </Box>
                 )}
 

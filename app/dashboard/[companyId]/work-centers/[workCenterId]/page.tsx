@@ -208,7 +208,9 @@ export default function WorkCenterDetailPage() {
               </Typography>
               <Divider sx={{ mb: 2 }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {/* Kind-conditional fields mirror the form so the displayed data is consistent. */}
+                {/* Kind-conditional fields mirror the form so the displayed data is consistent.
+                    Internal: labor rate. External: vendor link + a hint that pricing
+                    lives on the routing operations, not on the work center. */}
                 {isInternal && (
                   <Box>
                     <Typography variant="body2" color="text.secondary">
@@ -242,6 +244,19 @@ export default function WorkCenterDetailPage() {
                         —
                       </Typography>
                     )}
+                  </Box>
+                )}
+                {!isInternal && (
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Pricing per routing operation
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5 }}>
+                      External work centers price per routing operation. Each
+                      routing op sets its own{' '}
+                      <strong>external_unit_price</strong> and{' '}
+                      <strong>external_setup_cost</strong> for this vendor.
+                    </Typography>
                   </Box>
                 )}
                 <Box>

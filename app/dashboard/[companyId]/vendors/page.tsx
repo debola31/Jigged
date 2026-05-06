@@ -297,15 +297,20 @@ export default function VendorsPage() {
     },
     {
       colId: 'contact',
-      headerName: 'Contact',
+      headerName: 'Primary Contact',
       flex: 1.5,
       minWidth: 200,
       sortable: false,
-      // Combined contact_name / contact_email display.
+      // Reads from the joined vendor_contacts row (is_primary=true).
+      // Em-dash when no primary contact exists — a legitimate state for
+      // vendors created without a contact, or backfilled vendors that had
+      // only email/phone in the old single-contact columns.
       valueGetter: (params) => {
         const r = params.data;
-        if (!r) return '';
-        const parts = [r.contact_name, r.contact_email].filter(Boolean);
+        if (!r || !r.primary_contact) return '—';
+        const parts = [r.primary_contact.name, r.primary_contact.email].filter(
+          Boolean,
+        );
         return parts.length > 0 ? parts.join(' · ') : '—';
       },
     },

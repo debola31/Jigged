@@ -61,18 +61,22 @@ type ImportStep =
   | 'importing'
   | 'complete';
 
+// Iteration 2: contact_name/email/phone moved into vendor_contacts; the CSV
+// path captures one primary contact per vendor via the primary_contact_*
+// fields below. notes was dropped (free-form dumping ground; will come back
+// as a typed column if/when there's a clear use case).
 const VENDOR_FIELDS: FieldDefinition[] = [
   { key: 'name', label: 'Name', required: true },
-  { key: 'contact_name', label: 'Contact Name', required: false },
-  { key: 'contact_email', label: 'Contact Email', required: false },
-  { key: 'contact_phone', label: 'Contact Phone', required: false },
+  { key: 'primary_contact_name', label: 'Primary Contact Name', required: false },
+  { key: 'primary_contact_email', label: 'Primary Contact Email', required: false },
+  { key: 'primary_contact_phone', label: 'Primary Contact Phone', required: false },
+  { key: 'primary_contact_role', label: 'Primary Contact Role', required: false },
   { key: 'address_line1', label: 'Address Line 1', required: false },
   { key: 'address_line2', label: 'Address Line 2', required: false },
   { key: 'city', label: 'City', required: false },
   { key: 'state', label: 'State', required: false },
   { key: 'postal_code', label: 'Postal Code', required: false },
   { key: 'country', label: 'Country', required: false },
-  { key: 'notes', label: 'Notes', required: false },
   { key: 'legacy_id', label: 'Legacy ID', required: false },
 ];
 

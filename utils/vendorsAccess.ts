@@ -5,9 +5,16 @@ import type {
   VendorWithDerivedRoles,
   VendorImportResult,
 } from '@/types/vendor';
+import type {
+  VendorContact,
+  VendorContactFormData,
+} from '@/types/vendorContact';
 
 const VENDOR_COLUMNS =
-  'id, company_id, name, contact_name, contact_email, contact_phone, address_line1, address_line2, city, state, postal_code, country, notes, legacy_id, created_at, updated_at';
+  'id, company_id, name, address_line1, address_line2, city, state, postal_code, country, legacy_id, created_at, updated_at';
+
+const VENDOR_CONTACT_COLUMNS =
+  'id, vendor_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
 
 /**
  * Get all vendors for a company.
@@ -27,9 +34,9 @@ export async function getAllVendors(
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search.trim()) {
-    query = query.or(
-      `name.ilike.%${search}%,contact_name.ilike.%${search}%,city.ilike.%${search}%`,
-    );
+    // Search the vendor name + city only. Contact-name search would require a
+    // join through vendor_contacts; defer until usability shows users want it.
+    query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%`);
   }
 
   const { data, error } = await query;
@@ -64,6 +71,11 @@ export async function getVendor(vendorId: string): Promise<Vendor | null> {
  * Hydrate a single vendor with its derived role counts:
  * supplies materials = parts where preferred_vendor_id = vendor.id;
  * performs outside ops = work_centers where vendor_id = vendor.id.
+ *
+ * Also fetches the vendor's primary contact (if any) for display in the
+ * detail page header / list contact column. `primary_contact` is null when
+ * the vendor has no contact rows or no contact is marked is_primary
+ * (legitimate state — see the migration's NOTICE log).
  */
 export async function getVendorWithDerivedRoles(
   vendorId: string,
@@ -73,32 +85,48 @@ export async function getVendorWithDerivedRoles(
   const vendor = await getVendor(vendorId);
   if (!vendor) return null;
 
-  const [{ count: suppliesCount, error: supError }, { count: opsCount, error: opError }] =
-    await Promise.all([
-      supabase
-        .from('parts')
-        .select('*', { count: 'exact', head: true })
-        .eq('preferred_vendor_id', vendorId),
-      supabase
-        .from('work_centers')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId),
-    ]);
+  const [
+    { count: suppliesCount, error: supError },
+    { count: opsCount, error: opError },
+    { data: primaryRows, error: contactError },
+  ] = await Promise.all([
+    supabase
+      .from('parts')
+      .select('*', { count: 'exact', head: true })
+      .eq('preferred_vendor_id', vendorId),
+    supabase
+      .from('work_centers')
+      .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendorId),
+    supabase
+      .from('vendor_contacts')
+      .select(VENDOR_CONTACT_COLUMNS)
+      .eq('vendor_id', vendorId)
+      .eq('is_primary', true)
+      .limit(1),
+  ]);
 
   if (supError) throw supError;
   if (opError) throw opError;
+  if (contactError) throw contactError;
+
+  const primaryContact =
+    ((primaryRows || []) as VendorContact[])[0] || null;
 
   return {
     ...vendor,
     supplies_materials_count: suppliesCount || 0,
     performs_outside_ops_count: opsCount || 0,
+    primary_contact: primaryContact,
   };
 }
 
 /**
  * List all vendors with their derived role counts in a single round trip.
  * The role counts come from two aggregate queries fanned across the company,
- * not row-by-row.
+ * not row-by-row. Primary contacts come from a single query against
+ * vendor_contacts WHERE is_primary=true; the result is stitched onto each
+ * vendor by vendor_id (null when no primary exists).
  */
 export async function getAllVendorsWithDerivedRoles(
   companyId: string,
@@ -111,22 +139,33 @@ export async function getAllVendorsWithDerivedRoles(
   const vendors = await getAllVendors(companyId, search, sortField, sortDirection);
   if (vendors.length === 0) return [];
 
-  const [{ data: partRows, error: partError }, { data: wcRows, error: wcError }] =
-    await Promise.all([
-      supabase
-        .from('parts')
-        .select('preferred_vendor_id')
-        .eq('company_id', companyId)
-        .not('preferred_vendor_id', 'is', null),
-      supabase
-        .from('work_centers')
-        .select('vendor_id')
-        .eq('company_id', companyId)
-        .not('vendor_id', 'is', null),
-    ]);
+  const vendorIds = vendors.map((v) => v.id);
+
+  const [
+    { data: partRows, error: partError },
+    { data: wcRows, error: wcError },
+    { data: contactRows, error: contactError },
+  ] = await Promise.all([
+    supabase
+      .from('parts')
+      .select('preferred_vendor_id')
+      .eq('company_id', companyId)
+      .not('preferred_vendor_id', 'is', null),
+    supabase
+      .from('work_centers')
+      .select('vendor_id')
+      .eq('company_id', companyId)
+      .not('vendor_id', 'is', null),
+    supabase
+      .from('vendor_contacts')
+      .select(VENDOR_CONTACT_COLUMNS)
+      .in('vendor_id', vendorIds)
+      .eq('is_primary', true),
+  ]);
 
   if (partError) throw partError;
   if (wcError) throw wcError;
+  if (contactError) throw contactError;
 
   const suppliesByVendor = new Map<string, number>();
   for (const r of (partRows || []) as Array<{ preferred_vendor_id: string }>) {
@@ -141,18 +180,21 @@ export async function getAllVendorsWithDerivedRoles(
     opsByVendor.set(r.vendor_id, (opsByVendor.get(r.vendor_id) || 0) + 1);
   }
 
+  const primaryByVendor = new Map<string, VendorContact>();
+  for (const c of (contactRows || []) as VendorContact[]) {
+    primaryByVendor.set(c.vendor_id, c);
+  }
+
   return vendors.map((v) => ({
     ...v,
     supplies_materials_count: suppliesByVendor.get(v.id) || 0,
     performs_outside_ops_count: opsByVendor.get(v.id) || 0,
+    primary_contact: primaryByVendor.get(v.id) || null,
   }));
 }
 
 /**
  * Linked parts (preferred-vendor backlink) for the vendor detail page.
- * Returns a thin row shape — id, name, primary_unit — enough to render a
- * collapsible list and link out. The detail page uses the count from
- * `getVendorWithDerivedRoles` to gate the "Show parts" expander.
  */
 export async function getPartsByPreferredVendor(
   vendorId: string,
@@ -179,8 +221,6 @@ export async function getPartsByPreferredVendor(
 
 /**
  * Linked work_centers (vendor_id backlink) for the vendor detail page.
- * Returns id + name + kind so the UI can confirm `kind='external'` (the only
- * kind that can carry a vendor reference per the schema CHECK constraint).
  */
 export async function getWorkCentersByVendor(
   vendorId: string,
@@ -237,22 +277,30 @@ function formDataToInsert(formData: VendorFormData): Record<string, unknown> {
   const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
   return {
     name: formData.name.trim(),
-    contact_name: trimmed(formData.contact_name),
-    contact_email: trimmed(formData.contact_email),
-    contact_phone: trimmed(formData.contact_phone),
     address_line1: trimmed(formData.address_line1),
     address_line2: trimmed(formData.address_line2),
     city: trimmed(formData.city),
     state: trimmed(formData.state),
     postal_code: trimmed(formData.postal_code),
     country: trimmed(formData.country) || 'USA',
-    notes: trimmed(formData.notes),
   };
 }
 
+/**
+ * Create a vendor. If `initialContact` is provided, also inserts one
+ * vendor_contacts row marked is_primary=true. The two writes are sequenced
+ * (vendor first so the contact has a vendor_id to reference); a failure on
+ * the contact insert leaves the vendor row in place — the user can add a
+ * contact via the Contacts card on the detail page afterward.
+ *
+ * The VendorForm in `mode='create'` passes initialContact when the user
+ * fills in the embedded "Initial contact" sub-form; in edit mode the
+ * Contacts card on the detail page handles all contact CRUD instead.
+ */
 export async function createVendor(
   companyId: string,
   formData: VendorFormData,
+  initialContact?: VendorContactFormData,
 ): Promise<Vendor> {
   const supabase = getSupabase();
 
@@ -266,7 +314,31 @@ export async function createVendor(
     console.error('Error creating vendor:', error);
     throw error;
   }
-  return data as Vendor;
+  const vendor = data as Vendor;
+
+  if (initialContact && initialContact.name.trim() !== '') {
+    const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
+    const { error: contactError } = await supabase
+      .from('vendor_contacts')
+      .insert({
+        vendor_id: vendor.id,
+        name: initialContact.name.trim(),
+        role: initialContact.role,
+        role_label:
+          initialContact.role === 'other'
+            ? trimmed(initialContact.role_label)
+            : null,
+        email: trimmed(initialContact.email),
+        phone: trimmed(initialContact.phone),
+        is_primary: true,
+      });
+    if (contactError) {
+      console.error('Error creating initial vendor contact:', contactError);
+      throw contactError;
+    }
+  }
+
+  return vendor;
 }
 
 export async function updateVendor(
@@ -342,16 +414,12 @@ export async function bulkImportVendors(
   companyId: string,
   rows: Array<{
     name: string;
-    contact_name?: string;
-    contact_email?: string;
-    contact_phone?: string;
     address_line1?: string;
     address_line2?: string;
     city?: string;
     state?: string;
     postal_code?: string;
     country?: string;
-    notes?: string;
     legacy_id?: string;
   }>,
 ): Promise<VendorImportResult> {
@@ -400,16 +468,12 @@ export async function bulkImportVendors(
     const { error } = await supabase.from('vendors').insert({
       company_id: companyId,
       name: row.name.trim(),
-      contact_name: trimmed(row.contact_name),
-      contact_email: trimmed(row.contact_email),
-      contact_phone: trimmed(row.contact_phone),
       address_line1: trimmed(row.address_line1),
       address_line2: trimmed(row.address_line2),
       city: trimmed(row.city),
       state: trimmed(row.state),
       postal_code: trimmed(row.postal_code),
       country: trimmed(row.country) || 'USA',
-      notes: trimmed(row.notes),
       legacy_id: trimmed(row.legacy_id),
     });
 

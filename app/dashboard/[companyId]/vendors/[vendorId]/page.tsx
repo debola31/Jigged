@@ -30,6 +30,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AddIcon from '@mui/icons-material/Add';
+import StarIcon from '@mui/icons-material/Star';
+import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
@@ -39,7 +42,15 @@ import {
   getPartsByPreferredVendor,
   getWorkCentersByVendor,
 } from '@/utils/vendorsAccess';
+import {
+  getContactsForVendor,
+  deleteVendorContact,
+  setPrimaryContact,
+} from '@/utils/vendorContactsAccess';
+import { roleDisplayLabel } from '@/types/vendorContact';
+import type { VendorContact } from '@/types/vendorContact';
 import type { VendorWithDerivedRoles } from '@/types/vendor';
+import { VendorContactModal } from '@/components/vendors';
 
 interface LinkedPart {
   id: string;
@@ -60,6 +71,7 @@ export default function VendorDetailPage() {
   const vendorId = params.vendorId as string;
 
   const [vendor, setVendor] = useState<VendorWithDerivedRoles | null>(null);
+  const [contacts, setContacts] = useState<VendorContact[]>([]);
   const [linkedParts, setLinkedParts] = useState<LinkedPart[]>([]);
   const [linkedWorkCenters, setLinkedWorkCenters] = useState<LinkedWorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,28 +79,51 @@ export default function VendorDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
+  // Contact modal state — shared between Add and Edit; `editingContact`
+  // distinguishes the two modes.
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<VendorContact | undefined>(
+    undefined,
+  );
+
+  // Per-contact delete confirmation. Keyed by contact id so the prompt
+  // wording can include the contact's name without needing extra state.
+  const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
+
   const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
-      // One round of fan-out queries — vendor with counts, then linked parts
-      // and work centers in parallel. The counts on the vendor row are the
-      // canonical source for the role chips and delete-gating; the linked
-      // lists below are for display.
       const v = await getVendorWithDerivedRoles(vendorId);
       setVendor(v);
       if (v) {
-        const [parts, wcs] = await Promise.all([
+        const [parts, wcs, contactList] = await Promise.all([
           getPartsByPreferredVendor(vendorId),
           getWorkCentersByVendor(vendorId),
+          getContactsForVendor(vendorId),
         ]);
         setLinkedParts(parts);
         setLinkedWorkCenters(wcs);
+        setContacts(contactList);
       }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load vendor');
     } finally {
       setLoading(false);
+    }
+  }, [vendorId]);
+
+  // Lighter refresh after a contact mutation — no need to reload parts/wcs.
+  const refreshContacts = useCallback(async () => {
+    try {
+      const [contactList, v] = await Promise.all([
+        getContactsForVendor(vendorId),
+        getVendorWithDerivedRoles(vendorId),
+      ]);
+      setContacts(contactList);
+      setVendor(v);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh contacts');
     }
   }, [vendorId]);
 
@@ -102,12 +137,47 @@ export default function VendorDetailPage() {
       await deleteVendor(vendorId);
       router.push(`/dashboard/${companyId}/vendors`);
     } catch (err) {
-      // No silent fallback — surface the constraint failure with the clear
-      // message thrown by deleteVendor (vendorsAccess.ts maps 23503 to a
-      // human-readable explanation of which references block the delete).
       setError(err instanceof Error ? err.message : 'Failed to delete vendor');
       setActionLoading(false);
       setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleAddContact = () => {
+    setEditingContact(undefined);
+    setContactModalOpen(true);
+  };
+
+  const handleEditContact = (contact: VendorContact) => {
+    setEditingContact(contact);
+    setContactModalOpen(true);
+  };
+
+  const handleDeleteContact = async () => {
+    if (!deleteContactId) return;
+    setActionLoading(true);
+    try {
+      await deleteVendorContact(deleteContactId);
+      setDeleteContactId(null);
+      await refreshContacts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete contact');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSetPrimary = async (contactId: string) => {
+    setActionLoading(true);
+    try {
+      await setPrimaryContact(vendorId, contactId);
+      await refreshContacts();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to set primary contact',
+      );
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -145,10 +215,11 @@ export default function VendorDetailPage() {
 
   const supplies = vendor.supplies_materials_count > 0;
   const outside = vendor.performs_outside_ops_count > 0;
-  // Delete is gated by either reference type — DB will reject via FK anyway,
-  // but disabling up front + showing a clear constraint message beats waiting
-  // for a raw Postgres error.
   const hasReferences = supplies || outside;
+
+  const contactBeingDeleted = deleteContactId
+    ? contacts.find((c) => c.id === deleteContactId)
+    : undefined;
 
   return (
     <Box>
@@ -253,52 +324,190 @@ export default function VendorDetailPage() {
       </Card>
 
       <Grid container spacing={3}>
-        {/* Contact card */}
+        {/* Contacts card — replaces the single Primary Contact card. Lists
+            all contacts, with primary marked by a star and actions for
+            edit / set-primary / delete. Empty state ("No contacts yet.") is
+            a legitimate post-migration state for vendors that previously
+            had only email/phone (see the migration's NOTICE log). */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Primary Contact
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Contact Name
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {vendor.contact_name || '—'}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Phone
-                  </Typography>
-                  {vendor.contact_phone ? (
-                    <MuiLink href={`tel:${vendor.contact_phone}`} sx={{ fontWeight: 500 }}>
-                      {vendor.contact_phone}
-                    </MuiLink>
-                  ) : (
-                    <Typography variant="body1" color="text.secondary">
-                      —
-                    </Typography>
-                  )}
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Email
-                  </Typography>
-                  {vendor.contact_email ? (
-                    <MuiLink href={`mailto:${vendor.contact_email}`} sx={{ fontWeight: 500 }}>
-                      {vendor.contact_email}
-                    </MuiLink>
-                  ) : (
-                    <Typography variant="body1" color="text.secondary">
-                      —
-                    </Typography>
-                  )}
-                </Box>
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  mb: 2,
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Contacts ({contacts.length})
+                </Typography>
+                {contacts.length > 0 && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddContact}
+                    disabled={actionLoading}
+                  >
+                    Add Contact
+                  </Button>
+                )}
               </Box>
+              <Divider sx={{ mb: 2 }} />
+
+              {contacts.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mb: 2 }}
+                  >
+                    No contacts yet.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddContact}
+                    disabled={actionLoading}
+                  >
+                    Add Contact
+                  </Button>
+                </Box>
+              ) : (
+                <Stack spacing={2}>
+                  {contacts.map((contact) => (
+                    <Box
+                      key={contact.id}
+                      sx={{
+                        p: 2,
+                        borderRadius: 1,
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: contact.is_primary
+                          ? 'primary.main'
+                          : 'divider',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: 1,
+                        }}
+                      >
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
+                              mb: 0.5,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            {contact.is_primary && (
+                              <Tooltip title="Primary contact">
+                                <StarIcon
+                                  sx={{
+                                    color: 'primary.main',
+                                    fontSize: 18,
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                            <Typography
+                              variant="body1"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              {contact.name}
+                            </Typography>
+                            <Chip
+                              size="small"
+                              label={roleDisplayLabel(contact)}
+                              variant="outlined"
+                            />
+                          </Box>
+                          <Stack
+                            direction="row"
+                            spacing={2}
+                            sx={{ flexWrap: 'wrap', mt: 0.5 }}
+                          >
+                            {contact.email && (
+                              <MuiLink
+                                href={`mailto:${contact.email}`}
+                                variant="body2"
+                              >
+                                {contact.email}
+                              </MuiLink>
+                            )}
+                            {contact.phone && (
+                              <MuiLink
+                                href={`tel:${contact.phone}`}
+                                variant="body2"
+                              >
+                                {contact.phone}
+                              </MuiLink>
+                            )}
+                            {!contact.email && !contact.phone && (
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                              >
+                                No email or phone
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Box>
+                        <Stack direction="row" spacing={0.5}>
+                          {!contact.is_primary && (
+                            <Tooltip title="Set as primary">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleSetPrimary(contact.id)}
+                                  disabled={actionLoading}
+                                >
+                                  <StarOutlineIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                          <Tooltip title="Edit contact">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleEditContact(contact)}
+                                disabled={actionLoading}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Delete contact">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() => setDeleteContactId(contact.id)}
+                                disabled={actionLoading}
+                                sx={{
+                                  '&:hover': {
+                                    color: 'error.main',
+                                  },
+                                }}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Stack>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -317,24 +526,6 @@ export default function VendorDetailPage() {
             </CardContent>
           </Card>
         </Grid>
-
-        {/* Notes card — render only when set so the page doesn't grow blank
-            cards on lean vendor records. */}
-        {vendor.notes && (
-          <Grid size={{ xs: 12 }}>
-            <Card elevation={2}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Notes
-                </Typography>
-                <Divider sx={{ mb: 2 }} />
-                <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                  {vendor.notes}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
 
         {/* Linked items — collapsible per role. Empty cases say so explicitly
             so the user can tell "no parts" from "didn't load." */}
@@ -452,6 +643,55 @@ export default function VendorDetailPage() {
         </Grid>
       </Grid>
 
+      {/* Add / Edit contact modal */}
+      <VendorContactModal
+        open={contactModalOpen}
+        onClose={() => setContactModalOpen(false)}
+        vendorId={vendorId}
+        existing={editingContact}
+        onSaved={refreshContacts}
+      />
+
+      {/* Per-contact delete confirmation */}
+      <Dialog
+        open={deleteContactId !== null}
+        onClose={() => !actionLoading && setDeleteContactId(null)}
+      >
+        <DialogTitle>Delete Contact?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {contactBeingDeleted ? (
+              <>
+                Are you sure you want to delete <strong>{contactBeingDeleted.name}</strong>?
+                This action cannot be undone.
+              </>
+            ) : (
+              'Delete this contact?'
+            )}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setDeleteContactId(null)}
+            disabled={actionLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteContact}
+            color="error"
+            variant="contained"
+            disabled={actionLoading}
+            startIcon={
+              actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
+            }
+          >
+            {actionLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Vendor delete confirmation */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Vendor?</DialogTitle>
         <DialogContent>

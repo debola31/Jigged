@@ -11,7 +11,21 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+
 import type { Vendor, VendorFormData } from '@/types/vendor';
+import {
+  EMPTY_VENDOR_CONTACT_FORM,
+  VENDOR_CONTACT_ROLES,
+} from '@/types/vendorContact';
+import type { VendorContactFormData } from '@/types/vendorContact';
 import {
   createVendor,
   updateVendor,
@@ -31,15 +45,21 @@ interface VendorFormProps {
 }
 
 /**
- * Vendor form for create + edit. Mirrors WorkCenterForm and CustomerForm in
- * structure (Basic / Contact / Address / Notes cards).
+ * Vendor form for create + edit.
  *
- * Intentionally has NO capability checkboxes ("supplies materials" / "performs
- * outside operations"). What a vendor does is derived from references:
- *   - parts.preferred_vendor_id → "supplies materials"
- *   - work_centers.vendor_id    → "performs outside operations"
- * Storing capability flags here would be a second source of truth and could
- * silently diverge from reality.
+ * No capability checkboxes — what a vendor does is derived from references
+ * (parts.preferred_vendor_id → "supplies materials"; work_centers.vendor_id
+ * → "performs outside operations"). Storing capability flags would be a
+ * second source of truth and could silently diverge from reality.
+ *
+ * Contact handling differs by mode:
+ * - **Create mode**: an embedded "Initial contact" sub-form lets the user
+ *   capture one primary contact at vendor-creation time. The user can leave
+ *   it empty (just the vendor name) — the vendor is created with zero
+ *   contacts and the detail page's empty-state ("No contacts yet.") shows.
+ * - **Edit mode**: NO embedded contact sub-form. The Contacts card on the
+ *   vendor detail page handles all contact CRUD (single source of truth for
+ *   contact edits → no risk of conflicting form state).
  */
 export default function VendorForm({
   mode,
@@ -54,6 +74,9 @@ export default function VendorForm({
   const companyId = companyIdProp || (params.companyId as string);
 
   const [formData, setFormData] = useState<VendorFormData>(initialData);
+  const [contactData, setContactData] = useState<VendorContactFormData>(
+    EMPTY_VENDOR_CONTACT_FORM,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -67,18 +90,20 @@ export default function VendorForm({
       }
     };
 
+  const handleContactChange =
+    (field: keyof VendorContactFormData) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setContactData((prev) => ({ ...prev, [field]: e.target.value }));
+      if (fieldErrors[`contact_${field}`]) {
+        setFieldErrors((prev) => ({ ...prev, [`contact_${field}`]: '' }));
+      }
+    };
+
   const validateForm = async (): Promise<boolean> => {
     const errors: Record<string, string> = {};
 
     if (!formData.name.trim()) {
       errors.name = 'Vendor name is required';
-    }
-
-    if (
-      formData.contact_email.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contact_email)
-    ) {
-      errors.contact_email = 'Invalid email format';
     }
 
     if (formData.name.trim() && !errors.name) {
@@ -97,6 +122,42 @@ export default function VendorForm({
       }
     }
 
+    // Initial contact validation only applies in create mode AND only when
+    // the user actually started filling the sub-form (any of name/email/
+    // phone non-empty). Empty sub-form → no contact, no validation, no
+    // contact row created.
+    if (mode === 'create') {
+      const hasAnyContactField =
+        contactData.name.trim() ||
+        contactData.email.trim() ||
+        contactData.phone.trim();
+
+      if (hasAnyContactField) {
+        if (!contactData.name.trim()) {
+          // Mirrors the importer's missing_contact_name validation rule —
+          // never create a contact with no name (would silently corrupt
+          // data, see the migration's data-quality NOTICE rationale).
+          errors.contact_name =
+            'Contact name is required when adding a contact (or clear email/phone to skip)';
+        }
+
+        if (
+          contactData.email.trim() &&
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactData.email)
+        ) {
+          errors.contact_email = 'Invalid email format';
+        }
+
+        if (
+          contactData.role === 'other' &&
+          !contactData.role_label.trim()
+        ) {
+          errors.contact_role_label =
+            'Role label is required when role is "Other"';
+        }
+      }
+    }
+
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -112,7 +173,12 @@ export default function VendorForm({
     setLoading(true);
     try {
       if (mode === 'create') {
-        const vendor = await createVendor(companyId, formData);
+        const hasContact = contactData.name.trim() !== '';
+        const vendor = await createVendor(
+          companyId,
+          formData,
+          hasContact ? { ...contactData, is_primary: true } : undefined,
+        );
         if (onSuccess) {
           onSuccess(vendor);
         } else {
@@ -170,47 +236,6 @@ export default function VendorForm({
                   fieldErrors.name ||
                   'Unique vendor name (e.g. "PerformCoat of Michigan LLC")'
                 }
-                disabled={loading}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Primary Contact */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Primary Contact
-          </Typography>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                label="Contact Name"
-                value={formData.contact_name}
-                onChange={handleChange('contact_name')}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                label="Contact Phone"
-                value={formData.contact_phone}
-                onChange={handleChange('contact_phone')}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <TextField
-                fullWidth
-                label="Contact Email"
-                type="email"
-                value={formData.contact_email}
-                onChange={handleChange('contact_email')}
-                error={!!fieldErrors.contact_email}
-                helperText={fieldErrors.contact_email}
                 disabled={loading}
               />
             </Grid>
@@ -285,24 +310,100 @@ export default function VendorForm({
         </CardContent>
       </Card>
 
-      {/* Notes */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Notes
-          </Typography>
-          <TextField
-            fullWidth
-            label="Internal Notes"
-            value={formData.notes}
-            onChange={handleChange('notes')}
-            disabled={loading}
-            multiline
-            minRows={3}
-            placeholder="Optional internal notes about this vendor"
-          />
-        </CardContent>
-      </Card>
+      {/* Initial contact — create mode only. Defaults to expanded so the
+          field is visible without a click; can be collapsed if the user
+          plans to add contacts later from the detail page. */}
+      {mode === 'create' && (
+        <Accordion defaultExpanded elevation={2} sx={{ mb: 3 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Initial Contact (optional)
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Add one primary contact now, or skip and add contacts from the
+                vendor detail page later.
+              </Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Contact Name"
+                  value={contactData.name}
+                  onChange={handleContactChange('name')}
+                  error={!!fieldErrors.contact_name}
+                  helperText={fieldErrors.contact_name}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <FormControl fullWidth>
+                  <InputLabel id="contact-role-label">Role</InputLabel>
+                  <Select
+                    labelId="contact-role-label"
+                    label="Role"
+                    value={contactData.role}
+                    onChange={(e) =>
+                      setContactData((prev) => ({
+                        ...prev,
+                        role: e.target.value as VendorContactFormData['role'],
+                      }))
+                    }
+                    disabled={loading}
+                  >
+                    {VENDOR_CONTACT_ROLES.map((r) => (
+                      <MenuItem key={r.value} value={r.value}>
+                        {r.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              {contactData.role === 'other' && (
+                <Grid size={{ xs: 12 }}>
+                  <TextField
+                    fullWidth
+                    required
+                    label="Role label"
+                    value={contactData.role_label}
+                    onChange={handleContactChange('role_label')}
+                    error={!!fieldErrors.contact_role_label}
+                    helperText={
+                      fieldErrors.contact_role_label ||
+                      'Free-text label (e.g. "Production Manager")'
+                    }
+                    disabled={loading}
+                  />
+                </Grid>
+              )}
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  type="email"
+                  label="Email"
+                  value={contactData.email}
+                  onChange={handleContactChange('email')}
+                  error={!!fieldErrors.contact_email}
+                  helperText={fieldErrors.contact_email}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Phone"
+                  value={contactData.phone}
+                  onChange={handleContactChange('phone')}
+                  disabled={loading}
+                />
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      )}
 
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
         <Button variant="outlined" onClick={handleCancel} disabled={loading}>

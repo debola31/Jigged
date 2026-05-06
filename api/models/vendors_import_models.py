@@ -9,6 +9,15 @@ The validate step also returns `proposed_merges` — a list of vendor names that
 look like the same vendor (Levenshtein distance + common-prefix matching). The
 user confirms or rejects each merge in the import UI; confirmed merges are
 collapsed into the canonical row at execute time.
+
+Iteration 2 (vendor multi-contact): the embedded contact_name / contact_email /
+contact_phone columns and the notes column were dropped from the vendors
+table. Contacts now live in the separate vendor_contacts table. To keep the
+single-row CSV import path useful, this importer accepts optional
+primary_contact_* fields per row; when present, execute inserts one
+vendor_contacts row per imported vendor with is_primary=true. Multi-contact
+import (multiple contacts per vendor in one CSV) is deferred to a separate
+/api/vendors/contacts/import endpoint.
 """
 
 from typing import Optional
@@ -54,6 +63,12 @@ class VendorValidationError(BaseModel):
 
     error_type values:
       - "missing_name"
+      - "missing_contact_name": primary_contact_email or _phone was set but
+        primary_contact_name was empty. We refuse to create contacts with no
+        name (would silently corrupt data — see the migration's data-quality
+        NOTICE rationale).
+      - "invalid_contact_role": primary_contact_role is set to a value not in
+        the allowed enum.
     """
 
     row_number: int
@@ -63,13 +78,7 @@ class VendorValidationError(BaseModel):
 
 
 class VendorMergeProposal(BaseModel):
-    """A proposed merge: from_name should be treated as to_name.
-
-    The user confirms or rejects each proposal in the import UI before execute.
-    confidence is in [0.0, 1.0]; higher means we're more confident the names
-    refer to the same vendor (e.g. "PerformCoat of Michigan LL" vs "PerformCoat
-    of Michigan LLC" → ~0.95).
-    """
+    """A proposed merge: from_name should be treated as to_name."""
 
     from_name: str
     to_name: str
@@ -114,12 +123,7 @@ class VendorImportError(BaseModel):
 
 
 class VendorExecuteRequest(BaseModel):
-    """Request to execute the vendors import.
-
-    confirmed_merges: rows whose vendor name matches any confirmed `from_name`
-    are folded into the row carrying the canonical `to_name`. Unconfirmed
-    proposals are imported as separate vendors.
-    """
+    """Request to execute the vendors import."""
 
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
@@ -135,31 +139,61 @@ class VendorExecuteResponse(BaseModel):
     imported_count: int
     updated_count: int = 0  # Rows upserted via legacy_id ON CONFLICT path
     merged_count: int = 0  # Rows folded into a canonical name via confirmed_merges
+    contacts_imported_count: int = 0  # vendor_contacts rows created from primary_contact_* fields
     skipped_count: int
     errors: list[VendorImportError]
 
 
-# Target schema for vendors table (for AI mapping)
+# Allowed values for primary_contact_role (mirrors the vendor_contacts.role
+# CHECK enum). Order matches the UI dropdown order.
+VENDOR_CONTACT_ROLE_VALUES = (
+    "sales",
+    "accounts_payable",
+    "quality",
+    "engineering",
+    "shipping_receiving",
+    "customer_service",
+    "other",
+)
+
+# Target schema for vendors table (for AI mapping).
+#
+# Iteration 2 changes:
+#   - Removed: contact_name, contact_email, contact_phone, notes
+#   - Added: primary_contact_name, primary_contact_email, primary_contact_phone,
+#     primary_contact_role (defaults to 'sales' if omitted; validated against
+#     VENDOR_CONTACT_ROLE_VALUES)
 VENDOR_SCHEMA = {
     "name": {
         "type": "string",
         "required": True,
         "description": "Vendor company name (unique per company)",
     },
-    "contact_name": {
+    "primary_contact_name": {
         "type": "string",
         "required": False,
-        "description": "Primary contact person name",
+        "description": "Name of the primary contact person at this vendor. When set, a vendor_contacts row is created with is_primary=true. Required when primary_contact_email or primary_contact_phone is set.",
     },
-    "contact_email": {
+    "primary_contact_email": {
         "type": "string",
         "required": False,
-        "description": "Primary contact email address",
+        "description": "Email of the primary contact person. Stored on the vendor_contacts row, not on the vendor itself.",
     },
-    "contact_phone": {
+    "primary_contact_phone": {
         "type": "string",
         "required": False,
-        "description": "Primary contact phone number",
+        "description": "Phone of the primary contact person. Stored on the vendor_contacts row.",
+    },
+    "primary_contact_role": {
+        "type": "string",
+        "required": False,
+        "description": (
+            "Role of the primary contact. One of: "
+            + ", ".join(VENDOR_CONTACT_ROLE_VALUES)
+            + ". Defaults to 'sales' when omitted. Use 'other' for shop-specific roles "
+            "(but in the CSV path there's no place to capture role_label, so 'other' "
+            "rows will fail the DB CHECK constraint — prefer one of the named values)."
+        ),
     },
     "address_line1": {
         "type": "string",
@@ -190,11 +224,6 @@ VENDOR_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Country (defaults to USA)",
-    },
-    "notes": {
-        "type": "string",
-        "required": False,
-        "description": "Internal notes about this vendor",
     },
     "legacy_id": {
         "type": "string",

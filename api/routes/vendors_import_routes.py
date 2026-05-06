@@ -9,10 +9,12 @@ look like the same vendor (e.g. "PerformCoat of Michigan LL" vs "PerformCoat
 of Michigan LLC") are surfaced for the user to confirm or reject. Confirmed
 merges collapse the duplicate row into the canonical row at execute time.
 
-NOTE: There is no `import_events` audit table in the current schema, so the
-merge log is returned in the execute response only. (Spec called this out as
-a conditional choice.) If an audit table is added later, the merge details
-captured in the response payload can be persisted there.
+Iteration 2 (vendor multi-contact): contact info now lives in the separate
+vendor_contacts table. The CSV path accepts optional primary_contact_*
+columns; when present, execute inserts one vendor_contacts row per imported
+vendor with is_primary=true. The validation rule "no contact rows without a
+contact_name" mirrors the migration's data-quality NOTICE rationale: never
+silently corrupt by using the company name as the person name.
 """
 
 import hashlib
@@ -40,6 +42,7 @@ from models.vendors_import_models import (
     VendorExecuteResponse,
     VendorImportError,
     VENDOR_SCHEMA,
+    VENDOR_CONTACT_ROLE_VALUES,
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
@@ -122,16 +125,7 @@ def _get_column_samples(
 def _propose_merges(
     name_to_rows: dict[str, list[int]],
 ) -> list[VendorMergeProposal]:
-    """Compute merge proposals across CSV vendor names.
-
-    Combines two cheap heuristics:
-      1. Common-prefix: if name A is a prefix of name B (case-insensitive,
-         length difference < 6), propose merging A → B.
-      2. SequenceMatcher.ratio() above MERGE_RATIO_THRESHOLD.
-
-    The longer of the two names becomes the canonical `to_name` because legacy
-    truncations almost always lose a suffix ("LLC" → "LL"), not gain one.
-    """
+    """Compute merge proposals across CSV vendor names."""
     proposals: dict[tuple[str, str], VendorMergeProposal] = {}
     names = list(name_to_rows.keys())
 
@@ -148,14 +142,12 @@ def _propose_merges(
             longer_lower = longer.lower()
             shorter_lower = shorter.lower()
 
-            # Heuristic 1: prefix match
             confidence = 0.0
             if longer_lower.startswith(shorter_lower) and (
                 len(longer) - len(shorter)
             ) <= 6:
                 confidence = 0.95
             else:
-                # Heuristic 2: similarity ratio
                 ratio = SequenceMatcher(None, a_lower, b_lower).ratio()
                 if ratio >= MERGE_RATIO_THRESHOLD:
                     confidence = ratio
@@ -290,6 +282,10 @@ async def validate_import(
 
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         name_column = reverse_mappings.get("name")
+        contact_name_column = reverse_mappings.get("primary_contact_name")
+        contact_email_column = reverse_mappings.get("primary_contact_email")
+        contact_phone_column = reverse_mappings.get("primary_contact_phone")
+        contact_role_column = reverse_mappings.get("primary_contact_role")
 
         # Track name occurrences
         name_to_rows: dict[str, list[int]] = {}
@@ -299,7 +295,6 @@ async def validate_import(
             if name:
                 name_to_rows.setdefault(name, []).append(row_number)
 
-        # Lower-keyed for duplicate detection
         lowered_occurrences: dict[str, list[int]] = {}
         for name, rows in name_to_rows.items():
             lowered_occurrences.setdefault(name.lower(), []).extend(rows)
@@ -358,6 +353,55 @@ async def validate_import(
                 conflict_rows.add(row_number)
                 continue
 
+            # Contact-related validation. Skip rows already in
+            # validation_error_rows or conflict_rows so we don't double-up
+            # error messages on the same row.
+            contact_name_val = (
+                row.get(contact_name_column, "").strip() if contact_name_column else ""
+            )
+            contact_email_val = (
+                row.get(contact_email_column, "").strip() if contact_email_column else ""
+            )
+            contact_phone_val = (
+                row.get(contact_phone_column, "").strip() if contact_phone_column else ""
+            )
+            contact_role_val = (
+                row.get(contact_role_column, "").strip() if contact_role_column else ""
+            )
+
+            # Rule: if any contact-bearing field (email/phone) is set,
+            # contact_name must also be set. We refuse to silently invent
+            # a name (matches the migration's data-quality NOTICE rule).
+            if (contact_email_val or contact_phone_val) and not contact_name_val:
+                validation_errors.append(
+                    VendorValidationError(
+                        row_number=row_number,
+                        error_type="missing_contact_name",
+                        field="primary_contact_name",
+                        message=(
+                            "primary_contact_name is required when "
+                            "primary_contact_email or primary_contact_phone is set"
+                        ),
+                    )
+                )
+                validation_error_rows.add(row_number)
+                continue
+
+            if contact_role_val and contact_role_val not in VENDOR_CONTACT_ROLE_VALUES:
+                validation_errors.append(
+                    VendorValidationError(
+                        row_number=row_number,
+                        error_type="invalid_contact_role",
+                        field="primary_contact_role",
+                        message=(
+                            f"primary_contact_role '{contact_role_val}' is not valid. "
+                            f"Allowed: {', '.join(VENDOR_CONTACT_ROLE_VALUES)}"
+                        ),
+                    )
+                )
+                validation_error_rows.add(row_number)
+                continue
+
         # Compute merge proposals across the cleaned (non-error) name set
         eligible_name_to_rows = {
             name: rows
@@ -395,9 +439,9 @@ async def execute_import(
 ):
     """Execute the vendors import.
 
-    Confirmed merges are applied at execute time: rows whose name matches any
-    confirmed `from_name` are folded into the row carrying the canonical `to_name`.
-    Unconfirmed proposals are imported as separate vendors.
+    Each row writes one vendors row (with merge handling); rows that have any
+    primary_contact_* fields populated also write one vendor_contacts row
+    with is_primary=true, role defaulting to 'sales' when not specified.
     """
     try:
         validate_response = await validate_import(
@@ -418,7 +462,6 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Build merge map (case-insensitive) from confirmed merges
         merge_map: dict[str, str] = {}
         for m in request.confirmed_merges:
             merge_map[m.from_name.lower()] = m.to_name
@@ -426,6 +469,16 @@ async def execute_import(
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         name_column = reverse_mappings.get("name")
         legacy_id_column = reverse_mappings.get("legacy_id")
+        contact_name_column = reverse_mappings.get("primary_contact_name")
+        contact_email_column = reverse_mappings.get("primary_contact_email")
+        contact_phone_column = reverse_mappings.get("primary_contact_phone")
+        contact_role_column = reverse_mappings.get("primary_contact_role")
+
+        # Pending vendor_contacts rows. We can only insert these AFTER the
+        # vendor row exists (we need its id). Build a list of (canonical_name,
+        # contact_payload) pairs here, then resolve names → ids after the
+        # vendor inserts return.
+        pending_contacts: list[tuple[str, dict]] = []
 
         rows_to_insert: list[dict] = []
         rows_to_upsert: list[dict] = []
@@ -444,13 +497,32 @@ async def execute_import(
             name = row.get(name_column, "").strip() if name_column else ""
             canonical_name = merge_map.get(name.lower(), name)
 
-            # If this row is being merged into another, count it and skip the
-            # row insert (the canonical row will carry forward).
             if canonical_name.lower() != name.lower():
                 merged += 1
+                # If the merged-away row carried contact info, attach it to
+                # the canonical name so the canonical vendor still gets a
+                # primary contact (only attach the FIRST one we see — multiple
+                # merged rows with conflicting contacts would race for is_primary).
+                if contact_name_column:
+                    contact_name_val = row.get(contact_name_column, "").strip()
+                    if contact_name_val and not any(
+                        cn.lower() == canonical_name.lower()
+                        for cn, _ in pending_contacts
+                    ):
+                        pending_contacts.append(
+                            (
+                                canonical_name,
+                                _build_contact_payload(
+                                    row,
+                                    contact_name_column,
+                                    contact_email_column,
+                                    contact_phone_column,
+                                    contact_role_column,
+                                ),
+                            )
+                        )
                 continue
 
-            # Avoid inserting the canonical name multiple times within one batch
             if canonical_name.lower() in seen_canonical_names:
                 skipped += 1
                 continue
@@ -462,16 +534,12 @@ async def execute_import(
             }
 
             for db_field in (
-                "contact_name",
-                "contact_email",
-                "contact_phone",
                 "address_line1",
                 "address_line2",
                 "city",
                 "state",
                 "postal_code",
                 "country",
-                "notes",
             ):
                 csv_column = reverse_mappings.get(db_field)
                 if csv_column and csv_column in row:
@@ -491,9 +559,30 @@ async def execute_import(
             else:
                 rows_to_insert.append(vendor_data)
 
+            # Queue a contact insert if the row has a contact name. Email/
+            # phone-only rows are caught by validation as missing_contact_name
+            # and skipped before reaching here.
+            if contact_name_column:
+                contact_name_val = row.get(contact_name_column, "").strip()
+                if contact_name_val:
+                    pending_contacts.append(
+                        (
+                            canonical_name,
+                            _build_contact_payload(
+                                row,
+                                contact_name_column,
+                                contact_email_column,
+                                contact_phone_column,
+                                contact_role_column,
+                            ),
+                        )
+                    )
+
         BATCH_SIZE = 500
         imported_count = 0
         updated_count = 0
+        # name → vendor.id, used to attach pending_contacts after insert.
+        name_to_vendor_id: dict[str, str] = {}
 
         if rows_to_insert:
             try:
@@ -501,7 +590,11 @@ async def execute_import(
                 for batch_start in range(0, total, BATCH_SIZE):
                     batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
                     response = supabase.table("vendors").insert(batch).execute()
-                    imported_count += len(response.data) if response.data else 0
+                    if response.data:
+                        imported_count += len(response.data)
+                        for r in response.data:
+                            if r.get("name") and r.get("id"):
+                                name_to_vendor_id[r["name"].lower()] = r["id"]
             except Exception as e:
                 error_str = str(e)
                 if "23505" in error_str or "duplicate key" in error_str.lower():
@@ -522,16 +615,63 @@ async def execute_import(
                         .upsert(batch, on_conflict="company_id,legacy_id")
                         .execute()
                     )
-                    updated_count += len(response.data) if response.data else 0
+                    if response.data:
+                        updated_count += len(response.data)
+                        for r in response.data:
+                            if r.get("name") and r.get("id"):
+                                name_to_vendor_id[r["name"].lower()] = r["id"]
             except Exception as e:
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
+
+        # Insert vendor_contacts rows. We treat contact insert failures as
+        # non-fatal — the vendor row is already in place; surface the error
+        # via the import response so the user can address it without losing
+        # the vendor data.
+        contacts_imported = 0
+        if pending_contacts:
+            contact_rows: list[dict] = []
+            for canonical_name, contact_payload in pending_contacts:
+                vendor_id = name_to_vendor_id.get(canonical_name.lower())
+                if not vendor_id:
+                    # Vendor insert may have been deduped or failed silently.
+                    # Skip the contact rather than orphan it.
+                    continue
+                contact_rows.append({"vendor_id": vendor_id, **contact_payload})
+
+            if contact_rows:
+                try:
+                    for batch_start in range(0, len(contact_rows), BATCH_SIZE):
+                        batch = contact_rows[batch_start : batch_start + BATCH_SIZE]
+                        response = (
+                            supabase.table("vendor_contacts").insert(batch).execute()
+                        )
+                        if response.data:
+                            contacts_imported += len(response.data)
+                except Exception as e:
+                    logger.error(
+                        f"Vendors import: contact insert failed: {str(e)}",
+                        exc_info=True,
+                    )
+                    sentry_sdk.capture_exception(e)
+                    errors.append(
+                        VendorImportError(
+                            row_number=0,
+                            reason=(
+                                "Vendor rows imported successfully, but one or more "
+                                f"contact rows failed to insert: {str(e)}. Add the "
+                                "contacts manually from each vendor's detail page."
+                            ),
+                            data={},
+                        )
+                    )
 
         return VendorExecuteResponse(
             success=True,
             imported_count=imported_count,
             updated_count=updated_count,
             merged_count=merged,
+            contacts_imported_count=contacts_imported,
             skipped_count=skipped,
             errors=errors,
         )
@@ -545,3 +685,33 @@ async def execute_import(
             status_code=500,
             detail="Internal server error",
         )
+
+
+def _build_contact_payload(
+    row: dict[str, str],
+    name_col: str | None,
+    email_col: str | None,
+    phone_col: str | None,
+    role_col: str | None,
+) -> dict:
+    """Build a vendor_contacts insert payload from a CSV row.
+
+    Always sets is_primary=true (the CSV path is single-contact-per-vendor;
+    multi-contact import is a deferred follow-up endpoint).
+    Defaults role to 'sales' when not provided.
+    """
+    contact_name = row.get(name_col, "").strip() if name_col else ""
+    contact_email = row.get(email_col, "").strip() if email_col else ""
+    contact_phone = row.get(phone_col, "").strip() if phone_col else ""
+    contact_role = row.get(role_col, "").strip() if role_col else ""
+
+    payload: dict = {
+        "name": contact_name,
+        "role": contact_role if contact_role else "sales",
+        "is_primary": True,
+    }
+    if contact_email:
+        payload["email"] = contact_email
+    if contact_phone:
+        payload["phone"] = contact_phone
+    return payload

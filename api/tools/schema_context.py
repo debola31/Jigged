@@ -51,9 +51,9 @@ SCHEMA_CONTEXT = """
 - company_id: UUID -- ALWAYS filter with $1
 - part_name: TEXT (unique per company)
 - description: TEXT
-- is_manufacturable: BOOLEAN (default true) -- this part is made in-house (has a routing)
-- is_stockable: BOOLEAN (default false) -- this part is tracked as on-hand stock
-- primary_unit: TEXT (required when is_stockable=true; e.g. 'ea', 'lb', 'ft')
+- source: TEXT (CHECK 'made'|'bought'; default 'made') -- 'made' = produced in-shop (has a routing); 'bought' = procured from a vendor
+- is_stocked: BOOLEAN (default false) -- this part is tracked as on-hand stock
+- primary_unit: TEXT (required when is_stocked=true; e.g. 'ea', 'lb', 'ft')
 - quantity: NUMERIC (default 0; current stock-on-hand, >= 0)
 - cost_per_unit: NUMERIC(12,4) (latest computed unit cost; nullable until recalculated)
 - cost_recalculated_at: TIMESTAMPTZ (nullable; set by recalculate_part_cost())
@@ -61,11 +61,11 @@ SCHEMA_CONTEXT = """
 - preferred_vendor_id: UUID (FK -> vendors.id, nullable)
 - legacy_id: TEXT (unique per company; carried from a prior system on import)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- The four (is_manufacturable, is_stockable) tuples mean:
-    * (true,  false) → custom manufactured part
-    * (false, true)  → raw material / bought item
-    * (true,  true)  → sub-assembly (made AND stocked)
-    * (false, false) → "orphan" customer part (quoted but never made)
+- The four (source, is_stocked) quadrants mean:
+    * (made,   false) → Custom Made (built to order)
+    * (made,   true)  → Sub-assembly (made AND stocked)
+    * (bought, true)  → Raw Material (vendor stock kept on hand)
+    * (bought, false) → Service / Drop-ship
 
 ### part_pricing_tiers (volume-pricing tiers per part)
 - id: UUID (PK)
@@ -352,12 +352,12 @@ GROUP BY c.name
 ORDER BY revenue DESC
 LIMIT 5;
 
--- Stockable parts below their reorder point
+-- Stocked parts below their reorder point
 SELECT part_name, quantity, reorder_point, primary_unit,
        (reorder_point - quantity) AS deficit
 FROM parts
 WHERE company_id = $1
-  AND is_stockable = true
+  AND is_stocked = true
   AND reorder_point IS NOT NULL
   AND quantity <= reorder_point
 ORDER BY (reorder_point - quantity) DESC;

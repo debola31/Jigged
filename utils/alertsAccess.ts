@@ -134,7 +134,7 @@ export async function getLowStockPartsAlerts(
     .from('parts')
     .select('id, part_name, quantity, reorder_point, primary_unit')
     .eq('company_id', companyId)
-    .eq('is_stockable', true)
+    .eq('is_stocked', true)
     .not('reorder_point', 'is', null);
 
   if (error) throw error;

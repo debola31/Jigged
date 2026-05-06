@@ -1,17 +1,31 @@
 """Import routes for parts CSV import with AI-powered mapping.
 
 The unified Parts importer absorbs the previous inventory_items import path.
-A row is classified by the (is_manufacturable, is_stockable) tuple:
+A row is classified by the (source, is_stocked) pair:
 
-  - manufacturable=true,  stockable=false → custom manufactured part
-  - manufacturable=false, stockable=true  → raw material / bought item
-  - manufacturable=true,  stockable=true  → sub-assembly (made AND stocked)
-  - manufacturable=false, stockable=false → "orphan" customer part (quoted but never made)
+  - source='made',   !is_stocked → Custom Made (built to order)
+  - source='made',    is_stocked → Sub-assembly
+  - source='bought',  is_stocked → Raw Material
+  - source='bought', !is_stocked → Service / Drop-ship
 
-Auto-classification rules at execute time:
-  - Any row with operation columns gets is_manufacturable=true
-  - Any row with primary_unit / quantity / cost_per_unit gets is_stockable=true
-  - Both can be true (sub-assembly)
+Auto-classification rules at execute time (when no explicit source mapping is
+provided):
+  - source='bought' if procurement fields (cost_per_unit, primary_unit,
+    quantity, reorder_point) are present and there are NO operation columns
+  - source='made'   if any operation columns are present, or if no procurement
+    fields are set
+  - is_stocked is true when primary_unit / quantity / cost_per_unit are present
+
+Legacy column-mapping aliases. The previous (is_manufacturable, is_stockable)
+booleans were renamed by the 20260504 source-enum migration. To stay
+compatible with already-prepared CSVs for one version, the importer accepts
+`is_manufacturable` and `is_stockable` as legacy aliases:
+  - is_manufacturable=true  → source='made'
+  - is_manufacturable=false → source='bought'
+  - is_stockable value passes through to is_stocked
+Each legacy-mapped row writes a deprecation entry to the import-event log
+(visible in server logs). Plan to remove the alias once Shane's CSVs use the
+new headers.
 
 `legacy_id` is unique per company; rows with a `legacy_id` set are upserted
 via ON CONFLICT so re-importing the same source CSV is idempotent.
@@ -208,6 +222,37 @@ def _row_has_inventory_data(
         if col and row.get(col, "").strip():
             return True
     return False
+
+
+def _row_has_procurement_data(
+    row: dict[str, str],
+    reverse_mappings: dict[str, str],
+) -> bool:
+    """Detect if a row carries procurement data (cost/unit/qty/reorder set).
+
+    Used to infer source='bought' when the CSV doesn't supply an explicit
+    source column. A row with procurement fields and no operation columns is
+    almost certainly a bought row.
+    """
+    for db_field in ("cost_per_unit", "primary_unit", "quantity", "reorder_point"):
+        col = reverse_mappings.get(db_field)
+        if col and row.get(col, "").strip():
+            return True
+    return False
+
+
+def _legacy_manufacturable_to_source(value: str) -> Optional[str]:
+    """Translate the legacy is_manufacturable boolean string into a source value.
+
+    Returns 'made' for truthy, 'bought' for falsy, None for empty/unrecognized.
+    Empty/unrecognized falls back to the auto-classification path.
+    """
+    parsed = parse_bool(value)
+    if parsed is True:
+        return "made"
+    if parsed is False:
+        return "bought"
+    return None
 
 
 def get_supabase() -> Client:
@@ -438,8 +483,13 @@ async def validate_import(
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
         legacy_id_column = reverse_mappings.get("legacy_id")
-        is_stockable_column = reverse_mappings.get("is_stockable")
-        is_manufacturable_column = reverse_mappings.get("is_manufacturable")
+        # New (chunk 11) columns:
+        source_column = reverse_mappings.get("source")
+        is_stocked_column = reverse_mappings.get("is_stocked")
+        # Legacy aliases (kept one-version for CSVs already prepared with the
+        # old headers — see module docstring):
+        legacy_is_stockable_column = reverse_mappings.get("is_stockable")
+        legacy_is_manufacturable_column = reverse_mappings.get("is_manufacturable")
         description_column = reverse_mappings.get("description")
 
         has_routing_cols = _has_routing_columns(request.mappings)
@@ -463,41 +513,43 @@ async def validate_import(
         validation_error_rows: set[int] = set()
         conflict_rows: set[int] = set()
 
-        # Determine which rows look stockable (so we know whether to require unit)
-        stockable_row_numbers: set[int] = set()
+        # Determine which rows look stocked (so we know whether to require unit)
+        stocked_row_numbers: set[int] = set()
         for i, row in enumerate(request.rows):
             row_number = i + 1
-            explicit_stockable = None
-            if is_stockable_column:
-                explicit_stockable = parse_bool(row.get(is_stockable_column, ""))
-            if explicit_stockable is True:
-                stockable_row_numbers.add(row_number)
-            elif explicit_stockable is None and _row_has_inventory_data(
+            explicit_stocked: Optional[bool] = None
+            if is_stocked_column:
+                explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
+            elif legacy_is_stockable_column:
+                explicit_stocked = parse_bool(row.get(legacy_is_stockable_column, ""))
+            if explicit_stocked is True:
+                stocked_row_numbers.add(row_number)
+            elif explicit_stocked is None and _row_has_inventory_data(
                 row, reverse_mappings
             ):
-                stockable_row_numbers.add(row_number)
+                stocked_row_numbers.add(row_number)
 
-        # Resolve UOMs for stockable rows that have a unit column
+        # Resolve UOMs for stocked rows that have a unit column
         if request.pre_resolved_uoms:
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
         elif primary_unit_column or description_column:
-            stockable_rows = [
-                row for i, row in enumerate(request.rows) if (i + 1) in stockable_row_numbers
+            stocked_rows = [
+                row for i, row in enumerate(request.rows) if (i + 1) in stocked_row_numbers
             ]
-            stockable_index_map = {
+            stocked_index_map = {
                 idx + 1: orig_idx + 1
                 for idx, orig_idx in enumerate(
-                    [i for i in range(len(request.rows)) if (i + 1) in stockable_row_numbers]
+                    [i for i in range(len(request.rows)) if (i + 1) in stocked_row_numbers]
                 )
             }
             partial = resolve_units_for_rows(
-                stockable_rows,
+                stocked_rows,
                 name_column=part_name_column,
                 description_column=description_column,
                 uom_column=primary_unit_column,
             )
             uom_resolutions = {
-                stockable_index_map[k]: v for k, v in partial.items()
+                stocked_index_map[k]: v for k, v in partial.items()
             }
         else:
             uom_resolutions = {}
@@ -578,8 +630,8 @@ async def validate_import(
                     validation_error_rows.add(row_number)
                     continue
 
-            # UOM required when stockable
-            if row_number in stockable_row_numbers:
+            # UOM required when stocked
+            if row_number in stocked_row_numbers:
                 resolved_unit = uom_resolutions.get(row_number)
                 csv_unit = (
                     row.get(primary_unit_column, "").strip()
@@ -592,7 +644,7 @@ async def validate_import(
                             row_number=row_number,
                             error_type="missing_primary_unit",
                             field="primary_unit",
-                            message="primary_unit is required for stockable parts",
+                            message="primary_unit is required for stocked parts",
                         )
                     )
                     validation_error_rows.add(row_number)
@@ -703,8 +755,15 @@ async def execute_import(
 ):
     """Execute the parts import.
 
-    - Auto-classifies rows: any row with operation columns gets is_manufacturable=true;
-      any row with primary_unit/quantity/cost_per_unit gets is_stockable=true.
+    - Auto-classifies rows by (source, is_stocked):
+      - source='made'   if any operation columns are present, OR if there are
+        no procurement fields (cost/unit/qty/reorder)
+      - source='bought' if procurement fields are present and there are no
+        operation columns
+      - is_stocked=true if primary_unit / quantity / cost_per_unit are present
+    - Accepts the legacy headers `is_manufacturable` and `is_stockable` as
+      column-mapping aliases (one-version compat). Each legacy-mapped row
+      writes a deprecation log entry. See the module docstring.
     - Resolves preferred_vendor_name to vendor_id (rows that failed validation
       have already been excluded from the insert set).
     - Splits insert and upsert paths: rows with legacy_id are upserted via
@@ -764,8 +823,19 @@ async def execute_import(
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
         legacy_id_column = reverse_mappings.get("legacy_id")
-        is_stockable_column = reverse_mappings.get("is_stockable")
-        is_manufacturable_column = reverse_mappings.get("is_manufacturable")
+        # New (chunk 11) columns:
+        source_column = reverse_mappings.get("source")
+        is_stocked_column = reverse_mappings.get("is_stocked")
+        # Legacy aliases (one-version compat — see module docstring):
+        legacy_is_stockable_column = reverse_mappings.get("is_stockable")
+        legacy_is_manufacturable_column = reverse_mappings.get("is_manufacturable")
+        if legacy_is_stockable_column or legacy_is_manufacturable_column:
+            logger.warning(
+                "Parts import using legacy headers is_manufacturable/is_stockable. "
+                "These are deprecated; use 'source' (made|bought) and 'is_stocked' instead. "
+                "company_id=%s",
+                request.company_id,
+            )
 
         has_routing_cols = _has_routing_columns(request.mappings)
 
@@ -829,36 +899,65 @@ async def execute_import(
                 except ValueError:
                     reorder_val = None
 
-            # Auto-classification
-            explicit_stockable = (
-                parse_bool(row.get(is_stockable_column, ""))
-                if is_stockable_column
-                else None
-            )
-            explicit_manufacturable = (
-                parse_bool(row.get(is_manufacturable_column, ""))
-                if is_manufacturable_column
-                else None
-            )
+            # Auto-classification: (source, is_stocked).
+            #
+            # is_stocked: explicit > legacy is_stockable > inferred from
+            # primary_unit/quantity/cost.
+            explicit_stocked: Optional[bool] = None
+            if is_stocked_column:
+                explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
+            elif legacy_is_stockable_column:
+                explicit_stocked = parse_bool(
+                    row.get(legacy_is_stockable_column, "")
+                )
 
-            inferred_stockable = bool(
+            inferred_stocked = bool(
                 primary_unit or quantity_val is not None or cost_val is not None
             )
-            inferred_manufacturable = has_routing_cols
-
-            is_stockable_val = (
-                explicit_stockable
-                if explicit_stockable is not None
-                else inferred_stockable
-            )
-            is_manufacturable_val = (
-                explicit_manufacturable
-                if explicit_manufacturable is not None
-                else (inferred_manufacturable or not is_stockable_val)
+            is_stocked_val = (
+                explicit_stocked if explicit_stocked is not None else inferred_stocked
             )
 
-            part_data["is_stockable"] = is_stockable_val
-            part_data["is_manufacturable"] = is_manufacturable_val
+            # source: explicit 'source' column > legacy is_manufacturable
+            # alias > inferred from operation columns vs procurement fields.
+            explicit_source: Optional[str] = None
+            if source_column:
+                raw = row.get(source_column, "").strip().lower()
+                if raw in ("made", "bought"):
+                    explicit_source = raw
+            if explicit_source is None and legacy_is_manufacturable_column:
+                explicit_source = _legacy_manufacturable_to_source(
+                    row.get(legacy_is_manufacturable_column, "")
+                )
+
+            if explicit_source is not None:
+                source_val = explicit_source
+            else:
+                # Inference rule: routing columns ⇒ made; procurement-only ⇒
+                # bought; otherwise default to 'made' (matches the migration's
+                # orphan-default rule, and is the safe default for hand-created
+                # rows).
+                has_proc = _row_has_procurement_data(row, reverse_mappings)
+                if has_routing_cols:
+                    source_val = "made"
+                elif has_proc:
+                    source_val = "bought"
+                else:
+                    source_val = "made"
+
+            part_data["is_stocked"] = is_stocked_val
+            part_data["source"] = source_val
+
+            if legacy_is_stockable_column or legacy_is_manufacturable_column:
+                logger.info(
+                    "Parts import row %s used legacy header(s) "
+                    "is_manufacturable/is_stockable (deprecated). Mapped to "
+                    "source=%s, is_stocked=%s. company_id=%s",
+                    row_number,
+                    source_val,
+                    is_stocked_val,
+                    request.company_id,
+                )
 
             if resolved_unit:
                 part_data["primary_unit"] = resolved_unit

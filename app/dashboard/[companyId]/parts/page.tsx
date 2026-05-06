@@ -44,8 +44,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import {
   getAllParts,
-  getStockableParts,
-  getManufacturableParts,
+  getStockedParts,
+  getMadeParts,
+  getBoughtParts,
   bulkDeleteParts,
 } from '@/utils/partsAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
@@ -56,9 +57,9 @@ import PartFormModal from '@/components/parts/PartFormModal';
 import type { Part, PartKind } from '@/types/part';
 import { partKind } from '@/types/part';
 
-type PartsView = 'all' | 'manufactured' | 'inventory';
+type PartsView = 'all' | 'made' | 'bought' | 'stocked';
 
-const VALID_VIEWS: readonly PartsView[] = ['all', 'manufactured', 'inventory'] as const;
+const VALID_VIEWS: readonly PartsView[] = ['all', 'made', 'bought', 'stocked'] as const;
 
 function isPartsView(value: string | null | undefined): value is PartsView {
   return value !== null && value !== undefined && (VALID_VIEWS as readonly string[]).includes(value);
@@ -124,11 +125,13 @@ export default function PartsPage() {
       // and Preferred Vendor name are zipped in client-side from parallel
       // queries so the rows render with everything pre-resolved.
       const partsPromise =
-        view === 'manufactured'
-          ? getManufacturableParts(companyId, searchDebounced, sortModel.field, sortModel.sort)
-          : view === 'inventory'
-            ? getStockableParts(companyId, searchDebounced, sortModel.field, sortModel.sort)
-            : getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort);
+        view === 'made'
+          ? getMadeParts(companyId, searchDebounced, sortModel.field, sortModel.sort)
+          : view === 'bought'
+            ? getBoughtParts(companyId, searchDebounced, sortModel.field, sortModel.sort)
+            : view === 'stocked'
+              ? getStockedParts(companyId, searchDebounced, sortModel.field, sortModel.sort)
+              : getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort);
 
       const [parts, vendors, bomParentIds] = await Promise.all([
         partsPromise,
@@ -289,10 +292,10 @@ export default function PartsPage() {
 
   const formatQty = (
     val: number | null | undefined,
-    isStockable: boolean,
+    isStocked: boolean,
     primaryUnit: string | null,
   ): string => {
-    if (!isStockable) return '';
+    if (!isStocked) return '';
     if (val === null || val === undefined) return '';
     const formatted = Number(val).toLocaleString(undefined, {
       maximumFractionDigits: 4,
@@ -334,7 +337,7 @@ export default function PartsPage() {
       width: 140,
       type: 'rightAligned',
       valueFormatter: (params) =>
-        formatQty(params.value as number | null, !!params.data?.is_stockable, params.data?.primary_unit ?? null),
+        formatQty(params.value as number | null, !!params.data?.is_stocked, params.data?.primary_unit ?? null),
     },
     {
       field: 'reorder_point',
@@ -342,7 +345,7 @@ export default function PartsPage() {
       width: 140,
       type: 'rightAligned',
       valueFormatter: (params) => {
-        if (!params.data?.is_stockable) return '';
+        if (!params.data?.is_stocked) return '';
         const v = params.value as number | null | undefined;
         if (v === null || v === undefined) return '';
         return Number(v).toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -360,7 +363,7 @@ export default function PartsPage() {
       headerName: 'Preferred Vendor',
       width: 180,
       valueFormatter: (params) => {
-        if (!params.data?.is_stockable) return '';
+        if (!params.data?.is_stocked) return '';
         return (params.value as string | null) ?? '';
       },
     },
@@ -443,32 +446,19 @@ export default function PartsPage() {
   // clear next action. Any view's empty state still allows clearing search.
   const renderEmptyState = () => {
     const isFiltered = !!searchDebounced;
-    if (view === 'manufactured') {
+    const labelByView: Record<Exclude<PartsView, 'all'>, string> = {
+      made: 'made parts',
+      bought: 'bought parts',
+      stocked: 'stocked parts',
+    };
+    if (view !== 'all') {
+      const label = labelByView[view];
       return (
         <>
           <Typography variant="h6" color="text.secondary" gutterBottom>
-            {isFiltered ? 'No manufactured parts match your search.' : 'No manufactured parts yet.'}
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 2 }}>
-            <Button variant="outlined" onClick={() => handleViewChange('all')}>
-              View All Parts
-            </Button>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setAddModalOpen(true)}
-            >
-              Add Part
-            </Button>
-          </Box>
-        </>
-      );
-    }
-    if (view === 'inventory') {
-      return (
-        <>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            {isFiltered ? 'No inventory parts match your search.' : 'No inventory yet.'}
+            {isFiltered
+              ? `No ${label} match your search.`
+              : `No ${label} yet.`}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 2 }}>
             <Button variant="outlined" onClick={() => handleViewChange('all')}>
@@ -493,7 +483,7 @@ export default function PartsPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {isFiltered
             ? 'Try a different search term.'
-            : 'Add your first manufactured part, raw material, or sub-assembly.'}
+            : 'Add your first custom-made part, raw material, or sub-assembly.'}
         </Typography>
         {!isFiltered && (
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
@@ -546,8 +536,9 @@ export default function PartsPage() {
             onChange={(e) => handleViewChange(e.target.value as PartsView)}
           >
             <MenuItem value="all">All Parts</MenuItem>
-            <MenuItem value="manufactured">Manufactured</MenuItem>
-            <MenuItem value="inventory">Inventory</MenuItem>
+            <MenuItem value="made">Made</MenuItem>
+            <MenuItem value="bought">Bought</MenuItem>
+            <MenuItem value="stocked">Stocked</MenuItem>
           </Select>
         </FormControl>
 

@@ -185,8 +185,8 @@ async function ensureCustomer(
 interface PartSpec {
   part_name: string;
   description: string;
-  is_manufacturable: boolean;
-  is_stockable: boolean;
+  source: 'made' | 'bought';
+  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   cost_per_unit: number | null;
@@ -212,8 +212,8 @@ async function ensurePart(
       company_id: companyId,
       part_name: spec.part_name,
       description: spec.description,
-      is_manufacturable: spec.is_manufacturable,
-      is_stockable: spec.is_stockable,
+      source: spec.source,
+      is_stocked: spec.is_stocked,
       primary_unit: spec.primary_unit,
       quantity: spec.quantity,
       cost_per_unit: spec.cost_per_unit,
@@ -338,18 +338,18 @@ export default async function globalSetup(): Promise<void> {
 
   const mfgPartId = await ensurePart(supabase, env.companyId, {
     part_name: PART_MFG_NAME,
-    description: 'E2E manufacturable part with routing',
-    is_manufacturable: true,
-    is_stockable: false,
+    description: 'E2E made part with routing',
+    source: 'made',
+    is_stocked: false,
     primary_unit: null,
     quantity: 0,
     cost_per_unit: null,
   });
   await ensurePart(supabase, env.companyId, {
     part_name: PART_RAW_NAME,
-    description: 'E2E stockable raw material',
-    is_manufacturable: false,
-    is_stockable: true,
+    description: 'E2E stocked raw material',
+    source: 'bought',
+    is_stocked: true,
     primary_unit: 'lbs',
     quantity: 100,
     cost_per_unit: 5.5,
@@ -357,8 +357,8 @@ export default async function globalSetup(): Promise<void> {
   const subPartId = await ensurePart(supabase, env.companyId, {
     part_name: PART_SUB_NAME,
     description: 'E2E sub-assembly (BOM child of MFG-001)',
-    is_manufacturable: true,
-    is_stockable: true,
+    source: 'made',
+    is_stocked: true,
     primary_unit: 'ea',
     quantity: 10,
     cost_per_unit: 12.0,

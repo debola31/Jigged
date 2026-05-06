@@ -22,10 +22,7 @@ import {
   partToFormData,
 } from '@/types/part';
 import type { Part, PartFormData } from '@/types/part';
-import {
-  getAllParts,
-  getPartUnitConversions,
-} from '@/utils/partsAccess';
+import { getAllParts } from '@/utils/partsAccess';
 
 interface PartFormModalProps {
   open: boolean;
@@ -45,8 +42,8 @@ interface PartSuggestion {
   id: string;
   part_name: string;
   description: string | null;
-  is_manufacturable: boolean;
-  is_stockable: boolean;
+  source: 'made' | 'bought';
+  is_stocked: boolean;
 }
 
 /**
@@ -121,8 +118,8 @@ export default function PartFormModal({
             id: p.id,
             part_name: p.part_name,
             description: p.description,
-            is_manufacturable: p.is_manufacturable,
-            is_stockable: p.is_stockable,
+            source: p.source,
+            is_stocked: p.is_stocked,
           })),
         );
       } catch (err) {
@@ -159,11 +156,10 @@ export default function PartFormModal({
     setEditLoading(true);
     setSuggestionsError(null);
     try {
-      // Pull full Part + unit conversions so the form is correctly populated.
-      const [allRows, conversions] = await Promise.all([
-        getAllParts(companyId, suggestion.part_name),
-        getPartUnitConversions(suggestion.id),
-      ]);
+      // Pull the full Part. Unit conversions live on the part detail page
+      // (chunk 11 moved them out of the create/edit form), so no longer
+      // fetched here.
+      const allRows = await getAllParts(companyId, suggestion.part_name);
       const fullPart = allRows.find((r) => r.id === suggestion.id) || null;
       if (!fullPart) {
         setSuggestionsError(
@@ -172,7 +168,7 @@ export default function PartFormModal({
         return;
       }
       setEditTarget(fullPart);
-      setEditTargetData(partToFormData(fullPart, conversions));
+      setEditTargetData(partToFormData(fullPart));
       setPhase('editing-existing');
       setFormKey((k) => k + 1);
     } catch (err) {
@@ -287,8 +283,8 @@ export default function PartFormModal({
               renderOption={(props, opt) => {
                 if (typeof opt === 'string') return null;
                 const kind = partKind({
-                  is_manufacturable: opt.is_manufacturable,
-                  is_stockable: opt.is_stockable,
+                  source: opt.source,
+                  is_stocked: opt.is_stocked,
                 });
                 return (
                   <Box

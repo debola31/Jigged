@@ -19,14 +19,13 @@ import Snackbar from '@mui/material/Snackbar';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Stack from '@mui/material/Stack';
-import IconButton from '@mui/material/IconButton';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Autocomplete from '@mui/material/Autocomplete';
 import InputAdornment from '@mui/material/InputAdornment';
-import Chip from '@mui/material/Chip';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import type { Part, PartFormData, PartUnitConversionFormData } from '@/types/part';
+import BuildIcon from '@mui/icons-material/Build';
+import LocalMallIcon from '@mui/icons-material/LocalMall';
+import type { Part, PartFormData } from '@/types/part';
 import { partKind } from '@/types/part';
 import {
   createPart,
@@ -50,11 +49,18 @@ interface PartFormProps {
   hideHeading?: boolean;
 }
 
-const EMPTY_CONVERSION: PartUnitConversionFormData = {
-  from_unit: '',
-  to_primary_factor: 1,
-};
-
+/**
+ * Create / edit form for a Part.
+ *
+ * Layout follows the chunk-11 spec: classification (Made/Bought + Stocked)
+ * sits at the top and drives every conditional field below. Procurement cost
+ * is shown only for source='bought'; UOM only when is_stocked=true; vendor
+ * picker when source='bought' OR is_stocked=true. Unit conversions live on
+ * the part detail page (chunk 14 wires up inline editing there).
+ *
+ * Contrast on the toggle group is intentionally inherited from MUI defaults
+ * for now; chunk 14 restyles it for high contrast on the dark theme.
+ */
 export default function PartForm({
   mode,
   companyId,
@@ -144,59 +150,27 @@ export default function PartForm({
       }
     };
 
-  const handleClassificationChange =
-    (field: 'is_manufacturable' | 'is_stockable') =>
-    (_e: unknown, checked: boolean) => {
-      setFormData((prev) => ({ ...prev, [field]: checked }));
-      // Clear any previously-shown stockable-only validation when the user
-      // toggles off the corresponding section.
-      if (field === 'is_stockable' && !checked && fieldErrors.primary_unit) {
-        setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
-      }
-    };
-
-  const handleConversionChange = (
-    idx: number,
-    field: keyof PartUnitConversionFormData,
-    value: string,
-  ) => {
-    setFormData((prev) => {
-      const conversions = [...prev.unit_conversions];
-      const current = conversions[idx];
-      if (field === 'to_primary_factor') {
-        const num = Number(value);
-        conversions[idx] = {
-          ...current,
-          to_primary_factor: Number.isFinite(num) ? num : 0,
-        };
-      } else {
-        conversions[idx] = { ...current, [field]: value };
-      }
-      return { ...prev, unit_conversions: conversions };
-    });
-    const errKey = `unit_conversions.${idx}`;
-    if (fieldErrors[errKey]) {
-      setFieldErrors((prev) => ({ ...prev, [errKey]: '' }));
+  // ToggleButtonGroup for source. Null `next` happens when the user clicks
+  // the already-selected button — ignore it (one of the two must always be
+  // active).
+  const handleSourceChange = (_e: unknown, next: 'made' | 'bought' | null) => {
+    if (next === null) return;
+    setFormData((prev) => ({ ...prev, source: next }));
+    // Clear cost-per-unit field when switching to 'made' — for made parts
+    // cost is computed via Recalculate Cost on the detail page, the form's
+    // cost field is hidden, and any pre-existing value would be invisible
+    // to the user. Better to drop it explicitly than to keep a stale value.
+    if (next === 'made') {
+      setFormData((prev) => ({ ...prev, cost_per_unit: null }));
     }
   };
 
-  const addConversion = () => {
-    setFormData((prev) => ({
-      ...prev,
-      unit_conversions: [...prev.unit_conversions, { ...EMPTY_CONVERSION }],
-    }));
-  };
-
-  const removeConversion = (idx: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      unit_conversions: prev.unit_conversions.filter((_, i) => i !== idx),
-    }));
-    setFieldErrors((prev) => {
-      const next = { ...prev };
-      delete next[`unit_conversions.${idx}`];
-      return next;
-    });
+  const handleStockedChange = (_e: unknown, checked: boolean) => {
+    setFormData((prev) => ({ ...prev, is_stocked: checked }));
+    // Clear stocked-only validation if the user toggles off.
+    if (!checked && fieldErrors.primary_unit) {
+      setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
+    }
   };
 
   const validateForm = async (): Promise<boolean> => {
@@ -222,13 +196,13 @@ export default function PartForm({
       }
     }
 
-    // DB CHECK: parts_stockable_requires_unit
-    if (formData.is_stockable && !(formData.primary_unit && formData.primary_unit.trim())) {
-      errors.primary_unit = 'Primary unit is required for stockable parts';
+    // DB CHECK: parts_stocked_requires_unit
+    if (formData.is_stocked && !(formData.primary_unit && formData.primary_unit.trim())) {
+      errors.primary_unit = 'Unit of measurement is required for stocked parts';
     }
 
     // DB CHECK: quantity >= 0
-    if (formData.quantity !== null && formData.quantity < 0) {
+    if (formData.is_stocked && formData.quantity !== null && formData.quantity < 0) {
       errors.quantity = 'Quantity cannot be negative';
     }
 
@@ -239,34 +213,6 @@ export default function PartForm({
     if (formData.reorder_point !== null && formData.reorder_point < 0) {
       errors.reorder_point = 'Reorder point cannot be negative';
     }
-
-    // Unit-conversion factors must be > 0 (DB CHECK to_primary_factor > 0).
-    formData.unit_conversions.forEach((uc, idx) => {
-      const fromBlank = !uc.from_unit.trim();
-      const factorInvalid = !Number.isFinite(uc.to_primary_factor) || uc.to_primary_factor <= 0;
-      if (fromBlank && factorInvalid) {
-        // Empty placeholder row — drop it silently in the submit step instead
-        // of erroring. We mark it for filtering below.
-        return;
-      }
-      if (fromBlank) {
-        errors[`unit_conversions.${idx}`] = 'From unit is required';
-      } else if (factorInvalid) {
-        errors[`unit_conversions.${idx}`] = 'Conversion factor must be greater than zero';
-      }
-    });
-
-    // Check for duplicate from_unit values among non-blank conversions.
-    const seenUnits = new Map<string, number>();
-    formData.unit_conversions.forEach((uc, idx) => {
-      const key = uc.from_unit.trim().toLowerCase();
-      if (!key) return;
-      if (seenUnits.has(key)) {
-        errors[`unit_conversions.${idx}`] = `Duplicate "from unit" — "${uc.from_unit}" already listed`;
-      } else {
-        seenUnits.set(key, idx);
-      }
-    });
 
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
@@ -282,22 +228,19 @@ export default function PartForm({
 
     setLoading(true);
 
-    // Drop any blank placeholder conversion rows before persisting.
-    const cleanedConversions = formData.unit_conversions.filter(
-      (uc) =>
-        uc.from_unit.trim() !== '' &&
-        Number.isFinite(uc.to_primary_factor) &&
-        uc.to_primary_factor > 0,
-    );
-
     const payload: PartFormData = {
       ...formData,
       // Ensure null-vs-empty consistency for primary_unit on the way to the DB.
       primary_unit:
-        formData.primary_unit && formData.primary_unit.trim() !== ''
+        formData.is_stocked && formData.primary_unit && formData.primary_unit.trim() !== ''
           ? formData.primary_unit.trim()
           : null,
-      unit_conversions: cleanedConversions,
+      // For made parts, never send a cost from this form — Recalculate Cost
+      // owns that field on the detail page.
+      cost_per_unit: formData.source === 'bought' ? formData.cost_per_unit : null,
+      // For un-stocked parts, force quantity to 0 (the on-hand qty is
+      // meaningless without stocking).
+      quantity: formData.is_stocked ? formData.quantity : 0,
     };
 
     try {
@@ -348,13 +291,14 @@ export default function PartForm({
     vendors.find((v) => v.id === formData.preferred_vendor_id) || null;
 
   const currentKind = partKind({
-    is_manufacturable: formData.is_manufacturable,
-    is_stockable: formData.is_stockable,
+    source: formData.source,
+    is_stocked: formData.is_stocked,
   });
 
-  const showInventorySection = formData.is_stockable;
-  const showManufacturingSection = formData.is_manufacturable;
-  const showUnitConversions = formData.is_stockable || formData.is_manufacturable;
+  const showProcurementCost = formData.source === 'bought';
+  const showMadeCostHint = formData.source === 'made';
+  const showUomField = formData.is_stocked;
+  const showVendorPicker = formData.source === 'bought' || formData.is_stocked;
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
@@ -373,57 +317,53 @@ export default function PartForm({
             </Typography>
           )}
 
-          {/* Classification toggles up top: drives every section below. */}
+          {/* Classification: Made/Bought + Stocked. Drives every section
+              below. */}
           <Box sx={{ mb: 3 }}>
             <Typography
               variant="body2"
               color="text.secondary"
-              sx={{ mb: 1, fontWeight: 500 }}
+              sx={{ mb: 1.5, fontWeight: 500 }}
             >
               Classification
             </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={2}
+              alignItems={{ xs: 'flex-start', sm: 'center' }}
+            >
+              <ToggleButtonGroup
+                value={formData.source}
+                exclusive
+                onChange={handleSourceChange}
+                disabled={loading}
+                aria-label="Source"
+                color="primary"
+              >
+                <ToggleButton value="made" aria-label="Made in-house">
+                  <BuildIcon fontSize="small" sx={{ mr: 1 }} />
+                  Made
+                </ToggleButton>
+                <ToggleButton value="bought" aria-label="Bought from vendor">
+                  <LocalMallIcon fontSize="small" sx={{ mr: 1 }} />
+                  Bought
+                </ToggleButton>
+              </ToggleButtonGroup>
+
               <FormControlLabel
                 control={
                   <Switch
-                    checked={formData.is_manufacturable}
-                    onChange={handleClassificationChange('is_manufacturable')}
+                    checked={formData.is_stocked}
+                    onChange={handleStockedChange}
                     disabled={loading}
                     color="primary"
                   />
                 }
-                label="Manufacturable"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={formData.is_stockable}
-                    onChange={handleClassificationChange('is_stockable')}
-                    disabled={loading}
-                    color="success"
-                  />
-                }
-                label="Stockable"
+                label="Stocked"
               />
               <Box sx={{ flex: 1 }} />
               <PartTypeChip kind={currentKind} />
             </Stack>
-            {currentKind === 'unclassified' && (
-              <Box
-                sx={{
-                  mt: 1.5,
-                  display: 'flex',
-                  gap: 1,
-                  alignItems: 'center',
-                  color: 'text.secondary',
-                }}
-              >
-                <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main' }} />
-                <Typography variant="caption">
-                  Unclassified parts won&apos;t appear in the Manufactured or Inventory views.
-                </Typography>
-              </Box>
-            )}
           </Box>
 
           <Grid container spacing={3}>
@@ -455,8 +395,10 @@ export default function PartForm({
         </CardContent>
       </Card>
 
-      {/* Inventory section: visible when is_stockable=true */}
-      {showInventorySection && (
+      {/* Stocked-only fields: UOM + on-hand qty + reorder point. UOM is a
+          plain text input for now; chunk 14 swaps it to the standard-units
+          combobox. */}
+      {showUomField && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
@@ -467,7 +409,7 @@ export default function PartForm({
                 <TextField
                   fullWidth
                   required
-                  label="Primary Unit"
+                  label="Unit of measurement"
                   value={formData.primary_unit ?? ''}
                   onChange={(e) => {
                     setFormData((prev) => ({
@@ -514,87 +456,30 @@ export default function PartForm({
                   inputProps={{ min: 0, step: 'any' }}
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Procurement Cost per Unit"
-                  type="number"
-                  value={formData.cost_per_unit ?? ''}
-                  onChange={handleNumberChange('cost_per_unit')}
-                  error={!!fieldErrors.cost_per_unit}
-                  helperText={
-                    fieldErrors.cost_per_unit ||
-                    'What you pay your supplier per primary unit'
-                  }
-                  disabled={loading}
-                  inputProps={{ min: 0, step: '0.0001' }}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    },
-                  }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Autocomplete
-                  options={vendors}
-                  getOptionLabel={(opt) => opt.name}
-                  value={selectedVendor}
-                  loading={vendorsLoading}
-                  onChange={(_event, newValue) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      preferred_vendor_id: newValue ? newValue.id : null,
-                    }));
-                  }}
-                  disabled={loading}
-                  isOptionEqualToValue={(opt, val) => opt.id === val.id}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Preferred Vendor"
-                      helperText="Optional. The default supplier when restocking this part."
-                      slotProps={{
-                        input: {
-                          ...params.InputProps,
-                          endAdornment: (
-                            <>
-                              {vendorsLoading ? (
-                                <CircularProgress color="inherit" size={20} />
-                              ) : null}
-                              {params.InputProps.endAdornment}
-                            </>
-                          ),
-                        },
-                      }}
-                    />
-                  )}
-                />
-              </Grid>
             </Grid>
           </CardContent>
         </Card>
       )}
 
-      {/* Manufacturing section: visible when is_manufacturable=true */}
-      {showManufacturingSection && (
+      {/* Bought-only: procurement cost. */}
+      {showProcurementCost && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-              Manufacturing
+              Procurement
             </Typography>
             <Grid container spacing={3}>
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   fullWidth
-                  label="Cost per Unit"
+                  label="Procurement cost per unit"
                   type="number"
                   value={formData.cost_per_unit ?? ''}
                   onChange={handleNumberChange('cost_per_unit')}
                   error={!!fieldErrors.cost_per_unit}
                   helperText={
                     fieldErrors.cost_per_unit ||
-                    'Use the Recalculate Cost button on the part detail page after defining a routing.'
+                    'Tiered pricing coming later — add tier sheets on the part detail page after creating.'
                   }
                   disabled={loading}
                   inputProps={{ min: 0, step: '0.0001' }}
@@ -610,105 +495,62 @@ export default function PartForm({
         </Card>
       )}
 
-      {/* Unit conversions: shared between stockable + manufacturable contexts. */}
-      {showUnitConversions && (
+      {/* Made-only: cost-comes-from-routing hint, no input. */}
+      {showMadeCostHint && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                mb: 2,
-              }}
-            >
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                Unit Conversions
-              </Typography>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={addConversion}
-                disabled={loading}
-              >
-                Add conversion
-              </Button>
-            </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {formData.primary_unit && formData.primary_unit.trim() ? (
-                <>
-                  Conversions to the primary unit{' '}
-                  <Chip label={formData.primary_unit.trim()} size="small" />
-                  . Example: 1 ft &rarr; 12 in.
-                </>
-              ) : (
-                'Add a primary unit above first; conversion factors map alternate units back to it.'
-              )}
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 1 }}>
+              Cost
             </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Cost will be calculated from routing + BOM via Recalculate Cost
+              on the detail page after defining the routing.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
-            {formData.unit_conversions.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                No conversions yet. Add one above if this part is bought or used in
-                multiple units.
-              </Typography>
-            ) : (
-              <Stack spacing={1.5}>
-                {formData.unit_conversions.map((uc, idx) => {
-                  const errKey = `unit_conversions.${idx}`;
-                  const rowError = fieldErrors[errKey];
-                  return (
-                    <Box
-                      key={idx}
-                      sx={{
-                        display: 'flex',
-                        gap: 1.5,
-                        alignItems: 'flex-start',
-                      }}
-                    >
-                      <TextField
-                        size="small"
-                        label="From unit"
-                        value={uc.from_unit}
-                        onChange={(e) =>
-                          handleConversionChange(idx, 'from_unit', e.target.value)
-                        }
-                        error={!!rowError}
-                        disabled={loading}
-                        sx={{ flex: 1 }}
-                        placeholder="e.g. ft"
-                      />
-                      <TextField
-                        size="small"
-                        label="Factor to primary"
-                        type="number"
-                        value={
-                          Number.isFinite(uc.to_primary_factor)
-                            ? uc.to_primary_factor
-                            : ''
-                        }
-                        onChange={(e) =>
-                          handleConversionChange(idx, 'to_primary_factor', e.target.value)
-                        }
-                        error={!!rowError}
-                        helperText={rowError || ' '}
-                        disabled={loading}
-                        inputProps={{ min: 0.0000001, step: 'any' }}
-                        sx={{ flex: 1 }}
-                      />
-                      <IconButton
-                        aria-label="Remove conversion"
-                        onClick={() => removeConversion(idx)}
-                        disabled={loading}
-                        sx={{ mt: 0.5 }}
-                      >
-                        <DeleteOutlineIcon />
-                      </IconButton>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            )}
+      {/* Vendor picker: shown for any sourced-or-stocked part. */}
+      {showVendorPicker && (
+        <Card elevation={2} sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+              Vendor
+            </Typography>
+            <Autocomplete
+              options={vendors}
+              getOptionLabel={(opt) => opt.name}
+              value={selectedVendor}
+              loading={vendorsLoading}
+              onChange={(_event, newValue) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  preferred_vendor_id: newValue ? newValue.id : null,
+                }));
+              }}
+              disabled={loading}
+              isOptionEqualToValue={(opt, val) => opt.id === val.id}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Preferred Vendor"
+                  helperText="Optional. The default supplier for this part."
+                  slotProps={{
+                    input: {
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {vendorsLoading ? (
+                            <CircularProgress color="inherit" size={20} />
+                          ) : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    },
+                  }}
+                />
+              )}
+            />
           </CardContent>
         </Card>
       )}

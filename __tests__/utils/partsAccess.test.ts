@@ -82,8 +82,8 @@ describe('partsAccess utilities', () => {
     company_id: 'company-1',
     part_name: 'PART001',
     description: 'Test Part',
-    is_manufacturable: true,
-    is_stockable: false,
+    source: 'made',
+    is_stocked: false,
     primary_unit: null,
     quantity: 0,
     cost_per_unit: null,
@@ -298,14 +298,13 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_name: 'NEW001',
       description: 'New Part',
-      is_manufacturable: true,
-      is_stockable: false,
+      source: 'made',
+      is_stocked: false,
       primary_unit: null,
       quantity: 0,
       cost_per_unit: null,
       reorder_point: null,
       preferred_vendor_id: null,
-      unit_conversions: [],
     };
 
     it('inserts part and returns data', async () => {
@@ -314,8 +313,8 @@ describe('partsAccess utilities', () => {
         company_id: 'company-1',
         part_name: 'NEW001',
         description: 'New Part',
-        is_manufacturable: true,
-        is_stockable: false,
+        source: 'made',
+        is_stocked: false,
         primary_unit: null,
         quantity: 0,
         cost_per_unit: null,
@@ -354,14 +353,13 @@ describe('partsAccess utilities', () => {
     const mockFormData: PartFormData = {
       part_name: 'PART001',
       description: 'Updated Part',
-      is_manufacturable: true,
-      is_stockable: false,
+      source: 'made',
+      is_stocked: false,
       primary_unit: null,
       quantity: 0,
       cost_per_unit: null,
       reorder_point: null,
       preferred_vendor_id: null,
-      unit_conversions: [],
     };
 
     it('updates part and returns data', async () => {

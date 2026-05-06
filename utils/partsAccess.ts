@@ -9,15 +9,15 @@ import type { InventoryTransaction, InventoryTransactionType } from '@/types/par
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, is_manufacturable, is_stockable, primary_unit, quantity, cost_per_unit, cost_recalculated_at, reorder_point, preferred_vendor_id, legacy_id, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, cost_per_unit, cost_recalculated_at, reorder_point, preferred_vendor_id, legacy_id, created_at, updated_at';
 
 interface PartRow {
   id: string;
   company_id: string;
   part_name: string;
   description: string | null;
-  is_manufacturable: boolean;
-  is_stockable: boolean;
+  source: 'made' | 'bought';
+  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   cost_per_unit: number | null;
@@ -38,8 +38,8 @@ function rowToPart(row: PartRow): Part {
     company_id: row.company_id,
     part_name: row.part_name,
     description: row.description,
-    is_manufacturable: row.is_manufacturable,
-    is_stockable: row.is_stockable,
+    source: row.source,
+    is_stocked: row.is_stocked,
     primary_unit: row.primary_unit,
     quantity: Number(row.quantity ?? 0),
     cost_per_unit: row.cost_per_unit !== null ? Number(row.cost_per_unit) : null,
@@ -103,10 +103,13 @@ export async function getAllParts(
 }
 
 /**
- * Stockable subset of getAllParts. Used by inventory-mental-model views and
- * by callers that need to pick a material part.
+ * Stocked subset of getAllParts (is_stocked=true). Used by inventory-
+ * mental-model views and by callers that need to pick a material part.
+ *
+ * Replaces the prior `getStockableParts` (renamed in chunk 11 alongside
+ * the is_stockable → is_stocked column rename).
  */
-export async function getStockableParts(
+export async function getStockedParts(
   companyId: string,
   search: string = '',
   sortField: string = 'part_name',
@@ -118,7 +121,7 @@ export async function getStockableParts(
     .from('parts')
     .select(PART_COLUMNS)
     .eq('company_id', companyId)
-    .eq('is_stockable', true)
+    .eq('is_stocked', true)
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search.trim()) {
@@ -127,16 +130,16 @@ export async function getStockableParts(
 
   const { data, error } = await query;
   if (error) {
-    console.error('Error fetching stockable parts:', error);
+    console.error('Error fetching stocked parts:', error);
     throw error;
   }
   return ((data as PartRow[]) || []).map(rowToPart);
 }
 
 /**
- * Manufacturable subset of getAllParts.
+ * Made parts (source='made'). Replaces the prior `getManufacturableParts`.
  */
-export async function getManufacturableParts(
+export async function getMadeParts(
   companyId: string,
   search: string = '',
   sortField: string = 'part_name',
@@ -148,7 +151,7 @@ export async function getManufacturableParts(
     .from('parts')
     .select(`${PART_COLUMNS}, routings(id)`)
     .eq('company_id', companyId)
-    .eq('is_manufacturable', true)
+    .eq('source', 'made')
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search.trim()) {
@@ -157,17 +160,18 @@ export async function getManufacturableParts(
 
   const { data, error } = await query;
   if (error) {
-    console.error('Error fetching manufacturable parts:', error);
+    console.error('Error fetching made parts:', error);
     throw error;
   }
   return ((data as PartRow[]) || []).map(rowToPart);
 }
 
 /**
- * Orphan parts: neither stockable nor manufacturable. Surfaces parts that
- * have been quoted but never classified.
+ * Bought parts (source='bought'). New in chunk 11 — there's no equivalent in
+ * the prior boolean model since "not manufacturable" was conflated with the
+ * orphan state.
  */
-export async function getOrphanParts(
+export async function getBoughtParts(
   companyId: string,
   search: string = '',
   sortField: string = 'part_name',
@@ -179,8 +183,7 @@ export async function getOrphanParts(
     .from('parts')
     .select(PART_COLUMNS)
     .eq('company_id', companyId)
-    .eq('is_manufacturable', false)
-    .eq('is_stockable', false)
+    .eq('source', 'bought')
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search.trim()) {
@@ -189,7 +192,7 @@ export async function getOrphanParts(
 
   const { data, error } = await query;
   if (error) {
-    console.error('Error fetching orphan parts:', error);
+    console.error('Error fetching bought parts:', error);
     throw error;
   }
   return ((data as PartRow[]) || []).map(rowToPart);
@@ -373,18 +376,19 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 
 /**
  * Lightweight parts query for dropdowns. Optional `kind` filter switches
- * between the unified, stockable, or manufacturable subset.
+ * between the unified, made, stocked, or bought subset (matches the saved
+ * views on the parts list page).
  */
 export async function getPartsForSelect(
   companyId: string,
-  kind: 'all' | 'stockable' | 'manufacturable' = 'all',
+  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
 ): Promise<Array<{
   id: string;
   part_name: string;
   description: string | null;
   has_routing: boolean;
-  is_stockable: boolean;
-  is_manufacturable: boolean;
+  is_stocked: boolean;
+  source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
   cost_per_unit: number | null;
@@ -397,8 +401,8 @@ export async function getPartsForSelect(
       id,
       part_name,
       description,
-      is_stockable,
-      is_manufacturable,
+      is_stocked,
+      source,
       primary_unit,
       quantity,
       cost_per_unit,
@@ -407,8 +411,9 @@ export async function getPartsForSelect(
     .eq('company_id', companyId)
     .order('part_name', { ascending: true });
 
-  if (kind === 'stockable') query = query.eq('is_stockable', true);
-  else if (kind === 'manufacturable') query = query.eq('is_manufacturable', true);
+  if (kind === 'stocked') query = query.eq('is_stocked', true);
+  else if (kind === 'made') query = query.eq('source', 'made');
+  else if (kind === 'bought') query = query.eq('source', 'bought');
 
   const { data, error } = await query;
 
@@ -424,8 +429,8 @@ export async function getPartsForSelect(
       part_name: p.part_name as string,
       description: p.description as string | null,
       has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
-      is_stockable: p.is_stockable as boolean,
-      is_manufacturable: p.is_manufacturable as boolean,
+      is_stocked: p.is_stocked as boolean,
+      source: p.source as 'made' | 'bought',
       primary_unit: p.primary_unit as string | null,
       quantity: Number(p.quantity ?? 0),
       cost_per_unit: p.cost_per_unit !== null ? Number(p.cost_per_unit) : null,
@@ -471,8 +476,8 @@ function formDataToInsert(formData: PartFormData): Record<string, unknown> {
   return {
     part_name: formData.part_name.trim(),
     description: formData.description.trim() || null,
-    is_manufacturable: formData.is_manufacturable,
-    is_stockable: formData.is_stockable,
+    source: formData.source,
+    is_stocked: formData.is_stocked,
     primary_unit: formData.primary_unit?.trim() || null,
     quantity: formData.quantity,
     cost_per_unit: formData.cost_per_unit,
@@ -482,7 +487,11 @@ function formDataToInsert(formData: PartFormData): Record<string, unknown> {
 }
 
 /**
- * Create a new part. Also writes any provided unit conversions.
+ * Create a new part.
+ *
+ * Unit conversions are NOT created here as of chunk 11 — they're managed on
+ * the part detail page after the row exists. See PartUnitConversion access
+ * helpers below.
  */
 export async function createPart(companyId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
@@ -503,10 +512,6 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     throw error;
   }
 
-  if (formData.unit_conversions.length > 0) {
-    await replacePartUnitConversions(data.id, formData.unit_conversions);
-  }
-
   // Auto-apply the company's default markup rate so the new part has a
   // starting pricing tier without the user having to pick one manually.
   // Failures are non-fatal — the part is created either way.
@@ -521,8 +526,8 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
 }
 
 /**
- * Update an existing part. Replaces the unit conversion list wholesale
- * (delete + insert), matching the previous inventory form behavior.
+ * Update an existing part. Unit conversions are managed separately on the
+ * detail page (see chunk 11 form refactor).
  */
 export async function updatePart(partId: string, formData: PartFormData): Promise<Part> {
   const supabase = getSupabase();
@@ -541,8 +546,6 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
     console.error('Error updating part:', error);
     throw error;
   }
-
-  await replacePartUnitConversions(partId, formData.unit_conversions);
 
   return rowToPart(data as PartRow);
 }
@@ -625,7 +628,12 @@ export async function getPartUnitConversions(partId: string): Promise<PartUnitCo
   return (data || []) as PartUnitConversion[];
 }
 
-async function replacePartUnitConversions(
+/**
+ * Replace the full unit-conversion list for a part (delete + insert).
+ * Exported for use by the part detail page (chunk 14 moves unit-conversion
+ * editing out of the create/edit form).
+ */
+export async function replacePartUnitConversions(
   partId: string,
   conversions: PartUnitConversionFormData[],
 ): Promise<void> {

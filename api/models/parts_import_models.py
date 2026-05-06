@@ -1,9 +1,19 @@
 """Pydantic models for Parts CSV import API.
 
-The unified Parts importer absorbs the previous `inventory_items` import path:
-a single row may be `is_manufacturable` (has a routing), `is_stockable` (tracked
-as stock-on-hand), both (a sub-assembly), or neither (an "orphan" customer part
-that has been quoted but never made).
+The unified Parts importer absorbs the previous `inventory_items` import path.
+Every imported row lives in one of four valid quadrants formed by the
+(source, is_stocked) pair:
+
+  - source='made',   !is_stocked → Custom Made
+  - source='made',    is_stocked → Sub-assembly
+  - source='bought',  is_stocked → Raw Material
+  - source='bought', !is_stocked → Service / Drop-ship
+
+The legacy boolean columns (`is_manufacturable`, `is_stockable`) were renamed
+in the 20260504 source-enum-and-stocked-rename migration. The importer still
+accepts them as legacy column-mapping aliases for one-version compatibility
+with already-prepared CSVs — see the validate/execute routes for the
+deprecation log entry that gets written for each legacy-mapped row.
 """
 
 from enum import Enum
@@ -78,7 +88,7 @@ class PartValidationError(BaseModel):
 
     error_type values:
       - "missing_part_name", "invalid_price", "invalid_qty"
-      - "missing_primary_unit": is_stockable=true but primary_unit absent
+      - "missing_primary_unit": is_stocked=true but primary_unit absent
       - "invalid_quantity": quantity is negative
       - "invalid_cost": cost_per_unit is negative
       - "invalid_reorder_point": reorder_point is negative
@@ -188,12 +198,12 @@ PART_SCHEMA = {
         "required": False,
         "description": "Part description or name",
     },
-    "is_manufacturable": {
-        "type": "boolean",
+    "source": {
+        "type": "string",
         "required": False,
-        "description": "Whether this part is made in-house. Defaults to true for any row that has a routing.",
+        "description": "'made' if produced in-shop (with a routing); 'bought' if procured from a vendor.",
     },
-    "is_stockable": {
+    "is_stocked": {
         "type": "boolean",
         "required": False,
         "description": "Whether this part is tracked as stock-on-hand. Defaults to true for raw materials and sub-assemblies.",
@@ -201,7 +211,7 @@ PART_SCHEMA = {
     "primary_unit": {
         "type": "string",
         "required": False,
-        "description": "Primary unit of measure (required when is_stockable=true; e.g., 'lbs', 'pcs', 'kg', 'in')",
+        "description": "Primary unit of measure (required when is_stocked=true; e.g., 'lbs', 'pcs', 'kg', 'in')",
     },
     "quantity": {
         "type": "number",

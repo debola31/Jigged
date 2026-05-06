@@ -125,8 +125,8 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
       description: null,
       primary_unit: overrides.childPrimaryUnit ?? 'ea',
       cost_per_unit: childCost,
-      is_stockable: true,
-      is_manufacturable: false,
+      is_stocked: true,
+      source: 'bought',
     },
   };
 }

@@ -1,20 +1,20 @@
 /**
  * Part record from database.
  *
- * Parts are the unified item master — both manufactured items (with a routing)
- * and stockable inventory items (with a quantity-on-hand) live in this table.
- * The two booleans `is_manufacturable` and `is_stockable` give four corners,
- * including the (false, false) "orphan" case for parts that have been quoted
- * but not yet classified, and the (true, true) "sub-assembly" case for items
- * that are both made in-house and consumed in another part's BOM.
+ * Parts are the unified item master — both made items (with a routing) and
+ * stocked inventory items (with a quantity-on-hand) live in this table. Two
+ * orthogonal axes classify a row:
+ *   - source: 'made' (produced in-shop) | 'bought' (procured from a vendor)
+ *   - is_stocked: whether the company tracks on-hand quantities for it
+ * Together they yield exactly four valid quadrants — see PartKind below.
  */
 export interface Part {
   id: string;
   company_id: string;
   part_name: string;
   description: string | null;
-  is_manufacturable: boolean;
-  is_stockable: boolean;
+  source: 'made' | 'bought';
+  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   cost_per_unit: number | null;
@@ -40,17 +40,29 @@ export interface Part {
 /**
  * Mutually exclusive classification used by the type chip on the parts list.
  *
- * Derived from the two booleans rather than stored: keeps the chip and the
- * underlying flags consistent, and lets future axes (e.g. `is_serialized`)
- * extend without an enum migration.
+ * Derived from (source, is_stocked) rather than stored: one chip per row,
+ * exactly one of four valid values. There is no "Unclassified" — the orphan
+ * (false, false) quadrant from the old (is_manufacturable, is_stockable)
+ * model was collapsed into 'custom_made' by the 20260504 source-enum
+ * migration's backfill rule.
+ *
+ * - custom_made:  source=made,   !is_stocked  (built to order)
+ * - sub_assembly: source=made,    is_stocked  (made AND consumed/stocked)
+ * - raw_material: source=bought,  is_stocked  (vendor stock kept on hand)
+ * - service:      source=bought, !is_stocked  (drop-ship / outside service)
+ *
+ * Use `assertNeverPartKind` in the `default:` branch of any switch on this
+ * enum to get a compile-time check that all four cases are handled. If the
+ * union grows, every old call site surfaces as a TypeScript error.
  */
-export type PartKind = 'manufactured' | 'inventory' | 'sub_assembly' | 'unclassified';
+export type PartKind = 'custom_made' | 'sub_assembly' | 'raw_material' | 'service';
 
-export function partKind(part: Pick<Part, 'is_manufacturable' | 'is_stockable'>): PartKind {
-  if (part.is_manufacturable && part.is_stockable) return 'sub_assembly';
-  if (part.is_manufacturable) return 'manufactured';
-  if (part.is_stockable) return 'inventory';
-  return 'unclassified';
+export function partKind(part: Pick<Part, 'source' | 'is_stocked'>): PartKind {
+  if (part.source === 'made') {
+    return part.is_stocked ? 'sub_assembly' : 'custom_made';
+  }
+  // source === 'bought'
+  return part.is_stocked ? 'raw_material' : 'service';
 }
 
 /**
@@ -75,54 +87,75 @@ export interface PartUnitConversionFormData {
  * Form data for creating/editing parts. Includes the editable subset of the
  * Part columns — preferred_vendor_id is editable, legacy_id is not (it's an
  * import-only identifier).
+ *
+ * Unit conversions live on the part detail page (not the create/edit form)
+ * as of chunk 11 — they're a property of an existing part, not something
+ * the user wires up before the row exists.
  */
 export interface PartFormData {
   part_name: string;
   description: string;
-  is_manufacturable: boolean;
-  is_stockable: boolean;
+  source: 'made' | 'bought';
+  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   cost_per_unit: number | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
-  unit_conversions: PartUnitConversionFormData[];
 }
 
 export const EMPTY_PART_FORM: PartFormData = {
   part_name: '',
   description: '',
-  is_manufacturable: true,
-  is_stockable: false,
+  source: 'made',
+  is_stocked: false,
   primary_unit: null,
   quantity: 0,
   cost_per_unit: null,
   reorder_point: null,
   preferred_vendor_id: null,
-  unit_conversions: [],
 };
 
 /**
  * Convert Part to PartFormData for edit forms.
+ *
+ * Unit conversions are NOT part of form data anymore (chunk 11 moved them to
+ * the part detail page). This signature stays accepting an optional second
+ * argument purely so existing call sites that pass `partUnitConversions` in
+ * still type-check during the transition; the value is ignored.
  */
 export function partToFormData(
   part: Part,
-  unitConversions: PartUnitConversion[] = [],
+  _unitConversions: PartUnitConversion[] = [],
 ): PartFormData {
   return {
     part_name: part.part_name,
     description: part.description || '',
-    is_manufacturable: part.is_manufacturable,
-    is_stockable: part.is_stockable,
+    source: part.source,
+    is_stocked: part.is_stocked,
     primary_unit: part.primary_unit,
     quantity: part.quantity,
     cost_per_unit: part.cost_per_unit,
     reorder_point: part.reorder_point,
     preferred_vendor_id: part.preferred_vendor_id,
-    unit_conversions: unitConversions.map((uc) => ({
-      id: uc.id,
-      from_unit: uc.from_unit,
-      to_primary_factor: uc.to_primary_factor,
-    })),
   };
+}
+
+/**
+ * Exhaustiveness helper for `switch (kind)` over PartKind. Use in the
+ * `default:` branch — a future PartKind addition will surface as a compile
+ * error at every call site rather than silently falling through to a
+ * default case.
+ *
+ * Example:
+ *   switch (kind) {
+ *     case 'custom_made': return ...;
+ *     case 'sub_assembly': return ...;
+ *     case 'raw_material': return ...;
+ *     case 'service': return ...;
+ *     default: return assertNeverPartKind(kind);
+ *   }
+ */
+export function assertNeverPartKind(k: never): never {
+  throw new Error(`Unhandled PartKind: ${String(k)}`);
 }

@@ -648,10 +648,10 @@ class TestPartsExecuteEndpoint:
         assert data["skipped_count"] == 1
 
     @pytest.mark.unit
-    async def test_execute_imports_stockable_part_with_unit_and_quantity(
+    async def test_execute_imports_stocked_part_with_unit_and_quantity(
         self, test_client
     ):
-        """Importing a part with primary_unit + quantity sets is_stockable=true."""
+        """Importing a part with primary_unit + quantity sets is_stocked=true and source='bought'."""
         insert_log: list = []
 
         request_data = {
@@ -694,7 +694,9 @@ class TestPartsExecuteEndpoint:
         parts_inserts = [r for r in insert_log if r["table"] == "parts"]
         assert len(parts_inserts) == 1
         inserted = parts_inserts[0]["data"][0]
-        assert inserted["is_stockable"] is True
+        assert inserted["is_stocked"] is True
+        # Procurement-only row (no operation columns) ⇒ source='bought'.
+        assert inserted["source"] == "bought"
         assert inserted["primary_unit"] == "pounds"
         assert inserted["quantity"] == 250.0
         assert inserted["cost_per_unit"] == 12.5
@@ -778,24 +780,24 @@ class TestPartsExecuteEndpoint:
         assert upsert_log[0]["on_conflict"] == "company_id,legacy_id"
 
     @pytest.mark.unit
-    async def test_execute_sub_assembly_classification(self, test_client):
-        """Explicit is_manufacturable + is_stockable both true (sub-assembly)."""
+    async def test_execute_sub_assembly_classification_new_headers(self, test_client):
+        """Explicit source='made' + is_stocked=true (sub-assembly) using the new headers."""
         insert_log: list = []
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
-                "Is Manufacturable": "is_manufacturable",
-                "Is Stockable": "is_stockable",
+                "Source": "source",
+                "Is Stocked": "is_stocked",
                 "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
                 {
                     "Part Name": "SUB-ASSY-001",
-                    "Is Manufacturable": "true",
-                    "Is Stockable": "true",
+                    "Source": "made",
+                    "Is Stocked": "true",
                     "Unit": "pcs",
                 },
             ],
@@ -818,5 +820,75 @@ class TestPartsExecuteEndpoint:
         assert response.status_code == 200
         parts_inserts = [r for r in insert_log if r["table"] == "parts"]
         inserted = parts_inserts[0]["data"][0]
-        assert inserted["is_manufacturable"] is True
-        assert inserted["is_stockable"] is True
+        assert inserted["source"] == "made"
+        assert inserted["is_stocked"] is True
+
+    @pytest.mark.unit
+    async def test_execute_legacy_is_manufacturable_alias_maps_to_source(
+        self, test_client
+    ):
+        """Legacy `is_manufacturable` header maps to source ('made'/'bought').
+
+        One-version compat for CSVs already prepared with the old headers.
+        See parts_import_routes module docstring.
+        """
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                # The legacy header (renamed in the 20260504 migration). The
+                # importer should accept it and translate true→'made',
+                # false→'bought'.
+                "Is Manufacturable": "is_manufacturable",
+                "Is Stockable": "is_stockable",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {
+                    "Part Name": "SUB-ASSY-LEGACY",
+                    "Is Manufacturable": "true",
+                    "Is Stockable": "true",
+                    "Unit": "pcs",
+                },
+                {
+                    "Part Name": "BOUGHT-LEGACY",
+                    "Is Manufacturable": "false",
+                    "Is Stockable": "true",
+                    "Unit": "pcs",
+                },
+            ],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pieces", 2: "pieces"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        # Both rows go in the same insert batch.
+        rows = parts_inserts[0]["data"]
+        sub_row = next(r for r in rows if r["part_name"] == "SUB-ASSY-LEGACY")
+        bought_row = next(r for r in rows if r["part_name"] == "BOUGHT-LEGACY")
+
+        assert sub_row["source"] == "made"
+        assert sub_row["is_stocked"] is True
+        assert bought_row["source"] == "bought"
+        assert bought_row["is_stocked"] is True
+        # New columns should be set on the inserted rows; the legacy boolean
+        # columns must NOT be passed through to the parts table (they don't
+        # exist anymore).
+        assert "is_manufacturable" not in sub_row
+        assert "is_stockable" not in sub_row

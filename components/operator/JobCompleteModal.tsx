@@ -20,7 +20,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { completeJob, getJobPartMaterialsForCompletion } from '@/utils/operatorAccess';
-import { getStockableParts } from '@/utils/partsAccess';
+import { getStockedParts } from '@/utils/partsAccess';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
 import type { Part } from '@/types/part';
@@ -119,7 +119,7 @@ export default function JobCompleteModal({
     if (stockableParts.length === 0) {
       setLoadingItems(true);
       try {
-        const items = await getStockableParts(companyId);
+        const items = await getStockedParts(companyId);
         setStockableParts(items);
       } catch {
         // Silently fail — user can retry

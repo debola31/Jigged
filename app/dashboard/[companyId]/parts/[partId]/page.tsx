@@ -89,13 +89,13 @@ export default function PartDetailPage() {
   const companyId = params.companyId as string;
   const partId = params.partId as string;
 
-  // Preserve the active saved view (e.g. ?view=inventory) when the user
+  // Preserve the active saved view (e.g. ?view=stocked) when the user
   // navigates back to the parts list. The list page reads this param to pick
   // the right filter, so the list/detail round trip lands them where they
   // started.
   const partsListHref = useMemo(() => {
     const view = searchParams.get('view');
-    const validViews = ['all', 'manufactured', 'inventory'];
+    const validViews = ['all', 'made', 'bought', 'stocked'];
     if (view && validViews.includes(view) && view !== 'all') {
       return `/dashboard/${companyId}/parts?view=${view}`;
     }
@@ -160,7 +160,7 @@ export default function PartDetailPage() {
           setPreferredVendor(null);
         }
 
-        if (data.is_manufacturable) {
+        if (data.source === 'made') {
           try {
             const info = await getStaleCostInfo(partId);
             setStaleInfo(info);
@@ -265,16 +265,16 @@ export default function PartDetailPage() {
   // ON DELETE RESTRICT) but disabling up-front beats waiting for a raw error.
   const hasReferences = quotesCount > 0 || jobsCount > 0 || bomParentsCount > 0;
 
-  const showInventoryPanel = part.is_stockable;
-  const showRoutingPanel = part.is_manufacturable;
-  // BOM panel: shown whenever this part is manufacturable, OR when it has BOM
+  const showInventoryPanel = part.is_stocked;
+  const showRoutingPanel = part.source === 'made';
+  // BOM panel: shown whenever this part is made in-house, OR when it has BOM
   // lines (covers historical / odd-classification rows that still have a BOM
   // attached).
-  const showBomPanel = part.is_manufacturable || bomLinesCount > 0;
+  const showBomPanel = part.source === 'made' || bomLinesCount > 0;
   const showWhereUsed = bomParentsCount > 0;
 
   const belowReorder =
-    part.is_stockable &&
+    part.is_stocked &&
     part.reorder_point !== null &&
     part.quantity <= part.reorder_point;
 
@@ -382,7 +382,7 @@ export default function PartDetailPage() {
               )}
             </Box>
 
-            {part.is_manufacturable && (
+            {part.source === 'made' && (
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Button
                   variant="contained"

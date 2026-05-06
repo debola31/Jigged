@@ -28,8 +28,8 @@ interface PartOption {
   id: string;
   part_name: string;
   description: string | null;
-  is_stockable: boolean;
-  is_manufacturable: boolean;
+  is_stocked: boolean;
+  source: 'made' | 'bought';
   primary_unit: string | null;
   cost_per_unit: number | null;
 }
@@ -97,8 +97,8 @@ export default function AddBomLineModal({
               id: r.id,
               part_name: r.part_name,
               description: r.description,
-              is_stockable: r.is_stockable,
-              is_manufacturable: r.is_manufacturable,
+              is_stocked: r.is_stocked,
+              source: r.source,
               primary_unit: r.primary_unit,
               cost_per_unit: r.cost_per_unit,
             })),

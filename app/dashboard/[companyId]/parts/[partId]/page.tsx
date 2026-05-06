@@ -51,6 +51,7 @@ import PartTransactionModal from '@/components/parts/PartTransactionModal';
 import PartTransactionHistoryTable from '@/components/parts/PartTransactionHistoryTable';
 import PartBomPanel from '@/components/parts/PartBomPanel';
 import PartWhereUsedPanel from '@/components/parts/PartWhereUsedPanel';
+import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
 
 const formatCurrency = (n: number | null): string => {
   if (n === null || !Number.isFinite(n)) return '—';
@@ -272,6 +273,11 @@ export default function PartDetailPage() {
   // attached).
   const showBomPanel = part.source === 'made' || bomLinesCount > 0;
   const showWhereUsed = bomParentsCount > 0;
+  // Procurement Pricing panel: bought parts only (cost is procured, not
+  // calculated). Sits between the Inventory panel and the Where Used panel
+  // per the iteration-2 plan. Made parts derive their cost from
+  // routing + BOM via Recalculate Cost — no procurement card to show.
+  const showProcurementPricingPanel = part.source === 'bought';
 
   const belowReorder =
     part.is_stocked &&
@@ -574,6 +580,40 @@ export default function PartDetailPage() {
                     // pricing card and recompute stale state.
                     setRefreshKey((k) => k + 1);
                     getStaleCostInfo(partId).then(setStaleInfo).catch(() => undefined);
+                  }}
+                />
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* Procurement Pricing panel — bought parts only. Sits between
+            Inventory and Where Used per the iteration-2 plan. The panel
+            renders default cost + per-vendor tier sheets and computes
+            sample-quantity costs via get_procurement_cost. */}
+        {showProcurementPricingPanel && (
+          <Grid size={{ xs: 12 }}>
+            <Card elevation={2}>
+              <CardContent>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Procurement Pricing
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Vendor tier sheets for purchasing this part. Tier sheets
+                  override the default cost for the matching quantity.
+                </Typography>
+                <Divider sx={{ my: 2 }} />
+                <PartProcurementPricingPanel
+                  partId={partId}
+                  companyId={companyId}
+                  defaultCost={part.cost_per_unit}
+                  primaryUnit={part.primary_unit}
+                  onChanged={() => {
+                    // Tier changes don't affect parts.cost_per_unit directly,
+                    // but they DO affect the rolled-up cost of any made
+                    // parents that BOM-include this part. Refresh the page so
+                    // the stale-cost check reruns and parents can be recalced.
+                    fetchPart();
                   }}
                 />
               </CardContent>

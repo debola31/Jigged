@@ -7,7 +7,7 @@ import type {
 } from '@/types/bom';
 
 const BOM_COLUMNS =
-  'id, parent_part_id, child_part_id, quantity, unit, sequence, notes, created_at, updated_at';
+  'id, parent_part_id, child_part_id, quantity, unit, sequence, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
   'id, part_name, description, primary_unit, cost_per_unit, is_stocked, source';
@@ -66,7 +66,6 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
         quantity: Number(row.quantity),
         unit: row.unit,
         sequence: row.sequence,
-        notes: row.notes,
         created_at: row.created_at,
         updated_at: row.updated_at,
         child_part: child,
@@ -144,7 +143,6 @@ export async function getBomParents(childPartId: string): Promise<BomLineWithPar
         quantity: Number(row.quantity),
         unit: row.unit,
         sequence: row.sequence,
-        notes: row.notes,
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_part: parent,
@@ -272,7 +270,6 @@ export async function addBomLine(
       quantity,
       unit: formData.unit.trim(),
       sequence,
-      notes: formData.notes.trim() || null,
     })
     .select(BOM_COLUMNS)
     .single();
@@ -329,7 +326,6 @@ export async function updateBomLine(
       child_part_id: formData.child_part_id,
       quantity,
       unit: formData.unit.trim(),
-      notes: formData.notes.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', bomLineId)

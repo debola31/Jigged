@@ -132,9 +132,4 @@ BOM_SCHEMA = {
         "required": True,
         "description": "Unit of measure for the BOM line (e.g., 'pcs', 'lbs', 'in')",
     },
-    "notes": {
-        "type": "string",
-        "required": False,
-        "description": "Notes about this BOM line (assembly instructions, etc.)",
-    },
 }

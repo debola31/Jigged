@@ -104,15 +104,6 @@ export default function PartWhereUsedPanel({ partId, companyId }: PartWhereUsedP
               >
                 {row.parent_part.part_name}
               </Link>
-              {row.notes && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 0.5 }}
-                >
-                  {row.notes}
-                </Typography>
-              )}
             </Box>
             <Box sx={{ minWidth: 140, textAlign: 'right' }}>
               <Typography variant="body2" color="text.secondary">

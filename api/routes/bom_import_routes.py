@@ -562,7 +562,6 @@ async def execute_import(
         child_column = reverse_mappings.get("child_part_name")
         quantity_column = reverse_mappings.get("quantity")
         unit_column = reverse_mappings.get("unit")
-        notes_column = reverse_mappings.get("notes")
 
         rows_to_insert: list[dict] = []
         errors: list[BomImportError] = []
@@ -611,11 +610,6 @@ async def execute_import(
                 "quantity": quantity,
                 "unit": unit,
             }
-
-            if notes_column:
-                notes = row.get(notes_column, "").strip()
-                if notes and notes.lower() != "undefined":
-                    bom_data["notes"] = notes
 
             rows_to_insert.append(bom_data)
 

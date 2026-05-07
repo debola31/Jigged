@@ -57,7 +57,7 @@ const formatQuantity = (n: number): string =>
  *
  * Lists the part's children (parts_bom rows where this part is parent), with
  * inline add/edit/remove. Each row shows the child part name (linked), the
- * child's PartTypeChip, the BOM-line quantity + unit, optional notes, and the
+ * child's PartTypeChip, the BOM-line quantity + unit, and the
  * cost contribution (qty × child.cost_per_unit). When the child's cost is
  * unknown, the contribution shows "—" with a hover hint — never a silent
  * zero, since that would understate the rolled-up cost without the user
@@ -187,15 +187,6 @@ export default function PartBomPanel({
                       {child.part_name}
                     </Link>
                   </Box>
-                  {row.notes && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: 'block', mt: 0.5 }}
-                    >
-                      {row.notes}
-                    </Typography>
-                  )}
                 </Box>
                 <Box sx={{ minWidth: 110, textAlign: 'right' }}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }}>

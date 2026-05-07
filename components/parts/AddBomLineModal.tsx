@@ -155,7 +155,7 @@ export default function AddBomLineModal({
 
     try {
       // Pre-check cycle before DB call. Only run when the child changed (or on
-      // create). Editing the qty/unit/notes can't introduce a new cycle.
+      // create). Editing the qty/unit can't introduce a new cycle.
       const childChanged = !existing || existing.child_part_id !== formData.child_part_id;
       if (childChanged) {
         const cycle = await checkBomCycle(parentPartId, formData.child_part_id);
@@ -287,16 +287,6 @@ export default function AddBomLineModal({
             sx={{ flex: 1 }}
           />
         </Box>
-
-        <TextField
-          fullWidth
-          label="Notes"
-          value={formData.notes}
-          onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-          multiline
-          rows={2}
-          placeholder="Optional notes about this BOM line"
-        />
       </DialogContent>
 
       <DialogActions>

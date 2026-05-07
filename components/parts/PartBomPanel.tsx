@@ -20,11 +20,21 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import NextLink from 'next/link';
-import { getBomForPart, deleteBomLine } from '@/utils/bomAccess';
-import type { BomLine, BomLineWithChildPart } from '@/types/bom';
+import {
+  getBomForPart,
+  deleteBomLine,
+  addBomLine,
+  updateBomLine,
+  checkBomCycle,
+} from '@/utils/bomAccess';
+import { getPartsForSelect } from '@/utils/partsAccess';
+import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import { partKind } from '@/types/part';
 import PartTypeChip from '@/components/parts/PartTypeChip';
-import AddBomLineModal from '@/components/parts/AddBomLineModal';
+import MaterialRowEditor, {
+  type MaterialEditorValue,
+  type PartOption,
+} from '@/components/parts/MaterialRowEditor';
 
 interface PartBomPanelProps {
   partId: string;
@@ -53,15 +63,18 @@ const formatQuantity = (n: number): string =>
   n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 /**
- * BOM editor on the part detail page.
+ * Materials editor on the part detail page.
  *
- * Lists the part's children (parts_bom rows where this part is parent), with
- * inline add/edit/remove. Each row shows the child part name (linked), the
- * child's PartTypeChip, the BOM-line quantity + unit, and the
- * cost contribution (qty × child.cost_per_unit). When the child's cost is
- * unknown, the contribution shows "—" with a hover hint — never a silent
- * zero, since that would understate the rolled-up cost without the user
- * noticing.
+ * Mirrors the routing-operations panel's inline-row pattern: "Add Material"
+ * appends an editor row at the end of the list, "Edit" swaps the read-only
+ * row for an editor in place. No modal — keeps the editing flow consistent
+ * with operations and avoids covering the rest of the page.
+ *
+ * Each saved row shows the child part name (linked), the child's
+ * PartTypeChip, the BOM-line quantity + unit, and the cost contribution
+ * (qty × child.cost_per_unit). When the child's cost is unknown, the
+ * contribution shows "—" with a hover hint — never a silent zero, since
+ * that would understate the rolled-up cost without the user noticing.
  *
  * After any mutation, reloads the BOM list and pings `onChanged` so the
  * parent page can rerun the stale-cost check.
@@ -76,8 +89,20 @@ export default function PartBomPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [editing, setEditing] = useState<BomLine | null>(null);
+  // Inline editor state machine — same shape as RoutingOperationsList.
+  const [editorState, setEditorState] = useState<
+    | { mode: 'closed' }
+    | { mode: 'add' }
+    | { mode: 'edit'; rowId: string }
+  >({ mode: 'closed' });
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Parts list for the picker, loaded once at panel mount and reused across
+  // every editor invocation. Excludes the parent part (DB also enforces this).
+  const [parts, setParts] = useState<PartOption[]>([]);
+  const [partsLoading, setPartsLoading] = useState(false);
+
   const [pendingDelete, setPendingDelete] = useState<BomLineWithChildPart | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -99,9 +124,102 @@ export default function PartBomPanel({
     fetchRows();
   }, [fetchRows]);
 
-  const handleSaved = async () => {
-    await fetchRows();
-    onChanged?.();
+  // Load parts list for the picker once. Re-fetches if partId or companyId
+  // changes (rare — only on detail-page navigation).
+  useEffect(() => {
+    let cancelled = false;
+    setPartsLoading(true);
+    getPartsForSelect(companyId, 'all')
+      .then((list) => {
+        if (cancelled) return;
+        setParts(
+          list
+            .filter((p) => p.id !== partId)
+            .map((p) => ({
+              id: p.id,
+              part_name: p.part_name,
+              description: p.description,
+              is_stocked: p.is_stocked,
+              source: p.source,
+              primary_unit: p.primary_unit,
+              cost_per_unit: p.cost_per_unit,
+            })),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load parts for material picker:', err);
+        setError('Failed to load parts list.');
+      })
+      .finally(() => {
+        if (!cancelled) setPartsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, partId]);
+
+  const closeEditor = () => {
+    setEditorState({ mode: 'closed' });
+    setEditorError(null);
+  };
+
+  const openAdd = () => {
+    setEditorError(null);
+    setEditorState({ mode: 'add' });
+  };
+
+  const openEdit = (rowId: string) => {
+    setEditorError(null);
+    setEditorState({ mode: 'edit', rowId });
+  };
+
+  const handleEditorSave = async (value: MaterialEditorValue) => {
+    if (!value.childPart) return;
+
+    const formData: BomLineFormData = {
+      child_part_id: value.childPart.id,
+      quantity: value.quantity,
+      unit: value.unit,
+    };
+
+    setEditorError(null);
+    setSaving(true);
+    try {
+      if (editorState.mode === 'add') {
+        // Cycle pre-check before insert. The DB trigger is the ultimate
+        // guard; the pre-check just gives a friendlier path-traced error.
+        const cycle = await checkBomCycle(partId, value.childPart.id);
+        if (cycle.would_create_cycle) {
+          setEditorError(
+            `Adding this material would create a cycle: ${cycle.cycle_path?.join(' → ') ?? '(path unavailable)'}.`,
+          );
+          setSaving(false);
+          return;
+        }
+        await addBomLine(partId, formData);
+      } else if (editorState.mode === 'edit') {
+        const existing = rows.find((r) => r.id === editorState.rowId);
+        if (!existing) {
+          setEditorError('Row no longer exists. Refresh and try again.');
+          setSaving(false);
+          return;
+        }
+        // Child is locked in edit mode (delete + re-add to swap), so no
+        // cycle check needed — qty/unit changes can't introduce a cycle.
+        await updateBomLine(existing.id, formData);
+      }
+      closeEditor();
+      await fetchRows();
+      onChanged?.();
+    } catch (err) {
+      // Surface the DB / access-layer error verbatim — includes the cycle
+      // trigger's message and the duplicate-child error from the unique
+      // index.
+      setEditorError(err instanceof Error ? err.message : 'Failed to save material.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -113,11 +231,35 @@ export default function PartBomPanel({
       await fetchRows();
       onChanged?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete BOM line.');
+      setError(err instanceof Error ? err.message : 'Failed to delete material.');
     } finally {
       setDeleting(false);
     }
   };
+
+  const editorOpen = editorState.mode !== 'closed';
+
+  // Build the editor's initial value from the row being edited.
+  const editingRow =
+    editorState.mode === 'edit'
+      ? rows.find((r) => r.id === editorState.rowId)
+      : null;
+  const editingInitial: MaterialEditorValue | undefined = editingRow
+    ? {
+        childPart:
+          parts.find((p) => p.id === editingRow.child_part_id) ?? {
+            id: editingRow.child_part.id,
+            part_name: editingRow.child_part.part_name,
+            description: editingRow.child_part.description,
+            is_stocked: editingRow.child_part.is_stocked,
+            source: editingRow.child_part.source,
+            primary_unit: editingRow.child_part.primary_unit,
+            cost_per_unit: editingRow.child_part.cost_per_unit,
+          },
+        quantity: String(editingRow.quantity),
+        unit: editingRow.unit,
+      }
+    : undefined;
 
   const totalCost = rows.reduce((sum, row) => {
     if (row.child_part.cost_per_unit === null) return sum;
@@ -139,10 +281,8 @@ export default function PartBomPanel({
             variant="outlined"
             size="small"
             startIcon={<AddIcon />}
-            onClick={() => {
-              setEditing(null);
-              setAddModalOpen(true);
-            }}
+            onClick={openAdd}
+            disabled={editorOpen || saving}
           >
             Add Material
           </Button>
@@ -153,10 +293,10 @@ export default function PartBomPanel({
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
           <CircularProgress size={28} />
         </Box>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !editorOpen ? (
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <Typography variant="body2" color="text.secondary">
-            No BOM lines yet. Add the parts consumed when this part is manufactured.
+            No materials yet. Add the parts consumed when this part is manufactured.
           </Typography>
         </Box>
       ) : (
@@ -165,6 +305,24 @@ export default function PartBomPanel({
             const child = row.child_part;
             const contribution =
               child.cost_per_unit === null ? null : row.quantity * child.cost_per_unit;
+
+            // Render an editor in place of the row when editing this one.
+            if (editorState.mode === 'edit' && editorState.rowId === row.id) {
+              return (
+                <MaterialRowEditor
+                  key={row.id}
+                  parts={parts}
+                  partsLoading={partsLoading}
+                  initial={editingInitial}
+                  lockChildPart
+                  saving={saving}
+                  error={editorError}
+                  onSave={handleEditorSave}
+                  onCancel={closeEditor}
+                />
+              );
+            }
+
             return (
               <Box
                 key={row.id}
@@ -217,33 +375,47 @@ export default function PartBomPanel({
                 {!readOnly && (
                   <Box sx={{ display: 'flex', gap: 0.5 }}>
                     <Tooltip title="Edit">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          setEditing(row);
-                          setAddModalOpen(true);
-                        }}
-                      >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => openEdit(row.id)}
+                          disabled={editorOpen || saving}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                     <Tooltip title="Remove">
-                      <IconButton
-                        size="small"
-                        onClick={() => setPendingDelete(row)}
-                        sx={{
-                          color: 'text.secondary',
-                          '&:hover': { color: 'error.main' },
-                        }}
-                      >
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => setPendingDelete(row)}
+                          disabled={editorOpen || saving}
+                          sx={{
+                            color: 'text.secondary',
+                            '&:hover': { color: 'error.main' },
+                          }}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                   </Box>
                 )}
               </Box>
             );
           })}
+
+          {editorState.mode === 'add' && (
+            <MaterialRowEditor
+              parts={parts}
+              partsLoading={partsLoading}
+              saving={saving}
+              error={editorError}
+              onSave={handleEditorSave}
+              onCancel={closeEditor}
+            />
+          )}
         </Stack>
       )}
 
@@ -270,24 +442,12 @@ export default function PartBomPanel({
         </Box>
       )}
 
-      <AddBomLineModal
-        open={addModalOpen}
-        onClose={() => {
-          setAddModalOpen(false);
-          setEditing(null);
-        }}
-        parentPartId={partId}
-        companyId={companyId}
-        existing={editing ?? undefined}
-        onSaved={handleSaved}
-      />
-
       <Dialog open={!!pendingDelete} onClose={deleting ? undefined : () => setPendingDelete(null)}>
-        <DialogTitle>Remove BOM line?</DialogTitle>
+        <DialogTitle>Remove material?</DialogTitle>
         <DialogContent>
           <Typography>
             Remove <strong>{pendingDelete?.child_part.part_name}</strong> from this BOM? This
-            cannot be undone, but you can re-add the line later.
+            cannot be undone, but you can re-add the material later.
           </Typography>
         </DialogContent>
         <DialogActions>

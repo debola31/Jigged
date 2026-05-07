@@ -144,7 +144,7 @@ export default function PartBomPanel({
               setAddModalOpen(true);
             }}
           >
-            Add BOM Line
+            Add Material
           </Button>
         </Box>
       )}

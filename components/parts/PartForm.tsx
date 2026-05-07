@@ -54,12 +54,14 @@ interface PartFormProps {
 /**
  * Create / edit form for a Part.
  *
- * Layout follows the chunk-11 spec: classification (Made/Bought + Stocked)
- * sits at the top and drives every conditional field below. Procurement cost
- * is shown only for source='bought'; UOM only when is_stocked=true; vendor
- * picker when source='bought' OR is_stocked=true. Unit conversions live on
- * the part detail page — they're managed inline on the Inventory panel and
- * never appear in this form (chunk 14).
+ * Layout follows the chunk-11 spec, refined in chunk 15: classification
+ * (Made/Bought + Stocked) sits at the top and drives every conditional
+ * field below. Procurement cost AND vendor picker are shown only for
+ * source='bought' (a stocked sub-assembly is made in-shop, no vendor).
+ * UOM only when is_stocked=true. No cost field at all for source='made' —
+ * cost comes from routing + BOM and is auto-recalculated on the detail
+ * page (chunk 18). Unit conversions live on the part detail page —
+ * managed inline on the Inventory panel and never in this form (chunk 14).
  *
  * The Made/Bought toggle uses `highContrastToggleSx` (shared with the
  * work-center kind toggle) so the selected state pops on the dark theme
@@ -300,9 +302,10 @@ export default function PartForm({
   });
 
   const showProcurementCost = formData.source === 'bought';
-  const showMadeCostHint = formData.source === 'made';
   const showUomField = formData.is_stocked;
-  const showVendorPicker = formData.source === 'bought' || formData.is_stocked;
+  // Preferred vendor is procurement-only — a stocked sub-assembly has no
+  // vendor because you make it yourself. Gated on source, not on stocked.
+  const showVendorPicker = formData.source === 'bought';
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
@@ -497,22 +500,8 @@ export default function PartForm({
         </Card>
       )}
 
-      {/* Made-only: cost-comes-from-routing hint, no input. */}
-      {showMadeCostHint && (
-        <Card elevation={2} sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 1 }}>
-              Cost
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Cost will be calculated from routing + BOM via Recalculate Cost
-              on the detail page after defining the routing.
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Vendor picker: shown for any sourced-or-stocked part. */}
+      {/* Vendor picker: procurement-only. Stocked-but-made (sub-assembly)
+          has no vendor because the shop makes it. */}
       {showVendorPicker && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>

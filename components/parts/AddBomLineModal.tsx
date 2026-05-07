@@ -187,7 +187,7 @@ export default function AddBomLineModal({
 
   return (
     <Dialog open={open} onClose={submitting ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{isEdit ? 'Edit BOM Line' : 'Add BOM Line'}</DialogTitle>
+      <DialogTitle>{isEdit ? 'Edit Material' : 'Add Material'}</DialogTitle>
       <DialogContent dividers>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>

@@ -450,7 +450,7 @@ export default function ImportBomPage() {
       case 'csv_duplicate':
         return 'Duplicate in CSV';
       case 'duplicate_bom_line':
-        return 'BOM Line Already Exists';
+        return 'Material Already Exists';
       case 'would_create_cycle':
         return 'Would Create Cycle';
       default:
@@ -568,7 +568,7 @@ export default function ImportBomPage() {
           <CardContent sx={{ p: 4, textAlign: 'center' }}>
             <CircularProgress size={64} sx={{ mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              Importing BOM Lines
+              Importing Materials
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Please wait while we import your data...
@@ -698,7 +698,7 @@ export default function ImportBomPage() {
           setCurrentStep('review');
         }}
         onConfirm={() => executeImport(true)}
-        entityName="BOM Lines"
+        entityName="Materials"
         conflictColumns={[
           { key: 'csv_parent', label: 'Parent Part' },
           { key: 'csv_child', label: 'Child Part' },

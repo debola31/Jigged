@@ -555,14 +555,16 @@ export default function PartDetailPage() {
           </Grid>
         )}
 
-        {/* Routing panel — visible when manufacturable. The PartRoutingPanel
-            handles its own empty state ("create routing" CTA). */}
+        {/* Operations panel — visible when manufacturable. There's a 1:1
+            relationship between part and routing, so the outer "Routing"
+            wrapper card was redundant nesting (chunk 15). The Operations
+            card sits at the same level as Inventory / BOM. */}
         {showRoutingPanel && (
           <Grid size={{ xs: 12, md: showInventoryPanel ? 6 : 7 }}>
             <Card elevation={2} sx={{ height: '100%' }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Routing
+                  Operations
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
                 <PartRoutingPanel
@@ -621,7 +623,7 @@ export default function PartDetailPage() {
             <Card elevation={2} sx={{ height: '100%' }}>
               <CardContent>
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  Bill of Materials
+                  Materials
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   Parts consumed when manufacturing this {part.part_name}.

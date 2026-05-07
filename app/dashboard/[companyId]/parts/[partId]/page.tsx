@@ -24,7 +24,6 @@ import Link from '@mui/material/Link';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -114,6 +113,12 @@ export default function PartDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [recalcLoading, setRecalcLoading] = useState(false);
+  // Surfaced inline next to the cost when an auto-recalc fails. The SQL
+  // function RAISES on missing labor rate / missing pricing / missing child
+  // cost / missing unit conversion — those messages are meaningful and we
+  // show them verbatim so the user knows exactly which row needs attention.
+  // Cleared on the next successful recalc.
+  const [recalcError, setRecalcError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{
@@ -184,37 +189,39 @@ export default function PartDetailPage() {
     fetchPart();
   }, [fetchPart]);
 
-  const handleRecalculate = async () => {
+  /**
+   * Auto-recalculate the part's cost. Fires automatically after every
+   * routing or BOM mutation (chunk 18) — no manual button to remember.
+   * Silent on success: refreshes the cost display and clears any prior
+   * error chip. On failure, shows an inline warning chip next to the cost
+   * with the SQL function's error message verbatim — never swallowed.
+   *
+   * Doesn't cascade up the BOM tree on success. The stale-cost badge
+   * mechanism handles that case: when this part's cost changes, parents
+   * that include it in their BOMs stale-badge their way to "needs
+   * recalc" without us forcing a recursive recalc on what could be 159
+   * parents (Contour's "0330T" case).
+   */
+  const triggerAutoRecalc = useCallback(async () => {
+    if (recalcLoading) return; // simple debounce — drop overlapping requests
     setRecalcLoading(true);
     try {
-      const newCost = await recalculatePartCost(partId);
-      setSnackbar({
-        open: true,
-        message: `Cost recalculated: ${formatCurrency(newCost)}`,
-        severity: 'success',
-      });
+      await recalculatePartCost(partId);
+      setRecalcError(null);
       await fetchPart();
-      // Pricing tiers and cost breakdown derive from the part cost — refresh
-      // them too.
+      // Pricing tiers and cost breakdown derive from the part cost —
+      // refresh them too.
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      // Surface the SQL function's error verbatim — no swallowing. The
-      // function RAISEs on missing labor rate, missing child cost, missing
-      // unit conversion. These messages are meaningful to the shop owner and
-      // tell them exactly which row needs attention.
       const message =
         err instanceof Error && err.message
           ? err.message
           : 'Cost recalculation failed.';
-      setSnackbar({
-        open: true,
-        message,
-        severity: 'error',
-      });
+      setRecalcError(message);
     } finally {
       setRecalcLoading(false);
     }
-  };
+  }, [partId, fetchPart, recalcLoading]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -346,67 +353,60 @@ export default function PartDetailPage() {
         </Alert>
       )}
 
-      {/* Header card: type chip + name, optional stale-cost badge, and the
-          recalculate-cost action when applicable. Mirrors the Vendor detail
-          page header card. */}
+      {/* Header card: type chip + name, optional stale-cost badge.
+          The manual Recalculate Cost button was removed in chunk 18 —
+          recalc fires automatically after every routing or BOM mutation.
+          The stale-cost badge stays for the descendants-changed case
+          (when something deeper in the BOM tree changed without a direct
+          edit to this part); clicking it triggers a recalc. Inline error
+          surface near the cost in the Inventory panel handles
+          recalc failures (missing labor rate, missing child cost, etc.).
+          Mirrors the Vendor detail page header card. */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 2,
-              flexWrap: 'wrap',
-              justifyContent: 'space-between',
-            }}
-          >
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                <PartTypeChip kind={partKind(part)} />
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  {part.part_name}
-                </Typography>
-              </Box>
-              {part.description && (
-                <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
-                  {part.description}
-                </Typography>
-              )}
-              {staleInfo.is_stale && (
-                <Tooltip
-                  title={`${staleInfo.stale_descendants} BOM descendant${staleInfo.stale_descendants === 1 ? '' : 's'} ${staleInfo.stale_descendants === 1 ? 'has' : 'have'} changed since this part's cost was last calculated. Click to recalculate.`}
-                >
-                  <Chip
-                    icon={<WarningAmberIcon />}
-                    label="Cost may be stale"
-                    color="warning"
-                    onClick={handleRecalculate}
-                    disabled={recalcLoading}
-                    sx={{ mt: 1.5, fontWeight: 500, cursor: 'pointer' }}
-                  />
-                </Tooltip>
-              )}
-            </Box>
-
-            {part.source === 'made' && (
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <Button
-                  variant="contained"
-                  startIcon={
-                    recalcLoading ? (
-                      <CircularProgress size={16} color="inherit" />
-                    ) : (
-                      <RefreshIcon />
-                    )
-                  }
-                  onClick={handleRecalculate}
-                  disabled={recalcLoading}
-                >
-                  {recalcLoading ? 'Recalculating...' : 'Recalculate Cost'}
-                </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <PartTypeChip kind={partKind(part)} />
+            <Typography variant="h5" sx={{ fontWeight: 600 }}>
+              {part.part_name}
+            </Typography>
+            {recalcLoading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary' }}>
+                <CircularProgress size={14} />
+                <Typography variant="caption">Recalculating cost…</Typography>
               </Box>
             )}
           </Box>
+          {part.description && (
+            <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+              {part.description}
+            </Typography>
+          )}
+          {staleInfo.is_stale && (
+            <Tooltip
+              title={`${staleInfo.stale_descendants} BOM descendant${staleInfo.stale_descendants === 1 ? '' : 's'} ${staleInfo.stale_descendants === 1 ? 'has' : 'have'} changed since this part's cost was last calculated. Click to recalculate.`}
+            >
+              <Chip
+                icon={<WarningAmberIcon />}
+                label="Cost may be stale"
+                color="warning"
+                onClick={triggerAutoRecalc}
+                disabled={recalcLoading}
+                sx={{ mt: 1.5, fontWeight: 500, cursor: 'pointer' }}
+              />
+            </Tooltip>
+          )}
+          {recalcError && (
+            <Tooltip title={recalcError}>
+              <Chip
+                icon={<WarningAmberIcon />}
+                label="Cost couldn't be calculated"
+                color="error"
+                onClick={triggerAutoRecalc}
+                disabled={recalcLoading}
+                sx={{ mt: 1.5, ml: staleInfo.is_stale ? 1 : 0, fontWeight: 500, cursor: 'pointer' }}
+              />
+            </Tooltip>
+          )}
         </CardContent>
       </Card>
 
@@ -571,10 +571,13 @@ export default function PartDetailPage() {
                   companyId={companyId}
                   partId={partId}
                   onRoutingSaved={() => {
-                    // Routing changes can shift cost rollups in the BOM tree
-                    // (this part's cost might affect its parents). Refresh the
-                    // pricing card and recompute stale state.
-                    setRefreshKey((k) => k + 1);
+                    // Routing changes can shift cost rollups. Auto-recalc
+                    // (chunk 18) refreshes parts.cost_per_unit silently;
+                    // failures surface as the inline error chip in the
+                    // header. Pricing tiers + breakdown are refreshed by
+                    // triggerAutoRecalc via setRefreshKey. Stale state is
+                    // re-checked next mount/refetch.
+                    triggerAutoRecalc();
                     getStaleCostInfo(partId).then(setStaleInfo).catch(() => undefined);
                   }}
                 />
@@ -633,10 +636,13 @@ export default function PartDetailPage() {
                   partId={partId}
                   companyId={companyId}
                   onChanged={() => {
-                    // BOM changed — re-check stale state and refresh the
-                    // header counts (bom_lines_count) so panels mount/unmount
-                    // appropriately.
-                    fetchPart();
+                    // BOM changed — auto-recalc (chunk 18) handles cost
+                    // refresh + cleared error chip. fetchPart inside
+                    // triggerAutoRecalc reloads bom_lines_count so panels
+                    // mount/unmount appropriately. Re-check stale state in
+                    // case a descendant became newer than this part.
+                    triggerAutoRecalc();
+                    getStaleCostInfo(partId).then(setStaleInfo).catch(() => undefined);
                   }}
                 />
               </CardContent>

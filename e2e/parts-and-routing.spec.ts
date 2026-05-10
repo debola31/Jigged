@@ -43,8 +43,11 @@ test.describe('Parts and Routing workflow', () => {
     // (`/parts/{partId}?from=parts`). Anchor on the partId path segment.
     await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+/, { timeout: 15_000 });
 
-    // Verify the part was created
-    await expect(page.getByText(partName)).toBeVisible();
+    // Verify the part was created. The part detail page renders the part
+    // name in the page heading AND inside the BOM panel's descriptive copy
+    // ("Parts consumed when manufacturing this <name>."), so a bare
+    // getByText trips strict mode — scope to the heading.
+    await expect(page.getByRole('heading', { name: partName })).toBeVisible();
 
     // ── Step 2: Add an operation via the inline routing editor ──
     // The routing panel is embedded on the part detail page — no navigation needed.

@@ -265,6 +265,90 @@ pnpm build
 
 ---
 
+## Running tests
+
+The repo has three test runners. Use these directly — don't invent
+new harness commands.
+
+```bash
+# Frontend unit / component tests (Vitest, watch mode)
+pnpm test
+
+# Vitest: run once (CI-style), with coverage, or via UI
+pnpm exec vitest run
+pnpm test:coverage
+pnpm test:ui
+
+# Backend API tests (pytest; from /api)
+cd api && pytest                      # full suite
+cd api && pytest tests/unit/          # only unit tests
+cd api && pytest -m integration       # integration marker (needs DB)
+
+# Type-check the whole frontend (no emit)
+pnpm exec tsc --noEmit -p tsconfig.json
+
+# Lint
+pnpm lint
+
+# E2E (Playwright)
+pnpm test:e2e                                                 # full suite
+pnpm test:e2e:ui                                              # interactive UI mode
+pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list  # one spec, clean output
+pnpm exec playwright test e2e/<spec>.spec.ts --headed --debug # step-through
+```
+
+### E2E setup (only needed once per machine)
+
+```bash
+# Install the Chromium build Playwright uses
+pnpm exec playwright install chromium
+```
+
+E2E reads two env files. Both are gitignored.
+
+- `.env.test.local` (repo root) — `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`,
+  `E2E_TEST_COMPANY_ID`. Loaded by `playwright.config.ts`.
+- `e2e/.env.test.local` — `SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  (same values as `.env.local`). Loaded by `e2e/global-setup.ts` for the
+  per-run fixture seed.
+
+`e2e/global-setup.ts` signs in as the test user via `signInWithPassword`
+and writes seed rows through RLS — no service-role key is plumbed
+through CI. The test user must already have a `user_company_access`
+row for `E2E_TEST_COMPANY_ID` (any role works).
+
+Playwright auto-launches `pnpm dev` on `localhost:3000` when not in CI
+(see `playwright.config.ts`); reuses an existing dev server if one is
+already running.
+
+### E2E gotchas
+
+- **`csv-import` spec skips in CI** via `test.skip(!!process.env.CI)`.
+  Locally it requires the FastAPI backend (`cd api && python index.py`)
+  for AI column analysis — without it, the spec fails with
+  `Failed to fetch (localhost:8000)`. Filter with
+  `--grep-invert "CSV Import"` if you don't want to run it.
+- **`quote-to-job` runtime-skips** when the test part has no pricing
+  tiers. The seed doesn't create tiers, so it skips by default. To
+  exercise the full convert-to-job flow, add `part_pricing_tiers` rows
+  in `e2e/global-setup.ts`.
+- **CI mirror locally:** `pnpm exec playwright test --grep-invert "CSV Import"`
+  reproduces the CI-equivalent outcome (4 passed + 1 runtime-skip).
+- Don't pass `CI=1` to simulate CI locally — `playwright.config.ts`
+  disables the auto-launched dev server in CI mode, so nothing serves
+  on `localhost:3000`.
+
+### Where the detailed docs live
+
+- [docs/testing/](docs/testing/) — strategy + guides per layer
+  ([README](docs/testing/README.md), [e2e.md](docs/testing/e2e.md),
+  [frontend-setup.md](docs/testing/frontend-setup.md),
+  [backend-setup.md](docs/testing/backend-setup.md),
+  [cicd.md](docs/testing/cicd.md))
+- [e2e/README.md](e2e/README.md) — env contract + what the seed creates
+
+---
+
 ## Documentation
 
 Product documentation is version-controlled in the `/docs` folder.

@@ -30,14 +30,18 @@ interface JobOperationRow {
   estimated_run_minutes_per_unit: number | null;
 }
 
+interface JobPartRow {
+  quantity: number | null;
+  job_operations: JobOperationRow[] | null;
+}
+
 interface JobRow {
   id: string;
   job_number: string | null;
   status: string;
   created_at: string | null;
   customers: { name: string | null } | null;
-  quotes: { quantity: number | null } | null;
-  job_operations: JobOperationRow[] | null;
+  job_parts: JobPartRow[] | null;
 }
 
 interface InventoryRow {
@@ -57,8 +61,10 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
       `
       id, job_number, status, created_at,
       customers!left(name),
-      quotes!jobs_quote_id_fkey(quantity),
-      job_operations(id, status, estimated_setup_minutes, estimated_run_minutes_per_unit)
+      job_parts(
+        quantity,
+        job_operations(id, status, estimated_setup_minutes, estimated_run_minutes_per_unit)
+      )
       `
     )
     .eq('company_id', companyId)
@@ -71,20 +77,23 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
   const atRisk: AtRiskJob[] = [];
 
   for (const job of jobs) {
-    const operations = job.job_operations ?? [];
-    if (operations.length === 0) continue;
-
-    const quantity = Number(job.quotes?.quantity ?? 1) || 1;
-    const totalOps = operations.length;
-    const completedOps = operations.filter((op) => op.status === 'completed').length;
-    const pctComplete = totalOps > 0 ? (completedOps / totalOps) * 100 : 0;
-
+    let totalOps = 0;
+    let completedOps = 0;
     let totalEstimatedHours = 0;
-    for (const op of operations) {
-      const setupMin = Number(op.estimated_setup_minutes ?? 0) || 0;
-      const runMin = Number(op.estimated_run_minutes_per_unit ?? 0) || 0;
-      totalEstimatedHours += (setupMin + runMin * quantity) / 60;
+
+    for (const part of job.job_parts ?? []) {
+      const partQty = Number(part.quantity ?? 1) || 1;
+      for (const op of part.job_operations ?? []) {
+        totalOps++;
+        if (op.status === 'completed') completedOps++;
+        const setupMin = Number(op.estimated_setup_minutes ?? 0) || 0;
+        const runMin = Number(op.estimated_run_minutes_per_unit ?? 0) || 0;
+        totalEstimatedHours += (setupMin + runMin * partQty) / 60;
+      }
     }
+
+    if (totalOps === 0) continue;
+    const pctComplete = (completedOps / totalOps) * 100;
 
     const createdMs = job.created_at ? Date.parse(job.created_at) : NaN;
     const elapsedHours = Number.isFinite(createdMs)

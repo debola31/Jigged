@@ -245,7 +245,7 @@ async function getRevenueInRange(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('jobs')
-    .select('id, quotes!jobs_quote_id_fkey(total_price)')
+    .select('id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))')
     .eq('company_id', companyId)
     .eq('status', 'shipped')
     .gte('shipped_at', startIso)
@@ -253,12 +253,14 @@ async function getRevenueInRange(
 
   if (error) throw error;
 
-  return (data || []).reduce(
-    (sum: number, job: { quotes: { total_price: number | null } | null }) => {
-      return sum + (job.quotes?.total_price || 0);
-    },
-    0
-  );
+  type Row = {
+    quotes: { quote_line_items: { total_price: number | null }[] | null } | null;
+  };
+
+  return ((data || []) as unknown as Row[]).reduce((sum, job) => {
+    const lines = job.quotes?.quote_line_items ?? [];
+    return sum + lines.reduce((s, li) => s + (li.total_price || 0), 0);
+  }, 0);
 }
 
 async function getCompletedJobsInRange(

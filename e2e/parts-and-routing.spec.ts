@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { navigateTo } from './helpers/navigation';
+import { navigateTo, waitForGridLoaded } from './helpers/navigation';
 
 /**
  * E2E: Parts + Routing workflow
@@ -21,23 +21,33 @@ test.describe('Parts and Routing workflow', () => {
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);
 
-    await page.getByRole('button', { name: /New Part/i }).click();
-    await expect(page).toHaveURL(/\/parts\/new/);
+    // "Add Part" now opens an inline PartFormModal instead of navigating to
+    // /parts/new — scope all field interactions to the dialog so we don't
+    // accidentally match the (off-screen) parts list behind it.
+    await page.getByRole('button', { name: /Add Part/i }).click();
+    const partFormDialog = page.getByRole('dialog');
+    await expect(partFormDialog).toBeVisible();
 
-    // Fill part name (required)
-    await page.getByLabel(/Part Name/i).fill(partName);
+    // Fill part name (required) — Source defaults to 'made' (the modal's
+    // default), which is what the rest of this spec needs to exercise the
+    // routing panel.
+    await partFormDialog.getByLabel(/Part Name/i).fill(partName);
 
     // Fill description
-    await page.getByLabel(/Description/i).fill(partDescription);
+    await partFormDialog.getByLabel(/Description/i).fill(partDescription);
 
-    // Save the part
-    await page.getByRole('button', { name: /^Save$/i }).click();
+    // Submit — primary action is "Create" (was "Save" in the route-based form).
+    await partFormDialog.getByRole('button', { name: /^Create$/i }).click();
 
-    // Should redirect to the part detail page (not /parts/new)
-    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });
+    // After creation the modal closes and we land on the part detail page
+    // (`/parts/{partId}?from=parts`). Anchor on the partId path segment.
+    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+/, { timeout: 15_000 });
 
-    // Verify the part was created
-    await expect(page.getByText(partName)).toBeVisible();
+    // Verify the part was created. The part detail page renders the part
+    // name in the page heading AND inside the BOM panel's descriptive copy
+    // ("Parts consumed when manufacturing this <name>."), so a bare
+    // getByText trips strict mode — scope to the heading.
+    await expect(page.getByRole('heading', { name: partName })).toBeVisible();
 
     // ── Step 2: Add an operation via the inline routing editor ──
     // The routing panel is embedded on the part detail page — no navigation needed.
@@ -53,21 +63,24 @@ test.describe('Parts and Routing workflow', () => {
     // editor row at the bottom of the Operations list (no dialog).
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // Open the Work center autocomplete and select the first available option.
-    // (Renamed from "Operation" in PR 1 — operations now reference work_centers.)
+    // Open the Work center autocomplete. Pick `E2E Internal WC` explicitly
+    // — the seed (e2e/global-setup.ts) creates both an Internal and an
+    // External WC, alphabetical sort puts the External one first, and
+    // selecting an external WC reshapes the editor to vendor-price fields
+    // (no Cycle minutes per unit), which would break the next assertion.
     await page.getByLabel(/^Work center$/).click();
 
     const listbox = page.getByRole('listbox');
-    const firstOption = listbox.getByRole('option').first();
-    const hasOperations = await firstOption
+    const internalWcOption = listbox.getByRole('option', { name: /E2E Internal WC/ });
+    const hasInternalWc = await internalWcOption
       .isVisible({ timeout: 10_000 })
       .catch(() => false);
 
-    if (!hasOperations) {
-      test.skip(true, 'No work centers exist in test company');
+    if (!hasInternalWc) {
+      test.skip(true, 'E2E Internal WC missing from test company (seed should have created it)');
     }
 
-    await firstOption.click();
+    await internalWcOption.click();
 
     // Editor requires at least one of cycle / setup minutes before save will
     // commit (see RoutingOperationRowEditor validation). Fill cycle minutes.
@@ -92,9 +105,21 @@ test.describe('Parts and Routing workflow', () => {
     // ── Step 4: Navigate back to parts list and verify ──
 
     await navigateTo(page, 'Parts');
-    await expect(page).toHaveURL(/\/parts/);
+    // The /\/parts/ pattern would also match /parts/{id}; require the path
+    // to end at /parts so we know we actually left the detail page.
+    await expect(page).toHaveURL(/\/parts(?:\?|$)/);
 
-    // The part should appear in the list
-    await expect(page.getByText(partName)).toBeVisible({ timeout: 10_000 });
+    // Wait for AG Grid to finish loading before asserting on cell content —
+    // otherwise the assertion races against the loading overlay and trips
+    // strict mode against any DOM Next.js still has cached from the
+    // previous /parts/{id} route.
+    await waitForGridLoaded(page);
+
+    // The part should appear in the grid. Scope the text query to the grid
+    // wrapper to avoid strict-mode collisions with any cached/lingering DOM
+    // from the previous route.
+    await expect(
+      page.locator('.ag-root-wrapper').getByText(partName).first()
+    ).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -37,6 +37,14 @@ jobs:
           E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
           E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          # Seed env for e2e/global-setup.ts (added in bfc4938 but never
+          # wired up, which is why the suite has been failing with "Cannot
+          # seed E2E fixtures — missing env vars"). global-setup signs in as
+          # E2E_TEST_EMAIL and writes through RLS, so only the public anon
+          # key is needed — no service-role secret in CI.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          E2E_TEST_COMPANY_ID: ${{ secrets.E2E_TEST_COMPANY_ID }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4

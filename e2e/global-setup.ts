@@ -7,20 +7,33 @@
  * of: ≥1 vendor, ≥1 internal + ≥1 external work_center, ≥1 customer, ≥1
  * manufacturable part with a routing op, ≥1 stockable raw, ≥1 BOM child.
  *
- * Idempotency strategy: every seeded row carries a sentinel marker via the
- * `legacy_id` column (e.g. legacy_id='E2E_SEED_v1'). On each run we look up by
- * marker and skip the insert if it exists. Re-runs are safe.
+ * Idempotency strategy: every seeded row carries a per-row sentinel via the
+ * `legacy_id` column shaped as `${E2E_SEED_MARKER}:${stable_name}` (e.g.
+ * `E2E_SEED_v1:E2E-MFG-001`). The per-row suffix is required because
+ * `parts_legacy_id_unique_per_company` (and the equivalent on vendors)
+ * forbids two rows in one company sharing the same legacy_id. Lookups
+ * happen by stable name (which also has UNIQUE-per-company constraints),
+ * so the marker is purely for teardown — `legacy_id LIKE 'E2E_SEED_v1%'`
+ * cleanly scopes deletes to seeded rows. Re-runs are safe.
  *
- * Why service role: this script bypasses RLS so it can write into the test
- * company without going through the auth flow. The service role key MUST
- * never be loaded into a browser bundle — it's only ever used here, in the
- * Node-side global setup.
+ * Why we sign in as the test user (and not service-role): every table we
+ * write to (vendors, work_centers, customers, parts, routings,
+ * routing_operations, parts_bom) has an RLS policy of the form
+ *   company_id IN (SELECT company_id FROM user_company_access WHERE user_id = auth.uid())
+ * So an authenticated user with access to E2E_TEST_COMPANY_ID can do every
+ * insert legitimately, no RLS bypass required. Avoiding the service-role key
+ * shrinks the CI secret surface — if a future seed step actually needs
+ * admin powers (e.g. seeding auth.users or RLS-immune tables), reintroduce
+ * the service-role client at that boundary only, not for the whole script.
  *
  * Env contract:
- *   SUPABASE_URL                — Supabase project URL (e.g. staging)
- *   SUPABASE_SERVICE_ROLE_KEY   — service role JWT (bypasses RLS)
- *   E2E_TEST_COMPANY_ID         — UUID of the company the E2E user belongs to
- *   E2E_TEST_USER_ID            — UUID of the E2E test user
+ *   SUPABASE_URL                       — Supabase project URL (e.g. staging)
+ *   NEXT_PUBLIC_SUPABASE_ANON_KEY      — public key the browser already uses
+ *   E2E_TEST_COMPANY_ID                — UUID of the company the E2E user belongs to
+ *   E2E_TEST_EMAIL / E2E_TEST_PASSWORD — credentials for sign-in (also used by auth.setup.ts)
+ *
+ * The E2E user must have a `user_company_access` row for E2E_TEST_COMPANY_ID
+ * (any role — operator/user/admin all satisfy the RLS predicate).
  *
  * If any are missing we exit 1 — silent skipping would leave specs failing
  * with confusing "Autocomplete is empty" timeouts.
@@ -34,9 +47,14 @@ import path from 'path';
 // E2E credentials once.
 dotenv.config({ path: path.resolve(__dirname, '.env.test.local') });
 
-/** Sentinel that tags every row seeded by this script. Bump version when
- *  the seed shape changes so old rows can be migrated cleanly. */
+/** Sentinel prefix that tags every row seeded by this script. Each row's
+ *  legacy_id is `${E2E_SEED_MARKER}:${stable_name}` so the per-company
+ *  legacy_id UNIQUE constraint is satisfied. Bump version when the seed
+ *  shape changes so old rows fall out of the prefix match cleanly. */
 export const E2E_SEED_MARKER = 'E2E_SEED_v1';
+
+/** Build the per-row legacy_id tag for a given stable name. */
+const seedTag = (name: string) => `${E2E_SEED_MARKER}:${name}`;
 
 /** Customer name we look up to detect prior seeds (customers has no
  *  legacy_id column on its schema, so we scope by name + company). */
@@ -52,22 +70,29 @@ const PART_SUB_NAME = 'E2E-SUB-001';
 
 interface SeedEnv {
   url: string;
-  serviceRoleKey: string;
+  anonKey: string;
   companyId: string;
-  userId: string;
+  email: string;
+  password: string;
 }
 
 function readEnvOrExit(): SeedEnv {
   const missing: string[] = [];
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.SUPABASE_PUBLISHABLE_KEY ??
+    '';
   const companyId = process.env.E2E_TEST_COMPANY_ID ?? '';
-  const userId = process.env.E2E_TEST_USER_ID ?? '';
+  const email = process.env.E2E_TEST_EMAIL ?? '';
+  const password = process.env.E2E_TEST_PASSWORD ?? '';
 
   if (!url) missing.push('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)');
-  if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!anonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)');
   if (!companyId) missing.push('E2E_TEST_COMPANY_ID');
-  if (!userId) missing.push('E2E_TEST_USER_ID');
+  if (!email) missing.push('E2E_TEST_EMAIL');
+  if (!password) missing.push('E2E_TEST_PASSWORD');
 
   if (missing.length > 0) {
     console.error(
@@ -78,13 +103,25 @@ function readEnvOrExit(): SeedEnv {
     process.exit(1);
   }
 
-  return { url, serviceRoleKey, companyId, userId };
+  return { url, anonKey, companyId, email, password };
 }
 
-function makeAdminClient({ url, serviceRoleKey }: SeedEnv): SupabaseClient {
-  return createClient(url, serviceRoleKey, {
+async function makeAuthenticatedClient(env: SeedEnv): Promise<SupabaseClient> {
+  const supabase = createClient(env.url, env.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  const { error } = await supabase.auth.signInWithPassword({
+    email: env.email,
+    password: env.password,
+  });
+  if (error) {
+    throw new Error(
+      `[e2e/global-setup] Failed to sign in as ${env.email}: ${error.message}. ` +
+        `The E2E test user must exist on this Supabase project and have a ` +
+        `user_company_access row for E2E_TEST_COMPANY_ID.`,
+    );
+  }
+  return supabase;
 }
 
 /**
@@ -104,13 +141,17 @@ async function ensureVendor(
   if (lookupErr) throw new Error(`vendor lookup failed: ${lookupErr.message}`);
   if (existing) return existing.id;
 
+  // The vendors table dropped contact_name/email/phone/notes in
+  // 20260504_vendor_contacts_and_drop_notes — contacts now live on a
+  // separate vendor_contacts row. None of the current specs touch vendor
+  // contact info, so we don't seed a vendor_contacts row here; if a spec
+  // needs one later, add an ensureVendorContact helper alongside this.
   const { data, error } = await supabase
     .from('vendors')
     .insert({
       company_id: companyId,
       name: VENDOR_NAME,
-      contact_email: 'e2e-vendor@example.com',
-      legacy_id: E2E_SEED_MARKER,
+      legacy_id: seedTag(VENDOR_NAME),
     })
     .select('id')
     .single();
@@ -217,7 +258,7 @@ async function ensurePart(
       primary_unit: spec.primary_unit,
       quantity: spec.quantity,
       cost_per_unit: spec.cost_per_unit,
-      legacy_id: E2E_SEED_MARKER,
+      legacy_id: seedTag(spec.part_name),
     })
     .select('id')
     .single();
@@ -312,7 +353,7 @@ async function ensureBomEdge(
 
 export default async function globalSetup(): Promise<void> {
   const env = readEnvOrExit();
-  const supabase = makeAdminClient(env);
+  const supabase = await makeAuthenticatedClient(env);
 
   // eslint-disable-next-line no-console
   console.log(`[e2e/global-setup] Seeding fixtures into company ${env.companyId}…`);

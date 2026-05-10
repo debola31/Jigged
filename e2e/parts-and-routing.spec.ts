@@ -21,7 +21,7 @@ test.describe('Parts and Routing workflow', () => {
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);
 
-    await page.getByRole('button', { name: /New Part/i }).click();
+    await page.getByRole('button', { name: /Add Part/i }).click();
     await expect(page).toHaveURL(/\/parts\/new/);
 
     // Fill part name (required)

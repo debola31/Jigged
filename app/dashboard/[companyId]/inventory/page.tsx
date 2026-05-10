@@ -16,11 +16,14 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
-import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
-import InventoryIcon from '@mui/icons-material/Inventory2';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -29,6 +32,7 @@ import type {
   GridReadyEvent,
   SelectionChangedEvent,
   SortChangedEvent,
+  ICellRendererParams,
   RowClickedEvent,
   CellKeyDownEvent,
 } from 'ag-grid-community';
@@ -36,91 +40,123 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllInventoryItems, bulkDeleteInventoryItems } from '@/utils/inventoryAccess';
+import { getStockedParts, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import type { InventoryItem } from '@/types/inventory';
+import PartFormModal from '@/components/parts/PartFormModal';
+import StockStatusChip, {
+  deriveStockStatus,
+  type StockStatus,
+} from '@/components/inventory/StockStatusChip';
+import type { Part } from '@/types/part';
 
+type InventoryRow = Part;
+type StatusFilter = 'all' | StockStatus;
+
+/**
+ * Inventory list page. Companion to the Parts list page.
+ *
+ * Filter: is_stocked=true. Both raw materials and sub-assemblies appear here.
+ * Custom-made parts that aren't tracked on hand do not.
+ *
+ * Detail-page navigation: row clicks append `?from=inventory` so the back link
+ * on the part detail page returns here. The Add Item flow opens PartFormModal
+ * defaulted to is_stocked=true + source='bought' (the most common stocked
+ * case); the user can toggle source to Made on the form to create a
+ * sub-assembly directly.
+ */
 export default function InventoryPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [rows, setRows] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
+  // Status is computed from quantity + reorder_point at render time, so the
+  // filter applies client-side after the fetch. Cheap for the row counts a
+  // single shop will hold; if that grows, push the filter into the query.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
-    field: 'name',
+    field: 'part_name',
     sort: 'asc',
   });
-
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const gridRef = useRef<AgGridReact<InventoryItem>>(null);
+  const gridRef = useRef<AgGridReact<InventoryRow>>(null);
 
-  const [deleteDialog, setDeleteDialog] = useState<{
-    open: boolean;
-    type: 'single' | 'bulk';
-    itemId?: string;
-    itemName?: string;
-  }>({ open: false, type: 'single' });
+  const [addModalOpen, setAddModalOpen] = useState(false);
+
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
 
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'error' | 'success';
+  }>({
     open: false,
     message: '',
     severity: 'error',
   });
 
-  // Debounce search
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchDebounced(search);
-    }, 300);
+    const timer = setTimeout(() => setSearchDebounced(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch inventory items
-  const fetchItems = useCallback(async () => {
+  const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getAllInventoryItems(
+      const data = await getStockedParts(
         companyId,
         searchDebounced,
         sortModel.field,
-        sortModel.sort
+        sortModel.sort,
       );
-      setItems(data);
+      setRows(data);
     } catch (error) {
       console.error('Error fetching inventory:', error);
+      setSnackbar({
+        open: true,
+        message: error instanceof Error ? error.message : 'Failed to load inventory',
+        severity: 'error',
+      });
     } finally {
       setLoading(false);
     }
   }, [companyId, searchDebounced, sortModel]);
 
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+    fetchInventory();
+  }, [fetchInventory]);
 
-  // Clear selection when search changes
   useEffect(() => {
     setSelectedIds([]);
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced]);
+  }, [searchDebounced, statusFilter]);
+
+  // Apply the status filter client-side so the grid (and the gridHeight /
+  // empty-state checks below) all see the same row set. Status is derived
+  // from quantity + reorder_point, not stored, so there's nothing to push
+  // server-side without duplicating the derivation in SQL.
+  const filteredRows = useMemo(() => {
+    if (statusFilter === 'all') return rows;
+    return rows.filter(
+      (r) => deriveStockStatus(r.quantity, r.reorder_point) === statusFilter,
+    );
+  }, [rows, statusFilter]);
 
   const gridHeight = useMemo(() => {
-    if (loading || items.length === 0) return 600;
-    const headerHeight = 56;
-    const rowHeight = 52;
-    const paginationHeight = 56;
-    const displayedRows = Math.min(items.length, 25);
-    return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
-  }, [loading, items.length]);
+    if (loading || filteredRows.length === 0) return 600;
+    const displayedRows = Math.min(filteredRows.length, 25);
+    return Math.max(56 + 52 * displayedRows + 56, 400);
+  }, [loading, filteredRows.length]);
 
-  const handleGridReady = (event: GridReadyEvent<InventoryItem>) => {
+  const handleGridReady = (event: GridReadyEvent<InventoryRow>) => {
     event.api.applyColumnState({
-      state: [{ colId: 'name', sort: 'asc' }],
+      state: [{ colId: 'part_name', sort: 'asc' }],
       defaultState: { sort: null },
     });
   };
@@ -128,18 +164,17 @@ export default function InventoryPage() {
   const handleSortChanged = (event: SortChangedEvent) => {
     const columnState = event.api.getColumnState();
     const sortedColumn = columnState.find((col) => col.sort !== null);
-
     if (sortedColumn && sortedColumn.sort) {
       setSortModel({
-        field: sortedColumn.colId || 'name',
+        field: sortedColumn.colId || 'part_name',
         sort: sortedColumn.sort as 'asc' | 'desc',
       });
     } else {
-      setSortModel({ field: 'name', sort: 'asc' });
+      setSortModel({ field: 'part_name', sort: 'asc' });
     }
   };
 
-  const handleSelectionChanged = (event: SelectionChangedEvent<InventoryItem>) => {
+  const handleSelectionChanged = (event: SelectionChangedEvent<InventoryRow>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
       .map((node) => node.data?.id)
@@ -147,51 +182,80 @@ export default function InventoryPage() {
     setSelectedIds(selectedData);
   };
 
-  const handleRowClicked = (event: RowClickedEvent<InventoryItem>) => {
-    if (event.data) {
-      router.push(`/dashboard/${companyId}/inventory/${event.data.id}`);
+  const handleRowClicked = (event: RowClickedEvent<InventoryRow>) => {
+    if (event.data && event.event) {
+      const target = event.event.target as HTMLElement;
+      if (!target.closest('.ag-checkbox-input-wrapper')) {
+        router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=inventory`);
+      }
     }
   };
 
-  const handleCellKeyDown = (event: CellKeyDownEvent<InventoryItem>) => {
+  const handleCellKeyDown = (event: CellKeyDownEvent<InventoryRow>) => {
     const keyboardEvent = event.event as KeyboardEvent | undefined;
     if (keyboardEvent?.key === 'Enter' && event.data) {
-      router.push(`/dashboard/${companyId}/inventory/${event.data.id}`);
+      router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=inventory`);
     }
   };
 
-  const handleBulkDeleteClick = () => {
-    setDeleteDialog({ open: true, type: 'bulk' });
-  };
+  const handleBulkDeleteClick = () => setDeleteDialog({ open: true });
 
   const handleDeleteConfirm = async () => {
     setDeleting(true);
     try {
-      await bulkDeleteInventoryItems(selectedIds);
+      await bulkDeleteParts(selectedIds);
+      const count = selectedIds.length;
       setSelectedIds([]);
       if (gridRef.current?.api) {
         gridRef.current.api.deselectAll();
       }
-      await fetchItems();
-      setDeleteDialog({ open: false, type: 'single' });
+      await fetchInventory();
+      setDeleteDialog({ open: false });
+      setSnackbar({
+        open: true,
+        message: `Deleted ${count} item${count === 1 ? '' : 's'}`,
+        severity: 'success',
+      });
     } catch (error) {
       setSnackbar({
         open: true,
         message: error instanceof Error ? error.message : 'An error occurred',
         severity: 'error',
       });
-      setDeleteDialog({ open: false, type: 'single' });
+      setDeleteDialog({ open: false });
     } finally {
       setDeleting(false);
     }
   };
 
-  const columnDefs: ColDef<InventoryItem>[] = [
+  const handlePartCreated = (part: Part) => {
+    // Land the user on the new part's detail page so they can finish setup
+    // (unit conversions, vendor pick, etc.). Mark `from=inventory` so the
+    // back link returns here.
+    router.push(`/dashboard/${companyId}/parts/${part.id}?from=inventory`);
+  };
+
+  // Formatters. Mirror the parts page (page.tsx:278-303). If formatting drift
+  // becomes a problem across pages, extract into utils/formatters.ts in a
+  // separate cleanup PR.
+  const formatDate = (val: string | null | undefined): string => {
+    if (!val) return '—';
+    return new Date(val).toLocaleDateString();
+  };
+
+  const formatCurrency = (val: number | null | undefined): string => {
+    if (val === null || val === undefined) return '—';
+    return `$${Number(val).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const columnDefs: ColDef<InventoryRow>[] = [
     {
-      field: 'name',
-      headerName: 'Name',
-      flex: 2,
-      minWidth: 200,
+      field: 'part_name',
+      headerName: 'Part Name',
+      width: 220,
       pinned: 'left' as const,
     },
     {
@@ -199,49 +263,98 @@ export default function InventoryPage() {
       headerName: 'Description',
       flex: 2,
       minWidth: 200,
-      valueFormatter: (params) => params.value ?? '—',
+      sortable: false,
+      valueFormatter: (params) => (params.value as string | null) ?? '—',
     },
     {
       field: 'quantity',
       headerName: 'Quantity',
-      width: 150,
-      type: 'numericColumn',
-      valueFormatter: (params) => {
-        if (params.value == null) return '—';
-        const qty = params.value as number;
-        return qty.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      width: 130,
+      type: 'rightAligned',
+      // rowToPart in partsAccess coerces numeric columns at the access
+      // boundary, so params.value is already a real number.
+      valueFormatter: (params) =>
+        ((params.value as number | null) ?? 0).toLocaleString(undefined, {
+          maximumFractionDigits: 4,
+        }),
+    },
+    {
+      colId: 'status',
+      headerName: 'Status',
+      width: 140,
+      sortable: false,
+      cellStyle: { display: 'flex', alignItems: 'center' },
+      cellRenderer: (params: ICellRendererParams<InventoryRow>) => {
+        if (!params.data) return null;
+        return (
+          <StockStatusChip
+            status={deriveStockStatus(params.data.quantity, params.data.reorder_point)}
+          />
+        );
       },
     },
     {
       field: 'primary_unit',
       headerName: 'Unit',
       width: 100,
+      valueFormatter: (params) => (params.value as string | null) ?? '—',
     },
     {
       field: 'cost_per_unit',
-      headerName: 'Cost/Unit',
-      width: 120,
-      type: 'numericColumn',
-      valueFormatter: (params) => (params.value != null ? `$${params.value.toFixed(2)}` : '—'),
+      headerName: 'Cost / Unit',
+      width: 140,
+      type: 'rightAligned',
+      // For sub-assemblies that have not yet been recalculated, cost_per_unit
+      // is null and the cell renders an em-dash. Documented behavior, not a
+      // bug: Recalculate Cost lives on the detail page where the user can
+      // see the inputs.
+      valueFormatter: (params) => formatCurrency(params.value as number | null),
     },
     {
       field: 'updated_at',
-      headerName: 'Last Updated',
-      width: 180,
-      valueFormatter: (params) => {
-        if (!params.value) return '—';
-        return new Date(params.value).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-      },
+      headerName: 'Updated',
+      width: 140,
+      valueFormatter: (params) => formatDate(params.value as string | null | undefined),
     },
   ];
 
+  const renderEmptyState = () => {
+    const isFiltered = !!searchDebounced || statusFilter !== 'all';
+    if (isFiltered) {
+      return (
+        <>
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No items match these filters.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Adjust the search or status filter to see more items.
+          </Typography>
+        </>
+      );
+    }
+    return (
+      <>
+        <Typography variant="h6" color="text.secondary" gutterBottom>
+          Nothing in inventory yet.
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          Add your first stocked item.
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setAddModalOpen(true)}
+          >
+            Add Item
+          </Button>
+        </Box>
+      </>
+    );
+  };
+
   return (
     <Box>
-      {/* Toolbar */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
           placeholder="Search inventory..."
@@ -259,6 +372,21 @@ export default function InventoryPage() {
             },
           }}
         />
+
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel id="inventory-status-label">Status</InputLabel>
+          <Select
+            labelId="inventory-status-label"
+            value={statusFilter}
+            label="Status"
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="in_stock">In stock</MenuItem>
+            <MenuItem value="low">Low</MenuItem>
+            <MenuItem value="out">Out of stock</MenuItem>
+          </Select>
+        </FormControl>
 
         {selectedIds.length > 0 && (
           <>
@@ -281,53 +409,19 @@ export default function InventoryPage() {
         <Box sx={{ flex: 1 }} />
 
         <Button
-          variant="outlined"
-          startIcon={<UploadIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/inventory/import`)}
-        >
-          Import
-        </Button>
-
-        <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/inventory/new`)}
+          onClick={() => setAddModalOpen(true)}
         >
           Add Item
         </Button>
       </Box>
 
-      {/* Data Grid or Empty State */}
-      {!loading && items.length === 0 ? (
+      {!loading && filteredRows.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
-            <InventoryIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No inventory items yet
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced
-                ? 'No items match your search.'
-                : 'Create your first inventory item or import from CSV.'}
-            </Typography>
-            {!searchDebounced && (
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<UploadIcon />}
-                  onClick={() => router.push(`/dashboard/${companyId}/inventory/import`)}
-                >
-                  Import CSV
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => router.push(`/dashboard/${companyId}/inventory/new`)}
-                >
-                  Add Item
-                </Button>
-              </Box>
-            )}
+            <Inventory2Icon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+            {renderEmptyState()}
           </CardContent>
         </Card>
       ) : (
@@ -345,15 +439,12 @@ export default function InventoryPage() {
               },
             }}
           >
-            <AgGridReact<InventoryItem>
+            <AgGridReact<InventoryRow>
               ref={gridRef}
-              rowData={items}
+              rowData={filteredRows}
               columnDefs={columnDefs}
               theme={jiggedAgGridTheme}
-              defaultColDef={{
-                sortable: true,
-                resizable: true,
-              }}
+              defaultColDef={{ sortable: true, resizable: true }}
               selectionColumnDef={{ pinned: 'left' }}
               rowSelection={{
                 mode: 'multiRow',
@@ -383,28 +474,35 @@ export default function InventoryPage() {
         </Card>
       )}
 
-      {/* Delete Confirmation Dialog */}
+      <PartFormModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={handlePartCreated}
+        companyId={companyId}
+        createDefaults={{ is_stocked: true, source: 'bought' }}
+      />
+
       <Dialog
         open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false, type: 'single' })}
+        onClose={() => !deleting && setDeleteDialog({ open: false })}
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle sx={{ pb: 2 }}>Delete Inventory Items</DialogTitle>
+        <DialogTitle sx={{ pb: 2 }}>Delete Items</DialogTitle>
         <DialogContent sx={{ pt: 0 }}>
           <Box sx={{ mb: 2 }}>
             <Typography variant="body1" sx={{ mb: 1 }}>
               Are you sure you want to delete <strong>{selectedIds.length}</strong> item
-              {selectedIds.length > 1 ? 's' : ''}?
+              {selectedIds.length === 1 ? '' : 's'}?
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              This action cannot be undone. Transaction history will remain for audit purposes.
+              Items referenced by quotes, jobs, or other parts&apos; BOMs cannot be deleted.
             </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button
-            onClick={() => setDeleteDialog({ open: false, type: 'single' })}
+            onClick={() => setDeleteDialog({ open: false })}
             disabled={deleting}
             color="inherit"
             size="large"
@@ -424,7 +522,6 @@ export default function InventoryPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Error Snackbar */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={6000}

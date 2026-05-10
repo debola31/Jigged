@@ -36,7 +36,7 @@ def _build_chat_system_prompt() -> str:
         "- Flag risks prominently (at-risk jobs, low inventory, revenue decline).\n"
         "- Use plain language. Avoid jargon. These are machinists, not MBAs.\n"
         "- In SQL, ALWAYS filter by company_id = $1 on tables that have company_id.\n"
-        "- For tables without company_id (job_operations, routing_nodes, etc.), JOIN through parent tables.\n\n"
+        "- For tables without company_id (job_operations, job_parts, job_materials, routing_operations, parts_bom, parts_unit_conversions), JOIN through parent tables.\n\n"
         "chart_config format (include as a ```json code block when applicable):\n"
         "{\n"
         '  "chart_type": "area" | "pie" | "bar" | "bar_horizontal" | "sparkline",\n'
@@ -132,10 +132,14 @@ def get_revenue_by_period(
     start_date = periods[0]["start"]
     end_date = periods[-1]["end"]
 
-    # Query shipped jobs with their quote prices in the date range
+    # Quotes no longer carry total_price; sum each quote's line items via the
+    # quote_line_items join. One job → one quote → many line items.
     response = (
         supabase.table("jobs")
-        .select("id, shipped_at, quotes!jobs_quote_id_fkey(total_price)")
+        .select(
+            "id, shipped_at, "
+            "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
+        )
         .eq("company_id", company_id)
         .eq("status", "shipped")
         .gte("shipped_at", start_date)
@@ -145,6 +149,15 @@ def get_revenue_by_period(
 
     jobs = response.data or []
 
+    def _job_revenue(job: dict) -> float:
+        quote = job.get("quotes")
+        if isinstance(quote, list):
+            quote = quote[0] if quote else None
+        if not isinstance(quote, dict):
+            return 0.0
+        line_items = quote.get("quote_line_items") or []
+        return sum(float(li.get("total_price", 0) or 0) for li in line_items)
+
     # Bucket jobs into periods
     result = []
     total_revenue = 0.0
@@ -152,13 +165,7 @@ def get_revenue_by_period(
         period_revenue = 0.0
         for job in jobs:
             if job.get("shipped_at") and period["start"] <= job["shipped_at"] < period["end"]:
-                price = 0.0
-                quote = job.get("quotes")
-                if isinstance(quote, dict):
-                    price = float(quote.get("total_price", 0) or 0)
-                elif isinstance(quote, list) and quote:
-                    price = float(quote[0].get("total_price", 0) or 0)
-                period_revenue += price
+                period_revenue += _job_revenue(job)
         total_revenue += period_revenue
         result.append({
             "period": period["label"],
@@ -334,10 +341,14 @@ def get_customer_revenue_breakdown(
     start_date = periods[0]["start"]
     end_date = periods[-1]["end"]
 
-    # Get shipped jobs with customer and quote data
+    # Quotes no longer carry total_price; sum each quote's line items.
     response = (
         supabase.table("jobs")
-        .select("id, customer_id, shipped_at, customers!left(name), quotes!jobs_quote_id_fkey(total_price)")
+        .select(
+            "id, customer_id, shipped_at, "
+            "customers!left(name), "
+            "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
+        )
         .eq("company_id", company_id)
         .eq("status", "shipped")
         .gte("shipped_at", start_date)
@@ -354,12 +365,11 @@ def get_customer_revenue_breakdown(
         if isinstance(job.get("customers"), dict):
             customer_name = job["customers"].get("name", "Unknown")
 
-        price = 0.0
         quote = job.get("quotes")
-        if isinstance(quote, dict):
-            price = float(quote.get("total_price", 0) or 0)
-        elif isinstance(quote, list) and quote:
-            price = float(quote[0].get("total_price", 0) or 0)
+        if isinstance(quote, list):
+            quote = quote[0] if quote else None
+        line_items = (quote or {}).get("quote_line_items") or []
+        price = sum(float(li.get("total_price", 0) or 0) for li in line_items)
 
         customer_id = job.get("customer_id", "unknown")
         if customer_id not in customer_revenue:
@@ -392,21 +402,43 @@ def get_customer_revenue_breakdown(
 
 def get_part_profitability(company_id: str, limit: int = 10) -> dict:
     """
-    Get part profitability analysis.
-    Compares revenue (quote total_price) vs estimated labor cost
-    (job_operations estimated_run_hours_per_unit * operation_types.labor_rate).
+    Get part profitability analysis on the unified parts schema.
+
+    Walks shipped jobs → job_parts → parts and aggregates per part:
+      - revenue: SUM(quote_line_items.total_price) from each job_part's
+        source_quote_line_item (jobs no longer carry a single price; the
+        quote line item is the per-part revenue source).
+      - labor_cost: SUM over each job_operation belonging to that job_part:
+          * For internal work centers (work_centers.kind = 'internal'):
+              labor_rate = COALESCE(routing_operations.labor_rate_override,
+                                    work_centers.labor_rate)
+              cost = (estimated_setup_minutes
+                      + estimated_run_minutes_per_unit * job_part.quantity)
+                     / 60.0 * labor_rate
+              If both override and default are NULL we cannot price the op
+              and RAISE — matching recalculate_part_cost's no-silent-fallback
+              behavior.
+          * For external work centers (kind = 'external'):
+              cost = external_unit_price * quantity + external_setup_cost
+              Read from routing_operations (the immutable source); job_operations
+              don't carry external pricing snapshots.
     """
     supabase = _get_supabase_service_role()
 
-    # Get shipped jobs with part, quote, and operation data
+    # Walk jobs → job_parts → parts → job_operations → work_centers.
+    # job_operations.routing_operation_id lets us read the override / external
+    # pricing fields the operator never sees but the cost contract requires.
     response = (
         supabase.table("jobs")
         .select(
-            "id, part_id, "
-            "parts!left(part_name, description), "
-            "quotes!jobs_quote_id_fkey(total_price, quantity), "
-            "job_operations(estimated_setup_hours, estimated_run_hours_per_unit, "
-            "operation_types!left(labor_rate))"
+            "id, "
+            "job_parts(id, part_id, quantity, source_quote_line_item_id, "
+            "parts!job_parts_part_id_fkey(part_name, description), "
+            "quote_line_items!job_parts_source_quote_line_item_id_fkey(total_price), "
+            "job_operations(estimated_setup_minutes, estimated_run_minutes_per_unit, "
+            "work_centers!left(kind, labor_rate), "
+            "routing_operations!left(labor_rate_override, external_unit_price, "
+            "external_setup_cost)))"
         )
         .eq("company_id", company_id)
         .eq("status", "shipped")
@@ -415,50 +447,106 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
 
     jobs = response.data or []
 
-    # Aggregate by part
+    # Aggregate by part_id
     part_data: dict[str, dict] = {}
     for job in jobs:
-        part_id = job.get("part_id")
-        if not part_id:
-            continue
+        job_parts = job.get("job_parts") or []
+        if not isinstance(job_parts, list):
+            job_parts = [job_parts]
 
-        if part_id not in part_data:
-            part_info = job.get("parts") or {}
-            if isinstance(part_info, list) and part_info:
-                part_info = part_info[0]
-            part_data[part_id] = {
-                "part_name": part_info.get("part_name", "Unknown"),
-                "description": part_info.get("description", ""),
-                "total_revenue": 0.0,
-                "total_labor_cost": 0.0,
-                "job_count": 0,
-            }
+        for jp in job_parts:
+            part_id = jp.get("part_id")
+            if not part_id:
+                continue
 
-        # Revenue from quote
-        quote = job.get("quotes")
-        quantity = 1
-        if isinstance(quote, dict):
-            part_data[part_id]["total_revenue"] += float(quote.get("total_price", 0) or 0)
-            quantity = int(quote.get("quantity", 1) or 1)
-        elif isinstance(quote, list) and quote:
-            part_data[part_id]["total_revenue"] += float(quote[0].get("total_price", 0) or 0)
-            quantity = int(quote[0].get("quantity", 1) or 1)
+            quantity = int(jp.get("quantity", 1) or 1)
 
-        # Estimated labor cost from operations
-        operations = job.get("job_operations") or []
-        if isinstance(operations, list):
-            for op in operations:
-                setup_hours = float(op.get("estimated_setup_hours", 0) or 0)
-                run_hours = float(op.get("estimated_run_hours_per_unit", 0) or 0)
-                total_hours = setup_hours + (run_hours * quantity)
+            if part_id not in part_data:
+                part_info = jp.get("parts") or {}
+                if isinstance(part_info, list) and part_info:
+                    part_info = part_info[0]
+                part_data[part_id] = {
+                    "part_name": part_info.get("part_name", "Unknown"),
+                    "description": part_info.get("description", ""),
+                    "total_revenue": 0.0,
+                    "total_labor_cost": 0.0,
+                    "job_part_count": 0,
+                }
 
-                op_type = op.get("operation_types") or {}
-                if isinstance(op_type, list) and op_type:
-                    op_type = op_type[0]
-                labor_rate = float(op_type.get("labor_rate", 0) or 0)
-                part_data[part_id]["total_labor_cost"] += total_hours * labor_rate
+            # Revenue: from the quote_line_item this job_part was created from.
+            # If unlinked (manual job_part with no quote origin), revenue is 0.
+            qli = jp.get("quote_line_items")
+            if isinstance(qli, list) and qli:
+                qli = qli[0]
+            if isinstance(qli, dict):
+                part_data[part_id]["total_revenue"] += float(
+                    qli.get("total_price", 0) or 0
+                )
 
-        part_data[part_id]["job_count"] += 1
+            # Labor cost: per-operation rollup using the cost contract.
+            operations = jp.get("job_operations") or []
+            if isinstance(operations, list):
+                for op in operations:
+                    wc = op.get("work_centers") or {}
+                    if isinstance(wc, list) and wc:
+                        wc = wc[0]
+                    ro = op.get("routing_operations") or {}
+                    if isinstance(ro, list) and ro:
+                        ro = ro[0]
+
+                    kind = wc.get("kind") if isinstance(wc, dict) else None
+
+                    if kind == "external":
+                        # External op: priced from the routing_operation row
+                        # (the source-of-truth for external pricing). Treat
+                        # missing pricing as zero contribution from this op
+                        # rather than raising — a job that shipped is history,
+                        # not a cost recalc context.
+                        unit_price = float(
+                            (ro.get("external_unit_price") if isinstance(ro, dict) else 0)
+                            or 0
+                        )
+                        setup_cost = float(
+                            (ro.get("external_setup_cost") if isinstance(ro, dict) else 0)
+                            or 0
+                        )
+                        op_cost = unit_price * quantity + setup_cost
+                    else:
+                        # Internal op (or unknown — treat as internal).
+                        # estimated_setup_minutes + estimated_run_minutes_per_unit * qty
+                        # are minutes; divide by 60 before multiplying by the
+                        # per-hour labor rate.
+                        setup_minutes = float(
+                            op.get("estimated_setup_minutes", 0) or 0
+                        )
+                        run_minutes_per_unit = float(
+                            op.get("estimated_run_minutes_per_unit", 0) or 0
+                        )
+                        total_minutes = setup_minutes + (run_minutes_per_unit * quantity)
+                        total_hours = total_minutes / 60.0
+
+                        # Cost contract: COALESCE(labor_rate_override, wc.labor_rate).
+                        # Both NULL = no rate available for this op; raise rather
+                        # than silently treating as $0.
+                        override = (
+                            ro.get("labor_rate_override")
+                            if isinstance(ro, dict)
+                            else None
+                        )
+                        wc_rate = wc.get("labor_rate") if isinstance(wc, dict) else None
+                        if override is None and wc_rate is None:
+                            raise RuntimeError(
+                                f"Cannot compute labor cost for job_part {jp.get('id')}: "
+                                f"routing op has no labor rate (neither override nor "
+                                f"work_center default). Set a rate before re-running "
+                                f"profitability."
+                            )
+                        labor_rate = float(override if override is not None else wc_rate)
+                        op_cost = total_hours * labor_rate
+
+                    part_data[part_id]["total_labor_cost"] += op_cost
+
+            part_data[part_id]["job_part_count"] += 1
 
     # Calculate profit margin and sort
     parts_list = []
@@ -475,7 +563,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
             "labor_cost": round(cost, 2),
             "profit": round(profit, 2),
             "margin_pct": round(margin, 1),
-            "job_count": data["job_count"],
+            "job_count": data["job_part_count"],
         })
 
     parts_list.sort(key=lambda x: x["profit"], reverse=True)
@@ -489,42 +577,44 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
 def get_revenue_forecast(company_id: str) -> dict:
     """
     Get revenue forecast from the open quote pipeline.
-    Sums total_price from quotes with status in (pending_approval, accepted).
+
+    "Open" = quotes that are still active (status='active') and have not yet
+    been converted to a job (converted_at IS NULL). The simplified quote
+    lifecycle (active|expired) means there's a single status worth surfacing
+    in the forecast, so we collapse the prior multi-stage breakdown into one
+    "open" bucket. Sums each quote's line item totals via the quote_line_items
+    join (quotes no longer carry a denormalized total_price).
     """
     supabase = _get_supabase_service_role()
 
     response = (
         supabase.table("quotes")
-        .select("id, status, total_price, customer_id, customers!left(name)")
+        .select(
+            "id, status, customer_id, "
+            "customers!left(name), "
+            "quote_line_items(total_price)"
+        )
         .eq("company_id", company_id)
-        .in_("status", ["pending_approval", "accepted"])
+        .eq("status", "active")
+        .is_("converted_at", "null")
         .execute()
     )
 
     quotes = response.data or []
 
-    # Group by status
-    by_status: dict[str, dict] = {}
+    open_total = 0.0
+    open_count = 0
     for quote in quotes:
-        status = quote.get("status", "unknown")
-        price = float(quote.get("total_price", 0) or 0)
+        line_items = quote.get("quote_line_items") or []
+        price = sum(float(li.get("total_price", 0) or 0) for li in line_items)
+        open_total += price
+        open_count += 1
 
-        if status not in by_status:
-            by_status[status] = {"status": status, "total_value": 0.0, "count": 0}
-        by_status[status]["total_value"] += price
-        by_status[status]["count"] += 1
+    pipeline = [
+        {"status": "open", "total_value": round(open_total, 2), "count": open_count}
+    ]
 
-    # Sort by pipeline stage order
-    stage_order = {"accepted": 0, "pending_approval": 1}
-    pipeline = sorted(
-        by_status.values(),
-        key=lambda x: stage_order.get(x["status"], 99),
-    )
-
-    for p in pipeline:
-        p["total_value"] = round(p["total_value"], 2)
-
-    total_pipeline = sum(p["total_value"] for p in pipeline)
+    total_pipeline = open_total
 
     return {
         "pipeline": pipeline,

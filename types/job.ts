@@ -15,8 +15,8 @@ export interface JobOperation {
   job_part_id: string;
   sequence: number;
   operation_name: string;
-  operation_type_id: string | null;
-  routing_node_id: string | null;
+  work_center_id: string | null;
+  routing_operation_id: string | null;
   estimated_setup_minutes: number;
   estimated_run_minutes_per_unit: number;
   actual_setup_minutes: number | null;
@@ -29,10 +29,11 @@ export interface JobOperation {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  operation_type?: {
+  work_center?: {
     id: string;
     name: string;
     labor_rate: number | null;
+    kind: 'internal' | 'external';
   } | null;
 }
 
@@ -104,8 +105,8 @@ export interface CurrentOperationInfo {
 }
 
 /**
- * Material expected/consumed for a (job, part). Snapshot from routing_materials
- * at job-part creation time.
+ * Material expected/consumed for a (job, part). Snapshot from parts_bom at
+ * job-part creation time.
  */
 export type JobMaterialStatus = 'pending' | 'consumed' | 'skipped';
 
@@ -113,8 +114,8 @@ export interface JobMaterial {
   id: string;
   job_id: string;
   job_part_id: string;
-  routing_material_id: string | null;
-  inventory_item_id: string;
+  parts_bom_id: string | null;
+  material_part_id: string;
   expected_quantity: number;
   actual_quantity: number | null;
   unit: string;
@@ -123,10 +124,10 @@ export interface JobMaterial {
   consumed_by: string | null;
   created_at: string;
   updated_at: string;
-  inventory_item?: {
+  material_part?: {
     id: string;
-    name: string;
-    primary_unit: string;
+    part_name: string;
+    primary_unit: string | null;
     quantity: number;
     cost_per_unit: number | null;
   } | null;

@@ -1,4 +1,20 @@
-"""Pydantic models for Parts CSV import API."""
+"""Pydantic models for Parts CSV import API.
+
+The unified Parts importer absorbs the previous `inventory_items` import path.
+Every imported row lives in one of four valid quadrants formed by the
+(source, is_stocked) pair:
+
+  - source='made',   !is_stocked → Custom Made
+  - source='made',    is_stocked → Sub-assembly
+  - source='bought',  is_stocked → Raw Material
+  - source='bought', !is_stocked → Service / Drop-ship
+
+The legacy boolean columns (`is_manufacturable`, `is_stockable`) were renamed
+in the 20260504 source-enum-and-stocked-rename migration. The importer still
+accepts them as legacy column-mapping aliases for one-version compatibility
+with already-prepared CSVs — see the validate/execute routes for the
+deprecation log entry that gets written for each legacy-mapped row.
+"""
 
 from enum import Enum
 from typing import Optional
@@ -8,7 +24,15 @@ from models.import_models import ColumnMapping  # noqa: F401
 
 
 class CustomerMatchMode(str, Enum):
-    """How to assign customers to imported parts."""
+    """How to assign customers to imported parts.
+
+    DEPRECATED — parts no longer reference customers in the unified schema.
+    Customer association lives on quotes/jobs only. The Pydantic enum is kept
+    so the frontend's currently-deployed payload still parses (we want a clear
+    400 from the route, not a 422 from Pydantic), but the import routes RAISE
+    the moment any customer field is present rather than silently dropping it.
+    See parts_import_routes._reject_customer_fields().
+    """
 
     BY_COLUMN = "by_column"  # Match by customer_code column
     ALL_TO_ONE = "all_to_one"  # Assign all parts to selected customer
@@ -41,34 +65,64 @@ class PartAnalyzeResponse(BaseModel):
 
 
 class PartConflictInfo(BaseModel):
-    """Information about a conflicting row."""
+    """Information about a conflicting row.
+
+    conflict_type values:
+      - "duplicate_part_name": part already exists in DB with this name
+      - "csv_duplicate": same part_name appears multiple times in CSV
+      - "customer_not_found": legacy customer-name lookup failed
+      - "unknown_vendor": preferred_vendor_name doesn't match any existing vendor
+      - "unknown_unit": primary_unit could not be resolved (alias or AI inference)
+    """
 
     row_number: int
     csv_part_name: Optional[str]
     csv_customer_code: Optional[str]
-    conflict_type: str  # "duplicate_part_name" | "customer_not_found" | "csv_duplicate"
+    conflict_type: str
     existing_part_id: str  # Empty string for non-DB conflicts
     existing_value: str  # Additional conflict info
 
 
 class PartValidationError(BaseModel):
-    """A validation error discovered during validation phase."""
+    """A validation error discovered during validation phase.
+
+    error_type values:
+      - "missing_part_name", "invalid_price", "invalid_qty"
+      - "missing_primary_unit": is_stocked=true but primary_unit absent
+      - "invalid_quantity": quantity is negative
+      - "invalid_cost": cost_per_unit is negative
+      - "invalid_reorder_point": reorder_point is negative
+    """
 
     row_number: int
-    error_type: str  # "missing_part_name" | "invalid_price" | "invalid_qty"
+    error_type: str
     field: str
     message: str
 
 
 class PartValidateRequest(BaseModel):
-    """Request to validate parts data before import."""
+    """Request to validate parts data before import.
+
+    `customer_match_mode` and `selected_customer_id` are accepted-but-deprecated.
+    Parts no longer link to customers at the data layer (customer association
+    lives on quotes/jobs only). The route handler RAISES a 400 when either
+    field is present, per the no-silent-fallbacks engineering principle —
+    silently dropping them would let the frontend think a customer link was
+    saved when it wasn't.
+    """
 
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
     pricing_columns: list[PricingColumnPair]  # Qty/price column pairs
     rows: list[dict[str, str]]  # All parsed CSV rows
-    customer_match_mode: CustomerMatchMode
-    selected_customer_id: Optional[str] = None  # For ALL_TO_ONE mode
+    # DEPRECATED — see class docstring; kept Optional so the route can
+    # detect presence and return a clear 400 rather than Pydantic 422'ing.
+    customer_match_mode: Optional[CustomerMatchMode] = None
+    selected_customer_id: Optional[str] = None
+    # Optional: pre-resolved canonical UOMs keyed by 1-based row_number.
+    # When provided (e.g. when execute_import re-validates internally), the
+    # validator will skip the AI inference step and trust these values.
+    pre_resolved_uoms: dict[int, str] = {}
 
 
 class PartValidateResponse(BaseModel):
@@ -81,6 +135,9 @@ class PartValidateResponse(BaseModel):
     conflict_rows_count: int
     error_rows_count: int
     skipped_rows_count: int
+    # Map of 1-based row_number to canonical UOM resolved from raw input.
+    # Stockable rows without an entry will fall back to the raw value during execute.
+    uom_resolutions: dict[int, str] = {}
 
 
 class PartImportError(BaseModel):
@@ -92,15 +149,24 @@ class PartImportError(BaseModel):
 
 
 class PartExecuteRequest(BaseModel):
-    """Request to execute the parts import."""
+    """Request to execute the parts import.
+
+    `customer_match_mode` and `selected_customer_id` are accepted-but-deprecated;
+    see PartValidateRequest. The route handler RAISES a 400 when either is
+    present.
+    """
 
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
     pricing_columns: list[PricingColumnPair]  # Qty/price column pairs
     rows: list[dict[str, str]]  # CSV rows to import
-    customer_match_mode: CustomerMatchMode
-    selected_customer_id: Optional[str] = None  # For ALL_TO_ONE mode
+    # DEPRECATED — see PartValidateRequest.
+    customer_match_mode: Optional[CustomerMatchMode] = None
+    selected_customer_id: Optional[str] = None
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Map of 1-based row_number to pre-resolved canonical UOM (from validate).
+    # Empty dict means execute will run alias resolution itself.
+    uom_resolutions: dict[int, str] = {}
 
 
 class PartExecuteResponse(BaseModel):
@@ -108,26 +174,69 @@ class PartExecuteResponse(BaseModel):
 
     success: bool
     imported_count: int
+    updated_count: int = 0  # Rows upserted via legacy_id ON CONFLICT path
     skipped_count: int
     errors: list[PartImportError]
 
 
-# Target schema for parts table (for AI mapping)
+# Target schema for parts table (for AI mapping).
+#
+# IMPORTANT: PART_SCHEMA and UNIFIED_PART_SCHEMA are intentionally identical
+# in this PR. The plan separates "core part fields" from "unified parts +
+# routings + inventory" conceptually; on disk the unified row is just a part
+# row with classification flags. Both names are exported because the frontend
+# `/api/parts/import/analyze-unified` route uses `UNIFIED_PART_SCHEMA` while
+# the standard `/analyze` uses `PART_SCHEMA`.
 PART_SCHEMA = {
     "part_name": {
         "type": "string",
         "required": True,
-        "description": "Part name identifier (unique per customer or globally for generic parts)",
-    },
-    "customer_name": {
-        "type": "string",
-        "required": False,
-        "description": "Customer name to associate this part with (used when customer_match_mode is BY_COLUMN)",
+        "description": "Part name identifier (unique per company)",
     },
     "description": {
         "type": "string",
         "required": False,
         "description": "Part description or name",
+    },
+    "source": {
+        "type": "string",
+        "required": False,
+        "description": "'made' if produced in-shop (with a routing); 'bought' if procured from a vendor.",
+    },
+    "is_stocked": {
+        "type": "boolean",
+        "required": False,
+        "description": "Whether this part is tracked as stock-on-hand. Defaults to true for raw materials and sub-assemblies.",
+    },
+    "primary_unit": {
+        "type": "string",
+        "required": False,
+        "description": "Primary unit of measure (required when is_stocked=true; e.g., 'lbs', 'pcs', 'kg', 'in')",
+    },
+    "quantity": {
+        "type": "number",
+        "required": False,
+        "description": "Initial quantity on hand (defaults to 0, must be non-negative)",
+    },
+    "cost_per_unit": {
+        "type": "number",
+        "required": False,
+        "description": "Cost per primary unit (decimal, e.g., 12.50)",
+    },
+    "reorder_point": {
+        "type": "number",
+        "required": False,
+        "description": "Reorder point (low-stock threshold; non-negative)",
+    },
+    "preferred_vendor_name": {
+        "type": "string",
+        "required": False,
+        "description": "Preferred vendor name. Resolved against existing vendors at import; fails as unknown_vendor if not found.",
+    },
+    "legacy_id": {
+        "type": "string",
+        "required": False,
+        "description": "ID from legacy/previous system. Unique per company; enables idempotent re-import via ON CONFLICT.",
     },
     "notes": {
         "type": "string",
@@ -135,6 +244,13 @@ PART_SCHEMA = {
         "description": "Internal notes about this part",
     },
 }
+
+
+# Unified parts + routings + inventory mapping target. Identical to PART_SCHEMA;
+# routing-operation columns are detected separately by the unified analyze step
+# (one CSV row per part with operation columns repeated, e.g. op1_name/op1_setup).
+UNIFIED_PART_SCHEMA = dict(PART_SCHEMA)
+
 
 # Common patterns for pricing columns in legacy CSV files
 PRICING_COLUMN_PATTERNS = [
@@ -147,3 +263,17 @@ PRICING_COLUMN_PATTERNS = [
     (r"^minqty(\d+)$", r"^unitprice(\d+)$"),
     (r"^min_qty_(\d+)$", r"^unit_price_(\d+)$"),
 ]
+
+
+def parse_bool(value: str) -> Optional[bool]:
+    """Parse a CSV boolean string. Returns None for empty/unrecognized values."""
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if not v:
+        return None
+    if v in ("true", "t", "yes", "y", "1"):
+        return True
+    if v in ("false", "f", "no", "n", "0"):
+        return False
+    return None

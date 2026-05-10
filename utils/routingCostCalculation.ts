@@ -1,7 +1,13 @@
 import { getRoutingForPart } from '@/utils/routingsAccess';
+import { getBomForPart } from '@/utils/bomAccess';
 
 export interface CostWarning {
-  type: 'empty_operation' | 'missing_labor_rate' | 'missing_material_cost' | 'no_operations';
+  type:
+    | 'empty_operation'
+    | 'missing_labor_rate'
+    | 'missing_material_cost'
+    | 'no_operations'
+    | 'missing_external_pricing';
   message: string;
   node_id?: string;
   material_id?: string;
@@ -35,109 +41,125 @@ export interface RoutingCostBreakdown {
 }
 
 /**
- * Calculate the full cost breakdown for a part's routing.
+ * Calculate the full cost breakdown for a part's routing + BOM.
  *
- * Labor (per operation): (run_time_per_unit / 60) × labor_rate, plus setup.
- * Setup-only operations (run = 0, setup > 0) are fully supported — their run
- * cost is 0 and setup cost is the whole labor contribution.
- * Materials: routing-level — Σ(quantity × cost_per_unit).
+ * Internal ops are priced via (cycle + setup) × COALESCE(override, wc rate).
+ * External ops are priced via external_unit_price + external_setup_cost — the
+ * unit price contributes to per-unit cost, the setup cost is one-time.
+ * Materials come from `parts_bom` (BOM is part-attached now, not routing-attached).
  *
- * Returns null if the part has no routing.
+ * Returns null if the part has no routing AND no BOM.
  */
 export async function calculateRoutingCost(partId: string): Promise<RoutingCostBreakdown | null> {
-  const routing = await getRoutingForPart(partId);
-  if (!routing) return null;
+  const [routing, bomLines] = await Promise.all([
+    getRoutingForPart(partId),
+    getBomForPart(partId),
+  ]);
+
+  if (!routing && bomLines.length === 0) return null;
 
   const warnings: CostWarning[] = [];
   const laborItems: LaborItem[] = [];
   const materialItems: MaterialItem[] = [];
 
-  if (routing.nodes.length === 0) {
+  if (routing && routing.operations.length === 0) {
     warnings.push({
       type: 'no_operations',
       message: 'Routing has no operations defined',
     });
-    return {
-      labor_items: [],
-      material_items: [],
-      total_labor_cost: 0,
-      total_setup_cost: 0,
-      total_material_cost: 0,
-      total_cost: 0,
-      warnings,
-    };
   }
 
-  for (const node of routing.nodes) {
-    const operationName = node.operation_type?.name || 'Unknown Operation';
-    const runMinutes = node.run_time_per_unit ?? 0;
-    const setupMinutes = node.setup_time ?? 0;
-    const hasAnyTime = runMinutes > 0 || setupMinutes > 0;
+  if (routing) {
+    for (const op of routing.operations) {
+      const wc = op.work_center;
+      const operationName = wc?.name || 'Unknown Operation';
 
-    if (!hasAnyTime) {
-      warnings.push({
-        type: 'empty_operation',
-        message: `${operationName}: no run or setup time set`,
-        node_id: node.id,
+      if (wc?.kind === 'external') {
+        const unitPrice = op.external_unit_price !== null ? Number(op.external_unit_price) : null;
+        const setupCost = op.external_setup_cost !== null ? Number(op.external_setup_cost) : null;
+        if (unitPrice === null && setupCost === null) {
+          warnings.push({
+            type: 'missing_external_pricing',
+            message: `${operationName}: external op has no unit price or setup cost`,
+            node_id: op.id,
+          });
+          continue;
+        }
+        laborItems.push({
+          operation_name: operationName,
+          run_time_minutes: 0,
+          setup_time_minutes: 0,
+          labor_rate: 0,
+          cost: Math.round((unitPrice ?? 0) * 100) / 100,
+          setup_cost: Math.round((setupCost ?? 0) * 100) / 100,
+        });
+        continue;
+      }
+
+      const cycleMinutes = op.cycle_minutes_per_unit ?? 0;
+      const setupMinutes = op.setup_minutes ?? 0;
+      const hasAnyTime = cycleMinutes > 0 || setupMinutes > 0;
+      if (!hasAnyTime) {
+        warnings.push({
+          type: 'empty_operation',
+          message: `${operationName}: no run or setup time set`,
+          node_id: op.id,
+        });
+        continue;
+      }
+
+      const laborRate = op.labor_rate_override ?? wc?.labor_rate ?? null;
+      if (laborRate === null) {
+        warnings.push({
+          type: 'missing_labor_rate',
+          message: `${operationName}: missing labor rate (no override and work center has no default)`,
+          node_id: op.id,
+        });
+        continue;
+      }
+
+      const runCost = (Number(cycleMinutes) / 60) * Number(laborRate);
+      const setupCost = (Number(setupMinutes) / 60) * Number(laborRate);
+      laborItems.push({
+        operation_name: operationName,
+        run_time_minutes: Number(cycleMinutes),
+        setup_time_minutes: Number(setupMinutes),
+        labor_rate: Number(laborRate),
+        cost: Math.round(runCost * 100) / 100,
+        setup_cost: Math.round(setupCost * 100) / 100,
       });
-      continue;
     }
-
-    const laborRate = node.operation_type?.labor_rate;
-    if (!laborRate) {
-      warnings.push({
-        type: 'missing_labor_rate',
-        message: `${operationName}: missing labor rate`,
-        node_id: node.id,
-      });
-      continue;
-    }
-
-    const runCost = (runMinutes / 60) * laborRate;
-    const setupCost = (setupMinutes / 60) * laborRate;
-    laborItems.push({
-      operation_name: operationName,
-      run_time_minutes: runMinutes,
-      setup_time_minutes: setupMinutes,
-      labor_rate: laborRate,
-      cost: Math.round(runCost * 100) / 100,
-      setup_cost: Math.round(setupCost * 100) / 100,
-    });
   }
 
-  for (const mat of routing.materials) {
-    const invItem = mat.inventory_item;
-    if (!invItem) {
+  for (const line of bomLines) {
+    const child = line.child_part;
+    const itemName = child.part_name;
+
+    if (child.cost_per_unit === null || child.cost_per_unit === undefined) {
       warnings.push({
         type: 'missing_material_cost',
-        message: `Material: inventory item not found (${mat.inventory_item_id})`,
-        material_id: mat.id,
+        message: `${itemName}: no cost per unit set`,
+        material_id: line.id,
       });
       continue;
     }
 
-    if (invItem.cost_per_unit === null || invItem.cost_per_unit === undefined) {
-      warnings.push({
-        type: 'missing_material_cost',
-        message: `${invItem.name}: no cost per unit set`,
-        material_id: mat.id,
-      });
-      continue;
-    }
-
-    const materialCost = mat.quantity * invItem.cost_per_unit;
+    const materialCost = Number(line.quantity) * Number(child.cost_per_unit);
     materialItems.push({
-      item_name: invItem.name,
-      quantity: mat.quantity,
-      unit: mat.unit || invItem.primary_unit,
-      cost_per_unit: invItem.cost_per_unit,
+      item_name: itemName,
+      quantity: Number(line.quantity),
+      unit: line.unit || child.primary_unit || '',
+      cost_per_unit: Number(child.cost_per_unit),
       cost: Math.round(materialCost * 100) / 100,
     });
   }
 
-  const totalLaborCost = Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
-  const totalSetupCost = Math.round(laborItems.reduce((sum, item) => sum + item.setup_cost, 0) * 100) / 100;
-  const totalMaterialCost = Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
+  const totalLaborCost =
+    Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
+  const totalSetupCost =
+    Math.round(laborItems.reduce((sum, item) => sum + item.setup_cost, 0) * 100) / 100;
+  const totalMaterialCost =
+    Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
 
   return {
     labor_items: laborItems,

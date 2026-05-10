@@ -1,0 +1,7 @@
+part_name,work_center_name,sequence,setup_minutes,cycle_minutes_per_unit,labor_rate_override,external_unit_price,external_setup_cost,instructions
+E2E-CSV-001,HURCO Mill,1,10,0.5,,,,Mill bracket faces
+E2E-CSV-001,Mazak Lathe,2,8,0.4,150.00,,,Turn outer diameter
+E2E-CSV-001,PerformCoat,3,,,,12.50,75.00,Black anodize finish
+E2E-CSV-002,HURCO Mill,1,15,0.75,,,,Rough mill plate stock
+E2E-CSV-002,QC Bench,2,5,0.2,,,,Inspect critical features
+E2E-CSV-002,PerformCoat,3,,,,8.25,50.00,Powder coat per spec

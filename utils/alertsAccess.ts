@@ -42,7 +42,7 @@ interface JobRow {
 
 interface InventoryRow {
   id: string;
-  name: string | null;
+  part_name: string | null;
   quantity: number | string | null;
   reorder_point: number | string | null;
   primary_unit: string | null;
@@ -125,15 +125,16 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
   return atRisk;
 }
 
-export async function getInventoryAlerts(
+export async function getLowStockPartsAlerts(
   companyId: string
 ): Promise<InventoryAlert[]> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
-    .from('inventory_items')
-    .select('id, name, quantity, reorder_point, primary_unit')
+    .from('parts')
+    .select('id, part_name, quantity, reorder_point, primary_unit')
     .eq('company_id', companyId)
+    .eq('is_stocked', true)
     .not('reorder_point', 'is', null);
 
   if (error) throw error;
@@ -150,7 +151,7 @@ export async function getInventoryAlerts(
       qty === 0 ? 'critical' : qty <= reorder * 0.5 ? 'high' : 'medium';
 
     alerts.push({
-      item_name: item.name ?? 'Unknown',
+      item_name: item.part_name ?? 'Unknown',
       quantity: qty,
       reorder_point: reorder,
       deficit: round2(reorder - qty),
@@ -170,6 +171,10 @@ export async function getInventoryAlerts(
 
   return alerts;
 }
+
+// AlertBadge consumer hasn't been updated in this chunk; keep the original
+// name as an alias so its import keeps resolving.
+export const getInventoryAlerts = getLowStockPartsAlerts;
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;

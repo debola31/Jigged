@@ -19,9 +19,19 @@ vi.mock('@/utils/partsAccess', () => ({
   checkPartNameExists: (...args: unknown[]) => mockCheckPartNameExists(...args),
 }));
 
-vi.mock('@/utils/partCategoriesAccess', () => ({
-  getPartCategoriesForSelect: vi.fn().mockResolvedValue([]),
-  createPartCategory: vi.fn().mockResolvedValue({ id: 'new-cat-id', name: 'New Category' }),
+vi.mock('@/utils/vendorsAccess', () => ({
+  getAllVendors: vi.fn().mockResolvedValue([]),
+}));
+
+// PartForm transitively imports UnitOfMeasurementSelect which calls into
+// utils/unitsAccess. Mock here too so the real Supabase client isn't loaded.
+vi.mock('@/utils/unitsAccess', () => ({
+  getCompanyCustomUnits: vi.fn().mockResolvedValue([]),
+  addCompanyCustomUnit: vi.fn().mockResolvedValue({
+    id: 'cu-1',
+    company_id: 'test-company-id',
+    unit_name: 'mock-unit',
+  }),
 }));
 
 describe('PartForm', () => {
@@ -73,7 +83,15 @@ describe('PartForm', () => {
         company_id: 'test-company-id',
         part_name: 'NEW-PART-001',
         description: 'Test Part Description',
-        category_id: null,
+        source: 'made',
+        is_stocked: false,
+        primary_unit: null,
+        quantity: 0,
+        cost_per_unit: null,
+        cost_recalculated_at: null,
+        reorder_point: null,
+        preferred_vendor_id: null,
+        legacy_id: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -146,9 +164,9 @@ describe('PartForm', () => {
 
   describe('Edit mode', () => {
     const existingPartData: PartFormData = {
+      ...EMPTY_PART_FORM,
       part_name: 'EXIST-001',
       description: 'Existing Part',
-      category_id: '',
     };
 
     const existingPart: Part = {
@@ -156,7 +174,15 @@ describe('PartForm', () => {
       company_id: 'test-company-id',
       part_name: 'EXIST-001',
       description: 'Existing Part',
-      category_id: null,
+      source: 'made',
+      is_stocked: false,
+      primary_unit: null,
+      quantity: 0,
+      cost_per_unit: null,
+      cost_recalculated_at: null,
+      reorder_point: null,
+      preferred_vendor_id: null,
+      legacy_id: null,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
       quotes_count: 2,

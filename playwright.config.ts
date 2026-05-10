@@ -16,6 +16,13 @@ export default defineConfig({
   reporter: isCI ? [['html'], ['github']] : [['html']],
   timeout: 120_000,
 
+  // Service-role-backed seed of the test company. Idempotent — every row
+  // carries an E2E_SEED_v1 sentinel. Reads SUPABASE_URL,
+  // SUPABASE_SERVICE_ROLE_KEY, E2E_TEST_COMPANY_ID, E2E_TEST_USER_ID; aborts
+  // with a clear error if any are missing. See e2e/README.md.
+  globalSetup: require.resolve('./e2e/global-setup.ts'),
+  globalTeardown: require.resolve('./e2e/global-teardown.ts'),
+
   use: {
     baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',

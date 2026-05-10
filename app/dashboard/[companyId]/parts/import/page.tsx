@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -12,15 +12,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
-import FormControl from '@mui/material/FormControl';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
-import Autocomplete from '@mui/material/Autocomplete';
-import TextField from '@mui/material/TextField';
-import Radio from '@mui/material/Radio';
-import RadioGroup from '@mui/material/RadioGroup';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -36,7 +27,6 @@ import { MappingReviewTable, ConflictDialog } from '@/components/import';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import type { FieldDefinition, ColumnMapping } from '@/components/import';
 import type {
-  CustomerMatchMode,
   PartAnalyzeResponse,
   PartValidateResponse,
   PartExecuteResponse,
@@ -45,10 +35,8 @@ import type {
   PartImportError,
 } from '@/types/parts-import';
 import { PART_FIELDS } from '@/types/parts-import';
-import { getAllCustomers } from '@/utils/customerAccess';
 import { parseCSV } from '@/utils/csvParser';
 import { API_BASE_URL } from '@/lib/api';
-import type { Customer } from '@/types/customer';
 
 // Maximum file size: 10MB
 const MAX_FILE_SIZE_MB = 10;
@@ -57,9 +45,16 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 // Maximum rows to send per API request (Vercel has 4.5MB body limit)
 const MAX_ROWS_PER_REQUEST = 500;
 
-const steps = ['Upload & Settings', 'AI Analysis', 'Review Mappings', 'Validate', 'Import'];
+const steps = ['Upload', 'AI Analysis', 'Review Mappings', 'Validate', 'Import'];
 
-type ImportStep = 'upload' | 'analyzing' | 'review' | 'validating' | 'conflicts' | 'importing' | 'complete';
+type ImportStep =
+  | 'upload'
+  | 'analyzing'
+  | 'review'
+  | 'validating'
+  | 'conflicts'
+  | 'importing'
+  | 'complete';
 
 export default function ImportPartsPage() {
   const router = useRouter();
@@ -71,16 +66,9 @@ export default function ImportPartsPage() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [allRows, setAllRows] = useState<string[][]>([]);
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
-  const [pricingColumns, setPricingColumns] = useState<Array<{ qty_column: string; price_column: string }>>([]);
   const [unmappedRequired, setUnmappedRequired] = useState<string[]>([]);
   const [discardedColumns, setDiscardedColumns] = useState<string[]>([]);
   const [unmappedOptional, setUnmappedOptional] = useState<string[]>([]);
-
-  // Customer matching
-  const [customerMatchMode, setCustomerMatchMode] = useState<CustomerMatchMode>('by_column');
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customersLoading, setCustomersLoading] = useState(true);
 
   // Validation & import
   const [conflicts, setConflicts] = useState<PartConflictInfo[]>([]);
@@ -92,23 +80,10 @@ export default function ImportPartsPage() {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [showUnmappedConfirmDialog, setShowUnmappedConfirmDialog] = useState(false);
 
-  // Temp state for file before customer mode selection
-  const [pendingFile, setPendingFile] = useState<{ headers: string[]; rows: string[][] } | null>(null);
-
-  // Load customers on mount
-  useEffect(() => {
-    async function loadCustomers() {
-      try {
-        const data = await getAllCustomers(companyId);
-        setCustomers(data);
-      } catch (err) {
-        console.error('Error loading customers:', err);
-      } finally {
-        setCustomersLoading(false);
-      }
-    }
-    loadCustomers();
-  }, [companyId]);
+  // Temp state for file before analysis
+  const [pendingFile, setPendingFile] = useState<{ headers: string[]; rows: string[][] } | null>(
+    null,
+  );
 
   // Get active step index for stepper
   const getActiveStepIndex = (): number => {
@@ -138,7 +113,9 @@ export default function ImportPartsPage() {
     // Check file size
     if (file.size > MAX_FILE_SIZE_BYTES) {
       const fileSizeMB = (file.size / 1024 / 1024).toFixed(1);
-      setError(`File too large. Maximum size is ${MAX_FILE_SIZE_MB}MB (your file is ${fileSizeMB}MB)`);
+      setError(
+        `File too large. Maximum size is ${MAX_FILE_SIZE_MB}MB (your file is ${fileSizeMB}MB)`,
+      );
       return;
     }
 
@@ -169,15 +146,9 @@ export default function ImportPartsPage() {
     reader.readAsText(file);
   }, []);
 
-  // Start analysis after file is selected and customer mode is chosen
+  // Start analysis after file is selected
   const handleStartAnalysis = async () => {
     if (!pendingFile) return;
-
-    // Validate customer mode settings
-    if (customerMatchMode === 'all_to_one' && !selectedCustomerId) {
-      setError('Please select a customer when using "Assign all to one customer" mode');
-      return;
-    }
 
     setHeaders(pendingFile.headers);
     setAllRows(pendingFile.rows);
@@ -204,20 +175,15 @@ export default function ImportPartsPage() {
 
       const data: PartAnalyzeResponse = await response.json();
       setMappings(data.mappings);
-      // pricing_columns removed — cost-plus model replaces pricing tiers
-      setPricingColumns([]);
       setUnmappedRequired(data.unmapped_required);
       setDiscardedColumns(data.discarded_columns);
 
       // Calculate unmapped optional fields
-      const mappedFields = new Set(data.mappings.filter((m) => m.db_field).map((m) => m.db_field));
+      const mappedFields = new Set(
+        data.mappings.filter((m) => m.db_field).map((m) => m.db_field),
+      );
       const optionalFields = PART_FIELDS.filter((f) => !f.required).map((f) => f.key);
-      // Don't count customer_name as unmapped if we're not using BY_COLUMN mode
-      let filteredOptional = optionalFields.filter((f) => !mappedFields.has(f));
-      if (customerMatchMode !== 'by_column') {
-        filteredOptional = filteredOptional.filter((f) => f !== 'customer_name');
-      }
-      setUnmappedOptional(filteredOptional);
+      setUnmappedOptional(optionalFields.filter((f) => !mappedFields.has(f)));
 
       setCurrentStep('review');
     } catch (err) {
@@ -240,15 +206,15 @@ export default function ImportPartsPage() {
               reasoning: 'Manually selected by user',
               needs_review: false,
             }
-          : m
-      )
+          : m,
+      ),
     );
 
     // Recalculate unmapped fields
     const mappedFields = new Set(
       mappings
         .map((m) => (m.csv_column === csvColumn ? dbField : m.db_field))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     // Update unmapped required
@@ -256,30 +222,8 @@ export default function ImportPartsPage() {
     setUnmappedRequired(requiredFields.filter((f) => !mappedFields.has(f)));
 
     // Update unmapped optional
-    let optionalFields = PART_FIELDS.filter((f) => !f.required).map((f) => f.key);
-    if (customerMatchMode !== 'by_column') {
-      optionalFields = optionalFields.filter((f) => f !== 'customer_name');
-    }
+    const optionalFields = PART_FIELDS.filter((f) => !f.required).map((f) => f.key);
     setUnmappedOptional(optionalFields.filter((f) => !mappedFields.has(f)));
-  };
-
-  // Pricing column pair management
-  const handleAddPricingPair = () => {
-    setPricingColumns((prev) => [...prev, { qty_column: '', price_column: '' }]);
-  };
-
-  const handleRemovePricingPair = (index: number) => {
-    setPricingColumns((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handlePricingPairChange = (
-    index: number,
-    field: 'qty_column' | 'price_column',
-    value: string
-  ) => {
-    setPricingColumns((prev) =>
-      prev.map((pair, i) => (i === index ? { ...pair, [field]: value } : pair))
-    );
   };
 
   // Check for unmapped fields and show confirmation if needed
@@ -302,12 +246,6 @@ export default function ImportPartsPage() {
       return;
     }
 
-    // Check customer_name mapping for BY_COLUMN mode
-    if (customerMatchMode === 'by_column' && !mappedFields.has('customer_name')) {
-      setError('Customer Name must be mapped when using "Match by column" mode');
-      return;
-    }
-
     setCurrentStep('validating');
     setLoading(true);
     setError(null);
@@ -320,11 +258,6 @@ export default function ImportPartsPage() {
           mappingsObj[m.csv_column] = m.db_field;
         }
       });
-
-      // Filter out empty pricing pairs
-      const validPricingColumns = pricingColumns.filter(
-        (p) => p.qty_column && p.price_column
-      );
 
       // Convert rows to objects (limit for validation to avoid payload size issues)
       const rowObjects = allRows.slice(0, MAX_ROWS_PER_REQUEST).map((row) => {
@@ -341,11 +274,8 @@ export default function ImportPartsPage() {
         body: JSON.stringify({
           company_id: companyId,
           mappings: mappingsObj,
-          pricing_columns: validPricingColumns,
           rows: rowObjects,
           total_rows: allRows.length,
-          customer_match_mode: customerMatchMode,
-          selected_customer_id: customerMatchMode === 'all_to_one' ? selectedCustomerId : undefined,
         }),
       });
 
@@ -390,11 +320,6 @@ export default function ImportPartsPage() {
         }
       });
 
-      // Filter out empty pricing pairs
-      const validPricingColumns = pricingColumns.filter(
-        (p) => p.qty_column && p.price_column
-      );
-
       // Convert all rows to objects
       const allRowObjects = allRows.map((row) => {
         const obj: Record<string, string> = {};
@@ -423,10 +348,7 @@ export default function ImportPartsPage() {
           body: JSON.stringify({
             company_id: companyId,
             mappings: mappingsObj,
-            pricing_columns: validPricingColumns,
             rows: batch,
-            customer_match_mode: customerMatchMode,
-            selected_customer_id: customerMatchMode === 'all_to_one' ? selectedCustomerId : undefined,
             skip_conflicts: skipConflicts,
             batch_offset: batchIndex * MAX_ROWS_PER_REQUEST,
           }),
@@ -467,7 +389,6 @@ export default function ImportPartsPage() {
     setHeaders([]);
     setAllRows([]);
     setMappings([]);
-    setPricingColumns([]);
     setUnmappedRequired([]);
     setUnmappedOptional([]);
     setDiscardedColumns([]);
@@ -477,8 +398,6 @@ export default function ImportPartsPage() {
     setImportResult(null);
     setError(null);
     setPendingFile(null);
-    setCustomerMatchMode('by_column');
-    setSelectedCustomerId('');
   };
 
   return (
@@ -523,7 +442,7 @@ export default function ImportPartsPage() {
         </Alert>
       )}
 
-      {/* Step: Upload & Settings */}
+      {/* Step: Upload */}
       {currentStep === 'upload' && (
         <Card elevation={2}>
           <CardContent sx={{ p: 4 }}>
@@ -535,7 +454,15 @@ export default function ImportPartsPage() {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Select a CSV file with part data. The first row should contain column headers.
               </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mb: 3 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 1,
+                  mb: 3,
+                }}
+              >
                 <AutoAwesomeIcon sx={{ color: 'primary.main', fontSize: 20 }} />
                 <Typography variant="body2" color="primary.main">
                   AI will automatically map your columns to part fields
@@ -553,87 +480,15 @@ export default function ImportPartsPage() {
             </Box>
 
             {pendingFile && (
-              <>
-                <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 3, mt: 3 }}>
-                  <Typography variant="h6" gutterBottom>
-                    Customer Assignment
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    How should customers be assigned to imported parts?
-                  </Typography>
-
-                  <RadioGroup
-                    value={customerMatchMode}
-                    onChange={(e) => setCustomerMatchMode(e.target.value as CustomerMatchMode)}
-                  >
-                    <FormControlLabel
-                      value="by_column"
-                      control={<Radio />}
-                      label={
-                        <Box>
-                          <Typography variant="body1">Match by Customer Name Column</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Use a CSV column to match parts to existing customers
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                    <FormControlLabel
-                      value="all_to_one"
-                      control={<Radio />}
-                      label={
-                        <Box>
-                          <Typography variant="body1">Assign All to One Customer</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            All imported parts will be assigned to a single customer
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                    <FormControlLabel
-                      value="all_generic"
-                      control={<Radio />}
-                      label={
-                        <Box>
-                          <Typography variant="body1">No Customer</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            All imported parts will not be tied to any customer
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                  </RadioGroup>
-
-                  {customerMatchMode === 'all_to_one' && (
-                    <Autocomplete
-                      fullWidth
-                      sx={{ mt: 2 }}
-                      disabled={customersLoading}
-                      options={customers}
-                      getOptionLabel={(option) => option.name}
-                      value={customers.find(c => c.id === selectedCustomerId) || null}
-                      onChange={(_, newValue) => setSelectedCustomerId(newValue?.id || '')}
-                      renderInput={(params) => (
-                        <TextField {...params} label="Select Customer" />
-                      )}
-                      ListboxProps={{
-                        sx: { maxHeight: 300 }
-                      }}
-                    />
-                  )}
-                </Box>
-
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 4 }}>
-                  <Button
-                    variant="contained"
-                    onClick={handleStartAnalysis}
-                    disabled={customerMatchMode === 'all_to_one' && !selectedCustomerId}
-                    endIcon={<ArrowForwardIcon />}
-                  >
-                    Analyze CSV
-                  </Button>
-                </Box>
-              </>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 4 }}>
+                <Button
+                  variant="contained"
+                  onClick={handleStartAnalysis}
+                  endIcon={<ArrowForwardIcon />}
+                >
+                  Analyze CSV
+                </Button>
+              </Box>
             )}
           </CardContent>
         </Card>
@@ -646,26 +501,14 @@ export default function ImportPartsPage() {
 
       {/* Step: Review Mappings */}
       {currentStep === 'review' && (
-        <>
-          {customerMatchMode === 'by_column' && !mappings.some((m) => m.db_field === 'customer_name') && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              Customer Name column not mapped. Required for &quot;Match by column&quot; mode.
-            </Alert>
-          )}
-
-          <MappingReviewTable
-            mappings={mappings}
-            fields={PART_FIELDS.map((f) => ({
-              ...f,
-              disabled: f.key === 'customer_name' && customerMatchMode !== 'by_column',
-            })) as FieldDefinition[]}
-            unmappedRequired={unmappedRequired}
-            unmappedOptional={unmappedOptional}
-            discardedColumns={discardedColumns}
-            onMappingChange={handleMappingChange}
-          />
-
-        </>
+        <MappingReviewTable
+          mappings={mappings}
+          fields={PART_FIELDS as FieldDefinition[]}
+          unmappedRequired={unmappedRequired}
+          unmappedOptional={unmappedOptional}
+          discardedColumns={discardedColumns}
+          onMappingChange={handleMappingChange}
+        />
       )}
 
       {/* Step: Validating */}
@@ -733,8 +576,19 @@ export default function ImportPartsPage() {
 
             {importResult.errors.length > 0 && (
               <Alert severity="warning" sx={{ mb: 3 }}>
-                {importResult.errors.length} row{importResult.errors.length > 1 ? 's' : ''} had errors
+                {importResult.errors.length} row{importResult.errors.length > 1 ? 's' : ''} had
+                errors
               </Alert>
+            )}
+
+            {importResult.imported_count > 0 && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: 'center', mb: 3 }}
+              >
+                Stocked items also appear in Inventory.
+              </Typography>
             )}
 
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
@@ -812,16 +666,11 @@ export default function ImportPartsPage() {
         }}
         onConfirm={() => executeImport(true)}
         entityName="Parts"
-        conflictColumns={[
-          { key: 'csv_part_name', label: 'Part Name' },
-          { key: 'csv_customer_name', label: 'Customer Name' },
-        ]}
+        conflictColumns={[{ key: 'csv_part_name', label: 'Part Name' }]}
         getConflictLabel={(conflict) => {
           switch (conflict.conflict_type) {
             case 'duplicate_part_name':
               return 'Duplicate Part Name';
-            case 'customer_not_found':
-              return 'Customer Not Found';
             case 'csv_duplicate':
               return 'Duplicate in CSV';
             default:

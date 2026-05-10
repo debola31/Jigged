@@ -110,11 +110,11 @@ export async function getJobWithRelations(
         parts(id, part_name, description),
         job_operations(
           *,
-          operation_types!left(id, name, labor_rate)
+          work_center:work_centers!left(id, name, labor_rate, kind)
         ),
         job_materials(
           *,
-          inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+          material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity, cost_per_unit)
         )
       )
     `)
@@ -172,7 +172,7 @@ export async function updateJobMaterial(
     .eq('id', materialId)
     .select(`
       *,
-      inventory_item:inventory_items(id, name, primary_unit, quantity, cost_per_unit)
+      material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity, cost_per_unit)
     `)
     .single();
 
@@ -333,7 +333,7 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
     .from('job_operations')
     .select(`
       *,
-      operation_types!left(id, name, labor_rate)
+      work_center:work_centers!left(id, name, labor_rate, kind)
     `)
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
@@ -503,7 +503,7 @@ export async function startJobOperation(
     .eq('status', 'pending')
     .select(`
       *,
-      operation_types!left(id, name, labor_rate)
+      work_center:work_centers!left(id, name, labor_rate, kind)
     `)
     .single();
   if (updateError) {
@@ -555,7 +555,7 @@ export async function completeJobOperation(
     .eq('status', 'in_progress')
     .select(`
       *,
-      operation_types!left(id, name, labor_rate)
+      work_center:work_centers!left(id, name, labor_rate, kind)
     `)
     .single();
   if (updateError) {
@@ -600,7 +600,7 @@ export async function skipJobOperation(
     .eq('status', 'pending')
     .select(`
       *,
-      operation_types!left(id, name, labor_rate)
+      work_center:work_centers!left(id, name, labor_rate, kind)
     `)
     .single();
   if (updateError) {
@@ -644,7 +644,7 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
     .in('status', ['completed', 'skipped'])
     .select(`
       *,
-      operation_types!left(id, name, labor_rate)
+      work_center:work_centers!left(id, name, labor_rate, kind)
     `)
     .single();
   if (error) {

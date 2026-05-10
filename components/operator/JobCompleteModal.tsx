@@ -20,10 +20,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { completeJob, getJobPartMaterialsForCompletion } from '@/utils/operatorAccess';
-import { getAllInventoryItems } from '@/utils/inventoryAccess';
+import { getStockedParts } from '@/utils/partsAccess';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
-import type { InventoryItem } from '@/types/inventory';
+import type { Part } from '@/types/part';
 
 interface JobCompleteModalProps {
   open: boolean;
@@ -68,7 +68,7 @@ export default function JobCompleteModal({
 
   // For adding extra materials
   const [showAddMaterial, setShowAddMaterial] = useState(false);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [stockableParts, setStockableParts] = useState<Part[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
 
   // Update elapsed time while modal is open
@@ -116,11 +116,11 @@ export default function JobCompleteModal({
   };
 
   const handleAddMaterial = async () => {
-    if (inventoryItems.length === 0) {
+    if (stockableParts.length === 0) {
       setLoadingItems(true);
       try {
-        const items = await getAllInventoryItems(companyId);
-        setInventoryItems(items);
+        const items = await getStockedParts(companyId);
+        setStockableParts(items);
       } catch {
         // Silently fail — user can retry
       } finally {
@@ -130,22 +130,25 @@ export default function JobCompleteModal({
     setShowAddMaterial(true);
   };
 
-  const handleSelectNewMaterial = (item: InventoryItem | null) => {
-    if (!item) return;
+  const handleSelectNewMaterial = (part: Part | null) => {
+    if (!part) return;
 
     // Don't add duplicates
-    if (materials.some((m) => m.inventory_item_id === item.id)) return;
+    if (materials.some((m) => m.inventory_item_id === part.id)) return;
 
+    const unit = part.primary_unit ?? '';
     setMaterials((prev) => [
       ...prev,
       {
-        inventory_item_id: item.id,
-        item_name: item.name,
+        // MaterialConfirmation.inventory_item_id is the legacy field name; the
+        // value is now a part_id (the unified item master).
+        inventory_item_id: part.id,
+        item_name: part.part_name,
         expected_quantity: 0,
         confirmed_quantity: 0,
-        unit: item.primary_unit,
-        current_stock: item.quantity,
-        primary_unit: item.primary_unit,
+        unit,
+        current_stock: part.quantity,
+        primary_unit: unit,
       },
     ]);
     setShowAddMaterial(false);
@@ -356,10 +359,10 @@ export default function JobCompleteModal({
             {showAddMaterial ? (
               <Card elevation={1} sx={{ p: 2 }}>
                 <Autocomplete
-                  options={inventoryItems.filter(
+                  options={stockableParts.filter(
                     (item) => !materials.some((m) => m.inventory_item_id === item.id)
                   )}
-                  getOptionLabel={(option) => option.name}
+                  getOptionLabel={(option) => option.part_name}
                   loading={loadingItems}
                   onChange={(_, value) => handleSelectNewMaterial(value)}
                   renderInput={(params) => (

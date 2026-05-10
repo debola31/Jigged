@@ -35,6 +35,7 @@ import {
 import {
   createMarkupRate,
   updateMarkupRate,
+  cascadeRateUpdateToParts,
   deleteMarkupRate,
   checkMarkupRateNameExists,
 } from '@/utils/markupRatesAccess';
@@ -174,6 +175,18 @@ export default function MarkupRateForm({
         await createMarkupRate(companyId, formData);
       } else if (rateId) {
         await updateMarkupRate(rateId, formData);
+        // Live link: every part with markup_rate_id = rateId picks up the new
+        // breakpoints. Sequential per-part inside the cascade. Failures are
+        // collected (not thrown) so a single bad part doesn't block the
+        // navigation back to the list — surfaced via console for now; if
+        // partial failures become common, plumb them through to a snackbar.
+        const result = await cascadeRateUpdateToParts(companyId, rateId);
+        if (result.failed.length > 0) {
+          console.warn(
+            `cascadeRateUpdateToParts: ${result.updated} updated, ${result.failed.length} failed`,
+            result.failed,
+          );
+        }
       }
       router.push(`/dashboard/${companyId}/markup-rates`);
     } catch (err) {
@@ -289,7 +302,7 @@ export default function MarkupRateForm({
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Quantity</TableCell>
+                    <TableCell>Min qty</TableCell>
                     <TableCell align="right">Markup %</TableCell>
                     <TableCell align="right" sx={{ width: 60 }}></TableCell>
                   </TableRow>

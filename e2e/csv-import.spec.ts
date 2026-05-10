@@ -33,12 +33,9 @@ test.describe('CSV Import workflow', () => {
     // Verify rows were loaded
     await expect(page.getByText(/3 rows loaded/i)).toBeVisible({ timeout: 10_000 });
 
-    // ── Step 3: Select customer matching mode ──
-
-    // Select "No Customer" mode to keep the test simple
-    await page.getByText(/No Customer/i).click();
-
-    // ── Step 4: Click "Analyze CSV" ──
+    // ── Step 3: Click "Analyze CSV" ──
+    // (The customer-match mode picker was removed in PR 1; parts no longer
+    // link to customers, so the upload step jumps straight to AI analysis.)
 
     await page.getByRole('button', { name: /Analyze CSV/i }).click();
 

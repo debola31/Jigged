@@ -1,24 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Box,
-  Divider,
-  CircularProgress,
-  Alert,
-  Typography,
-  Fade,
-} from '@mui/material';
+import { Box, CircularProgress, Alert, Typography, Fade } from '@mui/material';
 import CloudDoneOutlinedIcon from '@mui/icons-material/CloudDoneOutlined';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
 import RoutingOperationsList from '@/components/routings/RoutingOperationsList';
-import RoutingMaterialsList from '@/components/routings/RoutingMaterialsList';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
-import type { MaterialRowData } from '@/components/routings/RoutingMaterialRow';
-import {
-  getRoutingForPart,
-  saveRoutingWithOperationsAndMaterials,
-} from '@/utils/routingsAccess';
+import { getRoutingForPart, saveRoutingWithOperations } from '@/utils/routingsAccess';
+import type { RoutingOperationWithWorkCenter } from '@/types/routings';
 
 interface PartRoutingPanelProps {
   companyId: string;
@@ -31,22 +20,41 @@ interface PartRoutingPanelProps {
 }
 
 /**
- * Side-by-side Operations + Materials cards embedded in the part detail page.
- * Auto-saves to the database on every change — no "Save Routing" button.
+ * Inline auto-save routing editor embedded in the part detail page.
  *
+ *  - Materials are no longer routing-attached; BOM lives on the part itself
+ *    (`parts_bom`) and is edited by `PartBomPanel` (PR 3).
  *  - First add (when the part has no routing yet) implicitly creates the
- *    routing record before persisting the new node/material.
+ *    routing record before persisting the new operation.
  *  - Each user action (modal save, reorder arrow, delete) writes the full
- *    routing state via saveRoutingWithOperationsAndMaterials, then refetches
- *    so temp IDs become real IDs and the next change diffs correctly.
+ *    operations list via `saveRoutingWithOperations`, then refetches so temp
+ *    IDs become real IDs and the next change diffs correctly.
  *  - A subtle indicator in the header shows save state.
  */
-export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: PartRoutingPanelProps) {
+function rowFromOperation(op: RoutingOperationWithWorkCenter): OperationRowData {
+  return {
+    tempId: op.id,
+    workCenterId: op.work_center_id,
+    workCenterName: op.work_center?.name ?? 'Unknown work center',
+    workCenterKind: op.work_center?.kind ?? 'internal',
+    vendorName: op.work_center?.vendor?.name ?? null,
+    setupMinutes: op.setup_minutes,
+    cycleMinutesPerUnit: op.cycle_minutes_per_unit,
+    laborRateOverride: op.labor_rate_override,
+    externalUnitPrice: op.external_unit_price,
+    externalSetupCost: op.external_setup_cost,
+    instructions: op.instructions,
+  };
+}
+
+export default function PartRoutingPanel({
+  companyId,
+  partId,
+  onRoutingSaved,
+}: PartRoutingPanelProps) {
   const [ops, setOps] = useState<OperationRowData[]>([]);
-  const [mats, setMats] = useState<MaterialRowData[]>([]);
   const [routingId, setRoutingId] = useState<string | null>(null);
-  const [originalNodeIds, setOriginalNodeIds] = useState<Set<string>>(new Set());
-  const [originalMaterialIds, setOriginalMaterialIds] = useState<Set<string>>(new Set());
+  const [originalOpIds, setOriginalOpIds] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,27 +73,8 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
         if (cancelled) return;
         if (data) {
           setRoutingId(data.id);
-          setOps(
-            data.nodes.map((n) => ({
-              tempId: n.id,
-              operationTypeId: n.operation_type_id,
-              operationName: n.operation_type?.name || 'Unknown',
-              laborRate: n.operation_type?.labor_rate || null,
-              runTimePerUnit: n.run_time_per_unit,
-              setupTime: n.setup_time || 0,
-            }))
-          );
-          setMats(
-            data.materials.map((m) => ({
-              tempId: m.id,
-              inventoryItemId: m.inventory_item_id,
-              itemName: m.inventory_item?.name || 'Unknown item',
-              quantity: m.quantity,
-              unit: m.unit,
-            }))
-          );
-          setOriginalNodeIds(new Set(data.nodes.map((n) => n.id)));
-          setOriginalMaterialIds(new Set(data.materials.map((m) => m.id)));
+          setOps(data.operations.map(rowFromOperation));
+          setOriginalOpIds(new Set(data.operations.map((op) => op.id)));
         }
       })
       .catch((err) => {
@@ -102,64 +91,41 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
   }, [partId]);
 
   /**
-   * Persist the given operations + materials to the database, then refetch
-   * so temp IDs become real and subsequent diffs are correct. Calls are
-   * serialized via a ref-held promise queue.
+   * Persist the given operations to the database, then refetch so temp IDs
+   * become real and subsequent diffs are correct. Calls are serialized via
+   * a ref-held promise queue.
    */
   const persist = useCallback(
-    (nextOps: OperationRowData[], nextMats: MaterialRowData[]) => {
+    (nextOps: OperationRowData[]) => {
       const job = queueRef.current.then(async () => {
         setSaving(true);
         setError(null);
         try {
-          const routing = await saveRoutingWithOperationsAndMaterials(
+          const routing = await saveRoutingWithOperations(
             companyId,
             partId,
             routingId,
             nextOps.map((o) => ({
               tempId: o.tempId,
-              operationTypeId: o.operationTypeId,
-              operationName: o.operationName,
-              laborRate: o.laborRate,
-              runTimePerUnit: o.runTimePerUnit,
-              setupTime: o.setupTime,
+              workCenterId: o.workCenterId,
+              workCenterName: o.workCenterName,
+              workCenterKind: o.workCenterKind,
+              setupMinutes: o.setupMinutes,
+              cycleMinutesPerUnit: o.cycleMinutesPerUnit,
+              laborRateOverride: o.laborRateOverride,
+              externalUnitPrice: o.externalUnitPrice,
+              externalSetupCost: o.externalSetupCost,
+              instructions: o.instructions,
             })),
-            nextMats.map((m) => ({
-              tempId: m.tempId,
-              inventoryItemId: m.inventoryItemId,
-              itemName: m.itemName,
-              quantity: m.quantity,
-              unit: m.unit,
-            })),
-            originalNodeIds,
-            originalMaterialIds
+            originalOpIds,
           );
           setRoutingId(routing.id);
 
           // Refetch so any newly-created rows have their real DB ids.
           const fresh = await getRoutingForPart(partId);
           if (fresh) {
-            setOps(
-              fresh.nodes.map((n) => ({
-                tempId: n.id,
-                operationTypeId: n.operation_type_id,
-                operationName: n.operation_type?.name || 'Unknown',
-                laborRate: n.operation_type?.labor_rate || null,
-                runTimePerUnit: n.run_time_per_unit,
-                setupTime: n.setup_time || 0,
-              }))
-            );
-            setMats(
-              fresh.materials.map((m) => ({
-                tempId: m.id,
-                inventoryItemId: m.inventory_item_id,
-                itemName: m.inventory_item?.name || 'Unknown item',
-                quantity: m.quantity,
-                unit: m.unit,
-              }))
-            );
-            setOriginalNodeIds(new Set(fresh.nodes.map((n) => n.id)));
-            setOriginalMaterialIds(new Set(fresh.materials.map((m) => m.id)));
+            setOps(fresh.operations.map(rowFromOperation));
+            setOriginalOpIds(new Set(fresh.operations.map((op) => op.id)));
           }
           setSavedAt(new Date());
           onRoutingSaved?.();
@@ -173,23 +139,15 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
       // Swallow rejections in the chain so one error doesn't poison the queue.
       queueRef.current = job.catch(() => undefined);
     },
-    [companyId, partId, routingId, originalNodeIds, originalMaterialIds, onRoutingSaved]
+    [companyId, partId, routingId, originalOpIds, onRoutingSaved],
   );
 
   const handleOpsChange = useCallback(
     (next: OperationRowData[]) => {
       setOps(next);
-      persist(next, mats);
+      persist(next);
     },
-    [mats, persist]
-  );
-
-  const handleMatsChange = useCallback(
-    (next: MaterialRowData[]) => {
-      setMats(next);
-      persist(ops, next);
-    },
-    [ops, persist]
+    [persist],
   );
 
   if (loading) {
@@ -240,23 +198,12 @@ export default function PartRoutingPanel({ companyId, partId, onRoutingSaved }: 
         </Alert>
       )}
 
-      {/* Stacked vertically (operations above materials) since this lives
-          inside a narrow side panel — side-by-side wouldn't have room. */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <RoutingOperationsList
-          rows={ops}
-          onChange={handleOpsChange}
-          companyId={companyId}
-          disabled={saving}
-        />
-        <Divider />
-        <RoutingMaterialsList
-          rows={mats}
-          onChange={handleMatsChange}
-          companyId={companyId}
-          disabled={saving}
-        />
-      </Box>
+      <RoutingOperationsList
+        rows={ops}
+        onChange={handleOpsChange}
+        companyId={companyId}
+        disabled={saving}
+      />
     </Box>
   );
 }

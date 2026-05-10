@@ -1,27 +1,54 @@
 /**
  * Routings Data Access Layer
  *
- * Linear routing model: a routing is an ordered list of operations
- * (routing_nodes, ordered by `sequence`) plus a routing-level material list
- * (routing_materials). Each part has exactly one routing (1:1).
+ * Linear routing model: a routing is an ordered list of routing_operations
+ * (ordered by `sequence`). Each part has exactly one routing (1:1). BOM
+ * lines live separately on the part itself (`parts_bom`) and are managed by
+ * `utils/bomAccess.ts`.
  */
 
 import { getSupabase } from '@/lib/supabase';
 import type {
   Routing,
-  RoutingNode,
-  RoutingMaterial,
-  RoutingMaterialWithItem,
+  RoutingOperation,
+  RoutingOperationWithWorkCenter,
   RoutingWithPart,
   RoutingWithStats,
   RoutingWithGraph,
-  RoutingNodeFormData,
-  RoutingMaterialFormData,
+  RoutingOperationFormData,
 } from '@/types/routings';
 
 // ============================================
 // Routing CRUD
 // ============================================
+
+const ROUTING_OP_COLUMNS =
+  'id, routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, external_setup_cost, instructions, metadata, created_at, updated_at';
+
+const WC_JOIN = 'work_center:work_centers(id, name, kind, labor_rate, vendor:vendors(id, name))';
+
+interface WCJoinShape {
+  id: string;
+  name: string;
+  kind: 'internal' | 'external';
+  labor_rate: number | null;
+  vendor: { id: string; name: string } | { id: string; name: string }[] | null;
+}
+
+function shapeWorkCenterJoin(
+  wc: WCJoinShape | WCJoinShape[] | null,
+): RoutingOperationWithWorkCenter['work_center'] {
+  const single = Array.isArray(wc) ? wc[0] : wc;
+  if (!single) return null;
+  const vendor = Array.isArray(single.vendor) ? single.vendor[0] : single.vendor;
+  return {
+    id: single.id,
+    name: single.name,
+    kind: single.kind,
+    labor_rate: single.labor_rate !== null ? Number(single.labor_rate) : null,
+    vendor: vendor ?? null,
+  };
+}
 
 /**
  * Get the routing for a part (1:1). Returns null if the part has no routing.
@@ -52,7 +79,7 @@ export async function getRoutingForPart(partId: string): Promise<RoutingWithGrap
  * Lightweight routing summary for a part (for list/detail displays).
  */
 export async function getRoutingSummaryForPart(
-  partId: string
+  partId: string,
 ): Promise<{ id: string; nodeCount: number; totalRunTime: number | null } | null> {
   const supabase = getSupabase();
 
@@ -60,7 +87,7 @@ export async function getRoutingSummaryForPart(
     .from('routings')
     .select(`
       id,
-      routing_nodes(id, run_time_per_unit)
+      routing_operations(id, cycle_minutes_per_unit)
     `)
     .eq('part_id', partId)
     .maybeSingle();
@@ -72,12 +99,14 @@ export async function getRoutingSummaryForPart(
 
   if (!data) return null;
 
-  const nodes = (data.routing_nodes as Array<{ id: string; run_time_per_unit: number | null }>) || [];
-  const totalRun = nodes.reduce((sum, n) => sum + (n.run_time_per_unit || 0), 0);
+  const ops =
+    (data.routing_operations as Array<{ id: string; cycle_minutes_per_unit: number | null }>) ||
+    [];
+  const totalRun = ops.reduce((sum, op) => sum + (op.cycle_minutes_per_unit || 0), 0);
 
   return {
     id: data.id,
-    nodeCount: nodes.length,
+    nodeCount: ops.length,
     totalRunTime: totalRun || null,
   };
 }
@@ -92,7 +121,7 @@ export async function getRoutings(
     partId?: string;
     sortField?: string;
     sortDirection?: 'asc' | 'desc';
-  }
+  },
 ): Promise<RoutingWithStats[]> {
   const supabase = getSupabase();
   const { search, partId, sortField = 'name', sortDirection = 'asc' } = options || {};
@@ -102,7 +131,7 @@ export async function getRoutings(
     .select(`
       *,
       part:parts(id, part_name, description),
-      nodes:routing_nodes(id, run_time_per_unit)
+      operations:routing_operations(id, cycle_minutes_per_unit)
     `)
     .eq('company_id', companyId);
 
@@ -133,20 +162,21 @@ export async function getRoutings(
     created_at: string;
     updated_at: string;
     part: { id: string; part_name: string; description: string | null } | null;
-    nodes?: Array<{ id: string; run_time_per_unit: number | null }>;
+    operations?: Array<{ id: string; cycle_minutes_per_unit: number | null }>;
   }
 
   return (data || []).map((routing: RoutingRow) => {
-    const nodes = routing.nodes || [];
-    const totalRun = nodes.reduce(
-      (sum: number, n) => sum + (n.run_time_per_unit || 0),
-      0
+    const ops = routing.operations || [];
+    const totalRun = ops.reduce(
+      (sum: number, op) => sum + (op.cycle_minutes_per_unit || 0),
+      0,
     );
 
-    const { nodes: _, ...rest } = routing;
+    const { operations: _ops, ...rest } = routing;
+    void _ops;
     return {
       ...rest,
-      nodes_count: nodes.length,
+      operations_count: ops.length,
       total_run_time_per_unit: totalRun || null,
     } as RoutingWithStats;
   });
@@ -177,7 +207,7 @@ export async function getRouting(routingId: string): Promise<RoutingWithPart | n
 }
 
 /**
- * Get a routing with full operations + materials data.
+ * Get a routing with full operations data.
  */
 export async function getRoutingWithGraph(routingId: string): Promise<RoutingWithGraph | null> {
   const supabase = getSupabase();
@@ -201,55 +231,39 @@ export async function getRoutingWithGraph(routingId: string): Promise<RoutingWit
 }
 
 /**
- * Internal helper: given a routing row, fetch its nodes and materials.
+ * Internal helper: given a routing row, fetch its operations.
  */
 async function loadRoutingGraph(
-  routing: Routing & { part: { id: string; part_name: string; description: string | null } | null }
+  routing: Routing & { part: { id: string; part_name: string; description: string | null } | null },
 ): Promise<RoutingWithGraph> {
   const supabase = getSupabase();
 
-  const { data: nodes, error: nodesError } = await supabase
-    .from('routing_nodes')
-    .select(`
-      *,
-      operation_type:operation_types(
-        id,
-        name,
-        labor_rate
-      )
-    `)
+  const { data: ops, error: opsError } = await supabase
+    .from('routing_operations')
+    .select(`${ROUTING_OP_COLUMNS}, ${WC_JOIN}`)
     .eq('routing_id', routing.id)
     .order('sequence', { ascending: true })
     .order('created_at', { ascending: true });
 
-  if (nodesError) {
-    console.error('Error fetching routing nodes:', nodesError);
-    throw nodesError;
+  if (opsError) {
+    console.error('Error fetching routing operations:', opsError);
+    throw opsError;
   }
 
-  const { data: materials, error: materialsError } = await supabase
-    .from('routing_materials')
-    .select(`
-      *,
-      inventory_item:inventory_items(id, name, primary_unit, cost_per_unit)
-    `)
-    .eq('routing_id', routing.id)
-    .order('sequence', { ascending: true });
-
-  if (materialsError) {
-    console.error('Error fetching routing materials:', materialsError);
-    throw materialsError;
-  }
+  type OpRow = RoutingOperation & { work_center: WCJoinShape | WCJoinShape[] | null };
+  const operations = ((ops || []) as OpRow[]).map((row) => ({
+    ...row,
+    work_center: shapeWorkCenterJoin(row.work_center),
+  })) as RoutingOperationWithWorkCenter[];
 
   return {
     ...routing,
-    nodes: nodes || [],
-    materials: (materials as RoutingMaterialWithItem[]) || [],
+    operations,
   };
 }
 
 /**
- * Delete a routing (cascades to nodes and materials).
+ * Delete a routing (cascades to its operations).
  */
 export async function deleteRouting(routingId: string): Promise<void> {
   const supabase = getSupabase();
@@ -261,17 +275,13 @@ export async function deleteRouting(routingId: string): Promise<void> {
 }
 
 // ============================================
-// Routing Node CRUD
+// Routing Operation CRUD
 // ============================================
 
-/**
- * Internal helper: compute the next sequence value for a routing.
- * Returns 10 for the first node, then 20, 30, ...
- */
-async function getNextNodeSequence(routingId: string): Promise<number> {
+async function getNextOperationSequence(routingId: string): Promise<number> {
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from('routing_nodes')
+    .from('routing_operations')
     .select('sequence')
     .eq('routing_id', routingId)
     .order('sequence', { ascending: false })
@@ -279,162 +289,87 @@ async function getNextNodeSequence(routingId: string): Promise<number> {
     .maybeSingle();
 
   if (error) {
-    console.error('Error fetching max node sequence:', error);
+    console.error('Error fetching max operation sequence:', error);
     throw error;
   }
 
   return (data?.sequence ?? 0) + 10;
 }
 
-export async function createRoutingNode(
+function parseNumOrNull(s: string): number | null {
+  if (!s || !s.trim()) return null;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formDataToOpInsert(formData: RoutingOperationFormData): Record<string, unknown> {
+  return {
+    work_center_id: formData.work_center_id,
+    setup_minutes: parseNumOrNull(formData.setup_minutes) ?? 0,
+    cycle_minutes_per_unit: parseNumOrNull(formData.cycle_minutes_per_unit),
+    labor_rate_override: parseNumOrNull(formData.labor_rate_override),
+    external_unit_price: parseNumOrNull(formData.external_unit_price),
+    external_setup_cost: parseNumOrNull(formData.external_setup_cost),
+    instructions: formData.instructions.trim() || null,
+  };
+}
+
+export async function createRoutingOperation(
   routingId: string,
-  formData: RoutingNodeFormData,
-  sequence?: number
-): Promise<RoutingNode> {
+  formData: RoutingOperationFormData,
+  sequence?: number,
+): Promise<RoutingOperation> {
   const supabase = getSupabase();
-  const seq = sequence ?? (await getNextNodeSequence(routingId));
+  const seq = sequence ?? (await getNextOperationSequence(routingId));
 
   const { data, error } = await supabase
-    .from('routing_nodes')
+    .from('routing_operations')
     .insert({
       routing_id: routingId,
-      operation_type_id: formData.operation_type_id,
-      run_time_per_unit: formData.run_time_per_unit
-        ? parseFloat(formData.run_time_per_unit)
-        : null,
-      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
+      ...formDataToOpInsert(formData),
       metadata: {},
       sequence: seq,
     })
-    .select()
+    .select(ROUTING_OP_COLUMNS)
     .single();
 
   if (error) {
-    console.error('Error creating routing node:', error);
+    console.error('Error creating routing operation:', error);
     throw error;
   }
 
-  return data;
+  return data as RoutingOperation;
 }
 
-export async function updateRoutingNode(
-  nodeId: string,
-  formData: RoutingNodeFormData
-): Promise<RoutingNode> {
+export async function updateRoutingOperation(
+  operationId: string,
+  formData: RoutingOperationFormData,
+): Promise<RoutingOperation> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
-    .from('routing_nodes')
+    .from('routing_operations')
     .update({
-      operation_type_id: formData.operation_type_id,
-      run_time_per_unit: formData.run_time_per_unit
-        ? parseFloat(formData.run_time_per_unit)
-        : null,
-      setup_time: formData.setup_time ? parseFloat(formData.setup_time) : 0,
+      ...formDataToOpInsert(formData),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', nodeId)
-    .select()
+    .eq('id', operationId)
+    .select(ROUTING_OP_COLUMNS)
     .single();
 
   if (error) {
-    console.error('Error updating routing node:', error);
+    console.error('Error updating routing operation:', error);
     throw error;
   }
 
-  return data;
+  return data as RoutingOperation;
 }
 
-export async function deleteRoutingNode(nodeId: string): Promise<void> {
+export async function deleteRoutingOperation(operationId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('routing_nodes').delete().eq('id', nodeId);
+  const { error } = await supabase.from('routing_operations').delete().eq('id', operationId);
   if (error) {
-    console.error('Error deleting routing node:', error);
-    throw error;
-  }
-}
-
-// ============================================
-// Routing Material CRUD
-// ============================================
-
-async function getNextMaterialSequence(routingId: string): Promise<number> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('routing_materials')
-    .select('sequence')
-    .eq('routing_id', routingId)
-    .order('sequence', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error fetching max material sequence:', error);
-    throw error;
-  }
-
-  return (data?.sequence ?? 0) + 10;
-}
-
-export async function createRoutingMaterial(
-  routingId: string,
-  formData: RoutingMaterialFormData,
-  sequence?: number
-): Promise<RoutingMaterial> {
-  const supabase = getSupabase();
-  const seq = sequence ?? (await getNextMaterialSequence(routingId));
-
-  const { data, error } = await supabase
-    .from('routing_materials')
-    .insert({
-      routing_id: routingId,
-      inventory_item_id: formData.inventory_item_id,
-      quantity: parseFloat(formData.quantity),
-      unit: formData.unit,
-      sequence: seq,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating routing material:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-export async function updateRoutingMaterial(
-  materialId: string,
-  formData: RoutingMaterialFormData
-): Promise<RoutingMaterial> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('routing_materials')
-    .update({
-      inventory_item_id: formData.inventory_item_id,
-      quantity: parseFloat(formData.quantity),
-      unit: formData.unit,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', materialId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating routing material:', error);
-    throw error;
-  }
-
-  return data;
-}
-
-export async function deleteRoutingMaterial(materialId: string): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase.from('routing_materials').delete().eq('id', materialId);
-  if (error) {
-    console.error('Error deleting routing material:', error);
+    console.error('Error deleting routing operation:', error);
     throw error;
   }
 }
@@ -445,50 +380,42 @@ export async function deleteRoutingMaterial(materialId: string): Promise<void> {
 
 /**
  * Pending operation row from the linear builder.
- *  - tempId: synthetic id for new rows (prefix `temp-node-`); real uuid for existing rows.
- *  - All other fields mirror routing_nodes.
+ *  - tempId: synthetic id for new rows (prefix `temp-op-`); real uuid for existing rows.
+ *  - All other fields mirror routing_operations.
  */
-export interface PendingNode {
+export interface PendingOperation {
   tempId: string;
-  operationTypeId: string;
-  operationName: string;
-  laborRate: number | null;
-  runTimePerUnit: number | null;
-  setupTime: number;
+  workCenterId: string;
+  workCenterName: string;
+  workCenterKind: 'internal' | 'external';
+  setupMinutes: number | null;
+  cycleMinutesPerUnit: number | null;
+  laborRateOverride: number | null;
+  externalUnitPrice: number | null;
+  externalSetupCost: number | null;
+  instructions: string | null;
 }
 
 /**
- * Pending material row from the linear builder.
- *  - tempId: synthetic id for new rows (prefix `temp-material-`); real uuid for existing rows.
- */
-export interface PendingMaterial {
-  tempId: string;
-  inventoryItemId: string;
-  itemName: string;
-  quantity: number;
-  unit: string;
-}
-
-/**
- * Save a routing's full state from the wizard. Handles create + edit modes.
+ * Save a routing's operations from the wizard. Handles create + edit modes.
  * Routing name is auto-generated from the part name.
  *
- * Operations and materials are saved with `sequence` matching their position
- * in the input arrays (steps of 10).
+ * BOM is no longer routing-attached; the part page orchestrates a separate
+ * BOM save through `utils/bomAccess.ts`.
+ *
+ * Operations are saved with `sequence` matching their position in the input
+ * array (steps of 10).
  */
-export async function saveRoutingWithOperationsAndMaterials(
+export async function saveRoutingWithOperations(
   companyId: string,
   partId: string,
   routingId: string | null,
-  pendingNodes: PendingNode[],
-  pendingMaterials: PendingMaterial[],
-  originalNodeIds: Set<string>,
-  originalMaterialIds: Set<string>
+  pendingOperations: PendingOperation[],
+  originalOperationIds: Set<string>,
 ): Promise<Routing> {
   const supabase = getSupabase();
   const isEditMode = !!routingId;
 
-  // Get the part name for auto-naming
   const { data: partData, error: partError } = await supabase
     .from('parts')
     .select('part_name')
@@ -520,121 +447,61 @@ export async function saveRoutingWithOperationsAndMaterials(
   }
 
   // Step 2: Diff against the original sets to find deletions
-  const currentNodeIds = new Set(pendingNodes.map((n) => n.tempId));
-  const currentMaterialIds = new Set(pendingMaterials.map((m) => m.tempId));
+  const currentIds = new Set(pendingOperations.map((op) => op.tempId));
+  const opsToDelete = [...originalOperationIds].filter((id) => !currentIds.has(id));
 
-  const nodesToDelete = [...originalNodeIds].filter((id) => !currentNodeIds.has(id));
-  const materialsToDelete = [...originalMaterialIds].filter((id) => !currentMaterialIds.has(id));
-
-  if (nodesToDelete.length > 0) {
+  if (opsToDelete.length > 0) {
     const { error } = await supabase
-      .from('routing_nodes')
+      .from('routing_operations')
       .delete()
-      .in('id', nodesToDelete);
+      .in('id', opsToDelete);
     if (error) throw error;
   }
 
-  if (materialsToDelete.length > 0) {
-    const { error } = await supabase
-      .from('routing_materials')
-      .delete()
-      .in('id', materialsToDelete);
-    if (error) throw error;
-  }
-
-  // Step 3: Operations — two-phase update so the (routing_id, sequence) unique
-  //   constraint isn't violated while reordering. We push existing rows to
-  //   a temporary high-sequence range first, then assign the final sequences.
-  //   New rows can be inserted at their final sequence directly (no conflict).
-  if (pendingNodes.length > 0) {
-    const existingRows = pendingNodes.filter((n) => originalNodeIds.has(n.tempId));
+  // Step 3: Two-phase update so the (routing_id, sequence) unique constraint
+  //   isn't violated while reordering. Park existing rows at sequences
+  //   100000+, then assign final sequences.
+  if (pendingOperations.length > 0) {
+    const existingRows = pendingOperations.filter((op) => originalOperationIds.has(op.tempId));
     if (existingRows.length > 0) {
-      // Park existing rows at sequences 100000+ so the final write below has
-      // a clean slot to write into. Constraint is DEFERRED so even without
-      // this, a single statement update would work — but updating per-row
-      // is the simpler path.
       let temp = 100000;
-      for (const node of existingRows) {
+      for (const op of existingRows) {
         const { error } = await supabase
-          .from('routing_nodes')
+          .from('routing_operations')
           .update({ sequence: temp })
-          .eq('id', node.tempId);
+          .eq('id', op.tempId);
         if (error) throw error;
         temp += 10;
       }
     }
 
     let seq = 10;
-    for (const node of pendingNodes) {
-      const isExisting = originalNodeIds.has(node.tempId);
+    for (const op of pendingOperations) {
+      const isExisting = originalOperationIds.has(op.tempId);
+      const payload = {
+        work_center_id: op.workCenterId,
+        setup_minutes: op.setupMinutes ?? 0,
+        cycle_minutes_per_unit: op.cycleMinutesPerUnit,
+        labor_rate_override: op.laborRateOverride,
+        external_unit_price: op.externalUnitPrice,
+        external_setup_cost: op.externalSetupCost,
+        instructions: op.instructions,
+        sequence: seq,
+      };
+
       if (isExisting) {
         const { error } = await supabase
-          .from('routing_nodes')
-          .update({
-            operation_type_id: node.operationTypeId,
-            run_time_per_unit: node.runTimePerUnit,
-            setup_time: node.setupTime ?? 0,
-            sequence: seq,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', node.tempId);
+          .from('routing_operations')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', op.tempId);
         if (error) throw error;
       } else {
         const { error } = await supabase
-          .from('routing_nodes')
+          .from('routing_operations')
           .insert({
             routing_id: routing.id,
-            operation_type_id: node.operationTypeId,
-            run_time_per_unit: node.runTimePerUnit,
-            setup_time: node.setupTime ?? 0,
+            ...payload,
             metadata: {},
-            sequence: seq,
-          });
-        if (error) throw error;
-      }
-      seq += 10;
-    }
-  }
-
-  // Step 4: Materials — same two-phase approach
-  if (pendingMaterials.length > 0) {
-    const existingRows = pendingMaterials.filter((m) => originalMaterialIds.has(m.tempId));
-    if (existingRows.length > 0) {
-      let temp = 100000;
-      for (const mat of existingRows) {
-        const { error } = await supabase
-          .from('routing_materials')
-          .update({ sequence: temp })
-          .eq('id', mat.tempId);
-        if (error) throw error;
-        temp += 10;
-      }
-    }
-
-    let seq = 10;
-    for (const mat of pendingMaterials) {
-      const isExisting = originalMaterialIds.has(mat.tempId);
-      if (isExisting) {
-        const { error } = await supabase
-          .from('routing_materials')
-          .update({
-            inventory_item_id: mat.inventoryItemId,
-            quantity: mat.quantity,
-            unit: mat.unit,
-            sequence: seq,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', mat.tempId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('routing_materials')
-          .insert({
-            routing_id: routing.id,
-            inventory_item_id: mat.inventoryItemId,
-            quantity: mat.quantity,
-            unit: mat.unit,
-            sequence: seq,
           });
         if (error) throw error;
       }

@@ -21,20 +21,27 @@ test.describe('Parts and Routing workflow', () => {
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);
 
+    // "Add Part" now opens an inline PartFormModal instead of navigating to
+    // /parts/new — scope all field interactions to the dialog so we don't
+    // accidentally match the (off-screen) parts list behind it.
     await page.getByRole('button', { name: /Add Part/i }).click();
-    await expect(page).toHaveURL(/\/parts\/new/);
+    const partFormDialog = page.getByRole('dialog');
+    await expect(partFormDialog).toBeVisible();
 
-    // Fill part name (required)
-    await page.getByLabel(/Part Name/i).fill(partName);
+    // Fill part name (required) — Source defaults to 'made' (the modal's
+    // default), which is what the rest of this spec needs to exercise the
+    // routing panel.
+    await partFormDialog.getByLabel(/Part Name/i).fill(partName);
 
     // Fill description
-    await page.getByLabel(/Description/i).fill(partDescription);
+    await partFormDialog.getByLabel(/Description/i).fill(partDescription);
 
-    // Save the part
-    await page.getByRole('button', { name: /^Save$/i }).click();
+    // Submit — primary action is "Create" (was "Save" in the route-based form).
+    await partFormDialog.getByRole('button', { name: /^Create$/i }).click();
 
-    // Should redirect to the part detail page (not /parts/new)
-    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/, { timeout: 15_000 });
+    // After creation the modal closes and we land on the part detail page
+    // (`/parts/{partId}?from=parts`). Anchor on the partId path segment.
+    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+/, { timeout: 15_000 });
 
     // Verify the part was created
     await expect(page.getByText(partName)).toBeVisible();

@@ -131,12 +131,16 @@ async function ensureVendor(
   if (lookupErr) throw new Error(`vendor lookup failed: ${lookupErr.message}`);
   if (existing) return existing.id;
 
+  // The vendors table dropped contact_name/email/phone/notes in
+  // 20260504_vendor_contacts_and_drop_notes — contacts now live on a
+  // separate vendor_contacts row. None of the current specs touch vendor
+  // contact info, so we don't seed a vendor_contacts row here; if a spec
+  // needs one later, add an ensureVendorContact helper alongside this.
   const { data, error } = await supabase
     .from('vendors')
     .insert({
       company_id: companyId,
       name: VENDOR_NAME,
-      contact_email: 'e2e-vendor@example.com',
       legacy_id: E2E_SEED_MARKER,
     })
     .select('id')

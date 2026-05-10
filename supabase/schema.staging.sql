@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-03T20:01:35Z
+-- Generated: 2026-05-10T01:09:57Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -246,16 +246,12 @@ CREATE TABLE IF NOT EXISTS "public"."vendors"
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
     "name" text NOT NULL,
-    "contact_name" text,
-    "contact_email" text,
-    "contact_phone" text,
     "address_line1" text,
     "address_line2" text,
     "city" text,
     "state" text,
     "postal_code" text,
     "country" text DEFAULT 'USA'::text,
-    "notes" text,
     "legacy_id" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
@@ -270,8 +266,7 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "company_id" uuid NOT NULL,
     "part_name" text NOT NULL,
     "description" text,
-    "is_manufacturable" boolean NOT NULL DEFAULT true,
-    "is_stockable" boolean NOT NULL DEFAULT false,
+    "is_stocked" boolean NOT NULL DEFAULT false,
     "primary_unit" text,
     "quantity" numeric NOT NULL DEFAULT 0,
     "cost_per_unit" numeric(12,4),
@@ -281,11 +276,14 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "legacy_id" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "source" text NOT NULL DEFAULT 'made'::text,
+    "markup_rate_id" uuid,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
-    CONSTRAINT "parts_stockable_requires_unit" CHECK (((NOT is_stockable) OR (primary_unit IS NOT NULL)))
+    CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text]))),
+    CONSTRAINT "parts_stocked_requires_unit" CHECK (((NOT is_stocked) OR (primary_unit IS NOT NULL)))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
@@ -303,6 +301,24 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
     CONSTRAINT "part_pricing_tiers_unique_seq" UNIQUE (part_id, sequence),
     CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > 0))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."part_procurement_tiers"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "part_id" uuid NOT NULL,
+    "vendor_id" uuid,
+    "min_quantity" numeric NOT NULL,
+    "cost_per_unit" numeric NOT NULL,
+    "quoted_at" date,
+    "expires_at" date,
+    "notes" text,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "part_procurement_tiers_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_procurement_tiers_part_id_vendor_id_min_quantity_key" UNIQUE (part_id, vendor_id, min_quantity),
+    CONSTRAINT "part_procurement_tiers_cost_per_unit_check" CHECK ((cost_per_unit > (0)::numeric)),
+    CONSTRAINT "part_procurement_tiers_min_quantity_check" CHECK ((min_quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."parts_bom"
@@ -447,6 +463,23 @@ CREATE TABLE IF NOT EXISTS "public"."routings"
     CONSTRAINT "routings_part_id_unique" UNIQUE (part_id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."vendor_contacts"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "vendor_id" uuid NOT NULL,
+    "name" text NOT NULL,
+    "role" text NOT NULL,
+    "role_label" text,
+    "email" text,
+    "phone" text,
+    "is_primary" boolean NOT NULL DEFAULT false,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "vendor_contacts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "vendor_contacts_role_check" CHECK ((role = ANY (ARRAY['sales'::text, 'accounts_payable'::text, 'quality'::text, 'engineering'::text, 'shipping_receiving'::text, 'customer_service'::text, 'other'::text]))),
+    CONSTRAINT "vendor_contacts_role_label_required" CHECK (((role <> 'other'::text) OR ((role_label IS NOT NULL) AND (length(role_label) > 0))))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."waitlist"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -583,6 +616,7 @@ ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts_bom" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts_unit_conversions" ENABLE ROW LEVEL SECURITY;
@@ -596,6 +630,7 @@ ALTER TABLE "public"."saved_insights" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."system_admins" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_company_access" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."vendor_contacts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."vendors" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."waitlist" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."work_centers" ENABLE ROW LEVEL SECURITY;
@@ -1056,6 +1091,47 @@ CREATE POLICY "part_pricing_tiers_update"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
+DROP POLICY IF EXISTS "Users can delete part_procurement_tiers" ON "public"."part_procurement_tiers";
+CREATE POLICY "Users can delete part_procurement_tiers"
+    ON "public"."part_procurement_tiers"
+    FOR DELETE
+    USING ((part_id IN ( SELECT parts.id
+   FROM parts
+  WHERE (parts.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can insert part_procurement_tiers" ON "public"."part_procurement_tiers";
+CREATE POLICY "Users can insert part_procurement_tiers"
+    ON "public"."part_procurement_tiers"
+    FOR INSERT
+    WITH CHECK ((part_id IN ( SELECT parts.id
+   FROM parts
+  WHERE (parts.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can update part_procurement_tiers" ON "public"."part_procurement_tiers";
+CREATE POLICY "Users can update part_procurement_tiers"
+    ON "public"."part_procurement_tiers"
+    FOR UPDATE
+    USING ((part_id IN ( SELECT parts.id
+   FROM parts
+  WHERE (parts.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can view part_procurement_tiers" ON "public"."part_procurement_tiers";
+CREATE POLICY "Users can view part_procurement_tiers"
+    ON "public"."part_procurement_tiers"
+    FOR SELECT
+    USING ((part_id IN ( SELECT parts.id
+   FROM parts
+  WHERE (parts.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."part_procurement_tiers";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."part_procurement_tiers"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((EXISTS ( SELECT 1
+   FROM parts
+  WHERE ((parts.id = part_procurement_tiers.part_id) AND (parts.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
     ON "public"."parts"
@@ -1500,6 +1576,47 @@ CREATE POLICY "Users can view own preferences"
     FOR SELECT
     USING ((user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users can delete vendor_contacts" ON "public"."vendor_contacts";
+CREATE POLICY "Users can delete vendor_contacts"
+    ON "public"."vendor_contacts"
+    FOR DELETE
+    USING ((vendor_id IN ( SELECT v.id
+   FROM vendors v
+  WHERE (v.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can insert vendor_contacts" ON "public"."vendor_contacts";
+CREATE POLICY "Users can insert vendor_contacts"
+    ON "public"."vendor_contacts"
+    FOR INSERT
+    WITH CHECK ((vendor_id IN ( SELECT v.id
+   FROM vendors v
+  WHERE (v.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can update vendor_contacts" ON "public"."vendor_contacts";
+CREATE POLICY "Users can update vendor_contacts"
+    ON "public"."vendor_contacts"
+    FOR UPDATE
+    USING ((vendor_id IN ( SELECT v.id
+   FROM vendors v
+  WHERE (v.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can view vendor_contacts" ON "public"."vendor_contacts";
+CREATE POLICY "Users can view vendor_contacts"
+    ON "public"."vendor_contacts"
+    FOR SELECT
+    USING ((vendor_id IN ( SELECT v.id
+   FROM vendors v
+  WHERE (v.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."vendor_contacts";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."vendor_contacts"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((vendor_id IN ( SELECT v.id
+   FROM vendors v
+  WHERE (v.company_id = (current_setting('jigged.company_id'::text, true))::uuid))));
+
 DROP POLICY IF EXISTS "Users can delete vendors" ON "public"."vendors";
 CREATE POLICY "Users can delete vendors"
     ON "public"."vendors"
@@ -1741,8 +1858,17 @@ ALTER TABLE "public"."part_pricing_tiers"
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."part_procurement_tiers"
+    ADD CONSTRAINT "part_procurement_tiers_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_procurement_tiers"
+    ADD CONSTRAINT "part_procurement_tiers_vendor_id_fkey" FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE RESTRICT;
+
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."parts"
+    ADD CONSTRAINT "parts_markup_rate_id_fkey" FOREIGN KEY (markup_rate_id) REFERENCES markup_rates(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_preferred_vendor_id_fkey" FOREIGN KEY (preferred_vendor_id) REFERENCES vendors(id) ON DELETE SET NULL;
@@ -1837,6 +1963,9 @@ ALTER TABLE "public"."user_preferences"
 ALTER TABLE "public"."user_preferences"
     ADD CONSTRAINT "user_preferences_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."vendor_contacts"
+    ADD CONSTRAINT "vendor_contacts_vendor_id_fkey" FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."vendors"
     ADD CONSTRAINT "vendors_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -1891,9 +2020,13 @@ CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessi
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_procurement_tiers_expiring ON public.part_procurement_tiers USING btree (part_id, expires_at) WHERE (expires_at IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_procurement_tiers_part ON public.part_procurement_tiers USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_tiers_vendor ON public.part_procurement_tiers USING btree (vendor_id) WHERE (vendor_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_parts_company_manufacturable ON public.parts USING btree (company_id) WHERE is_manufacturable;
-CREATE INDEX IF NOT EXISTS idx_parts_company_stockable ON public.parts USING btree (company_id) WHERE is_stockable;
+CREATE INDEX IF NOT EXISTS idx_parts_company_made ON public.parts USING btree (company_id) WHERE (source = 'made'::text);
+CREATE INDEX IF NOT EXISTS idx_parts_company_stocked ON public.parts USING btree (company_id) WHERE is_stocked;
+CREATE INDEX IF NOT EXISTS idx_parts_markup_rate_id ON public.parts USING btree (markup_rate_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btree (preferred_vendor_id) WHERE (preferred_vendor_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_child ON public.parts_bom USING btree (child_part_id);
@@ -1921,6 +2054,8 @@ CREATE INDEX IF NOT EXISTS idx_user_company_access_company_id ON public.user_com
 CREATE INDEX IF NOT EXISTS idx_user_company_access_name ON public.user_company_access USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_user_id ON public.user_company_access USING btree (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON public.user_preferences USING btree (user_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_contacts_vendor ON public.vendor_contacts USING btree (vendor_id);
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_contacts_one_primary ON public.vendor_contacts USING btree (vendor_id) WHERE is_primary;
 CREATE INDEX IF NOT EXISTS idx_vendors_company ON public.vendors USING btree (company_id);
 CREATE INDEX IF NOT EXISTS waitlist_created_at_idx ON public.waitlist USING btree (created_at);
 CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (email);
@@ -1997,6 +2132,65 @@ BEGIN
     IF v_completed + v_shipped = v_total THEN RETURN 'completed'; END IF;
     IF v_in_progress > 0 OR v_completed > 0 OR v_shipped > 0 THEN RETURN 'in_progress'; END IF;
     RETURN 'not_started';
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.create_demo_company(p_source_company_id uuid, p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_source_name TEXT;
+    v_demo_company_id UUID;
+    v_existing_demo_id UUID;
+BEGIN
+    IF p_user_id != auth.uid() THEN
+        RAISE EXCEPTION 'Access denied: cannot create demo company for another user';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM user_company_access
+        WHERE user_id = p_user_id
+          AND company_id = p_source_company_id
+          AND role = 'admin'
+    ) THEN
+        RAISE EXCEPTION 'Access denied: must be admin of source company';
+    END IF;
+
+    -- Idempotency: return existing demo if linked
+    SELECT demo_company_id INTO v_existing_demo_id
+    FROM companies
+    WHERE id = p_source_company_id;
+
+    IF v_existing_demo_id IS NOT NULL THEN
+        RETURN v_existing_demo_id;
+    END IF;
+
+    SELECT name INTO v_source_name FROM companies WHERE id = p_source_company_id;
+    IF v_source_name IS NULL THEN
+        RAISE EXCEPTION 'Source company not found: %', p_source_company_id;
+    END IF;
+
+    INSERT INTO companies (name, is_demo)
+    VALUES (v_source_name || ' - Demo', TRUE)
+    RETURNING id INTO v_demo_company_id;
+
+    UPDATE companies SET demo_company_id = v_demo_company_id
+    WHERE id = p_source_company_id;
+
+    -- Mirror access (operator/user/admin all preserved)
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT uca.user_id, v_demo_company_id, uca.role, uca.name
+    FROM user_company_access uca
+    WHERE uca.company_id = p_source_company_id;
+
+    PERFORM seed_demo_data(v_demo_company_id, p_user_id, p_template_name::text);
+
+    RETURN v_demo_company_id;
 END;
 $function$
 
@@ -2140,6 +2334,57 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.get_procurement_cost(p_part_id uuid, p_qty numeric)
+ RETURNS TABLE(unit_cost numeric, vendor_id uuid, tier_id uuid, source text)
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_tier RECORD;
+    v_fallback numeric;
+BEGIN
+    -- Pick the cheapest non-expired tier across vendors where the requested
+    -- quantity meets or exceeds the tier's min_quantity break.
+    SELECT t.id, t.cost_per_unit, t.vendor_id
+      INTO v_tier
+      FROM public.part_procurement_tiers t
+     WHERE t.part_id = p_part_id
+       AND t.min_quantity <= p_qty
+       AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+     ORDER BY t.cost_per_unit ASC,
+              t.min_quantity DESC,
+              -- Prefer a real vendor over an "internal estimate" tie.
+              t.vendor_id NULLS LAST
+     LIMIT 1;
+
+    IF FOUND THEN
+        unit_cost := v_tier.cost_per_unit;
+        vendor_id := v_tier.vendor_id;
+        tier_id := v_tier.id;
+        source := 'tier';
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    -- No matching tier — fall back to the part's snapshot cost. This branch
+    -- intentionally fires for:
+    --   - bought parts with no tier sheet at all
+    --   - bought parts whose tier sheets all start above p_qty
+    --   - bought parts whose tier sheets are all expired
+    --   - made parts (which never have tier sheets; cost_per_unit is the
+    --     recalculate_part_cost snapshot)
+    SELECT cost_per_unit INTO v_fallback FROM public.parts WHERE id = p_part_id;
+
+    unit_cost := v_fallback;
+    vendor_id := NULL;
+    tier_id := NULL;
+    source := 'fallback';
+    RETURN NEXT;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.get_ready_operations_batch(p_job_ids uuid[])
  RETURNS TABLE(job_id uuid, operation_name text, ready_count integer)
  LANGUAGE plpgsql
@@ -2278,29 +2523,29 @@ CREATE OR REPLACE FUNCTION public.recalculate_part_cost(p_part_id uuid)
  LANGUAGE plpgsql
 AS $function$
 DECLARE
-    v_is_manufacturable boolean;
+    v_source text;
     v_routing_id uuid;
     v_total_cost numeric := 0;
     v_op record;
     v_op_cost numeric;
     v_bom record;
-    v_child_primary_unit text;
-    v_child_cost_per_primary_unit numeric;
     v_to_primary_factor numeric;
     v_qty_in_primary_unit numeric;
+    v_child_unit_cost numeric;
 BEGIN
-    SELECT is_manufacturable INTO v_is_manufacturable FROM parts WHERE id = p_part_id;
-    IF v_is_manufacturable IS NULL THEN
+    SELECT source INTO v_source FROM parts WHERE id = p_part_id;
+    IF v_source IS NULL THEN
         RAISE EXCEPTION 'part % not found', p_part_id;
     END IF;
-    IF NOT v_is_manufacturable THEN
+    IF v_source <> 'made' THEN
+        -- Bought parts: cost is the procurement cost; no rollup to compute.
         RETURN (SELECT cost_per_unit FROM parts WHERE id = p_part_id);
     END IF;
 
     SELECT id INTO v_routing_id FROM routings WHERE part_id = p_part_id;
 
-    -- Routing operations (only if a routing exists; some manufacturable parts
-    -- may not have one yet, e.g. immediately after creation).
+    -- Routing operations (only if a routing exists; some made parts may not
+    -- have one yet, e.g. immediately after creation).
     IF v_routing_id IS NOT NULL THEN
         FOR v_op IN
             SELECT ro.setup_minutes,
@@ -2346,22 +2591,31 @@ BEGIN
     -- BOM children. Convert BOM unit → child.primary_unit if they differ;
     -- error explicitly when no conversion exists (matches the existing
     -- unknown_* validation pattern).
+    --
+    -- Child unit cost is resolved through get_procurement_cost(child_id, 1)
+    -- per the function's documented contract — this works for any child
+    -- kind (bought-with-tiers, bought-without-tiers, made-snapshot). No
+    -- caller-side guard needed. Phase 1 uses qty=1; Phase 2 will revisit
+    -- to enable tier-aware aggregate-quantity rollups at quote time.
     FOR v_bom IN
         SELECT b.quantity, b.unit, b.child_part_id,
-               c.primary_unit AS child_primary_unit,
-               c.cost_per_unit AS child_cost_per_unit
+               c.primary_unit AS child_primary_unit
         FROM parts_bom b
         JOIN parts c ON c.id = b.child_part_id
         WHERE b.parent_part_id = p_part_id
     LOOP
-        IF v_bom.child_cost_per_unit IS NULL THEN
+        SELECT unit_cost
+          INTO v_child_unit_cost
+          FROM public.get_procurement_cost(v_bom.child_part_id, 1);
+
+        IF v_child_unit_cost IS NULL THEN
             -- Per the no-silent-fallbacks principle: a BOM child without a
             -- cost can't contribute to the parent's cost rollup. Raise rather
             -- than treating as $0 (which would let users quote without ever
             -- noticing the missing child cost). The UI should walk the BOM
             -- bottom-up and refuse to recalc the parent until all leaves are
             -- priced.
-            RAISE EXCEPTION 'Cannot recalculate cost for part %: BOM child % has no cost_per_unit (recalc the child first)', p_part_id, v_bom.child_part_id
+            RAISE EXCEPTION 'Cannot recalculate cost for part %: BOM child % has no cost_per_unit (recalc the child first, or add a procurement tier)', p_part_id, v_bom.child_part_id
                 USING ERRCODE = 'check_violation';
         END IF;
 
@@ -2382,7 +2636,7 @@ BEGIN
             v_qty_in_primary_unit := v_bom.quantity;
         END IF;
 
-        v_total_cost := v_total_cost + v_qty_in_primary_unit * v_bom.child_cost_per_unit;
+        v_total_cost := v_total_cost + v_qty_in_primary_unit * v_child_unit_cost;
     END LOOP;
 
     UPDATE parts
@@ -2391,6 +2645,62 @@ BEGIN
     WHERE id = p_part_id;
 
     RETURN v_total_cost;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.reset_demo_company(p_source_company_id uuid, p_user_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_demo_company_id uuid;
+BEGIN
+    IF p_user_id != auth.uid() THEN
+        RAISE EXCEPTION 'Access denied';
+    END IF;
+
+    SELECT demo_company_id INTO v_demo_company_id
+    FROM companies WHERE id = p_source_company_id;
+
+    IF v_demo_company_id IS NULL THEN
+        RAISE EXCEPTION 'No demo company exists for company: %', p_source_company_id;
+    END IF;
+
+    -- Delete in FK-respecting order. job_materials/job_operations live under
+    -- jobs (not company-scoped directly), so we pivot through jobs first.
+    DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
+    DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
+    DELETE FROM job_materials WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
+    DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
+    DELETE FROM job_parts WHERE company_id = v_demo_company_id;
+    DELETE FROM jobs WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_line_items WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_materials WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_operations WHERE company_id = v_demo_company_id;
+    DELETE FROM quotes WHERE company_id = v_demo_company_id;
+    -- routing_operations cascades from routings (FK ON DELETE CASCADE), but
+    -- being explicit makes the order obvious.
+    DELETE FROM routing_operations
+        WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
+    DELETE FROM routings WHERE company_id = v_demo_company_id;
+    -- parts_bom rows have no company_id; pivot through the parent part.
+    DELETE FROM parts_bom
+        WHERE parent_part_id IN (SELECT id FROM parts WHERE company_id = v_demo_company_id);
+    DELETE FROM part_pricing_tiers WHERE company_id = v_demo_company_id;
+    -- parts_unit_conversions also has no company_id; pivot through part.
+    DELETE FROM parts_unit_conversions
+        WHERE part_id IN (SELECT id FROM parts WHERE company_id = v_demo_company_id);
+    DELETE FROM parts WHERE company_id = v_demo_company_id;
+    DELETE FROM work_centers WHERE company_id = v_demo_company_id;
+    DELETE FROM vendors WHERE company_id = v_demo_company_id;
+    DELETE FROM customers WHERE company_id = v_demo_company_id;
+    DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
+
+    PERFORM seed_demo_data(v_demo_company_id, p_user_id);
 END;
 $function$
 
@@ -2478,6 +2788,266 @@ BEGIN
        {"qty": 10, "markup_percent": 32}]'::jsonb,
      false);
   RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.seed_demo_data(p_company_id uuid, p_user_id uuid, p_template_name text DEFAULT 'default'::text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    v_template jsonb;
+    v_ref_map jsonb := '{}'::jsonb;
+    v_item jsonb;
+    v_inner jsonb;
+    v_contact jsonb;
+    v_new_id uuid;
+    v_routing_id uuid;
+    v_quote_id uuid;
+    v_job_id uuid;
+    v_job_part_id uuid;
+    v_part_id uuid;
+BEGIN
+    SELECT template_data INTO v_template
+    FROM demo_data_templates
+    WHERE name = p_template_name AND is_active = true
+    LIMIT 1;
+
+    IF v_template IS NULL THEN
+        RAISE EXCEPTION 'No active demo template found with name: %', p_template_name;
+    END IF;
+
+    -- ── Vendors ───────────────────────────────────────────────────────────
+    -- Inserts the vendor row WITHOUT the dropped contact_name/email/phone/
+    -- notes columns. Each entry in v_item->'contacts' becomes a
+    -- vendor_contacts row, with is_primary respected (defaulting to false
+    -- when omitted).
+    IF v_template->'vendors' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'vendors') LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO vendors (id, company_id, name,
+                                 address_line1, address_line2, city, state, postal_code, country,
+                                 legacy_id)
+            VALUES (v_new_id, p_company_id, v_item->>'name',
+                    v_item->>'address_line1', v_item->>'address_line2',
+                    v_item->>'city', v_item->>'state', v_item->>'postal_code',
+                    COALESCE(v_item->>'country', 'USA'),
+                    v_item->>'legacy_id');
+
+            IF v_item->'contacts' IS NOT NULL THEN
+                FOR v_contact IN SELECT * FROM jsonb_array_elements(v_item->'contacts') LOOP
+                    INSERT INTO vendor_contacts (vendor_id, name, role, role_label,
+                                                 email, phone, is_primary)
+                    VALUES (v_new_id,
+                            v_contact->>'name',
+                            COALESCE(v_contact->>'role', 'sales'),
+                            v_contact->>'role_label',
+                            v_contact->>'email',
+                            v_contact->>'phone',
+                            COALESCE((v_contact->>'is_primary')::boolean, false));
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- ── Work centers ──────────────────────────────────────────────────────
+    -- Resolves vendor_ref via the ref-map for external work_centers.
+    -- The CHECK constraints on work_centers enforce internal/external ↔ vendor.
+    IF v_template->'work_centers' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'work_centers') LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO work_centers (id, company_id, name, kind, vendor_id,
+                                      labor_rate, description)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name',
+                    COALESCE(v_item->>'kind', 'internal'),
+                    CASE WHEN v_item->>'vendor_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'vendor_ref'))::uuid
+                         ELSE NULL END,
+                    NULLIF(v_item->>'labor_rate', '')::numeric,
+                    v_item->>'description');
+        END LOOP;
+    END IF;
+
+    -- ── Parts ─────────────────────────────────────────────────────────────
+    -- Inserted before parts_bom so child refs resolve. preferred_vendor_ref
+    -- resolves through the ref-map. Reads `source` / `is_stocked` from
+    -- template_data (renamed from `is_manufacturable` / `is_stockable` in
+    -- the 20260504_part_source_enum_and_stocked_rename migration).
+    IF v_template->'parts' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts') LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO parts (id, company_id, part_name, description,
+                               source, is_stocked,
+                               primary_unit, quantity, cost_per_unit,
+                               reorder_point, preferred_vendor_id, legacy_id)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'part_name', v_item->>'description',
+                    COALESCE(v_item->>'source', 'made'),
+                    COALESCE((v_item->>'is_stocked')::boolean, false),
+                    v_item->>'primary_unit',
+                    COALESCE((v_item->>'quantity')::numeric, 0),
+                    NULLIF(v_item->>'cost_per_unit', '')::numeric,
+                    NULLIF(v_item->>'reorder_point', '')::numeric,
+                    CASE WHEN v_item->>'preferred_vendor_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'preferred_vendor_ref'))::uuid
+                         ELSE NULL END,
+                    v_item->>'legacy_id');
+        END LOOP;
+    END IF;
+
+    -- ── parts_bom edges ───────────────────────────────────────────────────
+    IF v_template->'parts_bom' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts_bom') LOOP
+            INSERT INTO parts_bom (parent_part_id, child_part_id, quantity, unit, sequence, notes)
+            VALUES ((v_ref_map->>(v_item->>'parent_ref'))::uuid,
+                    (v_ref_map->>(v_item->>'child_ref'))::uuid,
+                    (v_item->>'quantity')::numeric,
+                    v_item->>'unit',
+                    COALESCE((v_item->>'sequence')::integer, 0),
+                    v_item->>'notes');
+        END LOOP;
+    END IF;
+
+    -- ── Routings + nested routing_operations ──────────────────────────────
+    IF v_template->'routings' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings') LOOP
+            v_routing_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_routing_id::text));
+            INSERT INTO routings (id, company_id, part_id, name, description, created_by)
+            VALUES (v_routing_id, p_company_id,
+                    (v_ref_map->>(v_item->>'part_ref'))::uuid,
+                    v_item->>'name', v_item->>'description', p_user_id);
+
+            IF v_item->'operations' IS NOT NULL THEN
+                FOR v_inner IN SELECT * FROM jsonb_array_elements(v_item->'operations') LOOP
+                    INSERT INTO routing_operations (
+                        routing_id, work_center_id, sequence,
+                        setup_minutes, cycle_minutes_per_unit,
+                        labor_rate_override,
+                        external_unit_price, external_setup_cost,
+                        instructions
+                    ) VALUES (
+                        v_routing_id,
+                        (v_ref_map->>(v_inner->>'work_center_ref'))::uuid,
+                        COALESCE((v_inner->>'sequence')::integer, 10),
+                        NULLIF(v_inner->>'setup_minutes', '')::numeric,
+                        NULLIF(v_inner->>'cycle_minutes_per_unit', '')::numeric,
+                        NULLIF(v_inner->>'labor_rate_override', '')::numeric,
+                        NULLIF(v_inner->>'external_unit_price', '')::numeric,
+                        NULLIF(v_inner->>'external_setup_cost', '')::numeric,
+                        v_inner->>'instructions'
+                    );
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- ── Customers ─────────────────────────────────────────────────────────
+    -- Customers still carry the embedded contact fields; multi-contact for
+    -- customers is a parallel follow-up. When that ships, this block needs
+    -- the same kind of treatment as vendors above.
+    IF v_template->'customers' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers') LOOP
+            v_new_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            INSERT INTO customers (id, company_id, name,
+                                   contact_name, contact_email, contact_phone,
+                                   address_line1, address_line2, city, state, postal_code, country,
+                                   website)
+            VALUES (v_new_id, p_company_id,
+                    v_item->>'name',
+                    v_item->>'contact_name', v_item->>'contact_email', v_item->>'contact_phone',
+                    v_item->>'address_line1', v_item->>'address_line2',
+                    v_item->>'city', v_item->>'state', v_item->>'postal_code',
+                    COALESCE(v_item->>'country', 'USA'),
+                    v_item->>'website');
+        END LOOP;
+    END IF;
+
+    -- ── Quotes + nested line_items ────────────────────────────────────────
+    IF v_template->'quotes' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes') LOOP
+            v_quote_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_quote_id::text));
+            INSERT INTO quotes (id, company_id, customer_id, status,
+                                lead_time_days, expiration_date, created_by)
+            VALUES (v_quote_id, p_company_id,
+                    CASE WHEN v_item->>'customer_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'customer_ref'))::uuid
+                         ELSE NULL END,
+                    COALESCE(v_item->>'status', 'active'),
+                    NULLIF(v_item->>'lead_time_days', '')::integer,
+                    NULLIF(v_item->>'expiration_date', '')::date,
+                    p_user_id);
+
+            IF v_item->'line_items' IS NOT NULL THEN
+                FOR v_inner IN SELECT * FROM jsonb_array_elements(v_item->'line_items') LOOP
+                    INSERT INTO quote_line_items (
+                        quote_id, company_id, part_id,
+                        sequence, quantity, unit_price, total_price
+                    ) VALUES (
+                        v_quote_id, p_company_id,
+                        (v_ref_map->>(v_inner->>'part_ref'))::uuid,
+                        COALESCE((v_inner->>'sequence')::integer, 10),
+                        (v_inner->>'quantity')::integer,
+                        (v_inner->>'unit_price')::numeric,
+                        NULLIF(v_inner->>'total_price', '')::numeric
+                    );
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- ── Jobs + job_parts ──────────────────────────────────────────────────
+    IF v_template->'jobs' IS NOT NULL THEN
+        FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs') LOOP
+            v_job_id := gen_random_uuid();
+            v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_job_id::text));
+
+            INSERT INTO jobs (id, company_id, customer_id, quote_id,
+                              job_number, status, created_by)
+            VALUES (v_job_id, p_company_id,
+                    CASE WHEN v_item->>'customer_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'customer_ref'))::uuid
+                         ELSE NULL END,
+                    CASE WHEN v_item->>'quote_ref' IS NOT NULL
+                         THEN (v_ref_map->>(v_item->>'quote_ref'))::uuid
+                         ELSE NULL END,
+                    COALESCE(v_item->>'job_number',
+                             'J-DEMO-' || substr(v_job_id::text, 1, 8)),
+                    COALESCE(v_item->>'status', 'not_started'),
+                    p_user_id);
+
+            IF v_item->'parts' IS NOT NULL THEN
+                FOR v_inner IN SELECT * FROM jsonb_array_elements(v_item->'parts') LOOP
+                    v_part_id := (v_ref_map->>(v_inner->>'part_ref'))::uuid;
+                    v_job_part_id := gen_random_uuid();
+
+                    INSERT INTO job_parts (id, job_id, company_id, part_id,
+                                           sequence, quantity, status)
+                    VALUES (v_job_part_id, v_job_id, p_company_id, v_part_id,
+                            COALESCE((v_inner->>'sequence')::integer, 10),
+                            COALESCE((v_inner->>'quantity')::integer, 1),
+                            COALESCE(v_inner->>'status', 'not_started'));
+
+                    IF v_inner->>'routing_ref' IS NOT NULL THEN
+                        PERFORM create_job_part_operations_from_routing(
+                            v_job_part_id,
+                            (v_ref_map->>(v_inner->>'routing_ref'))::uuid
+                        );
+                    END IF;
+                END LOOP;
+            END IF;
+        END LOOP;
+    END IF;
 END;
 $function$
 
@@ -2693,6 +3263,9 @@ CREATE TRIGGER operator_sessions_updated_at BEFORE UPDATE ON public.operator_ses
 DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
 CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "part_procurement_tiers_updated_at" ON "public"."part_procurement_tiers";
+CREATE TRIGGER part_procurement_tiers_updated_at BEFORE UPDATE ON public.part_procurement_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS "parts_updated_at" ON "public"."parts";
 CREATE TRIGGER parts_updated_at BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -2722,6 +3295,9 @@ CREATE TRIGGER user_company_access_fill_email_trg BEFORE INSERT ON public.user_c
 
 DROP TRIGGER IF EXISTS "user_preferences_updated_at" ON "public"."user_preferences";
 CREATE TRIGGER user_preferences_updated_at BEFORE UPDATE ON public.user_preferences FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "vendor_contacts_updated_at" ON "public"."vendor_contacts";
+CREATE TRIGGER vendor_contacts_updated_at BEFORE UPDATE ON public.vendor_contacts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "vendors_updated_at" ON "public"."vendors";
 CREATE TRIGGER vendors_updated_at BEFORE UPDATE ON public.vendors FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2766,6 +3342,9 @@ COMMENT ON TABLE "public"."markup_rates"
 COMMENT ON TABLE "public"."operator_sessions"
     IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
+COMMENT ON TABLE "public"."part_procurement_tiers"
+    IS 'Vendor-keyed tiered pricing for bought parts. Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor''s tier sheet. vendor_id may be NULL for "internal estimate" rows. Ordering of tiers within a vendor sheet is derived from min_quantity ASC — no separate sequence column. Resolved at read time via get_procurement_cost(part_id, qty), which picks the cheapest non-expired tier where min_quantity <= qty across all vendors.';
+
 COMMENT ON TABLE "public"."parts"
     IS 'Unified item master. Replaces the prior two-table split between manufacturable parts and stockable inventory_items.';
 
@@ -2789,6 +3368,9 @@ COMMENT ON TABLE "public"."user_company_access"
 
 COMMENT ON TABLE "public"."user_preferences"
     IS 'Per-user preferences and settings. Stores last accessed company for quick switching, UI preferences, and other user-specific configuration as JSONB.';
+
+COMMENT ON TABLE "public"."vendor_contacts"
+    IS 'People at a vendor. Replaces the single embedded contact_name/email/phone columns on vendors. Each row is one person with a role + optional email/phone. At most one row per vendor can have is_primary=true (enforced by the vendor_contacts_one_primary partial unique index).';
 
 COMMENT ON TABLE "public"."vendors"
     IS 'Supplier / outside-op partner. Roles are derived from references in parts.preferred_vendor_id and work_centers.vendor_id; no capability flags here.';
@@ -3000,20 +3582,29 @@ COMMENT ON COLUMN "public"."operator_sessions"."work_center_id"
 COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
     IS 'NULL while session is active. Set when operator stops or completes work.';
 
-COMMENT ON COLUMN "public"."parts"."is_manufacturable"
-    IS 'True if this part can be made in-house (will have a routing). Used for the "Manufactured" saved view and to gate the routing panel on the part detail page.';
+COMMENT ON COLUMN "public"."part_procurement_tiers"."vendor_id"
+    IS 'Vendor offering this tier. NULL = "internal estimate" (sketch before sourcing). When set, ON DELETE RESTRICT prevents removing a vendor that still has live tier sheets — drop the tiers first.';
 
-COMMENT ON COLUMN "public"."parts"."is_stockable"
-    IS 'True if quantities of this part are tracked in inventory. Used for the "Inventory" saved view, the inventory panel on the part detail page, and the reorder alerts query.';
+COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
+    IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
+
+COMMENT ON COLUMN "public"."part_procurement_tiers"."cost_per_unit"
+    IS 'Per-primary_unit cost at this tier. Always positive (CHECK).';
+
+COMMENT ON COLUMN "public"."part_procurement_tiers"."expires_at"
+    IS 'Date when this tier expires. Tiers past their expires_at are excluded by get_procurement_cost. NULL = never expires (open-ended quote).';
+
+COMMENT ON COLUMN "public"."parts"."is_stocked"
+    IS 'True if quantities of this part are tracked in inventory (renamed from is_stockable in the 20260504 migration to match shop-floor language). Used for the "Stocked" saved view, the inventory panel on the part detail page, and the reorder alerts query.';
 
 COMMENT ON COLUMN "public"."parts"."primary_unit"
-    IS 'Canonical unit of the on-hand quantity and the cost_per_unit. Required when is_stockable=true; may be NULL for manufactured-only parts.';
+    IS 'Canonical unit of the on-hand quantity and the cost_per_unit. Required when is_stocked=true (parts_stocked_requires_unit CHECK); may be NULL for made-only parts.';
 
 COMMENT ON COLUMN "public"."parts"."quantity"
     IS 'On-hand quantity in primary_unit. Defaults to 0; updated by inventory_transactions and the import flow.';
 
 COMMENT ON COLUMN "public"."parts"."cost_per_unit"
-    IS 'Per-primary_unit cost. For bought items, the procurement cost. For manufacturable items, snapshot from the most recent recalculate_part_cost call.';
+    IS 'Per-primary_unit cost. For bought items (source=''bought''), the procurement cost. For made items (source=''made''), snapshot from the most recent recalculate_part_cost call.';
 
 COMMENT ON COLUMN "public"."parts"."cost_recalculated_at"
     IS 'When recalculate_part_cost last ran for this part. Used by the part detail page to surface a "Cost may be stale" badge when any BOM descendant has updated_at newer than this timestamp.';
@@ -3026,6 +3617,9 @@ COMMENT ON COLUMN "public"."parts"."preferred_vendor_id"
 
 COMMENT ON COLUMN "public"."parts"."legacy_id"
     IS 'Source-system identifier from CSV import; allows ON CONFLICT (company_id, legacy_id) DO UPDATE for safe re-import. NULL for hand-created parts.';
+
+COMMENT ON COLUMN "public"."parts"."source"
+    IS 'How this part is sourced. ''made'' = produced in-shop (will have a routing); ''bought'' = procured from a vendor. Combined with is_stocked, classifies the part into one of four quadrants (Custom Made / Sub-assembly / Raw Material / Service+Drop-ship). Replaces the prior is_manufacturable boolean — see the 20260504 migration header for the (false,false)→''made'' orphan-default rationale.';
 
 COMMENT ON COLUMN "public"."parts_bom"."quantity"
     IS 'Quantity of child consumed per unit of parent, expressed in `unit`. Cost rollups convert to the child part primary_unit via parts_unit_conversions if `unit` differs.';
@@ -3134,6 +3728,12 @@ COMMENT ON COLUMN "public"."user_preferences"."created_at"
 
 COMMENT ON COLUMN "public"."user_preferences"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."vendor_contacts"."role_label"
+    IS 'Free-text label used when role=''other''. Lets the UI render "Other (Production Manager)" without inventing a new enum value for every shop-specific role.';
+
+COMMENT ON COLUMN "public"."vendor_contacts"."is_primary"
+    IS 'True for the contact treated as the vendor''s primary point of contact. Surfaced on the vendors list page and as a star badge on the vendor detail page. Enforced unique-per-vendor by the vendor_contacts_one_primary partial index.';
 
 COMMENT ON COLUMN "public"."vendors"."legacy_id"
     IS 'Source-system identifier from CSV import; allows ON CONFLICT (company_id, legacy_id) DO UPDATE for safe re-import.';

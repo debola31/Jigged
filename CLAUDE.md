@@ -297,6 +297,46 @@ pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list  # one spec, clean 
 pnpm exec playwright test e2e/<spec>.spec.ts --headed --debug # step-through
 ```
 
+### Pre-PR validation (smart-scope)
+
+Don't run "everything" before every PR. `next build` (which Vercel runs on
+every preview) already type-checks and lints, so re-running those locally
+is mostly redundant. The actual local-vs-CI gap is **tests** — Vitest,
+pytest, and Playwright run only in the CI workflows ([test.yml](.github/workflows/test.yml),
+[e2e-tests.yml](.github/workflows/e2e-tests.yml)). Match the local check
+to what the change actually risks breaking. CI remains the authoritative
+gate; this is just to shorten the feedback loop before push.
+
+| Change | Run before opening PR |
+|---|---|
+| Component / page / logic in `app/`, `components/`, or `lib/` | `pnpm test --run __tests__/<path>.test.ts` (file-scoped). Fall back to full `pnpm test --run` if the change is to a widely-imported helper. |
+| `utils/*Access.ts` or other Supabase access | `pnpm exec tsc --noEmit -p tsconfig.json` + matching `pnpm test --run __tests__/utils/<file>.test.ts`. |
+| Backend (`api/**/*.py`) | `cd api && pytest tests/unit/test_<area>.py` (or `pytest -m unit` for the fast suite). |
+| `supabase/migrations/*` schema work | Re-export with `python scripts/export_schema.py --env staging` and skim the diff. Spot-check any access layer that touched the changed columns/tables. |
+| `e2e/*.spec.ts`, or UI on a path a spec exercises (parts page, routing builder, auth flow) | Run the affected spec only: `pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list`. |
+| Doc / config / CI YAML / `.gitignore` / `scripts/` | Skip pre-PR validation. CI is the right gate. |
+
+Use **copy-pasteable, file-scoped** commands — `pnpm test --run __tests__/utils/partsAccess.test.ts`,
+not "run the tests". File-scoped runs in seconds; project-wide takes minutes
+and trains everyone to ignore the result.
+
+Anti-patterns to skip:
+
+- **Running the full E2E suite before every PR.** Most specs runtime-skip
+  without seed/env (csv-import, quote-to-job), `next build` already
+  covers what's deterministic, and the failures you'd find are usually
+  env drift you can't fix from this side.
+- **Re-running tsc / lint for doc-only PRs.** The build catches them
+  anyway, and the runs add nothing.
+- **Treating "local pass + CI fail" as a code bug.** That's expected env
+  drift (cache state, machine differences, parallelism). Read the CI log
+  and fix the actual failure; don't try to make local mirror CI exactly.
+
+If unsure what the change touches: tsc is the universally-cheap default
+(~15s, runs on the whole frontend). Backend changes get one
+`pytest -m unit` (~few seconds). Anything beyond that should be motivated
+by the specific change.
+
 ### E2E setup (only needed once per machine)
 
 ```bash

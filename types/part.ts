@@ -6,7 +6,10 @@
  * orthogonal axes classify a row:
  *   - source: 'made' (produced in-shop) | 'bought' (procured from a vendor)
  *   - is_stocked: whether the company tracks on-hand quantities for it
- * Together they yield exactly four valid quadrants — see PartKind below.
+ * The UI displays these two fields directly. There is no derived "kind"
+ * vocabulary (Custom Made / Sub-assembly / Raw Material / Service) — that
+ * was removed because it added a translation layer over fields the user
+ * already understands.
  */
 export interface Part {
   id: string;
@@ -21,6 +24,14 @@ export interface Part {
   cost_recalculated_at: string | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
+  // Live link to a markup rate. NULL means "Custom" (no rate is governing
+  // this part's tiers). Set when the user applies a rate; cleared when they
+  // manually edit a tier or click "Switch to Custom". Edits to a linked
+  // rate cascade into this part's tiers via cascadeRateUpdateToParts.
+  markup_rate_id: string | null;
+  // Populated by joins that LEFT JOIN markup_rates. Undefined when the
+  // caller did not request the join.
+  markup_rate_name?: string | null;
   legacy_id: string | null;
   created_at: string;
   updated_at: string;
@@ -35,34 +46,6 @@ export interface Part {
     nodes_count: number;
     total_run_time_per_unit: number | null;
   } | null;
-}
-
-/**
- * Mutually exclusive classification used by the type chip on the parts list.
- *
- * Derived from (source, is_stocked) rather than stored: one chip per row,
- * exactly one of four valid values. There is no "Unclassified" — the orphan
- * (false, false) quadrant from the old (is_manufacturable, is_stockable)
- * model was collapsed into 'custom_made' by the 20260504 source-enum
- * migration's backfill rule.
- *
- * - custom_made:  source=made,   !is_stocked  (built to order)
- * - sub_assembly: source=made,    is_stocked  (made AND consumed/stocked)
- * - raw_material: source=bought,  is_stocked  (vendor stock kept on hand)
- * - service:      source=bought, !is_stocked  (drop-ship / outside service)
- *
- * Use `assertNeverPartKind` in the `default:` branch of any switch on this
- * enum to get a compile-time check that all four cases are handled. If the
- * union grows, every old call site surfaces as a TypeScript error.
- */
-export type PartKind = 'custom_made' | 'sub_assembly' | 'raw_material' | 'service';
-
-export function partKind(part: Pick<Part, 'source' | 'is_stocked'>): PartKind {
-  if (part.source === 'made') {
-    return part.is_stocked ? 'sub_assembly' : 'custom_made';
-  }
-  // source === 'bought'
-  return part.is_stocked ? 'raw_material' : 'service';
 }
 
 /**
@@ -141,21 +124,3 @@ export function partToFormData(
   };
 }
 
-/**
- * Exhaustiveness helper for `switch (kind)` over PartKind. Use in the
- * `default:` branch — a future PartKind addition will surface as a compile
- * error at every call site rather than silently falling through to a
- * default case.
- *
- * Example:
- *   switch (kind) {
- *     case 'custom_made': return ...;
- *     case 'sub_assembly': return ...;
- *     case 'raw_material': return ...;
- *     case 'service': return ...;
- *     default: return assertNeverPartKind(kind);
- *   }
- */
-export function assertNeverPartKind(k: never): never {
-  throw new Error(`Unhandled PartKind: ${String(k)}`);
-}

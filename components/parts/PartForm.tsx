@@ -22,11 +22,9 @@ import Stack from '@mui/material/Stack';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Autocomplete from '@mui/material/Autocomplete';
-import InputAdornment from '@mui/material/InputAdornment';
 import BuildIcon from '@mui/icons-material/Build';
 import LocalMallIcon from '@mui/icons-material/LocalMall';
 import type { Part, PartFormData } from '@/types/part';
-import { partKind } from '@/types/part';
 import {
   createPart,
   updatePart,
@@ -35,7 +33,6 @@ import {
 } from '@/utils/partsAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
 import type { Vendor } from '@/types/vendor';
-import PartTypeChip from './PartTypeChip';
 import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 
@@ -54,14 +51,20 @@ interface PartFormProps {
 /**
  * Create / edit form for a Part.
  *
- * Layout follows the chunk-11 spec, refined in chunk 15: classification
- * (Made/Bought + Stocked) sits at the top and drives every conditional
- * field below. Procurement cost AND vendor picker are shown only for
- * source='bought' (a stocked sub-assembly is made in-shop, no vendor).
- * UOM only when is_stocked=true. No cost field at all for source='made' —
- * cost comes from routing + BOM and is auto-recalculated on the detail
- * page (chunk 18). Unit conversions live on the part detail page —
- * managed inline on the Inventory panel and never in this form (chunk 14).
+ * Layout: classification (Made/Bought + Stocked) sits at the top and
+ * drives every conditional field below. UOM + Reorder Point appear when
+ * is_stocked=true. Preferred Vendor appears when source='bought' (a
+ * stocked sub-assembly is made in-shop, no vendor).
+ *
+ * What this form does NOT edit:
+ *   - cost_per_unit. Made parts derive it from routing + BOM via
+ *     recalculate_part_cost; bought parts get it from the Procurement
+ *     Cost panel's tier sheets on the detail page. The form never writes
+ *     this field (formDataToInsert strips it).
+ *   - quantity. Only inventory_transactions ever changes the on-hand
+ *     count, for audit-trail consistency.
+ *   - Unit conversions. Managed inline on the Inventory panel of the
+ *     detail page after the part exists.
  *
  * The Made/Bought toggle uses `highContrastToggleSx` (shared with the
  * work-center kind toggle) so the selected state pops on the dark theme
@@ -137,19 +140,14 @@ export default function PartForm({
       }
     };
 
-  // Numeric handler that stores empty as null (so cost_per_unit can be cleared).
-  // Keeps quantity as 0 when empty since it's NOT NULL in the schema.
+  // Numeric handler for the form's remaining numeric field (reorder_point).
+  // Empty input persists as null so the user can clear the threshold.
   const handleNumberChange =
-    (field: 'cost_per_unit' | 'reorder_point' | 'quantity') =>
+    (field: 'reorder_point') =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
-      let parsed: number | null;
-      if (raw === '') {
-        parsed = field === 'quantity' ? 0 : null;
-      } else {
-        const num = Number(raw);
-        parsed = Number.isFinite(num) ? num : null;
-      }
+      const parsed: number | null =
+        raw === '' ? null : Number.isFinite(Number(raw)) ? Number(raw) : null;
       setFormData((prev) => ({ ...prev, [field]: parsed }));
       if (fieldErrors[field]) {
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
@@ -162,13 +160,6 @@ export default function PartForm({
   const handleSourceChange = (_e: unknown, next: 'made' | 'bought' | null) => {
     if (next === null) return;
     setFormData((prev) => ({ ...prev, source: next }));
-    // Clear cost-per-unit field when switching to 'made' — for made parts
-    // cost is computed via Recalculate Cost on the detail page, the form's
-    // cost field is hidden, and any pre-existing value would be invisible
-    // to the user. Better to drop it explicitly than to keep a stale value.
-    if (next === 'made') {
-      setFormData((prev) => ({ ...prev, cost_per_unit: null }));
-    }
   };
 
   const handleStockedChange = (_e: unknown, checked: boolean) => {
@@ -207,15 +198,6 @@ export default function PartForm({
       errors.primary_unit = 'Unit of measurement is required for stocked parts';
     }
 
-    // DB CHECK: quantity >= 0
-    if (formData.is_stocked && formData.quantity !== null && formData.quantity < 0) {
-      errors.quantity = 'Quantity cannot be negative';
-    }
-
-    if (formData.cost_per_unit !== null && formData.cost_per_unit < 0) {
-      errors.cost_per_unit = 'Cost cannot be negative';
-    }
-
     if (formData.reorder_point !== null && formData.reorder_point < 0) {
       errors.reorder_point = 'Reorder point cannot be negative';
     }
@@ -241,12 +223,12 @@ export default function PartForm({
         formData.is_stocked && formData.primary_unit && formData.primary_unit.trim() !== ''
           ? formData.primary_unit.trim()
           : null,
-      // For made parts, never send a cost from this form — Recalculate Cost
-      // owns that field on the detail page.
-      cost_per_unit: formData.source === 'bought' ? formData.cost_per_unit : null,
-      // For un-stocked parts, force quantity to 0 (the on-hand qty is
-      // meaningless without stocking).
-      quantity: formData.is_stocked ? formData.quantity : 0,
+      // `cost_per_unit` and `quantity` are stripped by formDataToInsert
+      // before the DB write — cost is owned by recalculate_part_cost (made
+      // parts) or the Procurement Cost panel's tier sheets (bought parts);
+      // quantity only changes through inventory_transactions for audit. The
+      // form never writes either, regardless of whatever value is in
+      // formData.
     };
 
     try {
@@ -296,12 +278,6 @@ export default function PartForm({
   const selectedVendor =
     vendors.find((v) => v.id === formData.preferred_vendor_id) || null;
 
-  const currentKind = partKind({
-    source: formData.source,
-    is_stocked: formData.is_stocked,
-  });
-
-  const showProcurementCost = formData.source === 'bought';
   const showUomField = formData.is_stocked;
   // Preferred vendor is procurement-only — a stocked sub-assembly has no
   // vendor because you make it yourself. Gated on source, not on stocked.
@@ -369,8 +345,6 @@ export default function PartForm({
                 }
                 label="Stocked"
               />
-              <Box sx={{ flex: 1 }} />
-              <PartTypeChip kind={currentKind} />
             </Stack>
           </Box>
 
@@ -403,145 +377,100 @@ export default function PartForm({
         </CardContent>
       </Card>
 
-      {/* Stocked-only fields: UOM + on-hand qty + reorder point. UOM is the
-          standard-units combobox (chunk 14) — picks from the canonical list
-          shared with the importer + lets the user add a custom unit inline.
-          Unit *conversions* live on the part detail page, not here. */}
-      {showUomField && (
+      {/* Stocked-only fields: UOM + reorder point. Quantity on hand is NOT
+          edited here — it's managed through Add Stock / Remove Stock /
+          Adjust on the part detail page so every change goes through
+          inventory_transactions. UOM is the standard-units combobox (chunk
+          14); unit conversions live on the part detail page, not here. */}
+      {/* Inventory card combines stocking fields (UOM + reorder point) with
+          the preferred vendor picker. UOM/reorder appear when is_stocked;
+          vendor appears when source='bought' (a stocked sub-assembly is
+          made in-shop and has no vendor). The card itself shows when at
+          least one of those conditions is true. */}
+      {(showUomField || showVendorPicker) && (
         <Card elevation={2} sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
               Inventory
             </Typography>
             <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <UnitOfMeasurementSelect
-                  value={formData.primary_unit}
-                  onChange={(next) => {
-                    setFormData((prev) => ({ ...prev, primary_unit: next }));
-                    if (fieldErrors.primary_unit) {
-                      setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
-                    }
-                  }}
-                  companyId={companyId}
-                  required
-                  disabled={loading}
-                  error={!!fieldErrors.primary_unit}
-                  helperText={
-                    fieldErrors.primary_unit ||
-                    'Costs and quantities are denominated in this unit.'
-                  }
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Quantity on Hand"
-                  type="number"
-                  value={formData.quantity ?? 0}
-                  onChange={handleNumberChange('quantity')}
-                  error={!!fieldErrors.quantity}
-                  helperText={fieldErrors.quantity || 'Current stock in primary unit'}
-                  disabled={loading}
-                  inputProps={{ min: 0, step: 'any' }}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Reorder Point"
-                  type="number"
-                  value={formData.reorder_point ?? ''}
-                  onChange={handleNumberChange('reorder_point')}
-                  error={!!fieldErrors.reorder_point}
-                  helperText={
-                    fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts when reached.'
-                  }
-                  disabled={loading}
-                  inputProps={{ min: 0, step: 'any' }}
-                />
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Bought-only: procurement cost. */}
-      {showProcurementCost && (
-        <Card elevation={2} sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-              Procurement
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Procurement cost per unit"
-                  type="number"
-                  value={formData.cost_per_unit ?? ''}
-                  onChange={handleNumberChange('cost_per_unit')}
-                  error={!!fieldErrors.cost_per_unit}
-                  helperText={
-                    fieldErrors.cost_per_unit ||
-                    'Tiered pricing coming later — add tier sheets on the part detail page after creating.'
-                  }
-                  disabled={loading}
-                  inputProps={{ min: 0, step: '0.0001' }}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    },
-                  }}
-                />
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Vendor picker: procurement-only. Stocked-but-made (sub-assembly)
-          has no vendor because the shop makes it. */}
-      {showVendorPicker && (
-        <Card elevation={2} sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-              Vendor
-            </Typography>
-            <Autocomplete
-              options={vendors}
-              getOptionLabel={(opt) => opt.name}
-              value={selectedVendor}
-              loading={vendorsLoading}
-              onChange={(_event, newValue) => {
-                setFormData((prev) => ({
-                  ...prev,
-                  preferred_vendor_id: newValue ? newValue.id : null,
-                }));
-              }}
-              disabled={loading}
-              isOptionEqualToValue={(opt, val) => opt.id === val.id}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Preferred Vendor"
-                  helperText="Optional. The default supplier for this part."
-                  slotProps={{
-                    input: {
-                      ...params.InputProps,
-                      endAdornment: (
-                        <>
-                          {vendorsLoading ? (
-                            <CircularProgress color="inherit" size={20} />
-                          ) : null}
-                          {params.InputProps.endAdornment}
-                        </>
-                      ),
-                    },
-                  }}
-                />
+              {showUomField && (
+                <>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <UnitOfMeasurementSelect
+                      value={formData.primary_unit}
+                      onChange={(next) => {
+                        setFormData((prev) => ({ ...prev, primary_unit: next }));
+                        if (fieldErrors.primary_unit) {
+                          setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
+                        }
+                      }}
+                      companyId={companyId}
+                      required
+                      disabled={loading}
+                      error={!!fieldErrors.primary_unit}
+                      helperText={
+                        fieldErrors.primary_unit ||
+                        'Costs and quantities are denominated in this unit.'
+                      }
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="Reorder Point"
+                      type="number"
+                      value={formData.reorder_point ?? ''}
+                      onChange={handleNumberChange('reorder_point')}
+                      error={!!fieldErrors.reorder_point}
+                      helperText={
+                        fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts when reached.'
+                      }
+                      disabled={loading}
+                      inputProps={{ min: 0, step: 'any' }}
+                    />
+                  </Grid>
+                </>
               )}
-            />
+              {showVendorPicker && (
+                <Grid size={{ xs: 12 }}>
+                  <Autocomplete
+                    options={vendors}
+                    getOptionLabel={(opt) => opt.name}
+                    value={selectedVendor}
+                    loading={vendorsLoading}
+                    onChange={(_event, newValue) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        preferred_vendor_id: newValue ? newValue.id : null,
+                      }));
+                    }}
+                    disabled={loading}
+                    isOptionEqualToValue={(opt, val) => opt.id === val.id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Preferred Vendor"
+                        helperText="Optional. The default supplier for this part."
+                        slotProps={{
+                          input: {
+                            ...params.InputProps,
+                            endAdornment: (
+                              <>
+                                {vendorsLoading ? (
+                                  <CircularProgress color="inherit" size={20} />
+                                ) : null}
+                                {params.InputProps.endAdornment}
+                              </>
+                            ),
+                          },
+                        }}
+                      />
+                    )}
+                  />
+                </Grid>
+              )}
+            </Grid>
           </CardContent>
         </Card>
       )}

@@ -9,7 +9,7 @@ import type { InventoryTransaction, InventoryTransactionType } from '@/types/par
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, cost_per_unit, cost_recalculated_at, reorder_point, preferred_vendor_id, legacy_id, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, cost_per_unit, cost_recalculated_at, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -24,6 +24,7 @@ interface PartRow {
   cost_recalculated_at: string | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
+  markup_rate_id: string | null;
   legacy_id: string | null;
   created_at: string;
   updated_at: string;
@@ -46,6 +47,7 @@ function rowToPart(row: PartRow): Part {
     cost_recalculated_at: row.cost_recalculated_at,
     reorder_point: row.reorder_point !== null ? Number(row.reorder_point) : null,
     preferred_vendor_id: row.preferred_vendor_id,
+    markup_rate_id: row.markup_rate_id,
     legacy_id: row.legacy_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -473,14 +475,24 @@ export async function checkPartNameExists(
 // ============================================================
 
 function formDataToInsert(formData: PartFormData): Record<string, unknown> {
+  // Two fields are intentionally NOT written through this path:
+  //   - `quantity`: only inventory_transactions ever changes the on-hand
+  //     count (PartTransactionModal / recordInventoryTransaction) so there
+  //     is always an audit row explaining where the number came from.
+  //   - `cost_per_unit`: made parts get it from recalculate_part_cost.
+  //     Bought parts price exclusively through the Procurement Cost
+  //     panel's per-vendor tier sheets at quote time; the column stays
+  //     null for them. Letting the part edit form rewrite this field
+  //     directly would silently break the made-part invariant and
+  //     reintroduce a "default cost" concept we deliberately removed.
+  // On create the columns default to 0/null respectively; on update,
+  // omitting them leaves the existing values untouched.
   return {
     part_name: formData.part_name.trim(),
     description: formData.description.trim() || null,
     source: formData.source,
     is_stocked: formData.is_stocked,
     primary_unit: formData.primary_unit?.trim() || null,
-    quantity: formData.quantity,
-    cost_per_unit: formData.cost_per_unit,
     reorder_point: formData.reorder_point,
     preferred_vendor_id: formData.preferred_vendor_id || null,
   };
@@ -556,6 +568,30 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
  * this part is the parent. Children are RESTRICTed — a part referenced as a
  * child somewhere can't be deleted without removing those references first.
  */
+/**
+ * Set the preferred vendor for a part. Used by the Cost section's vendor
+ * picker on the part detail page — that picker doubles as both the
+ * preferred-vendor setter and the cost-tier-sheet selector. Pass null to
+ * clear. Returns nothing; the caller updates its own local state.
+ */
+export async function updatePartPreferredVendor(
+  partId: string,
+  vendorId: string | null,
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('parts')
+    .update({
+      preferred_vendor_id: vendorId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', partId);
+  if (error) {
+    console.error('Error updating preferred vendor:', error);
+    throw error;
+  }
+}
+
 export async function deletePart(partId: string): Promise<void> {
   const supabase = getSupabase();
 
@@ -689,116 +725,6 @@ export async function recalculatePartCost(partId: string): Promise<number> {
   }
 
   return data === null ? 0 : Number(data);
-}
-
-/**
- * Walk the BOM tree under this part and surface whether any descendant has
- * been touched since this part's last cost recalc — which signals the cost
- * is potentially stale.
- *
- * Implemented client-side as a single recursive walk: pull the BOM rows for
- * the company once, then BFS from `partId`. Done client-side to avoid
- * shipping yet another SQL function for one read; the BOM table is small
- * (<10K rows for Contour) and the walk is bounded by the cycle-detection
- * trigger (max depth 50).
- */
-export async function getStaleCostInfo(
-  partId: string,
-): Promise<{ is_stale: boolean; stale_descendants: number }> {
-  const supabase = getSupabase();
-
-  const { data: rootRow, error: rootError } = await supabase
-    .from('parts')
-    .select('id, company_id, cost_recalculated_at')
-    .eq('id', partId)
-    .single();
-
-  if (rootError || !rootRow) {
-    throw rootError || new Error('part not found');
-  }
-
-  const recalculatedAt = rootRow.cost_recalculated_at
-    ? Date.parse(rootRow.cost_recalculated_at)
-    : null;
-
-  // If the cost was never calculated, we can't know whether descendants are
-  // newer — surface that as stale so the user is prompted to recalc.
-  if (recalculatedAt === null) {
-    const { count } = await supabase
-      .from('parts_bom')
-      .select('*', { count: 'exact', head: true })
-      .eq('parent_part_id', partId);
-    return { is_stale: (count || 0) > 0, stale_descendants: count || 0 };
-  }
-
-  // Pull BOM edges for the company once, then walk from the root part.
-  const { data: bomRows, error: bomError } = await supabase
-    .from('parts_bom')
-    .select('parent_part_id, child_part_id')
-    .eq('parent_part_id', partId);
-
-  if (bomError) throw bomError;
-
-  type Edge = { parent_part_id: string; child_part_id: string };
-  const initialEdges = (bomRows || []) as Edge[];
-  if (initialEdges.length === 0) {
-    return { is_stale: false, stale_descendants: 0 };
-  }
-
-  const visited = new Set<string>();
-  const queue: string[] = [];
-  for (const edge of initialEdges) {
-    if (!visited.has(edge.child_part_id)) {
-      visited.add(edge.child_part_id);
-      queue.push(edge.child_part_id);
-    }
-  }
-
-  // Walk down the tree breadth-first, fetching one BOM-children batch per
-  // level. Bounded by the cycle-detection trigger's depth=50, so the loop
-  // can't run forever even if data is somehow corrupt.
-  let depth = 0;
-  let frontier = [...queue];
-  while (frontier.length > 0 && depth < 50) {
-    const { data: nextLevel, error: levelError } = await supabase
-      .from('parts_bom')
-      .select('parent_part_id, child_part_id')
-      .in('parent_part_id', frontier);
-    if (levelError) throw levelError;
-    const nextFrontier: string[] = [];
-    for (const edge of (nextLevel || []) as Edge[]) {
-      if (!visited.has(edge.child_part_id)) {
-        visited.add(edge.child_part_id);
-        nextFrontier.push(edge.child_part_id);
-      }
-    }
-    frontier = nextFrontier;
-    depth += 1;
-  }
-
-  if (visited.size === 0) return { is_stale: false, stale_descendants: 0 };
-
-  const descendantIds = Array.from(visited);
-  const { data: descendants, error: descError } = await supabase
-    .from('parts')
-    .select('id, updated_at, cost_recalculated_at')
-    .in('id', descendantIds);
-
-  if (descError) throw descError;
-
-  let staleCount = 0;
-  for (const d of (descendants || []) as Array<{
-    id: string;
-    updated_at: string;
-    cost_recalculated_at: string | null;
-  }>) {
-    const updatedMs = Date.parse(d.updated_at);
-    const recalcMs = d.cost_recalculated_at ? Date.parse(d.cost_recalculated_at) : 0;
-    const newest = Math.max(updatedMs, recalcMs);
-    if (newest > recalculatedAt) staleCount += 1;
-  }
-
-  return { is_stale: staleCount > 0, stale_descendants: staleCount };
 }
 
 // ============================================================

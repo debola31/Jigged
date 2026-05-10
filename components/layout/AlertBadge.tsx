@@ -199,7 +199,7 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
                         key={alert.item_name}
                         onClick={() => {
                           setAnchorEl(null);
-                          router.push(`/dashboard/${companyId}/parts?view=stocked`);
+                          router.push(`/dashboard/${companyId}/inventory`);
                         }}
                         sx={{ pl: 3, py: 1 }}
                       >

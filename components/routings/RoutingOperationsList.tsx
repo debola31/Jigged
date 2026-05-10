@@ -143,19 +143,15 @@ export default function RoutingOperationsList({
 
   return (
     <Box>
+      {/* The card-level "Operations" title already names this section, so
+          the inline label + spanner icon were redundant. Just the summary
+          text + Add button. */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, gap: 1, flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <BuildIcon fontSize="small" color="primary" />
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Operations
-          </Typography>
-          {rows.length > 0 && (
-            <Typography variant="caption" color="text.secondary">
-              {rows.length} step{rows.length === 1 ? '' : 's'} • setup{' '}
-              {formatTime(setupMinutesTotal)} + run {formatTime(cycleMinutesTotal)}/unit
-            </Typography>
-          )}
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          {rows.length > 0
+            ? `${rows.length} step${rows.length === 1 ? '' : 's'} · setup ${formatTime(setupMinutesTotal)} + run ${formatTime(cycleMinutesTotal)}/unit`
+            : ''}
+        </Typography>
         <Button
           size="small"
           variant="contained"

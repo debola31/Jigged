@@ -4,15 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
 import Autocomplete from '@mui/material/Autocomplete';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
-import CheckIcon from '@mui/icons-material/Check';
-import CloseIcon from '@mui/icons-material/Close';
-import { partKind } from '@/types/part';
-import PartTypeChip from '@/components/parts/PartTypeChip';
 
 /**
  * Lightweight part option used by the material picker. Mirrors the shape
@@ -132,32 +126,24 @@ export default function MaterialRowEditor({
                 key?: React.Key;
               };
               return (
-                <Box
-                  component="li"
-                  {...rest}
-                  key={key as React.Key}
-                  sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
-                >
-                  <PartTypeChip kind={partKind(option)} size="small" />
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {option.part_name}
+                <Box component="li" {...rest} key={key as React.Key} sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    {option.part_name}
+                  </Typography>
+                  {option.description && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {option.description}
                     </Typography>
-                    {option.description && (
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{
-                          display: 'block',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {option.description}
-                      </Typography>
-                    )}
-                  </Box>
+                  )}
                 </Box>
               );
             }}
@@ -204,28 +190,6 @@ export default function MaterialRowEditor({
           disabled={saving}
           sx={{ width: 100 }}
         />
-
-        <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto' }}>
-          <Tooltip title="Save">
-            <span>
-              <IconButton
-                size="small"
-                color="primary"
-                onClick={() => canSave && onSave(value)}
-                disabled={!canSave || saving}
-              >
-                {saving ? <CircularProgress size={16} /> : <CheckIcon fontSize="small" />}
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Cancel">
-            <span>
-              <IconButton size="small" onClick={onCancel} disabled={saving}>
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Box>
       </Box>
 
       {value.childPart?.primary_unit &&
@@ -242,6 +206,34 @@ export default function MaterialRowEditor({
           {error}
         </Typography>
       )}
+
+      {/* Footer button row mirrors the operations editor: text buttons at
+          the bottom, not icon controls inline with the inputs. Save label
+          flips between Add to BOM (create) and Save changes (edit) so the
+          user knows what the click commits. */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 1,
+          mt: 1.5,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Button size="small" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          size="small"
+          variant="contained"
+          onClick={() => canSave && onSave(value)}
+          disabled={!canSave || saving}
+          startIcon={saving ? <CircularProgress size={14} color="inherit" /> : null}
+        >
+          {lockChildPart ? 'Save changes' : 'Add to BOM'}
+        </Button>
+      </Box>
 
       {/* Hidden Save button for keyboard users — Enter on any input submits. */}
       <Box sx={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>

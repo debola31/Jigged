@@ -581,6 +581,16 @@ export default function ImportPartsPage() {
               </Alert>
             )}
 
+            {importResult.imported_count > 0 && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ textAlign: 'center', mb: 3 }}
+              >
+                Stocked items also appear in Inventory.
+              </Typography>
+            )}
+
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
               <Button variant="outlined" onClick={handleReset}>
                 Import Another File

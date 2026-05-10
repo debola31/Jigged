@@ -4,241 +4,197 @@ import { useEffect, useMemo, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 import IconButton from '@mui/material/IconButton';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Autocomplete from '@mui/material/Autocomplete';
 import CloseIcon from '@mui/icons-material/Close';
-import PartForm from './PartForm';
-import PartTypeChip from './PartTypeChip';
-import {
-  EMPTY_PART_FORM,
-  partKind,
-  partToFormData,
-} from '@/types/part';
+import BuildIcon from '@mui/icons-material/Build';
+import LocalMallIcon from '@mui/icons-material/LocalMall';
+import { EMPTY_PART_FORM } from '@/types/part';
 import type { Part, PartFormData } from '@/types/part';
-import { getAllParts } from '@/utils/partsAccess';
+import type { Vendor } from '@/types/vendor';
+import { createPart, checkPartNameExists } from '@/utils/partsAccess';
+import { getAllVendors } from '@/utils/vendorsAccess';
+import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
+import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
 
 interface PartFormModalProps {
   open: boolean;
   onClose: () => void;
   /**
-   * Called when the user has either created a new part OR confirmed edits to
-   * an existing one. Receives the resulting Part either way so callers (e.g.
-   * QuoteForm) can pick the just-created/edited part into the parent form.
+   * Called once a new part has been created. Receives the resulting Part so
+   * the caller (parts list, inventory list, quote builder) can route to the
+   * detail page or pick the part into a parent form.
    */
   onCreated: (part: Part) => void;
   companyId: string;
-}
-
-type Phase = 'searching' | 'creating' | 'editing-existing';
-
-interface PartSuggestion {
-  id: string;
-  part_name: string;
-  description: string | null;
-  source: 'made' | 'bought';
-  is_stocked: boolean;
+  /**
+   * Partial defaults merged into EMPTY_PART_FORM for the form's initial
+   * state. The Parts page leaves this undefined (source='made' is already
+   * the EMPTY default); the Inventory page passes
+   * `{ source: 'bought', is_stocked: true }` so "Add Item" lands the user
+   * on a stocked-bought starting point.
+   */
+  createDefaults?: Partial<PartFormData>;
 }
 
 /**
- * Search-first add-part modal.
+ * Minimal create-only part modal.
  *
- * The user types a part name; as they type, we suggest existing parts in the
- * company. Picking a suggestion drops the modal into edit mode for that part.
- * Typing a brand-new name and continuing drops it into create mode with the
- * name pre-filled. Eliminates the "create-collides-with-existing" footgun
- * without needing a separate extend-existing flow.
+ * Collects what's needed to land a row without violating any DB CHECKs:
+ * Made-vs-Bought toggle, Stocked toggle, Part Name, Description, and
+ * Unit of measurement (only when Stocked is on, since
+ * parts_stocked_requires_unit forbids a stocked part with no unit).
+ * Everything else (on-hand quantity, reorder point, procurement cost,
+ * preferred vendor, unit conversions, BOM, routing) lives on the detail
+ * page. List pages are finders, the detail page is the workspace.
  *
- * The autocomplete query is RLS-scoped (uses partsAccess.getAllParts), so it
- * cannot leak parts from other companies.
+ * The earlier search-first flow (autocomplete suggesting existing parts to
+ * edit) and the procurement/vendor sections were removed from this modal
+ * deliberately. Editing an existing part happens from its detail page; the
+ * trim keeps the modal a single-screen one-job surface.
  */
 export default function PartFormModal({
   open,
   onClose,
   onCreated,
   companyId,
+  createDefaults,
 }: PartFormModalProps) {
-  const [phase, setPhase] = useState<Phase>('searching');
-  const [searchInput, setSearchInput] = useState('');
-  const [searchInputDebounced, setSearchInputDebounced] = useState('');
-  const [suggestions, setSuggestions] = useState<PartSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const baseCreate: PartFormData = useMemo(
+    () => ({ ...EMPTY_PART_FORM, ...createDefaults }),
+    [createDefaults],
+  );
 
-  const [editTarget, setEditTarget] = useState<Part | null>(null);
-  const [editTargetData, setEditTargetData] = useState<PartFormData | null>(null);
-  const [editLoading, setEditLoading] = useState(false);
-  const [createInitial, setCreateInitial] = useState<PartFormData>(EMPTY_PART_FORM);
-  // Bumped to force PartForm to re-mount whenever we hand it new initialData
-  // (e.g. when the user switches between an existing pick and a new name).
-  const [formKey, setFormKey] = useState(0);
+  const [formData, setFormData] = useState<PartFormData>(baseCreate);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    part_name?: string;
+    primary_unit?: string;
+  }>({});
 
-  // Reset everything when the modal closes/reopens.
+  // Vendor list — only fetched/shown when the form is in Bought mode, since
+  // preferred_vendor doesn't apply to made parts. Lazy-loaded the first time
+  // the modal opens so closed-modal cost is zero.
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+
   useEffect(() => {
-    if (open) {
-      setPhase('searching');
-      setSearchInput('');
-      setSearchInputDebounced('');
-      setSuggestions([]);
-      setSuggestionsError(null);
-      setEditTarget(null);
-      setEditTargetData(null);
-      setCreateInitial(EMPTY_PART_FORM);
-      setFormKey((k) => k + 1);
-    }
-  }, [open]);
-
-  // Debounce the search input to avoid hammering Supabase on every keystroke.
-  useEffect(() => {
-    const timer = setTimeout(() => setSearchInputDebounced(searchInput), 250);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  // Pull suggestions whenever the (debounced) input changes and we're still
-  // in the search phase. Once the user commits to creating or editing, we
-  // stop fetching so a stale suggestion list doesn't fight the form.
-  useEffect(() => {
-    if (!open || phase !== 'searching') return;
-
+    if (!open) return;
     let cancelled = false;
-    async function load() {
-      setSuggestionsLoading(true);
-      setSuggestionsError(null);
-      try {
-        const rows = await getAllParts(companyId, searchInputDebounced.trim());
-        if (cancelled) return;
-        setSuggestions(
-          rows.slice(0, 25).map((p) => ({
-            id: p.id,
-            part_name: p.part_name,
-            description: p.description,
-            source: p.source,
-            is_stocked: p.is_stocked,
-          })),
-        );
-      } catch (err) {
-        if (!cancelled) {
-          setSuggestionsError(err instanceof Error ? err.message : 'Failed to load parts');
-        }
-      } finally {
-        if (!cancelled) setSuggestionsLoading(false);
-      }
-    }
-    load();
+    setVendorsLoading(true);
+    getAllVendors(companyId)
+      .then((rows) => {
+        if (!cancelled) setVendors(rows);
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('Failed to load vendors:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setVendorsLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, phase, companyId, searchInputDebounced]);
+  }, [open, companyId]);
 
-  // Exact-match against current input (case-insensitive). Used to decide
-  // whether "press Enter" means "create" or "edit existing".
-  const exactMatch = useMemo<PartSuggestion | null>(() => {
-    const trimmed = searchInput.trim().toLowerCase();
-    if (!trimmed) return null;
-    return (
-      suggestions.find((s) => s.part_name.toLowerCase() === trimmed) ?? null
-    );
-  }, [suggestions, searchInput]);
+  // Reset whenever the modal closes/reopens, or when defaults change (e.g.
+  // user navigates from Parts to Inventory and reopens).
+  useEffect(() => {
+    if (open) {
+      setFormData(baseCreate);
+      setError(null);
+      setFieldErrors({});
+    }
+  }, [open, baseCreate]);
 
-  const startCreate = (name: string) => {
-    setCreateInitial({ ...EMPTY_PART_FORM, part_name: name });
-    setPhase('creating');
-    setFormKey((k) => k + 1);
+  const handleSourceChange = (_e: unknown, next: 'made' | 'bought' | null) => {
+    if (next === null) return;
+    setFormData((prev) => ({
+      ...prev,
+      source: next,
+      // Preferred vendor is procurement-only — clear it when switching to
+      // Made so the field doesn't carry a stale value into the new shape.
+      preferred_vendor_id: next === 'made' ? null : prev.preferred_vendor_id,
+    }));
   };
 
-  const startEditExisting = async (suggestion: PartSuggestion) => {
-    setEditLoading(true);
-    setSuggestionsError(null);
-    try {
-      // Pull the full Part. Unit conversions live on the part detail page
-      // (chunk 11 moved them out of the create/edit form), so no longer
-      // fetched here.
-      const allRows = await getAllParts(companyId, suggestion.part_name);
-      const fullPart = allRows.find((r) => r.id === suggestion.id) || null;
-      if (!fullPart) {
-        setSuggestionsError(
-          'Could not load the selected part. It may have been deleted.',
-        );
-        return;
-      }
-      setEditTarget(fullPart);
-      setEditTargetData(partToFormData(fullPart));
-      setPhase('editing-existing');
-      setFormKey((k) => k + 1);
-    } catch (err) {
-      setSuggestionsError(err instanceof Error ? err.message : 'Failed to load part');
-    } finally {
-      setEditLoading(false);
+  const handleStockedChange = (_e: unknown, checked: boolean) => {
+    setFormData((prev) => ({ ...prev, is_stocked: checked }));
+    // If they're toggling off, clear any pending UOM validation.
+    if (!checked && fieldErrors.primary_unit) {
+      setFieldErrors((prev) => ({ ...prev, primary_unit: undefined }));
     }
   };
 
-  const handleSelectSuggestion = (option: PartSuggestion | string | null) => {
-    if (!option) return;
-    if (typeof option === 'string') {
-      // User typed something not in the list and pressed Enter.
-      const trimmed = option.trim();
-      if (!trimmed) return;
-      const match = suggestions.find(
-        (s) => s.part_name.toLowerCase() === trimmed.toLowerCase(),
-      );
-      if (match) {
-        startEditExisting(match);
-      } else {
-        startCreate(trimmed);
-      }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setError(null);
+
+    const errors: { part_name?: string; primary_unit?: string } = {};
+
+    const trimmedName = formData.part_name.trim();
+    if (!trimmedName) {
+      errors.part_name = 'Part name is required';
+    }
+
+    // Mirror the DB CHECK so the user sees an inline field error rather than
+    // a Postgres exception bubbling up after the round-trip.
+    if (formData.is_stocked && !formData.primary_unit?.trim()) {
+      errors.primary_unit = 'Unit of measurement is required for stocked parts';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
-    startEditExisting(option);
-  };
 
-  const handleContinueAsNew = () => {
-    const trimmed = searchInput.trim();
-    if (!trimmed) return;
-    if (exactMatch) {
-      startEditExisting(exactMatch);
-    } else {
-      startCreate(trimmed);
-    }
-  };
+    setSubmitting(true);
+    try {
+      const exists = await checkPartNameExists(companyId, trimmedName);
+      if (exists) {
+        setFieldErrors({ part_name: 'A part with this name already exists' });
+        setSubmitting(false);
+        return;
+      }
 
-  const handleBackToSearch = () => {
-    setPhase('searching');
-    setEditTarget(null);
-    setEditTargetData(null);
-  };
+      const payload: PartFormData = {
+        ...formData,
+        part_name: trimmedName,
+        primary_unit: formData.is_stocked ? formData.primary_unit?.trim() ?? null : null,
+      };
 
-  const handleSuccess = (part?: Part) => {
-    if (part) {
-      onCreated(part);
+      const newPart = await createPart(companyId, payload);
+      onCreated(newPart);
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create part');
+    } finally {
+      setSubmitting(false);
     }
   };
-
-  const title =
-    phase === 'searching'
-      ? 'Add Part'
-      : phase === 'editing-existing' && editTarget
-        ? `Edit Part: ${editTarget.part_name}`
-        : 'Add Part';
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
-      maxWidth="md"
+      onClose={submitting ? undefined : onClose}
+      maxWidth="sm"
       fullWidth
       scroll="paper"
-      PaperProps={{
-        sx: {
-          maxHeight: '90vh',
-        },
-      }}
+      PaperProps={{ sx: { maxHeight: '90vh' } }}
     >
       <DialogTitle
         sx={{
@@ -248,97 +204,159 @@ export default function PartFormModal({
           pb: 1,
         }}
       >
-        {title}
-        <IconButton onClick={onClose} size="small" sx={{ color: 'text.secondary' }}>
+        Add Part
+        <IconButton
+          onClick={onClose}
+          size="small"
+          sx={{ color: 'text.secondary' }}
+          disabled={submitting}
+        >
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      <DialogContent sx={{ pt: 2 }}>
-        {phase === 'searching' && (
-          <Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Start typing a part name. Pick an existing part to edit it, or
-              continue with a new name to create one.
-            </Typography>
 
-            <Autocomplete<PartSuggestion, false, false, true>
-              freeSolo
-              autoHighlight
-              options={suggestions}
-              loading={suggestionsLoading}
-              inputValue={searchInput}
-              onInputChange={(_event, newValue, reason) => {
-                if (reason !== 'reset') {
-                  setSearchInput(newValue);
+      <Box component="form" onSubmit={handleSubmit}>
+        <DialogContent sx={{ pt: 2 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {error}
+            </Alert>
+          )}
+
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ mb: 1.5, fontWeight: 500 }}
+          >
+            Category
+          </Typography>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={2}
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            sx={{ mb: 3 }}
+          >
+            <ToggleButtonGroup
+              value={formData.source}
+              exclusive
+              onChange={handleSourceChange}
+              disabled={submitting}
+              aria-label="Source"
+              color="primary"
+              sx={highContrastToggleSx}
+            >
+              <ToggleButton value="made" aria-label="Made in-house">
+                <BuildIcon fontSize="small" sx={{ mr: 1 }} />
+                Made
+              </ToggleButton>
+              <ToggleButton value="bought" aria-label="Bought from vendor">
+                <LocalMallIcon fontSize="small" sx={{ mr: 1 }} />
+                Bought
+              </ToggleButton>
+            </ToggleButtonGroup>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.is_stocked}
+                  onChange={handleStockedChange}
+                  disabled={submitting}
+                  color="primary"
+                />
+              }
+              label="Stocked"
+            />
+          </Stack>
+
+          <TextField
+            fullWidth
+            required
+            autoFocus
+            label="Part Name"
+            value={formData.part_name}
+            onChange={(e) => {
+              setFormData((prev) => ({ ...prev, part_name: e.target.value }));
+              if (fieldErrors.part_name) {
+                setFieldErrors((prev) => ({ ...prev, part_name: undefined }));
+              }
+            }}
+            error={!!fieldErrors.part_name}
+            helperText={fieldErrors.part_name || 'Must be unique within this company'}
+            disabled={submitting}
+            sx={{ mb: 3 }}
+          />
+
+          <TextField
+            fullWidth
+            label="Description"
+            value={formData.description}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, description: e.target.value }))
+            }
+            disabled={submitting}
+            multiline
+            rows={2}
+            placeholder="Brief description of this part"
+            helperText="Optional"
+            sx={{ mb: 3 }}
+          />
+
+          {/* Unit of measurement — required for stocked parts (DB CHECK
+              parts_stocked_requires_unit). Only shown when Stocked is on so
+              the modal stays minimal for parts that don't track quantity. */}
+          {formData.is_stocked && (
+            <UnitOfMeasurementSelect
+              value={formData.primary_unit}
+              onChange={(next) => {
+                setFormData((prev) => ({ ...prev, primary_unit: next }));
+                if (fieldErrors.primary_unit) {
+                  setFieldErrors((prev) => ({ ...prev, primary_unit: undefined }));
                 }
               }}
-              onChange={(_event, value) => handleSelectSuggestion(value)}
-              filterOptions={(opts) => opts}
-              getOptionLabel={(opt) =>
-                typeof opt === 'string' ? opt : opt.part_name
+              companyId={companyId}
+              required
+              disabled={submitting}
+              error={!!fieldErrors.primary_unit}
+              helperText={
+                fieldErrors.primary_unit ||
+                'How quantities of this part are measured (each, lbs, sq in, …).'
               }
-              isOptionEqualToValue={(opt, val) =>
-                typeof opt !== 'string' && typeof val !== 'string' && opt.id === val.id
+            />
+          )}
+
+          {/* Preferred vendor — bought parts only. Optional; the user can
+              also leave it blank and pick a vendor later from the part
+              detail page. Made parts have no vendor concept, so the field
+              hides entirely when source='made'. */}
+          {formData.source === 'bought' && (
+            <Autocomplete<Vendor>
+              options={vendors}
+              loading={vendorsLoading}
+              value={
+                vendors.find((v) => v.id === formData.preferred_vendor_id) ?? null
               }
-              renderOption={(props, opt) => {
-                if (typeof opt === 'string') return null;
-                const kind = partKind({
-                  source: opt.source,
-                  is_stocked: opt.is_stocked,
-                });
-                return (
-                  <Box
-                    component="li"
-                    {...props}
-                    key={opt.id}
-                    sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}
-                  >
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                        {opt.part_name}
-                      </Typography>
-                      {opt.description && (
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{
-                            display: 'block',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {opt.description}
-                        </Typography>
-                      )}
-                    </Box>
-                    <PartTypeChip kind={kind} />
-                  </Box>
-                );
-              }}
+              onChange={(_e, next) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  preferred_vendor_id: next ? next.id : null,
+                }))
+              }
+              getOptionLabel={(opt) => opt.name}
+              isOptionEqualToValue={(opt, val) => opt.id === val.id}
+              size="small"
+              disabled={submitting}
+              sx={{ mt: 3 }}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  autoFocus
-                  label="Part name"
-                  placeholder="Type to search or create..."
-                  helperText={
-                    suggestionsError
-                      ? ' '
-                      : exactMatch
-                        ? 'A part with this exact name already exists. Press Enter to edit it.'
-                        : searchInput.trim()
-                          ? 'No exact match. Press Enter to create a new part with this name.'
-                          : ' '
-                  }
+                  label="Preferred vendor"
+                  helperText="Optional. The default supplier for this part."
                   slotProps={{
                     input: {
                       ...params.InputProps,
                       endAdornment: (
                         <>
-                          {(suggestionsLoading || editLoading) && (
-                            <CircularProgress color="inherit" size={20} />
-                          )}
+                          {vendorsLoading ? <CircularProgress size={14} /> : null}
                           {params.InputProps.endAdornment}
                         </>
                       ),
@@ -347,68 +365,23 @@ export default function PartFormModal({
                 />
               )}
             />
+          )}
+        </DialogContent>
 
-            {suggestionsError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {suggestionsError}
-              </Alert>
-            )}
-
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
-              <Stack direction="row" spacing={2}>
-                <Button
-                  variant="contained"
-                  onClick={handleContinueAsNew}
-                  disabled={!searchInput.trim() || editLoading}
-                >
-                  {exactMatch ? 'Edit existing part' : 'Create new part'}
-                </Button>
-              </Stack>
-            </Box>
-          </Box>
-        )}
-
-        {phase === 'creating' && (
-          <Box>
-            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-              <Button size="small" onClick={handleBackToSearch} sx={{ color: 'text.secondary' }}>
-                Search again
-              </Button>
-            </Box>
-            <PartForm
-              key={formKey}
-              mode="create"
-              companyId={companyId}
-              initialData={createInitial}
-              onSuccess={handleSuccess}
-              onCancel={onClose}
-              hideHeading
-            />
-          </Box>
-        )}
-
-        {phase === 'editing-existing' && editTargetData && editTarget && (
-          <Box>
-            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-              <Button size="small" onClick={handleBackToSearch} sx={{ color: 'text.secondary' }}>
-                Search again
-              </Button>
-            </Box>
-            <PartForm
-              key={formKey}
-              mode="edit"
-              companyId={companyId}
-              initialData={editTargetData}
-              partId={editTarget.id}
-              part={editTarget}
-              onSuccess={handleSuccess}
-              onCancel={onClose}
-              hideHeading
-            />
-          </Box>
-        )}
-      </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={onClose} disabled={submitting} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={submitting || !formData.part_name.trim()}
+            startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {submitting ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Box>
     </Dialog>
   );
 }
-

@@ -29,8 +29,6 @@ import {
 } from '@/utils/bomAccess';
 import { getPartsForSelect } from '@/utils/partsAccess';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
-import { partKind } from '@/types/part';
-import PartTypeChip from '@/components/parts/PartTypeChip';
 import MaterialRowEditor, {
   type MaterialEditorValue,
   type PartOption,
@@ -42,9 +40,15 @@ interface PartBomPanelProps {
   /** When true, hides add/edit/remove controls (display-only mode). */
   readOnly?: boolean;
   /**
+   * Optional sub-heading rendered to the left of the Add Material button on
+   * the panel's header row (e.g. "Parts consumed when manufacturing this
+   * BRACKET-300."). Mirrors how the Operations panel pairs its summary
+   * line with the Add Operation button on a single row.
+   */
+  description?: string;
+  /**
    * Fired after each successful add/update/delete so the parent page can
-   * refresh sibling pieces of state (e.g. the cost-stale badge, total cost
-   * display).
+   * refresh sibling pieces of state (e.g. the total cost display).
    */
   onChanged?: () => void;
 }
@@ -83,6 +87,7 @@ export default function PartBomPanel({
   partId,
   companyId,
   readOnly = false,
+  description,
   onChanged,
 }: PartBomPanelProps) {
   const [rows, setRows] = useState<BomLineWithChildPart[]>([]);
@@ -275,17 +280,35 @@ export default function PartBomPanel({
         </Alert>
       )}
 
-      {!readOnly && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<AddIcon />}
-            onClick={openAdd}
-            disabled={editorOpen || saving}
-          >
-            Add Material
-          </Button>
+      {(description || !readOnly) && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            mb: 2,
+            flexWrap: 'wrap',
+          }}
+        >
+          {description ? (
+            <Typography variant="body2" color="text.secondary">
+              {description}
+            </Typography>
+          ) : (
+            <Box />
+          )}
+          {!readOnly && (
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={openAdd}
+              disabled={editorOpen || saving}
+            >
+              Add Material
+            </Button>
+          )}
         </Box>
       )}
 
@@ -334,17 +357,14 @@ export default function PartBomPanel({
                 }}
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <PartTypeChip kind={partKind(child)} size="small" />
-                    <Link
-                      component={NextLink}
-                      href={`/dashboard/${companyId}/parts/${child.id}`}
-                      underline="hover"
-                      sx={{ fontWeight: 500 }}
-                    >
-                      {child.part_name}
-                    </Link>
-                  </Box>
+                  <Link
+                    component={NextLink}
+                    href={`/dashboard/${companyId}/parts/${child.id}`}
+                    underline="hover"
+                    sx={{ fontWeight: 500 }}
+                  >
+                    {child.part_name}
+                  </Link>
                 </Box>
                 <Box sx={{ minWidth: 110, textAlign: 'right' }}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }}>

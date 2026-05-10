@@ -28,13 +28,16 @@ describe('Sidebar', () => {
     expect(screen.getByText('Quotes')).toBeInTheDocument();
     expect(screen.getByText('Jobs')).toBeInTheDocument();
     expect(screen.getByText('Parts')).toBeInTheDocument();
+    // Inventory came back as its own list page (Parts/Inventory split). It
+    // sits between Parts and Work Centers in the sidebar.
+    expect(screen.getByText('Inventory')).toBeInTheDocument();
+    expect(screen.getByText('Work Centers')).toBeInTheDocument();
+    expect(screen.getByText('Vendors')).toBeInTheDocument();
     expect(screen.getByText('Customers')).toBeInTheDocument();
     expect(screen.getByText('Team')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
-    // Operations and Inventory entries removed in PR 1 — the unified Parts
-    // page in PR 3 covers both surfaces.
+    // Operations was deleted earlier and stays gone.
     expect(screen.queryByText('Operations')).not.toBeInTheDocument();
-    expect(screen.queryByText('Inventory')).not.toBeInTheDocument();
   });
 
   it('hides Team and Settings for user role', () => {

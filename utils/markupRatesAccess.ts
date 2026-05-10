@@ -168,9 +168,44 @@ export async function getDefaultMarkupRate(companyId: string): Promise<MarkupRat
 }
 
 /**
+ * Convert a rate's breakpoints into the PartPricingTierInput shape used by
+ * replaceTiersForPart. Sorted by qty ascending and re-sequenced from 10.
+ */
+function breakpointsToTierInputs(rate: MarkupRate): PartPricingTierInput[] {
+  return [...rate.breakpoints]
+    .sort((a, b) => a.qty - b.qty)
+    .map((bp, i) => ({
+      sequence: (i + 1) * 10,
+      quantity: bp.qty,
+      markup_percent: bp.markup_percent,
+    }));
+}
+
+/**
+ * Apply a specific markup rate to a single part: replaces the part's tiers
+ * with the rate's breakpoints AND links the part to that rate
+ * (markup_rate_id). Used by the per-part PartPricing UI rate picker, by the
+ * "Switch to <rate>" actions, and by cascadeRateUpdateToParts when a rate
+ * is edited.
+ */
+export async function applyRateToPart(
+  companyId: string,
+  partId: string,
+  rateId: string,
+): Promise<void> {
+  const rate = await getMarkupRate(rateId);
+  if (!rate) {
+    throw new Error(`Markup rate ${rateId} not found`);
+  }
+  const tiers = breakpointsToTierInputs(rate);
+  await replaceTiersForPart(companyId, partId, tiers, { rateId: rate.id });
+}
+
+/**
  * Snapshot the company's default markup rate's breakpoints into a part's
- * pricing tiers. Used by createPart to give new parts an initial set of
- * tier rows without the user having to apply a rate manually.
+ * pricing tiers AND link the part to that rate. Used by createPart so new
+ * parts open on the company's default rate (Markup chip reads "Default")
+ * without the user having to apply it manually.
  *
  * No-op if the company has no default rate set, or if the default has no
  * breakpoints. Errors are non-fatal — part creation must still succeed
@@ -183,15 +218,53 @@ export async function applyDefaultRateToPart(
   const defaultRate = await getDefaultMarkupRate(companyId);
   if (!defaultRate || defaultRate.breakpoints.length === 0) return;
 
-  const tiers: PartPricingTierInput[] = [...defaultRate.breakpoints]
-    .sort((a, b) => a.qty - b.qty)
-    .map((bp, i) => ({
-      sequence: (i + 1) * 10,
-      quantity: bp.qty,
-      markup_percent: bp.markup_percent,
-    }));
+  const tiers = breakpointsToTierInputs(defaultRate);
+  await replaceTiersForPart(companyId, partId, tiers, { rateId: defaultRate.id });
+}
 
-  await replaceTiersForPart(companyId, partId, tiers);
+/**
+ * Re-apply a rate's current breakpoints to every part linked to it. Called
+ * after a rate edit so the live-link semantic holds: editing a rate updates
+ * every part whose markup_rate_id points to it. Sequential per-part because
+ * we want a single failure to be visible (collected, not aborted) rather
+ * than parallelized into anonymous timeouts. Pilot scale (hundreds of parts
+ * per company) is fine here; revisit if a single rate ends up linked to
+ * thousands.
+ */
+export async function cascadeRateUpdateToParts(
+  companyId: string,
+  rateId: string,
+): Promise<{ updated: number; failed: Array<{ partId: string; error: string }> }> {
+  const supabase = getSupabase();
+
+  const { data: linkedParts, error } = await supabase
+    .from('parts')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('markup_rate_id', rateId);
+
+  if (error) {
+    console.error('Error fetching parts linked to rate:', error);
+    throw error;
+  }
+
+  const ids = ((linkedParts || []) as Array<{ id: string }>).map((r) => r.id);
+  if (ids.length === 0) return { updated: 0, failed: [] };
+
+  const failed: Array<{ partId: string; error: string }> = [];
+  let updated = 0;
+  for (const partId of ids) {
+    try {
+      await applyRateToPart(companyId, partId, rateId);
+      updated += 1;
+    } catch (err) {
+      failed.push({
+        partId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+  return { updated, failed };
 }
 
 export async function deleteMarkupRate(rateId: string): Promise<void> {

@@ -44,11 +44,21 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
  * `base_cost × (1 + markup/100)` against the current routing. There is no
  * lock concept — typing a unit price in the UI back-calculates markup before
  * calling this function, so the markup field captured here always governs.
+ *
+ * Also writes parts.markup_rate_id from `opts.rateId`. Two callers, two
+ * intents:
+ *   - applyRateToPart() passes the rate's id, so the part stays linked to
+ *     that rate after the snapshot.
+ *   - The PartPricing manual-edit path omits opts.rateId, which writes
+ *     markup_rate_id = null and flips the part to "Custom". This guarantees
+ *     that any tier write keeps the link state consistent with intent —
+ *     impossible to accidentally retain a stale rate link after an edit.
  */
 export async function replaceTiersForPart(
   companyId: string,
   partId: string,
   tiers: PartPricingTierInput[],
+  opts: { rateId?: string | null } = {},
 ): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
 
@@ -112,30 +122,37 @@ export async function replaceTiersForPart(
     }
   }
 
+  // Sync the part's rate link with the caller's intent. A rate-apply path
+  // passes the rate id; a manual-edit path omits it and the part flips to
+  // Custom (null). Done last so the FK update reflects a successful tier
+  // write — a partial failure leaves the link state matching the row state.
+  const nextRateId = opts.rateId ?? null;
+  const { error: rateLinkErr } = await supabase
+    .from('parts')
+    .update({ markup_rate_id: nextRateId })
+    .eq('id', partId);
+  if (rateLinkErr) throw rateLinkErr;
+
   return getTiersForPart(partId);
 }
 
 /**
- * Copy pricing tiers from one part to another. Source qty + markup are copied
- * verbatim; unit_price and base_cost_per_unit are recomputed against the
- * target part's own routing so the prices reflect target-part economics.
+ * Update only the part's markup_rate_id without touching its tiers. Used by
+ * the PartPricing "Switch to Custom" affordance, which flips the part to
+ * Custom while preserving the current tier values as the editable starting
+ * point. Pass `null` to clear, or a rate id to link without re-snapshotting
+ * (the apply-rate paths in markupRatesAccess already handle re-snapshotting).
  */
-export async function copyTiersFromPart(
-  companyId: string,
-  sourcePartId: string,
-  targetPartId: string,
-): Promise<PartPricingTier[]> {
-  const sourceTiers = await getTiersForPart(sourcePartId);
-  if (sourceTiers.length === 0) return getTiersForPart(targetPartId);
-
-  // Existing target tiers are replaced — copy semantics, not merge.
-  const inputs: PartPricingTierInput[] = sourceTiers.map((t, i) => ({
-    sequence: (i + 1) * 10,
-    quantity: t.quantity,
-    markup_percent: t.markup_percent,
-  }));
-
-  return replaceTiersForPart(companyId, targetPartId, inputs);
+export async function setPartMarkupRate(
+  partId: string,
+  rateId: string | null,
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('parts')
+    .update({ markup_rate_id: rateId })
+    .eq('id', partId);
+  if (error) throw error;
 }
 
 /**

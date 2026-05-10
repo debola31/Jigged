@@ -20,12 +20,10 @@ import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import Chip from '@mui/material/Chip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
-import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
-import CategoryIcon from '@mui/icons-material/Category';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -34,42 +32,57 @@ import type {
   GridReadyEvent,
   SelectionChangedEvent,
   SortChangedEvent,
+  ICellRendererParams,
   RowClickedEvent,
   CellKeyDownEvent,
-  ICellRendererParams,
 } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
+import { getStockedParts, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import PartFormModal from '@/components/parts/PartFormModal';
+import StockStatusChip, {
+  deriveStockStatus,
+  type StockStatus,
+} from '@/components/inventory/StockStatusChip';
 import type { Part } from '@/types/part';
 
-type PartRow = Part;
-type SourceFilter = 'all' | 'made' | 'bought';
+type InventoryRow = Part;
+type StatusFilter = 'all' | StockStatus;
 
-export default function PartsPage() {
+/**
+ * Inventory list page. Companion to the Parts list page.
+ *
+ * Filter: is_stocked=true. Both raw materials and sub-assemblies appear here.
+ * Custom-made parts that aren't tracked on hand do not.
+ *
+ * Detail-page navigation: row clicks append `?from=inventory` so the back link
+ * on the part detail page returns here. The Add Item flow opens PartFormModal
+ * defaulted to is_stocked=true + source='bought' (the most common stocked
+ * case); the user can toggle source to Made on the form to create a
+ * sub-assembly directly.
+ */
+export default function InventoryPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [rows, setRows] = useState<PartRow[]>([]);
+  const [rows, setRows] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  // Source filter is applied client-side after the fetch — `source` is a
-  // stored column, but pulling all rows once and filtering locally keeps
-  // the toggle instant and matches the inventory list's status-filter
-  // pattern. Shop-scale row counts make the cost negligible.
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  // Status is computed from quantity + reorder_point at render time, so the
+  // filter applies client-side after the fetch. Cheap for the row counts a
+  // single shop will hold; if that grows, push the filter into the query.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'part_name',
     sort: 'asc',
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const gridRef = useRef<AgGridReact<PartRow>>(null);
+  const gridRef = useRef<AgGridReact<InventoryRow>>(null);
 
   const [addModalOpen, setAddModalOpen] = useState(false);
 
@@ -91,24 +104,21 @@ export default function PartsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchParts = useCallback(async () => {
+  const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
-      // Pull every part the company owns (made + bought, stocked or not).
-      // The source filter narrows this client-side. Inventory page handles
-      // the stocked-only view; this page is the full catalog.
-      const parts = await getAllParts(
+      const data = await getStockedParts(
         companyId,
         searchDebounced,
         sortModel.field,
         sortModel.sort,
       );
-      setRows(parts);
+      setRows(data);
     } catch (error) {
-      console.error('Error fetching parts:', error);
+      console.error('Error fetching inventory:', error);
       setSnackbar({
         open: true,
-        message: error instanceof Error ? error.message : 'Failed to load parts',
+        message: error instanceof Error ? error.message : 'Failed to load inventory',
         severity: 'error',
       });
     } finally {
@@ -117,23 +127,26 @@ export default function PartsPage() {
   }, [companyId, searchDebounced, sortModel]);
 
   useEffect(() => {
-    fetchParts();
-  }, [fetchParts]);
+    fetchInventory();
+  }, [fetchInventory]);
 
   useEffect(() => {
     setSelectedIds([]);
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, sourceFilter]);
+  }, [searchDebounced, statusFilter]);
 
-  // Apply the source filter client-side so the grid, gridHeight, and
-  // empty-state checks all see the same row set. Same pattern the
-  // Inventory page uses for its status filter.
+  // Apply the status filter client-side so the grid (and the gridHeight /
+  // empty-state checks below) all see the same row set. Status is derived
+  // from quantity + reorder_point, not stored, so there's nothing to push
+  // server-side without duplicating the derivation in SQL.
   const filteredRows = useMemo(() => {
-    if (sourceFilter === 'all') return rows;
-    return rows.filter((r) => r.source === sourceFilter);
-  }, [rows, sourceFilter]);
+    if (statusFilter === 'all') return rows;
+    return rows.filter(
+      (r) => deriveStockStatus(r.quantity, r.reorder_point) === statusFilter,
+    );
+  }, [rows, statusFilter]);
 
   const gridHeight = useMemo(() => {
     if (loading || filteredRows.length === 0) return 600;
@@ -141,7 +154,7 @@ export default function PartsPage() {
     return Math.max(56 + 52 * displayedRows + 56, 400);
   }, [loading, filteredRows.length]);
 
-  const handleGridReady = (event: GridReadyEvent<PartRow>) => {
+  const handleGridReady = (event: GridReadyEvent<InventoryRow>) => {
     event.api.applyColumnState({
       state: [{ colId: 'part_name', sort: 'asc' }],
       defaultState: { sort: null },
@@ -161,7 +174,7 @@ export default function PartsPage() {
     }
   };
 
-  const handleSelectionChanged = (event: SelectionChangedEvent<PartRow>) => {
+  const handleSelectionChanged = (event: SelectionChangedEvent<InventoryRow>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
       .map((node) => node.data?.id)
@@ -169,19 +182,19 @@ export default function PartsPage() {
     setSelectedIds(selectedData);
   };
 
-  const handleRowClicked = (event: RowClickedEvent<PartRow>) => {
+  const handleRowClicked = (event: RowClickedEvent<InventoryRow>) => {
     if (event.data && event.event) {
       const target = event.event.target as HTMLElement;
       if (!target.closest('.ag-checkbox-input-wrapper')) {
-        router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=parts`);
+        router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=inventory`);
       }
     }
   };
 
-  const handleCellKeyDown = (event: CellKeyDownEvent<PartRow>) => {
+  const handleCellKeyDown = (event: CellKeyDownEvent<InventoryRow>) => {
     const keyboardEvent = event.event as KeyboardEvent | undefined;
     if (keyboardEvent?.key === 'Enter' && event.data) {
-      router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=parts`);
+      router.push(`/dashboard/${companyId}/parts/${event.data.id}?from=inventory`);
     }
   };
 
@@ -196,11 +209,11 @@ export default function PartsPage() {
       if (gridRef.current?.api) {
         gridRef.current.api.deselectAll();
       }
-      await fetchParts();
+      await fetchInventory();
       setDeleteDialog({ open: false });
       setSnackbar({
         open: true,
-        message: `Deleted ${count} part${count === 1 ? '' : 's'}`,
+        message: `Deleted ${count} item${count === 1 ? '' : 's'}`,
         severity: 'success',
       });
     } catch (error) {
@@ -215,67 +228,87 @@ export default function PartsPage() {
     }
   };
 
-  const handlePartCreatedOrEdited = (part: Part) => {
-    // Whether the user created a new part or edited an existing one through
-    // the search-first modal, route them to the detail page so they can keep
-    // working (define routing, edit BOM, etc.).
-    router.push(`/dashboard/${companyId}/parts/${part.id}?from=parts`);
+  const handlePartCreated = (part: Part) => {
+    // Land the user on the new part's detail page so they can finish setup
+    // (unit conversions, vendor pick, etc.). Mark `from=inventory` so the
+    // back link returns here.
+    router.push(`/dashboard/${companyId}/parts/${part.id}?from=inventory`);
   };
 
+  // Formatters. Mirror the parts page (page.tsx:278-303). If formatting drift
+  // becomes a problem across pages, extract into utils/formatters.ts in a
+  // separate cleanup PR.
   const formatDate = (val: string | null | undefined): string => {
     if (!val) return '—';
     return new Date(val).toLocaleDateString();
   };
 
-  // Column set is intentionally minimal: this page is a finder, the detail
-  // page is the workspace. Engineering signals (routing, BOM, sub-assembly
-  // badges, calculated cost) live on the detail page.
-  const columnDefs: ColDef<PartRow>[] = [
+  const formatCurrency = (val: number | null | undefined): string => {
+    if (val === null || val === undefined) return '—';
+    return `$${Number(val).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const columnDefs: ColDef<InventoryRow>[] = [
     {
       field: 'part_name',
       headerName: 'Part Name',
-      width: 240,
+      width: 220,
       pinned: 'left' as const,
     },
     {
       field: 'description',
       headerName: 'Description',
       flex: 2,
-      minWidth: 240,
+      minWidth: 200,
       sortable: false,
-      valueFormatter: (params) => params.value ?? '—',
+      valueFormatter: (params) => (params.value as string | null) ?? '—',
     },
     {
-      // Outlined source chip — same visual treatment as the header card on
-      // the part detail page, just narrower (only the source dimension; the
-      // Stocked indicator lives on the Inventory list page where it
-      // matters more).
-      field: 'source',
-      headerName: 'Source',
+      field: 'quantity',
+      headerName: 'Quantity',
       width: 130,
+      type: 'rightAligned',
+      // rowToPart in partsAccess coerces numeric columns at the access
+      // boundary, so params.value is already a real number.
+      valueFormatter: (params) =>
+        ((params.value as number | null) ?? 0).toLocaleString(undefined, {
+          maximumFractionDigits: 4,
+        }),
+    },
+    {
+      colId: 'status',
+      headerName: 'Status',
+      width: 140,
+      sortable: false,
       cellStyle: { display: 'flex', alignItems: 'center' },
-      cellRenderer: (params: ICellRendererParams<PartRow>) => {
-        const source = params.value as 'made' | 'bought' | undefined;
-        if (!source) return null;
-        const isMade = source === 'made';
+      cellRenderer: (params: ICellRendererParams<InventoryRow>) => {
+        if (!params.data) return null;
         return (
-          <Chip
-            label={isMade ? 'Made' : 'Bought'}
-            size="small"
-            variant="outlined"
-            sx={{
-              fontWeight: 500,
-              letterSpacing: 0.2,
-              bgcolor: 'transparent',
-              border: '1px solid',
-              color: isMade ? '#90caf9' : '#a5d6a7',
-              borderColor: isMade
-                ? 'rgba(144, 202, 249, 0.5)'
-                : 'rgba(165, 214, 167, 0.5)',
-            }}
+          <StockStatusChip
+            status={deriveStockStatus(params.data.quantity, params.data.reorder_point)}
           />
         );
       },
+    },
+    {
+      field: 'primary_unit',
+      headerName: 'Unit',
+      width: 100,
+      valueFormatter: (params) => (params.value as string | null) ?? '—',
+    },
+    {
+      field: 'cost_per_unit',
+      headerName: 'Cost / Unit',
+      width: 140,
+      type: 'rightAligned',
+      // For sub-assemblies that have not yet been recalculated, cost_per_unit
+      // is null and the cell renders an em-dash. Documented behavior, not a
+      // bug: Recalculate Cost lives on the detail page where the user can
+      // see the inputs.
+      valueFormatter: (params) => formatCurrency(params.value as number | null),
     },
     {
       field: 'updated_at',
@@ -286,15 +319,15 @@ export default function PartsPage() {
   ];
 
   const renderEmptyState = () => {
-    const isFiltered = !!searchDebounced || sourceFilter !== 'all';
+    const isFiltered = !!searchDebounced || statusFilter !== 'all';
     if (isFiltered) {
       return (
         <>
           <Typography variant="h6" color="text.secondary" gutterBottom>
-            No parts match these filters.
+            No items match these filters.
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Adjust the search or source filter to see more parts.
+            Adjust the search or status filter to see more items.
           </Typography>
         </>
       );
@@ -302,25 +335,18 @@ export default function PartsPage() {
     return (
       <>
         <Typography variant="h6" color="text.secondary" gutterBottom>
-          No parts yet.
+          Nothing in inventory yet.
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Add your first part — made in-house or bought from a vendor.
+          Add your first stocked item.
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-          <Button
-            variant="outlined"
-            startIcon={<UploadIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
-          >
-            Import CSV
-          </Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => setAddModalOpen(true)}
           >
-            Add Part
+            Add Item
           </Button>
         </Box>
       </>
@@ -331,7 +357,7 @@ export default function PartsPage() {
     <Box>
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <TextField
-          placeholder="Search parts..."
+          placeholder="Search inventory..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
@@ -348,16 +374,17 @@ export default function PartsPage() {
         />
 
         <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel id="parts-source-label">Source</InputLabel>
+          <InputLabel id="inventory-status-label">Status</InputLabel>
           <Select
-            labelId="parts-source-label"
-            value={sourceFilter}
-            label="Source"
-            onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+            labelId="inventory-status-label"
+            value={statusFilter}
+            label="Status"
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
           >
             <MenuItem value="all">All</MenuItem>
-            <MenuItem value="made">Made</MenuItem>
-            <MenuItem value="bought">Bought</MenuItem>
+            <MenuItem value="in_stock">In stock</MenuItem>
+            <MenuItem value="low">Low</MenuItem>
+            <MenuItem value="out">Out of stock</MenuItem>
           </Select>
         </FormControl>
 
@@ -365,7 +392,7 @@ export default function PartsPage() {
           <>
             <ExportCsvButton
               gridRef={gridRef}
-              fileName="parts-export"
+              fileName="inventory-export"
               selectedCount={selectedIds.length}
             />
             <Button
@@ -382,26 +409,18 @@ export default function PartsPage() {
         <Box sx={{ flex: 1 }} />
 
         <Button
-          variant="outlined"
-          startIcon={<UploadIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
-        >
-          Import
-        </Button>
-
-        <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setAddModalOpen(true)}
         >
-          Add Part
+          Add Item
         </Button>
       </Box>
 
       {!loading && filteredRows.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
-            <CategoryIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+            <Inventory2Icon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
             {renderEmptyState()}
           </CardContent>
         </Card>
@@ -420,7 +439,7 @@ export default function PartsPage() {
               },
             }}
           >
-            <AgGridReact<PartRow>
+            <AgGridReact<InventoryRow>
               ref={gridRef}
               rowData={filteredRows}
               columnDefs={columnDefs}
@@ -458,8 +477,9 @@ export default function PartsPage() {
       <PartFormModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        onCreated={handlePartCreatedOrEdited}
+        onCreated={handlePartCreated}
         companyId={companyId}
+        createDefaults={{ is_stocked: true, source: 'bought' }}
       />
 
       <Dialog
@@ -468,15 +488,15 @@ export default function PartsPage() {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle sx={{ pb: 2 }}>Delete Parts</DialogTitle>
+        <DialogTitle sx={{ pb: 2 }}>Delete Items</DialogTitle>
         <DialogContent sx={{ pt: 0 }}>
           <Box sx={{ mb: 2 }}>
             <Typography variant="body1" sx={{ mb: 1 }}>
-              Are you sure you want to delete <strong>{selectedIds.length}</strong> part
+              Are you sure you want to delete <strong>{selectedIds.length}</strong> item
               {selectedIds.length === 1 ? '' : 's'}?
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Parts referenced by quotes, jobs, or other parts&apos; BOMs cannot be deleted.
+              Items referenced by quotes, jobs, or other parts&apos; BOMs cannot be deleted.
             </Typography>
           </Box>
         </DialogContent>

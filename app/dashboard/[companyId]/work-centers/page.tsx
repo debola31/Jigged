@@ -256,15 +256,41 @@ export default function WorkCentersPage() {
       },
     },
     {
-      field: 'labor_rate',
-      headerName: 'Labor Rate',
-      width: 140,
-      type: 'rightAligned',
-      valueFormatter: (params) => {
-        if (params.data?.kind === 'external') return '';
-        return params.value === null || params.value === undefined
-          ? '—'
-          : formatRate(Number(params.value));
+      // Branches on kind: internal work centers carry an hourly labor rate
+      // (or em-dash if unset); external work centers' cost lives per-piece
+      // on each routing operation, so the cell points the user there.
+      // Custom comparator keeps internal rows ordered by labor_rate while
+      // pinning external rows to the bottom regardless of sort direction
+      // (their cost is not comparable to an hourly rate).
+      colId: 'cost',
+      headerName: 'Cost',
+      width: 160,
+      sortable: true,
+      comparator: (_a, _b, nodeA, nodeB) => {
+        const aExt = nodeA.data?.kind === 'external';
+        const bExt = nodeB.data?.kind === 'external';
+        if (aExt && !bExt) return 1;
+        if (!aExt && bExt) return -1;
+        if (aExt && bExt) return 0;
+        return (
+          (nodeA.data?.labor_rate ?? -Infinity) - (nodeB.data?.labor_rate ?? -Infinity)
+        );
+      },
+      cellRenderer: (params: ICellRendererParams<WorkCenterRow>) => {
+        const wc = params.data;
+        if (!wc) return null;
+        if (wc.kind === 'external') {
+          return (
+            <Typography
+              variant="body2"
+              sx={{ fontStyle: 'italic', color: 'text.secondary' }}
+            >
+              Per routing op
+            </Typography>
+          );
+        }
+        if (wc.labor_rate === null || wc.labor_rate === undefined) return '—';
+        return formatRate(Number(wc.labor_rate));
       },
     },
     {

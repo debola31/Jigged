@@ -93,6 +93,22 @@ export default function RoutingOperationRowEditor({
     setTouched(false);
   }, [initial]);
 
+  // Add-mode only: when the user picks a work center, pre-populate the
+  // labor-rate field with the work center's default rate. Editing the
+  // field then becomes an "override for this operation"; leaving the
+  // populated value alone saves no override (handleSave compares against
+  // the work center rate before writing). Edit mode keeps the existing
+  // override value untouched — switching work centers isn't allowed in
+  // edit mode anyway.
+  useEffect(() => {
+    if (isEdit) return;
+    if (workCenter && workCenter.kind === 'internal' && workCenter.labor_rate !== null) {
+      setLaborOverrideStr(String(workCenter.labor_rate));
+    } else {
+      setLaborOverrideStr('');
+    }
+  }, [workCenter, isEdit]);
+
   const isExternal = workCenter?.kind === 'external';
 
   const wcError = touched && !workCenter;
@@ -139,11 +155,22 @@ export default function RoutingOperationRowEditor({
       });
     } else {
       if (setupError || cycleError || !internalHasAny) return;
+      // The labor-rate field is pre-populated with the work center's rate;
+      // an "override" only makes sense when the user actually changed it.
+      // If their value matches the work center default (or they cleared
+      // it), persist null so the cost calc inherits whatever the work
+      // center rate becomes in the future.
+      const overrideParsed = parseOptionalNumber(laborOverrideStr);
+      const wcRate = workCenter.labor_rate;
+      const laborRateOverride =
+        overrideParsed === null || overrideParsed === wcRate
+          ? null
+          : overrideParsed;
       onSave({
         workCenter,
         setupMinutes: setupParsed,
         cycleMinutesPerUnit: cycleParsed,
-        laborRateOverride: parseOptionalNumber(laborOverrideStr),
+        laborRateOverride,
         externalUnitPrice: null,
         externalSetupCost: null,
         instructions: instructions.trim() || null,
@@ -305,24 +332,26 @@ export default function RoutingOperationRowEditor({
             }
             sx={{ flex: 1, minWidth: 180 }}
           />
-          <TextField
-            size="small"
-            label="Labor rate override ($/hr)"
-            type="text"
-            inputMode="decimal"
-            value={laborOverrideStr}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === '' || /^\d*\.?\d*$/.test(v)) setLaborOverrideStr(v);
-            }}
-            placeholder={
-              workCenter?.labor_rate !== null && workCenter?.labor_rate !== undefined
-                ? `default ${workCenter.labor_rate}`
-                : 'optional'
-            }
-            helperText="Optional. Overrides the work center's default rate."
-            sx={{ flex: 1, minWidth: 180 }}
-          />
+          {workCenter && (
+            <TextField
+              size="small"
+              label="Labor rate ($/hr)"
+              type="text"
+              inputMode="decimal"
+              value={laborOverrideStr}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '' || /^\d*\.?\d*$/.test(v)) setLaborOverrideStr(v);
+              }}
+              placeholder="optional"
+              helperText={
+                workCenter.labor_rate !== null
+                  ? `Defaults to ${workCenter.name}'s rate ($${workCenter.labor_rate}/hr). Change to override for this operation.`
+                  : `${workCenter.name} has no default rate set. Enter a rate for this operation.`
+              }
+              sx={{ flex: 1, minWidth: 180 }}
+            />
+          )}
         </Box>
       )}
 

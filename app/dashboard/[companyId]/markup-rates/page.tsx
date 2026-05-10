@@ -304,10 +304,10 @@ export default function MarkupRatesListPage() {
                   sx={{
                     fontFamily: 'inherit',
                     color: 'text.secondary',
-                    minWidth: 56,
+                    minWidth: 100,
                   }}
                 >
-                  qty {bp.qty}
+                  min qty {bp.qty}
                 </Typography>
                 <Typography
                   variant="caption"

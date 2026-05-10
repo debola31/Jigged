@@ -60,11 +60,15 @@ export default async function globalTeardown(): Promise<void> {
 
   // Find tagged parts first; we need their IDs to clean up routings + BOM
   // edges before deleting the parts themselves.
+  // Prefix match because every seeded row's legacy_id is shaped
+  // `${E2E_SEED_MARKER}:${stable_name}` (per-row to satisfy the
+  // per-company legacy_id UNIQUE constraint). The trailing `%` also
+  // catches any bare-marker rows from earlier seed-script versions.
   const { data: taggedParts } = await supabase
     .from('parts')
     .select('id')
     .eq('company_id', env.companyId)
-    .eq('legacy_id', E2E_SEED_MARKER);
+    .like('legacy_id', `${E2E_SEED_MARKER}%`);
   const partIds = (taggedParts ?? []).map((p: { id: string }) => p.id);
 
   if (partIds.length > 0) {
@@ -87,12 +91,12 @@ export default async function globalTeardown(): Promise<void> {
     .eq('company_id', env.companyId)
     .like('description', 'E2E seed (%');
 
-  // Tagged vendors
+  // Tagged vendors (same prefix-match rationale as parts above).
   await supabase
     .from('vendors')
     .delete()
     .eq('company_id', env.companyId)
-    .eq('legacy_id', E2E_SEED_MARKER);
+    .like('legacy_id', `${E2E_SEED_MARKER}%`);
 
   // eslint-disable-next-line no-console
   console.log('[e2e/global-teardown] Done.');

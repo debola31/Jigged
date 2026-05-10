@@ -7,9 +7,14 @@
  * of: ≥1 vendor, ≥1 internal + ≥1 external work_center, ≥1 customer, ≥1
  * manufacturable part with a routing op, ≥1 stockable raw, ≥1 BOM child.
  *
- * Idempotency strategy: every seeded row carries a sentinel marker via the
- * `legacy_id` column (e.g. legacy_id='E2E_SEED_v1'). On each run we look up by
- * marker and skip the insert if it exists. Re-runs are safe.
+ * Idempotency strategy: every seeded row carries a per-row sentinel via the
+ * `legacy_id` column shaped as `${E2E_SEED_MARKER}:${stable_name}` (e.g.
+ * `E2E_SEED_v1:E2E-MFG-001`). The per-row suffix is required because
+ * `parts_legacy_id_unique_per_company` (and the equivalent on vendors)
+ * forbids two rows in one company sharing the same legacy_id. Lookups
+ * happen by stable name (which also has UNIQUE-per-company constraints),
+ * so the marker is purely for teardown — `legacy_id LIKE 'E2E_SEED_v1%'`
+ * cleanly scopes deletes to seeded rows. Re-runs are safe.
  *
  * Why we sign in as the test user (and not service-role): every table we
  * write to (vendors, work_centers, customers, parts, routings,
@@ -42,9 +47,14 @@ import path from 'path';
 // E2E credentials once.
 dotenv.config({ path: path.resolve(__dirname, '.env.test.local') });
 
-/** Sentinel that tags every row seeded by this script. Bump version when
- *  the seed shape changes so old rows can be migrated cleanly. */
+/** Sentinel prefix that tags every row seeded by this script. Each row's
+ *  legacy_id is `${E2E_SEED_MARKER}:${stable_name}` so the per-company
+ *  legacy_id UNIQUE constraint is satisfied. Bump version when the seed
+ *  shape changes so old rows fall out of the prefix match cleanly. */
 export const E2E_SEED_MARKER = 'E2E_SEED_v1';
+
+/** Build the per-row legacy_id tag for a given stable name. */
+const seedTag = (name: string) => `${E2E_SEED_MARKER}:${name}`;
 
 /** Customer name we look up to detect prior seeds (customers has no
  *  legacy_id column on its schema, so we scope by name + company). */
@@ -141,7 +151,7 @@ async function ensureVendor(
     .insert({
       company_id: companyId,
       name: VENDOR_NAME,
-      legacy_id: E2E_SEED_MARKER,
+      legacy_id: seedTag(VENDOR_NAME),
     })
     .select('id')
     .single();
@@ -248,7 +258,7 @@ async function ensurePart(
       primary_unit: spec.primary_unit,
       quantity: spec.quantity,
       cost_per_unit: spec.cost_per_unit,
-      legacy_id: E2E_SEED_MARKER,
+      legacy_id: seedTag(spec.part_name),
     })
     .select('id')
     .single();

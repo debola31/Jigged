@@ -96,6 +96,35 @@ function getPageTitle(pathname: string): string {
     return 'Markup Rates';
   }
 
+  // Check for vendors routes
+  if (segments.includes('vendors')) {
+    if (segments.includes('new')) return 'New Vendor';
+    if (segments.includes('edit')) return 'Edit Vendor';
+    if (segments.includes('import')) return 'Import Vendors';
+    const vendorsIndex = segments.indexOf('vendors');
+    if (vendorsIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[vendorsIndex + 1])) {
+      return 'Vendor Details';
+    }
+    return 'Vendors';
+  }
+
+  // Check for work-centers routes
+  if (segments.includes('work-centers')) {
+    if (segments.includes('new')) return 'New Work Center';
+    if (segments.includes('edit')) return 'Edit Work Center';
+    if (segments.includes('import')) return 'Import Work Centers';
+    const wcIndex = segments.indexOf('work-centers');
+    if (wcIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[wcIndex + 1])) {
+      return 'Work Center Details';
+    }
+    return 'Work Centers';
+  }
+
+  // Check for team routes
+  if (segments.includes('team')) {
+    return 'Team';
+  }
+
   // Map other route segments to display titles
   const titleMap: Record<string, string> = {};
 

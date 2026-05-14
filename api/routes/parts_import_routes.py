@@ -494,8 +494,12 @@ async def validate_import(
 
         has_routing_cols = _has_routing_columns(request.mappings)
 
-        # First pass: track part_name occurrences for CSV duplicate detection
+        # First pass: track part_name and legacy_id occurrences for CSV duplicate
+        # detection. legacy_id duplicates matter because the execute path upserts
+        # via ON CONFLICT (company_id, legacy_id) — two rows in the same batch
+        # sharing a legacy_id cause a Postgres 21000 error otherwise.
         part_occurrences: dict[str, list[int]] = {}
+        legacy_id_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
             row_number = i + 1
             part_name = (
@@ -504,8 +508,16 @@ async def validate_import(
             if part_name:
                 key = part_name.lower()
                 part_occurrences.setdefault(key, []).append(row_number)
+            legacy_id_val = (
+                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
+            )
+            if legacy_id_val:
+                legacy_id_occurrences.setdefault(legacy_id_val, []).append(row_number)
 
         csv_duplicates = {k: v for k, v in part_occurrences.items() if len(v) > 1}
+        csv_legacy_id_duplicates = {
+            k: v for k, v in legacy_id_occurrences.items() if len(v) > 1
+        }
 
         # Second pass: per-row validation
         validation_errors: list[PartValidationError] = []
@@ -711,6 +723,32 @@ async def validate_import(
                 row.get(legacy_id_column, "").strip() if legacy_id_column else ""
             )
             has_legacy_id = bool(legacy_id_val)
+
+            # In-CSV legacy_id duplicate: the upsert can't resolve the same
+            # ON CONFLICT (company_id, legacy_id) key twice in one batch
+            # (Postgres 21000).
+            if has_legacy_id and legacy_id_val in csv_legacy_id_duplicates:
+                other_rows = [
+                    r
+                    for r in csv_legacy_id_duplicates[legacy_id_val]
+                    if r != row_number
+                ]
+                if other_rows:
+                    conflicts.append(
+                        PartConflictInfo(
+                            row_number=row_number,
+                            csv_part_name=part_name,
+                            csv_customer_code=None,
+                            conflict_type="csv_duplicate_legacy_id",
+                            existing_part_id="",
+                            existing_value=(
+                                f"Legacy ID '{legacy_id_val}' duplicated in CSV at rows "
+                                f"{', '.join(map(str, other_rows))}"
+                            ),
+                        )
+                    )
+                    conflict_rows.add(row_number)
+                    continue
 
             # Existing part_name collision (only conflicts when not upserting via legacy_id)
             if not has_legacy_id and key in existing_parts_by_name:

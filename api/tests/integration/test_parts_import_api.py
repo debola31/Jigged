@@ -406,6 +406,48 @@ class TestPartsValidateEndpoint:
         assert len(csv_duplicate_conflicts) >= 1
 
     @pytest.mark.unit
+    async def test_validate_detects_duplicate_legacy_id_in_csv(self, test_client):
+        """Detects duplicate legacy_id within CSV file.
+
+        Two rows sharing a legacy_id would cause Postgres 21000 ('ON CONFLICT
+        DO UPDATE command cannot affect row a second time') at execute time,
+        because the upsert path uses ON CONFLICT (company_id, legacy_id).
+        """
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Legacy Id": "legacy_id",
+            },
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "PART_A", "Legacy Id": "LEG-123"},
+                {"Part Name": "PART_B", "Legacy Id": "LEG-123"},
+            ],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["has_conflicts"] is True
+        legacy_id_dupe_conflicts = [
+            c
+            for c in data["conflicts"]
+            if c["conflict_type"] == "csv_duplicate_legacy_id"
+        ]
+        assert len(legacy_id_dupe_conflicts) == 2
+        assert all("LEG-123" in c["existing_value"] for c in legacy_id_dupe_conflicts)
+
+    @pytest.mark.unit
     async def test_validate_rejects_customer_match_mode(self, test_client):
         """RAISES 400 when customer_match_mode is present.
 

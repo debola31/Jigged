@@ -11,6 +11,10 @@ export interface CostWarning {
   message: string;
   node_id?: string;
   material_id?: string;
+  /** For `missing_material_cost`: the child part that needs a cost set. */
+  child_part_id?: string;
+  /** For `missing_material_cost`: drives the suggested fix in the warning copy. */
+  child_part_source?: 'made' | 'bought';
 }
 
 export interface LaborItem {
@@ -136,10 +140,19 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
     const itemName = child.part_name;
 
     if (child.cost_per_unit === null || child.cost_per_unit === undefined) {
+      // Markup rates don't populate cost_per_unit — users sometimes confuse
+      // the two. Steer them to the right place: a procurement tier for bought
+      // children, a recalc for made.
+      const fixHint =
+        child.source === 'bought'
+          ? 'add a procurement tier on the child part'
+          : 'open the child and let its cost recalc';
       warnings.push({
         type: 'missing_material_cost',
-        message: `${itemName}: no cost per unit set`,
+        message: `${itemName}: no cost per unit set — ${fixHint}`,
         material_id: line.id,
+        child_part_id: child.id,
+        child_part_source: child.source,
       });
       continue;
     }

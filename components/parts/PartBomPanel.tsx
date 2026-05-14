@@ -373,7 +373,13 @@ export default function PartBomPanel({
                 </Box>
                 <Box sx={{ minWidth: 100, textAlign: 'right' }}>
                   {contribution === null ? (
-                    <Tooltip title="Child part has no cost calculated yet — recalc the child to include it in the rollup.">
+                    <Tooltip
+                      title={
+                        child.source === 'bought'
+                          ? 'No cost yet — add a procurement tier on the child part. Markup rates set selling price, not cost.'
+                          : 'No cost yet — open the child part to let its cost recalc. Markup rates set selling price, not cost.'
+                      }
+                    >
                       <Box
                         sx={{
                           display: 'inline-flex',

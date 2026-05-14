@@ -462,6 +462,17 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           {breakdown.warnings.map((w, i) => (
             <Typography key={i} variant="body2">
               • {w.message}
+              {w.child_part_id && (
+                <>
+                  {' '}
+                  <Link
+                    href={`/dashboard/${companyId}/parts/${w.child_part_id}`}
+                    style={{ color: 'inherit', textDecoration: 'underline' }}
+                  >
+                    Open child →
+                  </Link>
+                </>
+              )}
             </Typography>
           ))}
         </Alert>

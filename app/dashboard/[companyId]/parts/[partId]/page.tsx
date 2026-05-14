@@ -194,18 +194,20 @@ export default function PartDetailPage() {
     if (recalcLoading) return; // simple debounce — drop overlapping requests
     setRecalcLoading(true);
     try {
-      await recalculatePartCost(partId);
-      // Silent refetch so the routing/BOM panels keep their inline editor
-      // state and the page doesn't spinner out under the user.
+      // The snapshot recalc can legitimately fail (missing labor rate on an
+      // op, BOM child without cost_per_unit, etc.). Swallow that failure on
+      // its own — we still want the live Pricing panel to reload its
+      // breakdown so its "Heads up" warnings reflect the latest saved state
+      // (e.g. a labor rate the user just entered). The previous structure
+      // skipped the refetch + refreshKey bump whenever recalc threw, leaving
+      // stale warnings on screen.
+      try {
+        await recalculatePartCost(partId);
+      } catch (err) {
+        console.warn('Auto-recalc snapshot failed (live panel will still refresh):', err);
+      }
       await fetchPart(true);
-      // Pricing tiers and cost breakdown derive from the part cost —
-      // refresh them too.
       setRefreshKey((k) => k + 1);
-    } catch (err) {
-      // Log only — surfacing this as UI proved more confusing than helpful.
-      // The Pricing card still shows correct live numbers; downstream
-      // ancestors will surface their own recalc errors at their own surfaces.
-      console.warn('Auto-recalc failed:', err);
     } finally {
       setRecalcLoading(false);
     }

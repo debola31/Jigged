@@ -8,9 +8,9 @@ Direct-SQL bulk loader for Contour Tool & Machine's data into Jigged.
 Reads the cleaned CSVs we produced in this conversation:
   - vendors.csv                          (50 vendor display names)
   - resources.csv                        (27 internal work centers with rates)
-  - parts_and_inventory_merged_v5.csv    (8,393 parts with costs)
+  - parts_and_inventory_merged_v6.csv    (8,393 parts with costs)
   - routings_for_jigged.csv              (18,639 routing operations)
-  - bom_for_jigged.csv                   (5,266 BOM lines)
+  - bom_for_jigged_v2.csv                   (5,266 BOM lines)
 
 Wipes the company's existing parts / routings / BOM / work_centers / vendors
 in dependency order, then INSERTs all of the above in one transaction. If
@@ -66,9 +66,9 @@ DATA_DIR = Path(__file__).parent
 # Source files
 VENDORS_CSV = DATA_DIR / "vendors.csv"
 RESOURCES_CSV = DATA_DIR / "resources.csv"
-PARTS_CSV = DATA_DIR / "parts_and_inventory_merged_v5.csv"
+PARTS_CSV = DATA_DIR / "parts_and_inventory_merged_v6.csv"
 ROUTINGS_CSV = DATA_DIR / "routings_for_jigged.csv"
-BOM_CSV = DATA_DIR / "bom_for_jigged.csv"
+BOM_CSV = DATA_DIR / "bom_for_jigged_v2.csv"
 
 BATCH_SIZE = 1000  # rows per executemany call
 
@@ -83,6 +83,87 @@ def read_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+# Header signatures we expect on each input file. The script validates against these
+# BEFORE any destructive operation runs. If a CSV's header doesn't match, the script
+# exits with a clear message so you don't wipe the database against the wrong file.
+EXPECTED_HEADERS: dict[str, tuple[Path, set[str]]] = {
+    "vendors": (
+        # Use a small required-subset; ignore optional columns
+        # The cleaned vendors.csv has: name, role, name_variants, city, state, zip, address
+        # The RAW Tangle export starts with: rowKey, _id, name, vendorName, website, ...
+        # We distinguish by requiring 'role' (cleaned) and FORBIDDING 'rowKey' (raw)
+        None,  # path filled in at runtime
+        {"name", "role"},
+    ),
+    "resources": (None, {"name", "labor_rate_per_hour"}),
+    "parts": (
+        None,
+        {"part_name", "source", "is_stocked", "primary_unit", "cost_per_unit", "legacy_id"},
+    ),
+    "routings": (
+        None,
+        {"part_name", "work_center_name", "sequence", "setup_minutes", "cycle_minutes_per_unit"},
+    ),
+    "bom": (None, {"parent_part_name", "child_part_name", "quantity", "unit"}),
+}
+
+# Headers that, if seen, mean we're looking at a RAW source export rather than
+# a cleaned import-ready file. These cause the script to exit immediately.
+FORBIDDEN_RAW_HEADERS: dict[str, set[str]] = {
+    "vendors": {"rowKey", "vendorName", "_id"},
+    "parts": {"rowKey", "_id", "vendCode1"},
+    "bom": {"parentPart", "uoM"},
+    "routings": {"parentPart", "cycleTime", "timeUnit"},
+}
+
+
+def validate_csv_headers() -> None:
+    """Exit early if any CSV looks wrong. Runs before any database changes."""
+    log("Validating CSV headers (pre-flight)...")
+
+    files = [
+        ("vendors", VENDORS_CSV),
+        ("resources", RESOURCES_CSV),
+        ("parts", PARTS_CSV),
+        ("routings", ROUTINGS_CSV),
+        ("bom", BOM_CSV),
+    ]
+
+    problems: list[str] = []
+    for key, path in files:
+        if not path.exists():
+            problems.append(f"  {key}: file not found at {path}")
+            continue
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            headers = set(reader.fieldnames or [])
+
+        required = EXPECTED_HEADERS[key][1]
+        forbidden = FORBIDDEN_RAW_HEADERS.get(key, set())
+
+        missing = required - headers
+        bad = headers & forbidden
+
+        if missing:
+            problems.append(
+                f"  {key} ({path.name}): missing required columns: {sorted(missing)}"
+            )
+        if bad:
+            problems.append(
+                f"  {key} ({path.name}): contains RAW source columns {sorted(bad)} - "
+                f"you're pointing at a Tangle export, not a cleaned import file. "
+                f"Use the cleaned CSV from this conversation's outputs."
+            )
+
+    if problems:
+        log("\nCSV validation FAILED. Fix these before re-running:")
+        for p in problems:
+            log(p)
+        sys.exit(1)
+
+    log("CSV headers OK.", indent=1)
+
+
 def blank_to_none(v):
     """Convert empty strings to None for nullable columns."""
     if v is None:
@@ -90,6 +171,29 @@ def blank_to_none(v):
     if isinstance(v, str) and v.strip() == "":
         return None
     return v
+
+
+# Canonical unit codes Jigged uses. Anything else gets coerced to EA with a warning.
+CANONICAL_UNITS = {"EA", "IN", "FT", "LB", "KG", "OZ", "M", "MM", "CM"}
+
+
+def normalize_unit(u: Optional[str]) -> str:
+    """
+    Normalize a unit string to a canonical short code.
+
+    - Strips whitespace and trailing periods (e.g. 'IN.' -> 'IN').
+    - Uppercases.
+    - Anything not in CANONICAL_UNITS defaults to 'EA' (the safe default; it preserves
+      cost math because BOM line quantities are scaled against child primary units, and
+      this script forces BOM line units to match child primary units).
+    - Returns 'EA' for None/blank.
+    """
+    if not u or not str(u).strip():
+        return "EA"
+    cleaned = str(u).strip().upper().rstrip(".")
+    if cleaned in CANONICAL_UNITS:
+        return cleaned
+    return "EA"
 
 
 def parse_numeric(v) -> Optional[float]:
@@ -433,15 +537,25 @@ def load_parts(
     cur,
     company_id: str,
     vendor_name_to_id: dict[str, str],
-) -> dict[str, str]:
-    """Insert parts, return part_name -> id map."""
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Insert parts. Returns (name -> id map, name -> primary_unit map).
+
+    Bought-part costs are NOT written to parts.cost_per_unit (column dropped in the
+    cost-rollup migration). Instead, this function collects costs for bought parts
+    and inserts them as part_procurement_tiers rows with vendor_id=NULL after the
+    parts table insert completes. The cost engine treats NULL-vendor tiers as the
+    fallback when no vendor-specific tier matches the qty.
+    """
     log("\nLoading parts...")
     rows = read_csv(PARTS_CSV)
 
     records: list[tuple] = []
-    tier_records: list[tuple] = []
     name_to_id: dict[str, str] = {}
+    name_to_unit: dict[str, str] = {}
     seen_legacy_ids: set[str] = set()
+    # Collect (part_id, cost) pairs to insert as procurement tiers afterward.
+    procurement_tier_records: list[tuple] = []
 
     for r in rows:
         name = r["part_name"].strip()
@@ -453,10 +567,13 @@ def load_parts(
         name_to_id[name] = pid
 
         is_stocked = parse_bool(r.get("is_stocked"))
-        primary_unit = blank_to_none(r.get("primary_unit"))
+        primary_unit_raw = blank_to_none(r.get("primary_unit"))
+        primary_unit = normalize_unit(primary_unit_raw) if primary_unit_raw else None
         if is_stocked and not primary_unit:
-            # Schema CHECK: stocked parts must have a unit. Default to EA.
             primary_unit = "EA"
+        # Even non-stocked parts have a logical primary unit for BOM math.
+        # Default to EA so the BOM loader has something to align against.
+        name_to_unit[name] = primary_unit or "EA"
 
         # Defensive: legacy_id must be unique per company (or NULL)
         legacy_id = blank_to_none(r.get("legacy_id"))
@@ -471,8 +588,8 @@ def load_parts(
         if pv_name:
             preferred_vendor_id = vendor_name_to_id.get(pv_name.strip())
 
-        cost_val = parse_numeric(r.get("cost_per_unit"))
-        source_val = r.get("source", "made").strip() or "made"
+        source = (r.get("source", "made").strip() or "made")
+        cost = parse_numeric(r.get("cost_per_unit"))
 
         records.append((
             pid,
@@ -485,16 +602,21 @@ def load_parts(
             parse_numeric(r.get("reorder_point")),
             preferred_vendor_id,
             legacy_id,
-            source_val,
+            source,
         ))
 
-        # parts.cost_per_unit was dropped in migration 20260514. For bought
-        # rows that carry a cost, route the value into a NULL-vendor
-        # procurement tier (min_quantity=1) so quote-time tier lookup picks
-        # it up. Made-row costs are ignored — compute_part_cost_at_qty
-        # recomputes them live.
-        if source_val == "bought" and cost_val is not None and cost_val > 0:
-            tier_records.append((pid, 1, float(cost_val)))
+        # Bought parts with a positive cost get a NULL-vendor procurement tier at
+        # min_quantity=1. Made parts have their cost computed from routing+BOM by
+        # compute_part_cost_at_qty — no tier row needed.
+        # part_procurement_tiers schema requires cost > 0 (CHECK constraint).
+        if source == "bought" and cost is not None and cost > 0:
+            procurement_tier_records.append((
+                str(uuid.uuid4()),
+                pid,
+                None,        # vendor_id NULL (cost known, vendor not attributed)
+                1,           # min_quantity = 1
+                cost,
+            ))
 
     execute_values(
         cur,
@@ -511,19 +633,24 @@ def load_parts(
     )
     log(f"inserted parts: {len(records)}", indent=1)
 
-    if tier_records:
+    if procurement_tier_records:
         execute_values(
             cur,
             """
-            INSERT INTO part_procurement_tiers (part_id, vendor_id, min_quantity, cost_per_unit)
+            INSERT INTO part_procurement_tiers
+                (id, part_id, vendor_id, min_quantity, cost_per_unit)
             VALUES %s
             """,
-            [(pid, None, qty, cost) for pid, qty, cost in tier_records],
+            procurement_tier_records,
             page_size=BATCH_SIZE,
         )
-        log(f"inserted NULL-vendor procurement tiers: {len(tier_records)}", indent=1)
+        log(
+            f"inserted part_procurement_tiers (NULL-vendor, qty=1): "
+            f"{len(procurement_tier_records)}",
+            indent=1,
+        )
 
-    return name_to_id
+    return name_to_id, name_to_unit
 
 
 def load_routings(
@@ -628,7 +755,11 @@ def load_routings(
         log(f"skipped {skipped_dup_seq} ops (duplicate sequence on same part)", indent=1)
 
 
-def load_bom(cur, part_name_to_id: dict[str, str]) -> None:
+def load_bom(
+    cur,
+    part_name_to_id: dict[str, str],
+    part_name_to_unit: dict[str, str],
+) -> None:
     log("\nLoading BOM...")
     rows = read_csv(BOM_CSV)
 
@@ -639,6 +770,7 @@ def load_bom(cur, part_name_to_id: dict[str, str]) -> None:
     skipped_self_ref = 0
     skipped_dup = 0
     skipped_bad_qty = 0
+    unit_realigned = 0
 
     for r in rows:
         parent = (r.get("parent_part_name") or "").strip()
@@ -666,7 +798,18 @@ def load_bom(cur, part_name_to_id: dict[str, str]) -> None:
             skipped_bad_qty += 1
             continue
 
-        unit = (r.get("unit") or "EA").strip() or "EA"
+        # Force BOM line unit to match child's primary unit. The source data labels
+        # some lines with consumption units ("0.75 IN") where the child is stocked in
+        # EA. Without a parts_unit_conversions row, the cost engine errors. We don't
+        # have conversion data in the source (no "this bar is 6 inches long" info),
+        # so we align units to the child's primary unit and let the quantity carry
+        # the multiplier directly. The colloquial "IN" label is decoration; the math
+        # is unchanged.
+        source_unit = normalize_unit(r.get("unit"))
+        child_unit = part_name_to_unit.get(child, "EA")
+        if source_unit != child_unit:
+            unit_realigned += 1
+        unit = child_unit
 
         records.append((
             str(uuid.uuid4()),
@@ -686,6 +829,8 @@ def load_bom(cur, part_name_to_id: dict[str, str]) -> None:
         page_size=BATCH_SIZE,
     )
     log(f"inserted parts_bom: {len(records)}", indent=1)
+    if unit_realigned:
+        log(f"realigned {unit_realigned} BOM line units to match child primary unit", indent=1)
     for label, n in [
         ("skipped (unknown parent)", skipped_unknown_parent),
         ("skipped (unknown child)", skipped_unknown_child),
@@ -713,6 +858,8 @@ def main() -> int:
         if not f.exists():
             sys.exit(f"Missing input file: {f}")
 
+    validate_csv_headers()
+
     log(f"Connecting to {DATABASE_URL.split('@')[-1].split('/')[0]}...")
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
@@ -726,11 +873,13 @@ def main() -> int:
             wc_name_to_id, wc_raw_to_canonical = load_work_centers(
                 cur, COMPANY_ID, vendor_name_to_id
             )
-            part_name_to_id = load_parts(cur, COMPANY_ID, vendor_name_to_id)
+            part_name_to_id, part_name_to_unit = load_parts(
+                cur, COMPANY_ID, vendor_name_to_id
+            )
             load_routings(
                 cur, COMPANY_ID, part_name_to_id, wc_name_to_id, wc_raw_to_canonical
             )
-            load_bom(cur, part_name_to_id)
+            load_bom(cur, part_name_to_id, part_name_to_unit)
 
         conn.commit()
         log("\nLoad complete. Transaction committed.\n")

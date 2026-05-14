@@ -263,9 +263,11 @@ export async function generateQuotePdf(
       textColor: [40, 40, 40],
     },
     headStyles: {
-      fillColor: [30, 30, 46],
-      textColor: [255, 255, 255],
+      fillColor: [240, 240, 240],
+      textColor: [30, 30, 30],
       fontStyle: 'bold',
+      lineColor: [200, 200, 200],
+      lineWidth: 0.5,
     },
     columnStyles: {
       0: { cellWidth: 90, fontStyle: 'bold' },

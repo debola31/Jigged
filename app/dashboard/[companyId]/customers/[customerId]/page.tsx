@@ -18,13 +18,15 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Chip from '@mui/material/Chip';
+import Stack from '@mui/material/Stack';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 
 import { getCustomerWithRelations, softDeleteCustomer } from '@/utils/customerAccess';
-import type { CustomerWithRelations } from '@/types/customer';
+import type { CustomerAddress, CustomerWithRelations } from '@/types/customer';
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -72,14 +74,13 @@ export default function CustomerDetailPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  const formatAddress = (): string => {
-    if (!customer) return '—';
+  const formatAddressLines = (a: CustomerAddress): string => {
     const parts = [
-      customer.address_line1,
-      customer.address_line2,
-      [customer.city, customer.state, customer.postal_code].filter(Boolean).join(', '),
-      customer.country !== 'USA' ? customer.country : null,
-    ].filter(Boolean);
+      a.address_line1,
+      a.address_line2,
+      [a.city, a.state, a.postal_code].filter(Boolean).join(', ').trim(),
+      a.country && a.country.toUpperCase() !== 'USA' ? a.country : null,
+    ].filter((p) => p && p.toString().trim().length > 0);
     return parts.length > 0 ? parts.join('\n') : '—';
   };
 
@@ -248,17 +249,48 @@ export default function CustomerDetailPage() {
           </Card>
         </Grid>
 
-        {/* Address Card */}
+        {/* Addresses Card */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Address
+                Addresses
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                {formatAddress()}
-              </Typography>
+              {customer.addresses.length === 0 ? (
+                <Typography variant="body1" color="text.secondary">
+                  No addresses on file
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  {customer.addresses.map((a) => (
+                    <Box key={a.id}>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center', mb: 0.5 }}>
+                        {a.label && (
+                          <Typography variant="body2" fontWeight={600} sx={{ mr: 1 }}>
+                            {a.label}
+                          </Typography>
+                        )}
+                        {a.is_default_billing && (
+                          <Chip size="small" color="primary" label="Default billing" />
+                        )}
+                        {a.is_default_shipping && (
+                          <Chip size="small" color="primary" label="Default shipping" />
+                        )}
+                        {!a.is_default_billing && a.is_billing && (
+                          <Chip size="small" variant="outlined" label="Billing" />
+                        )}
+                        {!a.is_default_shipping && a.is_shipping && (
+                          <Chip size="small" variant="outlined" label="Shipping" />
+                        )}
+                      </Box>
+                      <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                        {formatAddressLines(a)}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
             </CardContent>
           </Card>
         </Grid>

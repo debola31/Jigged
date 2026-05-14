@@ -65,19 +65,10 @@ describe('CustomerForm', () => {
         id: 'new-customer-uuid',
         company_id: 'test-company-id',
         name: 'New Test Company',
-        phone: null,
-        email: null,
         website: null,
         contact_name: null,
         contact_phone: null,
         contact_email: null,
-        address_line1: null,
-        address_line2: null,
-        city: null,
-        state: null,
-        postal_code: null,
-        country: 'USA',
-        notes: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -137,19 +128,26 @@ describe('CustomerForm', () => {
   describe('Edit mode', () => {
     const existingCustomerData: CustomerFormData = {
       name: 'Existing Company',
-      phone: '555-1234',
-      email: 'contact@existing.com',
       website: 'https://existing.com',
       contact_name: 'John Doe',
       contact_phone: '555-5678',
       contact_email: 'john@existing.com',
-      address_line1: '123 Main St',
-      address_line2: 'Suite 100',
-      city: 'Springfield',
-      state: 'IL',
-      postal_code: '62701',
-      country: 'USA',
-      notes: 'Important customer',
+      addresses: [
+        {
+          id: 'addr-1',
+          label: 'HQ',
+          address_line1: '123 Main St',
+          address_line2: 'Suite 100',
+          city: 'Springfield',
+          state: 'IL',
+          postal_code: '62701',
+          country: 'USA',
+          is_billing: true,
+          is_shipping: true,
+          is_default_billing: true,
+          is_default_shipping: true,
+        },
+      ],
     };
 
     it('pre-fills form with existing customer data', () => {
@@ -161,13 +159,14 @@ describe('CustomerForm', () => {
         />
       );
 
-      // Check that form fields are pre-filled
+      // Check that top-level fields are pre-filled
       expect(screen.getByLabelText(/company name/i)).toHaveValue('Existing Company');
       expect(screen.getByLabelText(/contact name/i)).toHaveValue('John Doe');
+      // Address fields live inside the Addresses card
       expect(screen.getByLabelText(/city/i)).toHaveValue('Springfield');
 
       // Delete button should be visible in edit mode
-      expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
     });
   });
 });

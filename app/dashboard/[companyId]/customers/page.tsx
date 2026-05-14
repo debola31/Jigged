@@ -41,7 +41,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllCustomers, softDeleteCustomer, bulkSoftDeleteCustomers } from '@/utils/customerAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import type { Customer } from '@/types/customer';
+import type { CustomerWithAddresses } from '@/types/customer';
+type Customer = CustomerWithAddresses;
 
 export default function CustomersPage() {
   const router = useRouter();
@@ -244,7 +245,14 @@ export default function CustomersPage() {
       sortable: false,
       valueGetter: (params) => {
         if (!params.data) return '—';
-        const parts = [params.data.city, params.data.state].filter(Boolean);
+        const addresses = params.data.addresses ?? [];
+        // Surface the default billing address's city/state in the list —
+        // matches what the quote PDF shows as BILL TO.
+        const primary =
+          addresses.find((a: { is_default_billing: boolean }) => a.is_default_billing) ??
+          addresses[0];
+        if (!primary) return '—';
+        const parts = [primary.city, primary.state].filter(Boolean);
         return parts.length > 0 ? parts.join(', ') : '—';
       },
     },

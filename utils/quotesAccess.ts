@@ -71,7 +71,14 @@ const QUOTE_LIST_SELECT = `
 
 const QUOTE_DETAIL_SELECT = `
   *,
-  customers!left(id, name, website, contact_name, contact_phone, contact_email, address_line1, address_line2, city, state, postal_code, country),
+  customers!left(
+    id, name, website, contact_name, contact_phone, contact_email,
+    addresses:customer_addresses(
+      id, label,
+      address_line1, address_line2, city, state, postal_code, country,
+      is_billing, is_shipping, is_default_billing, is_default_shipping
+    )
+  ),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
   jobs!left(id, job_number, status)
 `;

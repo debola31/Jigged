@@ -68,22 +68,70 @@ function buildShopHeaderLines(company: Company): string[] {
   return lines;
 }
 
-function buildBillToLines(customer: QuoteWithRelations['customers']): string[] {
+type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
+type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
+
+/**
+ * Pick the customer's default billing address (or any billing address).
+ * Returns null when the customer has no billing address on record.
+ */
+function pickBillingAddress(addresses: QuoteCustomerAddress[] | undefined):
+  QuoteCustomerAddress | null {
+  if (!addresses || addresses.length === 0) return null;
+  return (
+    addresses.find((a) => a.is_default_billing) ??
+    addresses.find((a) => a.is_billing) ??
+    null
+  );
+}
+
+/**
+ * Pick the customer's default shipping address. Falls back to any
+ * shipping address, and finally to the billing address — explicit
+ * product behavior ("ship to where we bill if no ship-to is set"),
+ * implemented in exactly one place.
+ */
+function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
+  QuoteCustomerAddress | null {
+  if (!addresses || addresses.length === 0) return null;
+  return (
+    addresses.find((a) => a.is_default_shipping) ??
+    addresses.find((a) => a.is_shipping) ??
+    pickBillingAddress(addresses)
+  );
+}
+
+/**
+ * Build the printed address lines for either a BILL TO or SHIP TO block.
+ * Includes the customer name + contact name as the first lines so each
+ * block reads as a self-contained "who/where" pair.
+ */
+function buildAddressLines(
+  customer: QuoteCustomer | null | undefined,
+  address: QuoteCustomerAddress | null,
+  { withContact = true }: { withContact?: boolean } = {},
+): string[] {
   if (!customer) return ['(No customer)'];
+
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
   if (customer.contact_name) lines.push(customer.contact_name);
 
-  const cityStateZip = [customer.city, customer.state].filter(Boolean).join(', ');
-  const cityStateZipFull = [cityStateZip, customer.postal_code].filter(Boolean).join(' ').trim();
+  if (address) {
+    const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
+    const cityStateZipFull = [cityStateZip, address.postal_code].filter(Boolean).join(' ').trim();
+    if (address.address_line1) lines.push(address.address_line1);
+    if (address.address_line2) lines.push(address.address_line2);
+    if (cityStateZipFull) lines.push(cityStateZipFull);
+    if (address.country && address.country.toUpperCase() !== 'USA') {
+      lines.push(address.country);
+    }
+  }
 
-  if (customer.address_line1) lines.push(customer.address_line1);
-  if (customer.address_line2) lines.push(customer.address_line2);
-  if (cityStateZipFull) lines.push(cityStateZipFull);
-  if (customer.country && customer.country.toUpperCase() !== 'USA') lines.push(customer.country);
-
-  if (customer.contact_phone) lines.push(customer.contact_phone);
-  if (customer.contact_email) lines.push(customer.contact_email);
+  if (withContact) {
+    if (customer.contact_phone) lines.push(customer.contact_phone);
+    if (customer.contact_email) lines.push(customer.contact_email);
+  }
   return lines;
 }
 
@@ -202,7 +250,22 @@ export async function generateQuotePdf(
 
   const createdByName = quote.created_by_member?.name ?? null;
   const createdByEmail = quote.created_by_member?.email ?? null;
-  const billToLines = buildBillToLines(quote.customers);
+
+  // Resolve the addresses for this customer. SHIP TO is only rendered as a
+  // separate block when it's a different address from BILL TO — when
+  // they're the same, customers expect a single "BILL TO" block, not a
+  // visually redundant pair.
+  const billingAddress = pickBillingAddress(quote.customers?.addresses);
+  const shippingAddress = pickShippingAddress(quote.customers?.addresses);
+  const shipDiffersFromBill =
+    shippingAddress !== null &&
+    billingAddress !== null &&
+    shippingAddress.id !== billingAddress.id;
+
+  const billToLines = buildAddressLines(quote.customers ?? null, billingAddress);
+  const shipToLines = shipDiffersFromBill
+    ? buildAddressLines(quote.customers ?? null, shippingAddress, { withContact: false })
+    : [];
 
   // Section labels
   doc.setFont('helvetica', 'bold');
@@ -231,10 +294,33 @@ export async function generateQuotePdf(
   // Right column: Bill To
   billToLines.forEach((line, i) => {
     doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(40);
     doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  const blockLines = Math.max(leftLineCount, billToLines.length);
+  let rightBlockHeight = 16 + billToLines.length * 13;
+
+  // Stacked SHIP TO underneath BILL TO when the addresses diverge.
+  if (shipToLines.length > 0) {
+    const shipLabelY = cursorY + rightBlockHeight + 6;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('SHIP TO', rightX, shipLabelY);
+
+    shipToLines.forEach((line, i) => {
+      doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(40);
+      doc.text(line, rightX, shipLabelY + 16 + i * 13);
+    });
+
+    rightBlockHeight = rightBlockHeight + 6 + 16 + shipToLines.length * 13;
+  }
+
+  const rightLineEquivalent = rightBlockHeight / 13;
+  const blockLines = Math.max(leftLineCount, rightLineEquivalent);
   cursorY = cursorY + 16 + blockLines * 13 + 16;
 
   // ---------- Line items ----------

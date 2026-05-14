@@ -56,8 +56,8 @@ export interface QuoteLineItem {
  * Quote with joined relation data
  */
 export interface QuoteWithRelations extends Quote {
-  // Joined customer data — full fields so the printable quote can render
-  // the Bill-To block without a second query.
+  // Joined customer data + their addresses, so the printable quote can
+  // render BILL TO and SHIP TO blocks without a second query.
   customers?: {
     id: string;
     name: string;
@@ -65,12 +65,20 @@ export interface QuoteWithRelations extends Quote {
     contact_name?: string | null;
     contact_phone?: string | null;
     contact_email?: string | null;
-    address_line1?: string | null;
-    address_line2?: string | null;
-    city?: string | null;
-    state?: string | null;
-    postal_code?: string | null;
-    country?: string | null;
+    addresses?: Array<{
+      id: string;
+      label: string | null;
+      address_line1: string | null;
+      address_line2: string | null;
+      city: string | null;
+      state: string | null;
+      postal_code: string | null;
+      country: string | null;
+      is_billing: boolean;
+      is_shipping: boolean;
+      is_default_billing: boolean;
+      is_default_shipping: boolean;
+    }>;
   } | null;
   // Hydrated line items (ordered by sequence).
   line_items?: QuoteLineItem[];

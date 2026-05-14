@@ -477,8 +477,6 @@ async def execute_import(
                             **address_data,
                             "is_billing": True,
                             "is_shipping": True,
-                            "is_default_billing": True,
-                            "is_default_shipping": True,
                         })
                     if address_rows_to_insert:
                         supabase.table("customer_addresses").insert(

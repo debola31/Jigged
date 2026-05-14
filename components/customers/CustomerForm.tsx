@@ -18,7 +18,6 @@ import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import Radio from '@mui/material/Radio';
 import IconButton from '@mui/material/IconButton';
 import Divider from '@mui/material/Divider';
 import Tooltip from '@mui/material/Tooltip';
@@ -85,13 +84,11 @@ export default function CustomerForm({
   /**
    * Patch a single field on a single address row.
    *
-   * Special-case behavior:
-   *   - Toggling is_default_billing on an address clears it on all other
-   *     addresses (radio semantics across the list).
-   *   - Same for is_default_shipping.
-   *   - Turning off "Billing" automatically turns off "Default billing"
-   *     for that row, since the constraint says a default-billing address
-   *     must be a billing address.
+   * Special-case behavior — "Used for: Billing" and "Used for: Shipping"
+   * are single-select across the address list. Tagging this row as
+   * billing/shipping clears the same flag on every other row, so the DB
+   * invariant ("at most one billing, at most one shipping per customer")
+   * is maintained by the UI before we ever try to insert.
    */
   const updateAddress = (
     index: number,
@@ -100,17 +97,12 @@ export default function CustomerForm({
     setFormData((prev) => {
       const next = prev.addresses.map((addr, i) => {
         if (i !== index) {
-          // Other rows: clear their default flag if THIS row is becoming the default.
           const updates: Partial<CustomerAddressFormData> = {};
-          if (patch.is_default_billing === true) updates.is_default_billing = false;
-          if (patch.is_default_shipping === true) updates.is_default_shipping = false;
+          if (patch.is_billing === true) updates.is_billing = false;
+          if (patch.is_shipping === true) updates.is_shipping = false;
           return Object.keys(updates).length > 0 ? { ...addr, ...updates } : addr;
         }
-        const merged = { ...addr, ...patch };
-        // If we just turned off the role, also clear its default flag.
-        if (patch.is_billing === false) merged.is_default_billing = false;
-        if (patch.is_shipping === false) merged.is_default_shipping = false;
-        return merged;
+        return { ...addr, ...patch };
       });
       return { ...prev, addresses: next };
     });
@@ -124,12 +116,14 @@ export default function CustomerForm({
       ...prev,
       addresses: [
         ...prev.addresses,
-        // New row: tagged for both roles, but not default for either —
-        // first-default-wins keeps the existing primary intact.
+        // New rows start un-tagged so they don't steal the billing/shipping
+        // role from the existing primary address. The user opts in by
+        // checking "Used for: Billing" or "Used for: Shipping" on the new
+        // row, which automatically clears the flag on the previous one.
         {
           ...EMPTY_CUSTOMER_ADDRESS,
-          is_default_billing: false,
-          is_default_shipping: false,
+          is_billing: false,
+          is_shipping: false,
         },
       ],
     }));
@@ -139,16 +133,14 @@ export default function CustomerForm({
     setFormData((prev) => {
       const removed = prev.addresses[index];
       const remaining = prev.addresses.filter((_, i) => i !== index);
-      // If we removed the default-billing/shipping row, promote the first
-      // eligible remaining row so the customer is never left without a
-      // default billing address (which would break quote generation).
-      if (removed?.is_default_billing) {
-        const promote = remaining.find((a) => a.is_billing);
-        if (promote) promote.is_default_billing = true;
+      // If we removed the billing or shipping row, promote the first
+      // remaining address into that role so the customer is never left
+      // without a billing address (which would break quote generation).
+      if (removed?.is_billing && remaining.length > 0 && !remaining.some((a) => a.is_billing)) {
+        remaining[0].is_billing = true;
       }
-      if (removed?.is_default_shipping) {
-        const promote = remaining.find((a) => a.is_shipping);
-        if (promote) promote.is_default_shipping = true;
+      if (removed?.is_shipping && remaining.length > 0 && !remaining.some((a) => a.is_shipping)) {
+        remaining[0].is_shipping = true;
       }
       return { ...prev, addresses: remaining };
     });
@@ -165,9 +157,9 @@ export default function CustomerForm({
       errors.contact_email = 'Invalid email format';
     }
 
-    // Address-set validation. Customers need at least one address tagged
-    // as billing AND marked as the default billing address, or the quote
-    // PDF will render a blank BILL TO block.
+    // Address-set validation. A customer needs at least one address tagged
+    // as billing — quote PDFs render BILL TO from it. Shipping is optional;
+    // pickShippingAddress() falls back to billing when unset.
     if (formData.addresses.length === 0) {
       errors.addresses = 'At least one address is required';
     } else {
@@ -176,8 +168,8 @@ export default function CustomerForm({
       );
       if (anyRoleMissing) {
         errors.addresses = 'Every address must be used for billing, shipping, or both';
-      } else if (!formData.addresses.some((a) => a.is_default_billing)) {
-        errors.addresses = 'Pick a default billing address';
+      } else if (!formData.addresses.some((a) => a.is_billing)) {
+        errors.addresses = 'Pick a billing address';
       }
     }
 
@@ -502,32 +494,6 @@ export default function CustomerForm({
                   label="Shipping"
                 />
 
-                <Box sx={{ flex: 1 }} />
-
-                <FormControlLabel
-                  control={
-                    <Radio
-                      checked={addr.is_default_billing}
-                      onChange={() =>
-                        updateAddress(idx, { is_default_billing: true })
-                      }
-                      disabled={loading || !addr.is_billing}
-                    />
-                  }
-                  label="Default billing"
-                />
-                <FormControlLabel
-                  control={
-                    <Radio
-                      checked={addr.is_default_shipping}
-                      onChange={() =>
-                        updateAddress(idx, { is_default_shipping: true })
-                      }
-                      disabled={loading || !addr.is_shipping}
-                    />
-                  }
-                  label="Default shipping"
-                />
               </Box>
             </Box>
           ))}

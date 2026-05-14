@@ -218,8 +218,6 @@ function addressRowFor(
     country: addr.country.trim() || 'USA',
     is_billing: addr.is_billing,
     is_shipping: addr.is_shipping,
-    is_default_billing: addr.is_default_billing,
-    is_default_shipping: addr.is_default_shipping,
   };
 }
 
@@ -478,30 +476,25 @@ export async function bulkImportCustomers(
 }
 
 /**
- * Return the customer's default billing address, or any billing address
- * as fallback. Returns null when the customer has no billing address.
+ * Return the address tagged is_billing for the customer (at most one
+ * exists per the unique partial index). Returns null when none is set.
  */
-export function pickDefaultBilling(
+export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
-  return (
-    customer.addresses.find((a) => a.is_default_billing) ??
-    customer.addresses.find((a) => a.is_billing) ??
-    null
-  );
+  return customer.addresses.find((a) => a.is_billing) ?? null;
 }
 
 /**
- * Return the customer's default shipping address. Falls back to any
- * shipping address, and finally to the billing address — documented
- * product behavior: "if no ship-to is set, ship to where we bill".
+ * Return the address tagged is_shipping. Falls back to the billing
+ * address — documented product behavior: "if no ship-to is set, ship to
+ * where we bill". Implemented in exactly one place.
  */
-export function pickDefaultShipping(
+export function pickShippingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
   return (
-    customer.addresses.find((a) => a.is_default_shipping) ??
     customer.addresses.find((a) => a.is_shipping) ??
-    pickDefaultBilling(customer)
+    pickBillingAddress(customer)
   );
 }

@@ -87,8 +87,6 @@ class CustomerFactory:
             "country": self.country,
             "is_billing": True,
             "is_shipping": True,
-            "is_default_billing": True,
-            "is_default_shipping": True,
         }
 
     def to_form_data(self) -> dict:

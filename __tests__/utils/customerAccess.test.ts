@@ -213,8 +213,6 @@ describe('customerAccess utilities', () => {
           country: 'USA',
           is_billing: true,
           is_shipping: true,
-          is_default_billing: true,
-          is_default_shipping: true,
         },
       ],
     };
@@ -274,8 +272,6 @@ describe('customerAccess utilities', () => {
           country: 'USA',
           is_billing: true,
           is_shipping: true,
-          is_default_billing: true,
-          is_default_shipping: true,
         },
       ],
     };

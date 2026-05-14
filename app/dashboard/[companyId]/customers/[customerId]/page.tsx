@@ -271,17 +271,11 @@ export default function CustomerDetailPage() {
                             {a.label}
                           </Typography>
                         )}
-                        {a.is_default_billing && (
-                          <Chip size="small" color="primary" label="Default billing" />
+                        {a.is_billing && (
+                          <Chip size="small" color="primary" label="Billing" />
                         )}
-                        {a.is_default_shipping && (
-                          <Chip size="small" color="primary" label="Default shipping" />
-                        )}
-                        {!a.is_default_billing && a.is_billing && (
-                          <Chip size="small" variant="outlined" label="Billing" />
-                        )}
-                        {!a.is_default_shipping && a.is_shipping && (
-                          <Chip size="small" variant="outlined" label="Shipping" />
+                        {a.is_shipping && (
+                          <Chip size="small" color="primary" label="Shipping" />
                         )}
                       </Box>
                       <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>

@@ -4,8 +4,8 @@
 -- Why: customers (especially the larger ones that buy from a shop) often
 -- ship to a different facility than the one that's billed. The flat
 -- address_line1/.../country columns on customers cannot model that. The
--- new table lets a customer carry many addresses, each tagged as billing,
--- shipping, or both, with one default per role.
+-- new table lets a customer carry many addresses; exactly one is tagged
+-- as billing and exactly one as shipping (commonly the same address).
 --
 -- Clean-break per CLAUDE.md "no silent runtime fallbacks for data-at-rest
 -- issues": this migration creates the new table, backfills every existing
@@ -15,12 +15,12 @@
 --
 -- Backfill rule: for each customer with any non-null address field today,
 -- insert one customer_addresses row labelled 'Primary', tagged both
--- billing+shipping, marked default for both. Customers with no address on
--- record produce no rows — their quote PDFs already render blank BILL TO
--- blocks today, and this migration preserves that.
+-- billing+shipping. Customers with no address on record produce no rows —
+-- their quote PDFs already render blank BILL TO blocks today, and this
+-- migration preserves that.
 --
 -- Read path post-migration: utils/customerAccess.ts exposes
--- pickDefaultBilling()/pickDefaultShipping() helpers. The "ship-to falls
+-- pickBillingAddress()/pickShippingAddress() helpers. The "ship-to falls
 -- back to bill-to when no shipping address exists" rule is documented
 -- product behavior implemented in exactly one place — not a silent
 -- compatibility layer.
@@ -39,26 +39,21 @@ CREATE TABLE public.customer_addresses (
     country text DEFAULT 'USA',
     is_billing boolean NOT NULL DEFAULT false,
     is_shipping boolean NOT NULL DEFAULT false,
-    is_default_billing boolean NOT NULL DEFAULT false,
-    is_default_shipping boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
 
-    -- An address that's marked default-for-a-role must actually have that role.
-    CONSTRAINT customer_addresses_default_billing_implies_billing
-        CHECK (NOT is_default_billing OR is_billing),
-    CONSTRAINT customer_addresses_default_shipping_implies_shipping
-        CHECK (NOT is_default_shipping OR is_shipping),
     -- An address must serve at least one role.
     CONSTRAINT customer_addresses_has_a_role
         CHECK (is_billing OR is_shipping)
 );
 
--- At most one default-billing and one default-shipping per customer.
-CREATE UNIQUE INDEX idx_customer_addresses_one_default_billing
-    ON public.customer_addresses(customer_id) WHERE is_default_billing;
-CREATE UNIQUE INDEX idx_customer_addresses_one_default_shipping
-    ON public.customer_addresses(customer_id) WHERE is_default_shipping;
+-- At most one billing address and one shipping address per customer.
+-- The same row can satisfy both (the common case) — the unique indexes
+-- are independent.
+CREATE UNIQUE INDEX idx_customer_addresses_one_billing
+    ON public.customer_addresses(customer_id) WHERE is_billing;
+CREATE UNIQUE INDEX idx_customer_addresses_one_shipping
+    ON public.customer_addresses(customer_id) WHERE is_shipping;
 
 CREATE INDEX idx_customer_addresses_customer
     ON public.customer_addresses(customer_id);
@@ -93,12 +88,12 @@ CREATE POLICY "Company members manage their customer addresses"
 INSERT INTO public.customer_addresses (
     customer_id, label,
     address_line1, address_line2, city, state, postal_code, country,
-    is_billing, is_shipping, is_default_billing, is_default_shipping
+    is_billing, is_shipping
 )
 SELECT
     id, 'Primary',
     address_line1, address_line2, city, state, postal_code, country,
-    true, true, true, true
+    true, true
 FROM public.customers
 WHERE COALESCE(
     address_line1, address_line2, city, state, postal_code

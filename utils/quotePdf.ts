@@ -72,30 +72,25 @@ type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
 type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
 
 /**
- * Pick the customer's default billing address (or any billing address).
- * Returns null when the customer has no billing address on record.
+ * Pick the customer's billing address (at most one exists per the
+ * unique partial index on customer_addresses). Returns null when none
+ * is set.
  */
 function pickBillingAddress(addresses: QuoteCustomerAddress[] | undefined):
   QuoteCustomerAddress | null {
   if (!addresses || addresses.length === 0) return null;
-  return (
-    addresses.find((a) => a.is_default_billing) ??
-    addresses.find((a) => a.is_billing) ??
-    null
-  );
+  return addresses.find((a) => a.is_billing) ?? null;
 }
 
 /**
- * Pick the customer's default shipping address. Falls back to any
- * shipping address, and finally to the billing address — explicit
- * product behavior ("ship to where we bill if no ship-to is set"),
- * implemented in exactly one place.
+ * Pick the customer's shipping address. Falls back to the billing
+ * address — explicit product behavior ("ship to where we bill if no
+ * ship-to is set"), implemented in exactly one place.
  */
 function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
   QuoteCustomerAddress | null {
   if (!addresses || addresses.length === 0) return null;
   return (
-    addresses.find((a) => a.is_default_shipping) ??
     addresses.find((a) => a.is_shipping) ??
     pickBillingAddress(addresses)
   );

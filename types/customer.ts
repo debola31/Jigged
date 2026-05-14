@@ -12,8 +12,9 @@ export interface Customer {
 
 /**
  * A single address for a customer. A customer can have multiple addresses;
- * each one is tagged as billing, shipping, or both, with one default per
- * role. See migration 20260515_customer_addresses.sql.
+ * exactly one is tagged billing and exactly one is tagged shipping (the
+ * same row can be both, which is the common case). See migration
+ * 20260515_customer_addresses.sql.
  */
 export interface CustomerAddress {
   id: string;
@@ -27,8 +28,6 @@ export interface CustomerAddress {
   country: string | null;
   is_billing: boolean;
   is_shipping: boolean;
-  is_default_billing: boolean;
-  is_default_shipping: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -50,8 +49,6 @@ export interface CustomerAddressFormData {
   country: string;
   is_billing: boolean;
   is_shipping: boolean;
-  is_default_billing: boolean;
-  is_default_shipping: boolean;
 }
 
 export interface CustomerFormData {
@@ -91,8 +88,6 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
   country: 'USA',
   is_billing: true,
   is_shipping: true,
-  is_default_billing: true,
-  is_default_shipping: true,
 };
 
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
@@ -125,8 +120,6 @@ export function customerToFormData(
       country: a.country ?? 'USA',
       is_billing: a.is_billing,
       is_shipping: a.is_shipping,
-      is_default_billing: a.is_default_billing,
-      is_default_shipping: a.is_default_shipping,
     })),
   };
 }

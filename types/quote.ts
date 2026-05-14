@@ -76,8 +76,6 @@ export interface QuoteWithRelations extends Quote {
       country: string | null;
       is_billing: boolean;
       is_shipping: boolean;
-      is_default_billing: boolean;
-      is_default_shipping: boolean;
     }>;
   } | null;
   // Hydrated line items (ordered by sequence).

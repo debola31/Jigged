@@ -144,8 +144,6 @@ describe('CustomerForm', () => {
           country: 'USA',
           is_billing: true,
           is_shipping: true,
-          is_default_billing: true,
-          is_default_shipping: true,
         },
       ],
     };

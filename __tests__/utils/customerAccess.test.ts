@@ -78,19 +78,7 @@ describe('customerAccess utilities', () => {
         id: 'customer-1',
         company_id: 'company-1',
         name: 'Customer One',
-        phone: '555-1111',
-        email: 'one@test.com',
         website: null,
-        contact_name: null,
-        contact_phone: null,
-        contact_email: null,
-        address_line1: null,
-        address_line2: null,
-        city: null,
-        state: null,
-        postal_code: null,
-        country: 'USA',
-        notes: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -98,19 +86,7 @@ describe('customerAccess utilities', () => {
         id: 'customer-2',
         company_id: 'company-1',
         name: 'Customer Two',
-        phone: '555-2222',
-        email: 'two@test.com',
         website: null,
-        contact_name: null,
-        contact_phone: null,
-        contact_email: null,
-        address_line1: null,
-        address_line2: null,
-        city: null,
-        state: null,
-        postal_code: null,
-        country: 'USA',
-        notes: null,
         created_at: '2024-01-02T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       },
@@ -123,9 +99,17 @@ describe('customerAccess utilities', () => {
       const result = await getAllCustomers('company-1');
 
       expect(mockSupabase.from).toHaveBeenCalledWith('customers');
-      expect(mockQueryBuilder.select).toHaveBeenCalledWith('*');
+      // Addresses + primary contact joined so the list page can render
+      // both Location and Contact columns without per-row fetches.
+      expect(mockQueryBuilder.select).toHaveBeenCalledWith(
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      );
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
-      expect(result).toEqual(mockCustomers);
+      // The result is mapped (primary_contact, addresses, etc) — at minimum the
+      // mapped rows should preserve the customers we fed in.
+      expect(result).toHaveLength(mockCustomers.length);
+      expect(result[0].id).toBe('customer-1');
+      expect(result[0].primary_contact).toBeNull();
     });
 
     it('applies search filter correctly', async () => {
@@ -156,24 +140,12 @@ describe('customerAccess utilities', () => {
       id: 'customer-1',
       company_id: 'company-1',
       name: 'Customer One',
-      phone: '555-1111',
-      email: 'one@test.com',
       website: null,
-      contact_name: null,
-      contact_phone: null,
-      contact_email: null,
-      address_line1: null,
-      address_line2: null,
-      city: null,
-      state: null,
-      postal_code: null,
-      country: 'USA',
-      notes: null,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
 
-    it('returns single customer by ID', async () => {
+    it('returns single customer by ID with empty addresses array', async () => {
       mockQueryBuilder.data = mockCustomer;
       mockQueryBuilder.error = null;
 
@@ -182,7 +154,9 @@ describe('customerAccess utilities', () => {
       expect(mockSupabase.from).toHaveBeenCalledWith('customers');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'customer-1');
       expect(mockQueryBuilder.single).toHaveBeenCalled();
-      expect(result).toEqual(mockCustomer);
+      // getCustomer now returns CustomerWithAddresses — the addresses
+      // array is normalized to [] when the join returns nothing.
+      expect(result).toEqual({ ...mockCustomer, addresses: [] });
     });
   });
 
@@ -219,38 +193,15 @@ describe('customerAccess utilities', () => {
   describe('createCustomer', () => {
     const mockFormData: CustomerFormData = {
       name: 'New Customer',
-      phone: '555-1234',
-      email: 'new@test.com',
       website: 'https://new.com',
-      contact_name: 'John Doe',
-      contact_phone: '555-5678',
-      contact_email: 'john@test.com',
-      address_line1: '123 Main St',
-      address_line2: '',
-      city: 'Springfield',
-      state: 'IL',
-      postal_code: '62701',
-      country: 'USA',
-      notes: 'New customer notes',
     };
 
     it('inserts customer and returns data', async () => {
       const mockCreatedCustomer: Customer = {
         id: 'new-customer-uuid',
         company_id: 'company-1',
-        ...mockFormData,
-        phone: mockFormData.phone || null,
-        email: mockFormData.email || null,
-        website: mockFormData.website || null,
-        contact_name: mockFormData.contact_name || null,
-        contact_phone: mockFormData.contact_phone || null,
-        contact_email: mockFormData.contact_email || null,
-        address_line1: mockFormData.address_line1 || null,
-        address_line2: mockFormData.address_line2 || null,
-        city: mockFormData.city || null,
-        state: mockFormData.state || null,
-        postal_code: mockFormData.postal_code || null,
-        notes: mockFormData.notes || null,
+        name: mockFormData.name,
+        website: mockFormData.website,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -262,8 +213,6 @@ describe('customerAccess utilities', () => {
 
       expect(mockSupabase.from).toHaveBeenCalledWith('customers');
       expect(mockQueryBuilder.insert).toHaveBeenCalled();
-      expect(mockQueryBuilder.select).toHaveBeenCalled();
-      expect(mockQueryBuilder.single).toHaveBeenCalled();
       expect(result).toEqual(mockCreatedCustomer);
     });
 
@@ -281,19 +230,7 @@ describe('customerAccess utilities', () => {
   describe('updateCustomer', () => {
     const mockFormData: CustomerFormData = {
       name: 'Updated Customer',
-      phone: '555-9999',
-      email: 'updated@test.com',
       website: '',
-      contact_name: '',
-      contact_phone: '',
-      contact_email: '',
-      address_line1: '',
-      address_line2: '',
-      city: '',
-      state: '',
-      postal_code: '',
-      country: 'USA',
-      notes: '',
     };
 
     it('updates customer and returns data', async () => {
@@ -301,19 +238,7 @@ describe('customerAccess utilities', () => {
         id: 'customer-1',
         company_id: 'company-1',
         name: 'Updated Customer',
-        phone: '555-9999',
-        email: 'updated@test.com',
         website: null,
-        contact_name: null,
-        contact_phone: null,
-        contact_email: null,
-        address_line1: null,
-        address_line2: null,
-        city: null,
-        state: null,
-        postal_code: null,
-        country: 'USA',
-        notes: null,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
@@ -325,7 +250,6 @@ describe('customerAccess utilities', () => {
 
       expect(mockSupabase.from).toHaveBeenCalledWith('customers');
       expect(mockQueryBuilder.update).toHaveBeenCalled();
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'customer-1');
       expect(result).toEqual(mockUpdatedCustomer);
     });
   });

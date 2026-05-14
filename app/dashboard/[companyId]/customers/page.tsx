@@ -41,7 +41,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllCustomers, softDeleteCustomer, bulkSoftDeleteCustomers } from '@/utils/customerAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import type { Customer } from '@/types/customer';
+import type { CustomerWithRelations } from '@/types/customer';
+type Customer = CustomerWithRelations;
 
 export default function CustomersPage() {
   const router = useRouter();
@@ -218,23 +219,23 @@ export default function CustomersPage() {
       pinned: 'left' as const,
     },
     {
-      field: 'contact_name',
+      colId: 'primary_contact_name',
       headerName: 'Contact',
       width: 250,
-      valueFormatter: (params) => params.value ?? '—',
+      valueGetter: (params) => params.data?.primary_contact?.name ?? '—',
     },
     {
-      field: 'contact_email',
+      colId: 'primary_contact_email',
       headerName: 'Email',
       flex: 2,
       minWidth: 200,
-      valueFormatter: (params) => params.value ?? '—',
+      valueGetter: (params) => params.data?.primary_contact?.email ?? '—',
     },
     {
-      field: 'contact_phone',
+      colId: 'primary_contact_phone',
       headerName: 'Phone',
       width: 180,
-      valueFormatter: (params) => params.value ?? '—',
+      valueGetter: (params) => params.data?.primary_contact?.phone ?? '—',
     },
     {
       colId: 'location',
@@ -244,7 +245,14 @@ export default function CustomersPage() {
       sortable: false,
       valueGetter: (params) => {
         if (!params.data) return '—';
-        const parts = [params.data.city, params.data.state].filter(Boolean);
+        const addresses = params.data.addresses ?? [];
+        // Surface the billing address's city/state in the list — matches
+        // what the quote PDF shows as BILL TO.
+        const primary =
+          addresses.find((a: { is_billing: boolean }) => a.is_billing) ??
+          addresses[0];
+        if (!primary) return '—';
+        const parts = [primary.city, primary.state].filter(Boolean);
         return parts.length > 0 ? parts.join(', ') : '—';
       },
     },

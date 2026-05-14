@@ -77,16 +77,29 @@ const baseQuote: QuoteWithRelations = {
   customers: {
     id: 'customer-1',
     name: 'Acme Machining',
-    contact_name: 'Jane Smith',
-    contact_email: 'jane@acme.example',
-    contact_phone: '555-0123',
-    address_line1: '500 Industrial Ave',
-    address_line2: null,
-    city: 'Detroit',
-    state: 'MI',
-    postal_code: '48201',
-    country: 'USA',
     website: null,
+    customer_contacts: [
+      {
+        id: 'contact-1',
+        name: 'Jane Smith',
+        email: 'jane@acme.example',
+        phone: '555-0123',
+        is_primary: true,
+      },
+    ],
+    addresses: [
+      {
+        id: 'addr-1',
+        address_line1: '500 Industrial Ave',
+        address_line2: null,
+        city: 'Detroit',
+        state: 'MI',
+        postal_code: '48201',
+        country: 'USA',
+        is_billing: true,
+        is_shipping: true,
+      },
+    ],
   },
   line_items: [
     {

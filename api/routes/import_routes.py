@@ -404,45 +404,107 @@ async def execute_import(
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
 
-        # Prepare rows for insertion
-        rows_to_insert = []
+        # Contact + address fields live on customer_contacts / customer_addresses
+        # respectively. Split each CSV row into a customers payload + (optional)
+        # contact row + (optional) address row so we can insert the parent first,
+        # then the children with the returned id.
+        contact_field_keys = {"contact_name", "contact_email", "contact_phone"}
+        address_field_keys = {
+            "address_line1",
+            "address_line2",
+            "city",
+            "state",
+            "postal_code",
+            "country",
+        }
+
+        prepared = []  # list of (customer_row, contact_row_or_None, address_row_or_None)
         errors = []
         skipped = 0
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
 
-            # Skip rows that failed validation or have conflicts
             if row_number in skip_row_numbers:
                 skipped += 1
                 continue
 
-            # Build customer record
-            customer_data = {
-                "company_id": request.company_id,
-            }
+            customer_data = {"company_id": request.company_id}
+            contact_data: dict = {}
+            address_data: dict = {}
 
             for db_field in CUSTOMER_SCHEMA.keys():
                 csv_column = reverse_mappings.get(db_field)
                 if csv_column and csv_column in row:
                     value = row[csv_column].strip()
-                    # Filter out empty values and literal "undefined" string from frontend
                     if value and value.lower() != "undefined":
-                        customer_data[db_field] = value
+                        if db_field in address_field_keys:
+                            address_data[db_field] = value
+                        elif db_field in contact_field_keys:
+                            # contact_name → name, contact_email → email, etc.
+                            contact_data[db_field.replace("contact_", "")] = value
+                        else:
+                            customer_data[db_field] = value
 
-            # Set default country if not provided
-            if "country" not in customer_data or not customer_data.get("country"):
-                customer_data["country"] = "USA"
+            if address_data and "country" not in address_data:
+                address_data["country"] = "USA"
 
-            # Trust validation already checked required fields
-            rows_to_insert.append(customer_data)
+            # Only create a contact row when there's a real name — never
+            # silently invent a contact (mirrors the vendor migration's
+            # data-quality rule).
+            contact_row = None
+            if contact_data.get("name"):
+                contact_row = {
+                    "name": contact_data["name"],
+                    "role": "buyer",
+                    "email": contact_data.get("email"),
+                    "phone": contact_data.get("phone"),
+                    "is_primary": True,
+                }
 
-        # Bulk insert
+            prepared.append(
+                (
+                    customer_data,
+                    contact_row,
+                    address_data if address_data else None,
+                )
+            )
+
+        # Bulk insert: customers first, then a per-customer contact row and
+        # address row for each row that had matching content.
         imported_count = 0
-        if rows_to_insert:
+        if prepared:
             try:
-                response = supabase.table("customers").insert(rows_to_insert).execute()
+                customers_payload = [c for c, _, _ in prepared]
+                response = supabase.table("customers").insert(customers_payload).execute()
                 imported_count = len(response.data) if response.data else 0
+
+                if response.data:
+                    contact_rows_to_insert = []
+                    address_rows_to_insert = []
+                    for inserted_customer, (_, contact_row, address_data) in zip(
+                        response.data, prepared
+                    ):
+                        if contact_row:
+                            contact_rows_to_insert.append({
+                                "customer_id": inserted_customer["id"],
+                                **contact_row,
+                            })
+                        if address_data:
+                            address_rows_to_insert.append({
+                                "customer_id": inserted_customer["id"],
+                                **address_data,
+                                "is_billing": True,
+                                "is_shipping": True,
+                            })
+                    if contact_rows_to_insert:
+                        supabase.table("customer_contacts").insert(
+                            contact_rows_to_insert
+                        ).execute()
+                    if address_rows_to_insert:
+                        supabase.table("customer_addresses").insert(
+                            address_rows_to_insert
+                        ).execute()
             except Exception as e:
                 error_str = str(e)
                 # Check for PostgreSQL unique constraint violation (code 23505)

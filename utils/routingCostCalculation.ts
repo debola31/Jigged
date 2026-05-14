@@ -1,5 +1,7 @@
+import { getSupabase } from '@/lib/supabase';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 import { getBomForPart } from '@/utils/bomAccess';
+import { getComputedPartCost, getPartCostExplain } from '@/utils/partsAccess';
 
 export interface CostWarning {
   type:
@@ -11,6 +13,10 @@ export interface CostWarning {
   message: string;
   node_id?: string;
   material_id?: string;
+  /** For `missing_material_cost`: the child part that needs a cost set. */
+  child_part_id?: string;
+  /** For `missing_material_cost`: drives the suggested fix in the warning copy. */
+  child_part_source?: 'made' | 'bought';
 }
 
 export interface LaborItem {
@@ -41,16 +47,30 @@ export interface RoutingCostBreakdown {
 }
 
 /**
- * Calculate the full cost breakdown for a part's routing + BOM.
+ * Calculate the per-unit cost breakdown for a part's routing + BOM at a
+ * given parent quantity.
  *
- * Internal ops are priced via (cycle + setup) × COALESCE(override, wc rate).
- * External ops are priced via external_unit_price + external_setup_cost — the
- * unit price contributes to per-unit cost, the setup cost is one-time.
- * Materials come from `parts_bom` (BOM is part-attached now, not routing-attached).
+ * Run labor and external unit prices contribute per-unit. Setup costs and
+ * external setup costs are one-time per parent batch — they live in
+ * `total_setup_cost` and are NOT amortized at this layer (callers like
+ * `calculateTierPricing` divide by the tier qty to spread them).
+ *
+ * BOM child costs come from `compute_part_cost_at_qty(child_id,
+ * parent_qty * qty_in_child_primary_unit)` — i.e. the child is tier-matched
+ * at the *cascaded* qty actually being consumed across the parent batch.
+ * Setup amortization for sub-assemblies falls out of that recursion: a
+ * sub-assembly's setup divided by the cascaded qty contributes
+ * `sub_setup / parent_qty` per parent unit (one sub-assembly setup spread
+ * across the parent batch run).
  *
  * Returns null if the part has no routing AND no BOM.
  */
-export async function calculateRoutingCost(partId: string): Promise<RoutingCostBreakdown | null> {
+export async function calculateRoutingCost(
+  partId: string,
+  qty: number = 1,
+): Promise<RoutingCostBreakdown | null> {
+  const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 1;
+
   const [routing, bomLines] = await Promise.all([
     getRoutingForPart(partId),
     getBomForPart(partId),
@@ -131,27 +151,130 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
     }
   }
 
-  for (const line of bomLines) {
-    const child = line.child_part;
-    const itemName = child.part_name;
+  if (bomLines.length > 0) {
+    // Batch-load unit conversion factors for any BOM line whose unit differs
+    // from its child's primary_unit. The SQL cost function does the same
+    // resolution internally; here we need it because the parent-unit
+    // material contribution = qty_in_primary × child_cost_per_primary, and
+    // qty_in_primary is what we feed to compute_part_cost_at_qty too.
+    const conversionLookups = bomLines
+      .filter(
+        (l) =>
+          l.child_part.primary_unit !== null &&
+          l.unit !== l.child_part.primary_unit,
+      )
+      .map((l) => ({ child_id: l.child_part.id, from_unit: l.unit }));
 
-    if (child.cost_per_unit === null || child.cost_per_unit === undefined) {
-      warnings.push({
-        type: 'missing_material_cost',
-        message: `${itemName}: no cost per unit set`,
-        material_id: line.id,
-      });
-      continue;
+    const conversionMap = new Map<string, number>();
+    if (conversionLookups.length > 0) {
+      const supabase = getSupabase();
+      const partIds = [...new Set(conversionLookups.map((c) => c.child_id))];
+      const fromUnits = [...new Set(conversionLookups.map((c) => c.from_unit))];
+      const { data: convs, error: convErr } = await supabase
+        .from('parts_unit_conversions')
+        .select('part_id, from_unit, to_primary_factor')
+        .in('part_id', partIds)
+        .in('from_unit', fromUnits);
+      if (convErr) {
+        console.error('Error loading parts_unit_conversions:', convErr);
+        throw convErr;
+      }
+      for (const row of (convs ?? []) as Array<{
+        part_id: string;
+        from_unit: string;
+        to_primary_factor: number;
+      }>) {
+        conversionMap.set(`${row.part_id}:${row.from_unit}`, Number(row.to_primary_factor));
+      }
     }
 
-    const materialCost = Number(line.quantity) * Number(child.cost_per_unit);
-    materialItems.push({
-      item_name: itemName,
-      quantity: Number(line.quantity),
-      unit: line.unit || child.primary_unit || '',
-      cost_per_unit: Number(child.cost_per_unit),
-      cost: Math.round(materialCost * 100) / 100,
-    });
+    for (const line of bomLines) {
+      const child = line.child_part;
+      const itemName = child.part_name;
+      const bomQty = Number(line.quantity);
+      const bomUnit = line.unit;
+      const childPrimary = child.primary_unit;
+      // Treat an empty bom.unit as "in the child's primary unit" — the UI
+      // sometimes omits the unit on legacy rows and the cost shouldn't
+      // unsplit on that.
+      const effectiveBomUnit = bomUnit && bomUnit.trim() !== '' ? bomUnit : childPrimary;
+
+      let qtyInPrimary: number;
+      if (childPrimary !== null && effectiveBomUnit !== null && effectiveBomUnit !== childPrimary) {
+        const factor = conversionMap.get(`${child.id}:${effectiveBomUnit}`);
+        if (factor === undefined) {
+          warnings.push({
+            type: 'missing_material_cost',
+            message: `${itemName}: no unit conversion from "${effectiveBomUnit}" to "${childPrimary}" — add one on the child part`,
+            material_id: line.id,
+            child_part_id: child.id,
+            child_part_source: child.source,
+          });
+          continue;
+        }
+        qtyInPrimary = bomQty * factor;
+      } else {
+        qtyInPrimary = bomQty;
+      }
+
+      const cumulativeQty = safeQty * qtyInPrimary;
+
+      let childUnitCost: number | null = null;
+      try {
+        childUnitCost = await getComputedPartCost(child.id, cumulativeQty);
+      } catch (err) {
+        warnings.push({
+          type: 'missing_material_cost',
+          message: `${itemName}: cost lookup failed (${(err as Error).message})`,
+          material_id: line.id,
+          child_part_id: child.id,
+          child_part_source: child.source,
+        });
+        continue;
+      }
+
+      if (childUnitCost === null) {
+        // Surface the deepest offending bought leaf via the explain RPC. The
+        // BOM panel uses this to render an actionable tooltip with the leaf's
+        // name + a link to its detail page.
+        let leafHint = '';
+        try {
+          const explain = await getPartCostExplain(child.id, cumulativeQty);
+          const firstLeaf = explain.missing_leaves[0];
+          if (firstLeaf) {
+            leafHint =
+              firstLeaf.part_id === child.id
+                ? `no priced tier covers qty ${formatQty(cumulativeQty)}`
+                : `no priced tier covers qty ${formatQty(firstLeaf.qty_required)} for ${firstLeaf.part_name}`;
+          }
+        } catch {
+          // If explain itself fails (e.g. cycle), fall back to a generic message.
+        }
+        if (!leafHint) {
+          leafHint =
+            child.source === 'bought'
+              ? `no priced tier covers qty ${formatQty(cumulativeQty)} — add a procurement tier on the child part`
+              : `no priced tier in the BOM subtree covers the cascaded qty — open the child`;
+        }
+        warnings.push({
+          type: 'missing_material_cost',
+          message: `${itemName}: ${leafHint}`,
+          material_id: line.id,
+          child_part_id: child.id,
+          child_part_source: child.source,
+        });
+        continue;
+      }
+
+      const materialCost = qtyInPrimary * childUnitCost;
+      materialItems.push({
+        item_name: itemName,
+        quantity: bomQty,
+        unit: effectiveBomUnit || '',
+        cost_per_unit: Math.round(childUnitCost * 10000) / 10000,
+        cost: Math.round(materialCost * 100) / 100,
+      });
+    }
   }
 
   const totalLaborCost =
@@ -172,19 +295,31 @@ export async function calculateRoutingCost(partId: string): Promise<RoutingCostB
   };
 }
 
+function formatQty(q: number): string {
+  if (Number.isInteger(q)) return String(q);
+  return q.toFixed(2).replace(/\.?0+$/, '');
+}
+
 export interface TierPricing {
   baseCostPerUnit: number;
   unitPrice: number | null;
 }
 
 /**
- * Compute per-unit base cost and unit price for a given quantity tier.
+ * Compute per-unit base cost and unit price for a given quantity tier from
+ * an existing breakdown.
  *
  * Run labor and materials are already per-unit in the breakdown.
  * Setup is one-time, so it amortizes across the tier quantity:
  *   baseCostPerUnit = run_per_unit + material_per_unit + (total_setup / quantity)
  * unitPrice = null if markup is null (signals "no price yet"); otherwise
  *   baseCostPerUnit × (1 + markupPercent / 100).
+ *
+ * Callers that need the canonical truth (cost that cascades sub-assembly
+ * tier matching down the BOM at the parent's qty) should use
+ * `getComputedPartCost(partId, qty)` directly. This helper is fine for UI
+ * tier-pricing display where a per-tier-qty `calculateRoutingCost(partId,
+ * qty)` has already done the cascade for materials.
  */
 export function calculateTierPricing(
   breakdown: RoutingCostBreakdown,

@@ -3,38 +3,73 @@ import type { RoutingWithGraph, RoutingOperationWithWorkCenter } from '@/types/r
 import type { BomLineWithChildPart } from '@/types/bom';
 
 /**
- * Tests for utils/routingCostCalculation.ts against the unified
- * parts/work_centers/vendors schema (PR 1).
+ * Tests for utils/routingCostCalculation.ts.
  *
  * Behaviors under test:
  *   - Internal ops: cost = (cycle + setup) × COALESCE(override, wc.labor_rate) / 60
  *   - External ops: cost = unit_price (per-unit) + setup_cost (one-time)
- *   - BOM materials: per-unit cost = bom.quantity × child.cost_per_unit
- *     (no client-side unit conversion; the SQL recalculate_part_cost has
- *     already normalised child.cost_per_unit to the child's primary_unit)
+ *   - BOM materials: per-unit cost = bom.quantity × getComputedPartCost(child_id, qty)
+ *     (the SQL function compute_part_cost_at_qty handles tier cascade and
+ *     unit conversion internally — the TS layer just multiplies)
  *   - Tier pricing: setup amortizes across the tier qty
  *
  * Per the no-silent-fallbacks engineering principle, the TS function does
  * NOT silently treat missing rates / external pricing / material costs as
  * zero. It surfaces them via the `warnings` array (typed) and skips the
- * row in the cost rollup. Tests assert each warning type is raised with a
- * useful message when data is missing.
+ * row in the cost rollup.
  *
- * The SQL recalculate_part_cost is stricter — it RAISEs — but the
- * client-side breakdown is for the part-detail UI, where surfacing
- * warnings is more useful than blowing up the page render. The two layers
- * agree on the principle (no $0 fallback) and the user sees the gap
- * either way.
+ * Migration 20260514 dropped parts.cost_per_unit and recalculate_part_cost
+ * in favour of the live compute_part_cost_at_qty(part_id, qty) function.
+ * `getComputedPartCost` is the TS wrapper; tests mock it to return the
+ * child cost the test wants to exercise.
  */
 
 const mockGetRoutingForPart = vi.fn();
 const mockGetBomForPart = vi.fn();
+// childCostMap is keyed by child part_id; the mockGetComputedPartCost looks
+// up the desired cost here so individual tests can stage the value alongside
+// their BOM-line builder call. null means "no priced tier — propagate NULL"
+// (used to exercise the missing_material_cost warning path).
+const childCostMap = new Map<string, number | null>();
+const mockGetComputedPartCost = vi.fn(async (partId: string, _qty: number) => {
+  if (childCostMap.has(partId)) return childCostMap.get(partId) ?? null;
+  return 0;
+});
+const mockGetPartCostExplain = vi.fn(async (partId: string, qty: number) => ({
+  unit_cost: childCostMap.has(partId) ? childCostMap.get(partId) ?? null : 0,
+  missing_leaves: childCostMap.get(partId) === null
+    ? [{ part_id: partId, part_name: childNameMap.get(partId) ?? 'UNPRICED', depth: 0, qty_required: qty }]
+    : [],
+}));
+const childNameMap = new Map<string, string>();
+// getSupabase is invoked when the BOM has unit-mismatch rows that require a
+// parts_unit_conversions lookup. Tests stay on same-unit rows by default;
+// the mock returns an empty conversion list when called.
+const mockSupabaseConversions: Array<{ part_id: string; from_unit: string; to_primary_factor: number }> = [];
 
 vi.mock('@/utils/routingsAccess', () => ({
   getRoutingForPart: (...args: unknown[]) => mockGetRoutingForPart(...args),
 }));
 vi.mock('@/utils/bomAccess', () => ({
   getBomForPart: (...args: unknown[]) => mockGetBomForPart(...args),
+}));
+vi.mock('@/utils/partsAccess', () => ({
+  getComputedPartCost: (...args: [string, number]) => mockGetComputedPartCost(...args),
+  getPartCostExplain: (...args: [string, number]) => mockGetPartCostExplain(...args),
+}));
+vi.mock('@/lib/supabase', () => ({
+  // Only invoked when a BOM line uses a unit different from the child's
+  // primary_unit; tests stay on same-unit rows by default and this returns
+  // an empty conversion list.
+  getSupabase: () => ({
+    from: () => ({
+      select: () => ({
+        in: () => ({
+          in: () => Promise.resolve({ data: mockSupabaseConversions, error: null }),
+        }),
+      }),
+    }),
+  }),
 }));
 
 import { calculateRoutingCost, calculateTierPricing } from '@/utils/routingCostCalculation';
@@ -97,9 +132,14 @@ interface BomOverrides {
   id?: string;
   quantity?: number;
   unit?: string;
+  childId?: string;
   childName?: string;
-  /** Pass `null` explicitly to test the missing_material_cost path. Omit
-   *  the key entirely to get the default of 5.0. */
+  /**
+   * Cost this child returns from compute_part_cost_at_qty. Staged into
+   * `childCostMap` keyed by the child's id. Pass `null` to test the
+   * missing-cost path (no priced tier covers the cascaded qty). Omit to
+   * get the default of 5.0.
+   */
   childCost?: number | null;
   childPrimaryUnit?: string;
 }
@@ -109,10 +149,15 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
   // callers can pass `childCost: null` to exercise the missing-cost branch
   // without it being silently coerced back to the default.
   const childCost = 'childCost' in overrides ? overrides.childCost! : 5.0;
+  const childId = overrides.childId ?? 'child-1';
+  const childName = overrides.childName ?? 'CHILD-1';
+  // Stage the cost so the mocked compute_part_cost_at_qty returns it.
+  childCostMap.set(childId, childCost);
+  childNameMap.set(childId, childName);
   return {
     id: overrides.id ?? 'bom-1',
     parent_part_id: 'part-1',
-    child_part_id: 'child-1',
+    child_part_id: childId,
     quantity: overrides.quantity ?? 1,
     unit: overrides.unit ?? 'ea',
     sequence: 10,
@@ -120,11 +165,10 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     child_part: {
-      id: 'child-1',
-      part_name: overrides.childName ?? 'CHILD-1',
+      id: childId,
+      part_name: childName,
       description: null,
       primary_unit: overrides.childPrimaryUnit ?? 'ea',
-      cost_per_unit: childCost,
       is_stocked: true,
       source: 'bought',
     },
@@ -140,6 +184,9 @@ describe('calculateRoutingCost', () => {
     mockGetRoutingForPart.mockReset();
     mockGetBomForPart.mockReset();
     mockGetBomForPart.mockResolvedValue([]);
+    childCostMap.clear();
+    childNameMap.clear();
+    mockSupabaseConversions.length = 0;
   });
 
   describe('returns null when there is nothing to cost', () => {
@@ -447,6 +494,57 @@ describe('calculateRoutingCost', () => {
       const result = await calculateRoutingCost('part-1');
 
       expect(result!.material_items[0].unit).toBe('lbs');
+    });
+
+    it('SP-H-42-FFBC regression: parent rolls up both made + bought children live', async () => {
+      // Repro of the user-reported bug from migration 20260514. Before this
+      // refactor, the parent's BOM panel showed "—" for made child
+      // 0190-4140 because parts.cost_per_unit was the snapshot column and
+      // had never been written for that child (despite pricing tiers
+      // existing for it). The bought child C FLAT happened to have a value
+      // in the snapshot column. With the snapshot gone, both children
+      // resolve through compute_part_cost_at_qty live, so the rollup is
+      // symmetric and complete.
+      mockGetRoutingForPart.mockResolvedValue(
+        makeRouting([
+          makeOp({
+            setup_minutes: 30,
+            cycle_minutes_per_unit: 6,
+            labor_rate_override: 100,
+          }),
+        ]),
+      );
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({
+          id: 'bom-made-child',
+          childId: 'part-0190-4140',
+          childName: '0190-4140',
+          quantity: 1,
+          childCost: 76.26,
+        }),
+        makeBomLine({
+          id: 'bom-bought-child',
+          childId: 'part-c-flat',
+          childName: 'C FLAT .50 X .625 X 6.00 Z9',
+          quantity: 1,
+          childCost: 17.41,
+        }),
+      ]);
+
+      const result = await calculateRoutingCost('part-1');
+
+      // No missing-material warnings — both children have a live cost.
+      expect(
+        result!.warnings.filter((w) => w.type === 'missing_material_cost'),
+      ).toHaveLength(0);
+      // Both children land in material_items.
+      expect(result!.material_items).toHaveLength(2);
+      // Material total = 1 × 76.26 + 1 × 17.41 = 93.67
+      expect(result!.total_material_cost).toBeCloseTo(93.67, 2);
+      // labor = 6 min × $100 / 60 = $10 per unit
+      expect(result!.total_labor_cost).toBe(10);
+      // setup = 30 min × $100 / 60 = $50 one-time
+      expect(result!.total_setup_cost).toBe(50);
     });
   });
 

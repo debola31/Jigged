@@ -258,7 +258,7 @@ async def validate_import(
         name_occurrences: dict[str, list[int]] = {}
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             csv_name = row.get(name_column, "").strip() if name_column else ""
 
             if csv_name:
@@ -278,7 +278,7 @@ async def validate_import(
         validation_error_row_set: set[int] = set()
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
 
             # Build customer data to check required fields
             customer_data = {}
@@ -307,7 +307,7 @@ async def validate_import(
         conflict_row_set: set[int] = set()
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
 
             # Skip rows with validation errors
             if row_number in validation_error_row_set:

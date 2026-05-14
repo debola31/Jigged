@@ -47,6 +47,10 @@ class ValidateRequest(BaseModel):
     company_id: str
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # All parsed CSV rows
+    # When the frontend batches validate calls, this offset is added to the
+    # per-batch index so conflict/error row_numbers reflect the row's true
+    # position in the original CSV. Default 0 = single-shot validate.
+    batch_offset: int = 0
 
 
 class ValidationError(BaseModel):

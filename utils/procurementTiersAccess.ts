@@ -331,18 +331,20 @@ export async function getProcurementCost(
     throw error;
   }
 
-  // The SQL function returns a TABLE with one row; PostgREST hands us back
-  // an array. Some Supabase typings flatten single-row TABLE results to an
-  // object — handle both shapes defensively.
+  // The SQL function returns at most one row (zero when no tier matches —
+  // the parts.cost_per_unit fallback was removed in migration 20260514).
+  // PostgREST hands us back an array; some Supabase typings flatten
+  // single-row TABLE results to an object. Handle both shapes defensively;
+  // empty / null means "no matching tier" and we normalise to a null cost.
   const row = Array.isArray(data) ? data[0] : data;
   if (!row) {
-    return { unit_cost: null, vendor_id: null, tier_id: null, source: 'fallback' };
+    return { unit_cost: null, vendor_id: null, tier_id: null, source: 'tier' };
   }
   const r = row as Record<string, unknown>;
   return {
     unit_cost: r.unit_cost == null ? null : Number(r.unit_cost),
     vendor_id: (r.vendor_id as string | null) ?? null,
     tier_id: (r.tier_id as string | null) ?? null,
-    source: (r.source as 'tier' | 'fallback') ?? 'fallback',
+    source: 'tier',
   };
 }

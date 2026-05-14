@@ -115,9 +115,14 @@ test.describe('Parts and Routing workflow', () => {
     // previous /parts/{id} route.
     await waitForGridLoaded(page);
 
-    // The part should appear in the grid. Scope the text query to the grid
-    // wrapper to avoid strict-mode collisions with any cached/lingering DOM
-    // from the previous route.
+    // Filter the grid to the new part. AG Grid virtualizes rows, so a bare
+    // getByText won't find the row when accumulated E2E-* parts from prior
+    // CI runs push it outside the viewport. The search box also exercises
+    // the server-side query path (getAllParts with an ilike filter), which
+    // is what we actually want to verify here.
+    await page.getByPlaceholder(/Search parts/i).fill(partName);
+
+    // The part should appear in the (now-filtered) grid.
     await expect(
       page.locator('.ag-root-wrapper').getByText(partName).first()
     ).toBeVisible({ timeout: 10_000 });

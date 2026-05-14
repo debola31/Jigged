@@ -230,6 +230,12 @@ interface PartSpec {
   is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
+  /**
+   * Procurement cost to seed for bought parts. Persisted as a NULL-vendor
+   * procurement tier at min_quantity=1 (parts.cost_per_unit was dropped in
+   * migration 20260514). Ignored for made parts — their cost is computed
+   * live by compute_part_cost_at_qty.
+   */
   cost_per_unit: number | null;
 }
 
@@ -245,25 +251,57 @@ async function ensurePart(
     .eq('part_name', spec.part_name)
     .maybeSingle();
   if (lookupErr) throw new Error(`part lookup failed: ${lookupErr.message}`);
-  if (existing) return existing.id;
 
-  const { data, error } = await supabase
-    .from('parts')
-    .insert({
-      company_id: companyId,
-      part_name: spec.part_name,
-      description: spec.description,
-      source: spec.source,
-      is_stocked: spec.is_stocked,
-      primary_unit: spec.primary_unit,
-      quantity: spec.quantity,
-      cost_per_unit: spec.cost_per_unit,
-      legacy_id: seedTag(spec.part_name),
-    })
-    .select('id')
-    .single();
-  if (error || !data) throw new Error(`part insert failed (${spec.part_name}): ${error?.message}`);
-  return data.id;
+  let partId: string;
+  if (existing) {
+    partId = existing.id;
+  } else {
+    const { data, error } = await supabase
+      .from('parts')
+      .insert({
+        company_id: companyId,
+        part_name: spec.part_name,
+        description: spec.description,
+        source: spec.source,
+        is_stocked: spec.is_stocked,
+        primary_unit: spec.primary_unit,
+        quantity: spec.quantity,
+        legacy_id: seedTag(spec.part_name),
+      })
+      .select('id')
+      .single();
+    if (error || !data) throw new Error(`part insert failed (${spec.part_name}): ${error?.message}`);
+    partId = data.id;
+  }
+
+  // Idempotent NULL-vendor procurement tier for bought parts with a cost.
+  if (spec.source === 'bought' && spec.cost_per_unit !== null && spec.cost_per_unit > 0) {
+    const { data: existingTier, error: tierLookupErr } = await supabase
+      .from('part_procurement_tiers')
+      .select('id')
+      .eq('part_id', partId)
+      .is('vendor_id', null)
+      .eq('min_quantity', 1)
+      .maybeSingle();
+    if (tierLookupErr) {
+      throw new Error(`tier lookup failed (${spec.part_name}): ${tierLookupErr.message}`);
+    }
+    if (!existingTier) {
+      const { error: tierErr } = await supabase
+        .from('part_procurement_tiers')
+        .insert({
+          part_id: partId,
+          vendor_id: null,
+          min_quantity: 1,
+          cost_per_unit: spec.cost_per_unit,
+        });
+      if (tierErr) {
+        throw new Error(`tier insert failed (${spec.part_name}): ${tierErr.message}`);
+      }
+    }
+  }
+
+  return partId;
 }
 
 async function ensureRouting(

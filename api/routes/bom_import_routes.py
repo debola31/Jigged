@@ -241,31 +241,48 @@ async def validate_import(
     csv_duplicate, duplicate_bom_line, would_create_cycle.
     """
     try:
-        # Existing parts (for parent/child name resolution)
-        parts_response = (
-            supabase.table("parts")
-            .select("id, part_name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_parts = parts_response.data or []
+        # Existing parts (for parent/child name resolution). Supabase caps
+        # `.select()` at 1000 rows by default — paginate so a company with
+        # more than 1000 parts can still resolve BOM references without
+        # silently producing fake "unknown_parent_part" conflicts.
+        existing_parts: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            page = (
+                supabase.table("parts")
+                .select("id, part_name")
+                .eq("company_id", request.company_id)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = page.data or []
+            existing_parts.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
         part_name_to_id: dict[str, str] = {
             p["part_name"].lower(): p["id"]
             for p in existing_parts
             if p.get("part_name")
         }
 
-        # Existing parts_bom (for duplicate detection and cycle walk seed)
+        # Existing parts_bom (for duplicate detection and cycle walk seed).
+        # PostgREST encodes `.in_()` values into the URL — with thousands of
+        # part IDs the URL exceeds the request line limit. Batch the lookup
+        # in chunks of 200 IDs (~50 chars each = ~10KB URL) to stay safe.
         existing_part_ids = [p["id"] for p in existing_parts]
         existing_bom_rows: list[dict] = []
-        if existing_part_ids:
+        IN_CLAUSE_BATCH = 200
+        for chunk_start in range(0, len(existing_part_ids), IN_CLAUSE_BATCH):
+            chunk = existing_part_ids[chunk_start : chunk_start + IN_CLAUSE_BATCH]
             bom_response = (
                 supabase.table("parts_bom")
                 .select("id, parent_part_id, child_part_id")
-                .in_("parent_part_id", existing_part_ids)
+                .in_("parent_part_id", chunk)
                 .execute()
             )
-            existing_bom_rows = bom_response.data or []
+            existing_bom_rows.extend(bom_response.data or [])
 
         existing_bom_pairs: dict[tuple[str, str], str] = {}
         existing_edges: dict[str, set[str]] = {}
@@ -509,7 +526,10 @@ async def validate_import(
             skipped_rows_count=len(total_skipped),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"BOM import validate error: {str(e)}", exc_info=True)
         sentry_sdk.capture_exception(e)
         raise HTTPException(
             status_code=500,
@@ -543,14 +563,24 @@ async def execute_import(
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
         # Resolve part names (the validate already returned valid rows but we
-        # need the IDs again for the insert).
-        parts_response = (
-            supabase.table("parts")
-            .select("id, part_name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_parts = parts_response.data or []
+        # need the IDs again for the insert). Paginate to handle companies
+        # with more than Supabase's 1000-row default page size.
+        existing_parts: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            page = (
+                supabase.table("parts")
+                .select("id, part_name")
+                .eq("company_id", request.company_id)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = page.data or []
+            existing_parts.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
         part_name_to_id = {
             p["part_name"].lower(): p["id"]
             for p in existing_parts

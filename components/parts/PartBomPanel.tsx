@@ -27,7 +27,14 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import { getPartsForSelect } from '@/utils/partsAccess';
+import {
+  getPartsForSelect,
+  getComputedPartCost,
+  getPartCostExplain,
+  type PartCostMissingLeaf,
+} from '@/utils/partsAccess';
+import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
@@ -66,6 +73,11 @@ const formatCurrency = (n: number | null): string => {
 const formatQuantity = (n: number): string =>
   n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
+const formatQty = (q: number): string => {
+  if (Number.isInteger(q)) return String(q);
+  return q.toFixed(2).replace(/\.?0+$/, '');
+};
+
 /**
  * Materials editor on the part detail page.
  *
@@ -76,13 +88,24 @@ const formatQuantity = (n: number): string =>
  *
  * Each saved row shows the child part name (linked), the child's
  * PartTypeChip, the BOM-line quantity + unit, and the cost contribution
- * (qty × child.cost_per_unit). When the child's cost is unknown, the
- * contribution shows "—" with a hover hint — never a silent zero, since
- * that would understate the rolled-up cost without the user noticing.
+ * (qty_in_primary × child_cost_at_cumulative_qty resolved live via
+ * compute_part_cost_at_qty). When the child's cost is unknown, the
+ * contribution shows "—" with a hover hint identifying the deepest
+ * unpriced leaf — never a silent zero, since that would understate the
+ * rolled-up cost without the user noticing.
  *
  * After any mutation, reloads the BOM list and pings `onChanged` so the
  * parent page can rerun the stale-cost check.
  */
+interface BomRowCost {
+  /** Per-parent-unit contribution: qty_in_primary × child_cost_at_cumulative_qty. */
+  contribution: number | null;
+  /** Tooltip text when contribution is null. Pulled from compute_part_cost_explain. */
+  missingHint: string | null;
+  /** Specific leaf (when known) so the tooltip can link to it. */
+  missingLeaf: PartCostMissingLeaf | null;
+}
+
 export default function PartBomPanel({
   partId,
   companyId,
@@ -93,6 +116,12 @@ export default function PartBomPanel({
   const [rows, setRows] = useState<BomLineWithChildPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Per-row cost contribution computed live from compute_part_cost_at_qty.
+  // The panel uses `displayQty` (= min(parent's pricing tier qty) ?? 1) so a
+  // qty-agnostic card still produces a fixed number per row. When a cost is
+  // null, an explain call surfaces the deepest unpriced leaf for the
+  // tooltip — so the user sees which part to fix, not just a generic dash.
+  const [costs, setCosts] = useState<Map<string, BomRowCost>>(new Map());
 
   // Inline editor state machine — same shape as RoutingOperationsList.
   const [editorState, setEditorState] = useState<
@@ -129,6 +158,143 @@ export default function PartBomPanel({
     fetchRows();
   }, [fetchRows]);
 
+  // Compute the per-row cost contributions live whenever rows change. The
+  // display qty is the parent's lowest-defined tier (or 1 if no tiers yet)
+  // so the card always shows a fixed number that matches the cheapest qty
+  // a quote could use. For sub-assembly tier cascading and unit conversion
+  // we delegate to the canonical SQL function via getComputedPartCost.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (rows.length === 0) {
+      setCosts(new Map());
+      return;
+    }
+
+    (async () => {
+      try {
+        // Pick the display qty. min(parent's tier quantity) ?? 1.
+        const tiers = await getTiersForPart(partId);
+        const displayQty =
+          tiers.length > 0
+            ? Math.min(...tiers.map((t) => t.quantity))
+            : 1;
+
+        // Resolve unit conversions for BOM lines whose unit ≠ child's
+        // primary_unit, batched in one query.
+        const conversionLookups = rows
+          .filter(
+            (r) =>
+              r.child_part.primary_unit !== null &&
+              r.unit !== r.child_part.primary_unit,
+          )
+          .map((r) => ({ child_id: r.child_part.id, from_unit: r.unit }));
+
+        const conversionMap = new Map<string, number>();
+        if (conversionLookups.length > 0) {
+          const supabase = getSupabase();
+          const partIds = [...new Set(conversionLookups.map((c) => c.child_id))];
+          const fromUnits = [...new Set(conversionLookups.map((c) => c.from_unit))];
+          const { data: convs } = await supabase
+            .from('parts_unit_conversions')
+            .select('part_id, from_unit, to_primary_factor')
+            .in('part_id', partIds)
+            .in('from_unit', fromUnits);
+          for (const c of (convs ?? []) as Array<{
+            part_id: string;
+            from_unit: string;
+            to_primary_factor: number;
+          }>) {
+            conversionMap.set(`${c.part_id}:${c.from_unit}`, Number(c.to_primary_factor));
+          }
+        }
+
+        const nextCosts = new Map<string, BomRowCost>();
+
+        await Promise.all(
+          rows.map(async (row) => {
+            const child = row.child_part;
+            const childPrimary = child.primary_unit;
+            const bomUnit = row.unit;
+            let qtyInPrimary: number;
+            if (childPrimary !== null && bomUnit !== childPrimary) {
+              const factor = conversionMap.get(`${child.id}:${bomUnit}`);
+              if (factor === undefined) {
+                nextCosts.set(row.id, {
+                  contribution: null,
+                  missingHint: `no unit conversion from "${bomUnit}" to "${childPrimary}" — add one on the child part`,
+                  missingLeaf: null,
+                });
+                return;
+              }
+              qtyInPrimary = row.quantity * factor;
+            } else {
+              qtyInPrimary = row.quantity;
+            }
+
+            const cumulativeQty = displayQty * qtyInPrimary;
+
+            let unitCost: number | null = null;
+            try {
+              unitCost = await getComputedPartCost(child.id, cumulativeQty);
+            } catch (err) {
+              nextCosts.set(row.id, {
+                contribution: null,
+                missingHint: (err as Error).message,
+                missingLeaf: null,
+              });
+              return;
+            }
+
+            if (unitCost === null) {
+              // Use explain to surface the deepest unpriced leaf.
+              let leaf: PartCostMissingLeaf | null = null;
+              let hint = '';
+              try {
+                const explain = await getPartCostExplain(child.id, cumulativeQty);
+                leaf = explain.missing_leaves[0] ?? null;
+                if (leaf) {
+                  hint =
+                    leaf.part_id === child.id
+                      ? `no priced tier covers qty ${formatQty(cumulativeQty)} on this part — add a procurement tier.`
+                      : `no priced tier covers qty ${formatQty(leaf.qty_required)} for ${leaf.part_name} — add a procurement tier on that part.`;
+                }
+              } catch {
+                // explain failed; fall through to a generic message
+              }
+              if (!hint) {
+                hint =
+                  child.source === 'bought'
+                    ? 'No procurement tier covers this qty — add one on the child part.'
+                    : 'A leaf in this subassembly has no priced tier — open the child to inspect.';
+              }
+              nextCosts.set(row.id, {
+                contribution: null,
+                missingHint: hint,
+                missingLeaf: leaf,
+              });
+              return;
+            }
+
+            nextCosts.set(row.id, {
+              contribution: qtyInPrimary * unitCost,
+              missingHint: null,
+              missingLeaf: null,
+            });
+          }),
+        );
+
+        if (!cancelled) setCosts(nextCosts);
+      } catch (err) {
+        console.error('Failed to compute BOM costs:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rows, partId]);
+
   // Load parts list for the picker once. Re-fetches if partId or companyId
   // changes (rare — only on detail-page navigation).
   useEffect(() => {
@@ -147,7 +313,6 @@ export default function PartBomPanel({
               is_stocked: p.is_stocked,
               source: p.source,
               primary_unit: p.primary_unit,
-              cost_per_unit: p.cost_per_unit,
             })),
         );
       })
@@ -259,7 +424,6 @@ export default function PartBomPanel({
             is_stocked: editingRow.child_part.is_stocked,
             source: editingRow.child_part.source,
             primary_unit: editingRow.child_part.primary_unit,
-            cost_per_unit: editingRow.child_part.cost_per_unit,
           },
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
@@ -267,10 +431,14 @@ export default function PartBomPanel({
     : undefined;
 
   const totalCost = rows.reduce((sum, row) => {
-    if (row.child_part.cost_per_unit === null) return sum;
-    return sum + row.quantity * row.child_part.cost_per_unit;
+    const c = costs.get(row.id);
+    if (!c || c.contribution === null) return sum;
+    return sum + c.contribution;
   }, 0);
-  const anyMissingCost = rows.some((row) => row.child_part.cost_per_unit === null);
+  const anyMissingCost = rows.some((row) => {
+    const c = costs.get(row.id);
+    return !c || c.contribution === null;
+  });
 
   return (
     <Box>
@@ -326,8 +494,8 @@ export default function PartBomPanel({
         <Stack divider={<Divider flexItem />} spacing={0}>
           {rows.map((row) => {
             const child = row.child_part;
-            const contribution =
-              child.cost_per_unit === null ? null : row.quantity * child.cost_per_unit;
+            const rowCost = costs.get(row.id);
+            const contribution = rowCost ? rowCost.contribution : null;
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -373,13 +541,34 @@ export default function PartBomPanel({
                 </Box>
                 <Box sx={{ minWidth: 100, textAlign: 'right' }}>
                   {contribution === null ? (
-                    <Tooltip title="Child part has no cost calculated yet — recalc the child to include it in the rollup.">
+                    <Tooltip
+                      title={
+                        <Box>
+                          <Typography variant="caption" sx={{ display: 'block' }}>
+                            {rowCost?.missingHint ??
+                              (child.source === 'bought'
+                                ? 'No procurement tier covers this qty — add one on the child part.'
+                                : 'A leaf in this subassembly has no priced tier.')}
+                          </Typography>
+                          {rowCost?.missingLeaf &&
+                            rowCost.missingLeaf.part_id !== child.id && (
+                              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                                Leaf: {rowCost.missingLeaf.part_name}
+                              </Typography>
+                            )}
+                        </Box>
+                      }
+                    >
                       <Box
+                        component={NextLink}
+                        href={`/dashboard/${companyId}/parts/${rowCost?.missingLeaf?.part_id ?? child.id}`}
                         sx={{
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 0.5,
                           color: 'text.secondary',
+                          textDecoration: 'none',
+                          '&:hover': { color: 'primary.main' },
                         }}
                       >
                         <HelpOutlineIcon sx={{ fontSize: 14 }} />

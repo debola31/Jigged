@@ -26,6 +26,7 @@ class MockSupabaseTable:
     def eq(self, *a, **k): return self
     def in_(self, *a, **k): return self
     def is_(self, *a, **k): return self
+    def range(self, *a, **k): return self
     def delete(self): return self
 
     def insert(self, data):

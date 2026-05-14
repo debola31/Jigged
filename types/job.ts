@@ -129,7 +129,6 @@ export interface JobMaterial {
     part_name: string;
     primary_unit: string | null;
     quantity: number;
-    cost_per_unit: number | null;
   } | null;
 }
 

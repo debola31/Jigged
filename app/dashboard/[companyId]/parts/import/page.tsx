@@ -36,6 +36,7 @@ import type {
 } from '@/types/parts-import';
 import { PART_FIELDS } from '@/types/parts-import';
 import { parseCSV } from '@/utils/csvParser';
+import { importErrorMessage } from '@/utils/importErrorMessage';
 import { API_BASE_URL } from '@/lib/api';
 
 // Maximum file size: 10MB
@@ -46,17 +47,6 @@ const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const MAX_ROWS_PER_REQUEST = 500;
 
 const steps = ['Upload', 'AI Analysis', 'Review Mappings', 'Validate', 'Import'];
-
-function formatApiError(detail: unknown, fallback: string): string {
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail
-      .map((d) => (d && typeof d === 'object' && 'msg' in d ? String(d.msg) : JSON.stringify(d)))
-      .join('; ');
-  }
-  if (detail) return JSON.stringify(detail);
-  return fallback;
-}
 
 type ImportStep =
   | 'upload'
@@ -270,8 +260,11 @@ export default function ImportPartsPage() {
         }
       });
 
-      // Convert rows to objects (limit for validation to avoid payload size issues)
-      const rowObjects = allRows.slice(0, MAX_ROWS_PER_REQUEST).map((row) => {
+      // Convert all rows to objects, then batch the validate call so every
+      // row is checked. Single-batch validation used to silently truncate at
+      // MAX_ROWS_PER_REQUEST and let conflicts in rows 501+ leak through to
+      // execute as a 400.
+      const allRowObjects = allRows.map((row) => {
         const obj: Record<string, string> = {};
         headers.forEach((header, index) => {
           obj[header] = row[index] || '';
@@ -279,29 +272,44 @@ export default function ImportPartsPage() {
         return obj;
       });
 
-      const response = await fetch(`${API_BASE_URL}/api/parts/import/validate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company_id: companyId,
-          mappings: mappingsObj,
-          pricing_columns: [],
-          rows: rowObjects,
-          total_rows: allRows.length,
-        }),
-      });
+      const aggregatedConflicts: PartConflictInfo[] = [];
+      const aggregatedValidationErrors: PartValidationError[] = [];
+      let aggregatedValidRowsCount = 0;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(formatApiError(errorData.detail, 'Validation failed'));
+      for (
+        let batchStart = 0;
+        batchStart < allRowObjects.length;
+        batchStart += MAX_ROWS_PER_REQUEST
+      ) {
+        const batch = allRowObjects.slice(batchStart, batchStart + MAX_ROWS_PER_REQUEST);
+        const response = await fetch(`${API_BASE_URL}/api/parts/import/validate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_id: companyId,
+            mappings: mappingsObj,
+            pricing_columns: [],
+            rows: batch,
+            batch_offset: batchStart,
+            total_rows: allRows.length,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(importErrorMessage(errorData.detail, 'Validation failed'));
+        }
+
+        const data: PartValidateResponse = await response.json();
+        aggregatedConflicts.push(...data.conflicts);
+        aggregatedValidationErrors.push(...data.validation_errors);
+        aggregatedValidRowsCount += data.valid_rows_count;
       }
 
-      const data: PartValidateResponse = await response.json();
-
-      if (data.has_conflicts || data.validation_errors.length > 0) {
-        setConflicts(data.conflicts);
-        setValidationErrors(data.validation_errors);
-        setValidRowsCount(data.valid_rows_count);
+      if (aggregatedConflicts.length > 0 || aggregatedValidationErrors.length > 0) {
+        setConflicts(aggregatedConflicts);
+        setValidationErrors(aggregatedValidationErrors);
+        setValidRowsCount(aggregatedValidRowsCount);
         setCurrentStep('conflicts');
         setShowConflictDialog(true);
       } else {
@@ -369,7 +377,7 @@ export default function ImportPartsPage() {
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(formatApiError(errorData.detail, `Import failed on batch ${batchIndex + 1}`));
+          throw new Error(importErrorMessage(errorData.detail, `Import failed on batch ${batchIndex + 1}`));
         }
 
         const data: PartExecuteResponse = await response.json();

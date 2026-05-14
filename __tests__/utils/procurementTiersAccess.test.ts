@@ -460,14 +460,14 @@ describe('procurementTiersAccess', () => {
         data: {
           unit_cost: 1.1,
           vendor_id: null,
-          tier_id: null,
-          source: 'fallback',
+          tier_id: 'tier-2',
+          source: 'tier',
         },
         error: null,
       });
 
       const result = await getProcurementCost('part-1', 1);
-      expect(result.source).toBe('fallback');
+      expect(result.source).toBe('tier');
       expect(result.unit_cost).toBe(1.1);
       expect(result.vendor_id).toBeNull();
     });
@@ -479,14 +479,17 @@ describe('procurementTiersAccess', () => {
       expect(mockSupabase.rpc).not.toHaveBeenCalled();
     });
 
-    it('returns a fallback result when RPC returns no rows', async () => {
+    it('returns a null unit_cost when RPC returns no rows', async () => {
+      // The parts.cost_per_unit fallback was removed in migration 20260514.
+      // No rows ⇒ no priced tier matches the requested qty.
       (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         data: [],
         error: null,
       });
       const result = await getProcurementCost('part-1', 1);
-      expect(result.source).toBe('fallback');
+      expect(result.source).toBe('tier');
       expect(result.unit_cost).toBeNull();
+      expect(result.tier_id).toBeNull();
     });
 
     it('throws when RPC returns an error', async () => {

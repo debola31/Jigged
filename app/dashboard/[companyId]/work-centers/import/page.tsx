@@ -27,6 +27,7 @@ import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import type { FieldDefinition, ColumnMapping } from '@/components/import';
 import { parseCSV } from '@/utils/csvParser';
 import { API_BASE_URL } from '@/lib/api';
+import { importErrorMessage } from '@/utils/importErrorMessage';
 
 const MAX_FILE_SIZE_MB = 10;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -281,7 +282,10 @@ export default function ImportWorkCentersPage() {
         }
       });
 
-      const rowObjects = allRows.slice(0, MAX_ROWS_PER_REQUEST).map((row) => {
+      // Convert all rows, then batch validate so every row is checked.
+      // Single-batch validation used to truncate at MAX_ROWS_PER_REQUEST and
+      // let conflicts in rows 501+ leak through to execute as a 400.
+      const allRowObjects = allRows.map((row) => {
         const obj: Record<string, string> = {};
         headers.forEach((header, index) => {
           obj[header] = row[index] || '';
@@ -289,27 +293,42 @@ export default function ImportWorkCentersPage() {
         return obj;
       });
 
-      const response = await fetch(`${API_BASE_URL}/api/work-centers/import/validate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company_id: companyId,
-          mappings: mappingsObj,
-          rows: rowObjects,
-        }),
-      });
+      const aggregatedConflicts: ConflictInfo[] = [];
+      const aggregatedValidationErrors: ValidationError[] = [];
+      let aggregatedValidRowsCount = 0;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Validation failed');
+      for (
+        let batchStart = 0;
+        batchStart < allRowObjects.length;
+        batchStart += MAX_ROWS_PER_REQUEST
+      ) {
+        const batch = allRowObjects.slice(batchStart, batchStart + MAX_ROWS_PER_REQUEST);
+        const response = await fetch(`${API_BASE_URL}/api/work-centers/import/validate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_id: companyId,
+            mappings: mappingsObj,
+            rows: batch,
+            batch_offset: batchStart,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(importErrorMessage(errorData.detail, 'Validation failed'));
+        }
+
+        const data: ValidateResponse = await response.json();
+        aggregatedConflicts.push(...data.conflicts);
+        aggregatedValidationErrors.push(...data.validation_errors);
+        aggregatedValidRowsCount += data.valid_rows_count;
       }
 
-      const data: ValidateResponse = await response.json();
-
-      if (data.has_conflicts || data.validation_errors.length > 0) {
-        setConflicts(data.conflicts);
-        setValidationErrors(data.validation_errors);
-        setValidRowsCount(data.valid_rows_count);
+      if (aggregatedConflicts.length > 0 || aggregatedValidationErrors.length > 0) {
+        setConflicts(aggregatedConflicts);
+        setValidationErrors(aggregatedValidationErrors);
+        setValidRowsCount(aggregatedValidRowsCount);
         setCurrentStep('conflicts');
         setShowConflictDialog(true);
       } else {
@@ -370,7 +389,7 @@ export default function ImportWorkCentersPage() {
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.detail || `Import failed on batch ${batchIndex + 1}`);
+          throw new Error(importErrorMessage(errorData.detail, `Import failed on batch ${batchIndex + 1}`));
         }
 
         const data: ExecuteResponse = await response.json();

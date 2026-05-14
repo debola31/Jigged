@@ -169,13 +169,17 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
       ]);
       setBreakdown(routingBreakdown);
 
+      // baseCostPerUnit is purely a UI display value (computed live from the
+      // breakdown + tier qty). The column was dropped from part_pricing_tiers
+      // in migration 20260514 — the canonical truth at save time is
+      // compute_part_cost_at_qty, called inside replaceTiersForPart.
       const asRows: EditRow[] = tiers.map((t) => ({
         id: t.id,
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
         unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
-        baseCostPerUnit: t.base_cost_per_unit ?? 0,
+        baseCostPerUnit: 0,
       }));
       setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
     } catch (err) {
@@ -236,15 +240,18 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
               return fresh.map((t) => {
                 const existing = t.id ? byId.get(t.id) : undefined;
                 return existing
-                  ? { ...existing, id: t.id, baseCostPerUnit: t.base_cost_per_unit ?? 0 }
-                  : {
-                      id: t.id,
-                      sequence: t.sequence,
-                      quantity: String(t.quantity),
-                      markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-                      unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
-                      baseCostPerUnit: t.base_cost_per_unit ?? 0,
-                    };
+                  ? { ...existing, id: t.id }
+                  : recomputeRow(
+                      {
+                        id: t.id,
+                        sequence: t.sequence,
+                        quantity: String(t.quantity),
+                        markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
+                        unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
+                        baseCostPerUnit: 0,
+                      },
+                      breakdown,
+                    );
               });
             });
           } catch (err) {
@@ -462,6 +469,17 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           {breakdown.warnings.map((w, i) => (
             <Typography key={i} variant="body2">
               • {w.message}
+              {w.child_part_id && (
+                <>
+                  {' '}
+                  <Link
+                    href={`/dashboard/${companyId}/parts/${w.child_part_id}`}
+                    style={{ color: 'inherit', textDecoration: 'underline' }}
+                  >
+                    Open child →
+                  </Link>
+                </>
+              )}
             </Typography>
           ))}
         </Alert>

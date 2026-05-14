@@ -501,7 +501,7 @@ async def validate_import(
         part_occurrences: dict[str, list[int]] = {}
         legacy_id_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
@@ -528,7 +528,7 @@ async def validate_import(
         # Determine which rows look stocked (so we know whether to require unit)
         stocked_row_numbers: set[int] = set()
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             explicit_stocked: Optional[bool] = None
             if is_stocked_column:
                 explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
@@ -546,12 +546,18 @@ async def validate_import(
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
         elif primary_unit_column or description_column:
             stocked_rows = [
-                row for i, row in enumerate(request.rows) if (i + 1) in stocked_row_numbers
+                row
+                for i, row in enumerate(request.rows)
+                if (i + 1 + request.batch_offset) in stocked_row_numbers
             ]
             stocked_index_map = {
-                idx + 1: orig_idx + 1
+                idx + 1: orig_idx + 1 + request.batch_offset
                 for idx, orig_idx in enumerate(
-                    [i for i in range(len(request.rows)) if (i + 1) in stocked_row_numbers]
+                    [
+                        i
+                        for i in range(len(request.rows))
+                        if (i + 1 + request.batch_offset) in stocked_row_numbers
+                    ]
                 )
             }
             partial = resolve_units_for_rows(
@@ -567,7 +573,7 @@ async def validate_import(
             uom_resolutions = {}
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
@@ -885,6 +891,13 @@ async def execute_import(
 
         rows_to_insert: list[dict] = []
         rows_to_upsert: list[dict] = []
+        # parts.cost_per_unit was dropped in migration 20260514. For bought
+        # rows with a CSV cost, we stage NULL-vendor procurement tiers
+        # (min_quantity=1) and insert them after the parts rows commit. Each
+        # entry is (legacy_id_or_none, part_name, cost_val) — we resolve to
+        # part_id by querying parts by (company_id, legacy_id|part_name) once
+        # all rows are persisted.
+        pending_procurement_tiers: list[tuple[Optional[str], str, float]] = []
         errors: list[PartImportError] = []
         skipped = 0
 
@@ -1010,8 +1023,10 @@ async def execute_import(
             else:
                 # Schema NOT NULL DEFAULT 0; explicit for clarity
                 part_data["quantity"] = 0
-            if cost_val is not None:
-                part_data["cost_per_unit"] = cost_val
+            # parts.cost_per_unit was dropped (migration 20260514). For bought
+            # rows we stage a NULL-vendor procurement tier post-insert; made
+            # rows' cost_val is ignored — compute_part_cost_at_qty recomputes
+            # live from routing + BOM.
             if reorder_val is not None:
                 part_data["reorder_point"] = reorder_val
 
@@ -1034,10 +1049,21 @@ async def execute_import(
             else:
                 rows_to_insert.append(part_data)
 
+            # Stage a procurement tier for bought rows that supplied a cost.
+            if source_val == "bought" and cost_val is not None and cost_val > 0:
+                pending_procurement_tiers.append(
+                    (legacy_id_val or None, part_name, cost_val)
+                )
+
         # Bulk insert in batches
         BATCH_SIZE = 500
         imported_count = 0
         updated_count = 0
+        # Capture the inserted/upserted parts so we can correlate them to
+        # `pending_procurement_tiers` by part_name (or legacy_id) and grab
+        # their ids. Saves a round-trip vs re-querying after the writes.
+        id_by_legacy_id: dict[str, str] = {}
+        id_by_part_name: dict[str, str] = {}
 
         if rows_to_insert:
             try:
@@ -1046,6 +1072,14 @@ async def execute_import(
                     batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
                     response = supabase.table("parts").insert(batch).execute()
                     imported_count += len(response.data) if response.data else 0
+                    for inserted in response.data or []:
+                        pid = inserted.get("id")
+                        if not pid:
+                            continue
+                        if inserted.get("part_name"):
+                            id_by_part_name[inserted["part_name"]] = pid
+                        if inserted.get("legacy_id"):
+                            id_by_legacy_id[inserted["legacy_id"]] = pid
             except Exception as e:
                 error_str = str(e)
                 logger.error(f"Parts import insert error: {error_str}", exc_info=True)
@@ -1068,11 +1102,71 @@ async def execute_import(
                         .execute()
                     )
                     updated_count += len(response.data) if response.data else 0
+                    for upserted in response.data or []:
+                        pid = upserted.get("id")
+                        if not pid:
+                            continue
+                        if upserted.get("part_name"):
+                            id_by_part_name[upserted["part_name"]] = pid
+                        if upserted.get("legacy_id"):
+                            id_by_legacy_id[upserted["legacy_id"]] = pid
             except Exception as e:
                 error_str = str(e)
                 logger.error(f"Parts import upsert error: {error_str}", exc_info=True)
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
+
+        # ── Procurement tiers for bought rows ──────────────────────────────
+        # CSV imports historically wrote cost into parts.cost_per_unit. With
+        # that column dropped, route the same value into a NULL-vendor
+        # procurement tier (min_quantity=1) on each imported bought row. The
+        # tier lookup at quote time prefers vendor-specific tiers when the
+        # user later adds them.
+        if pending_procurement_tiers:
+            try:
+                tier_rows: list[dict] = []
+                for lid, name, cost in pending_procurement_tiers:
+                    part_id = (
+                        id_by_legacy_id.get(lid) if lid else id_by_part_name.get(name)
+                    )
+                    if not part_id and name:
+                        part_id = id_by_part_name.get(name)
+                    if not part_id:
+                        # Row was skipped/conflicted earlier; just drop the
+                        # tier — the parent insert never happened.
+                        continue
+                    tier_rows.append(
+                        {
+                            "part_id": part_id,
+                            "vendor_id": None,
+                            "min_quantity": 1,
+                            "cost_per_unit": cost,
+                        }
+                    )
+
+                if tier_rows:
+                    # Upsert on (part_id, vendor_id, min_quantity) so
+                    # re-importing the same CSV updates the imported cost
+                    # instead of failing with a duplicate-key error.
+                    for batch_start in range(0, len(tier_rows), BATCH_SIZE):
+                        batch = tier_rows[batch_start : batch_start + BATCH_SIZE]
+                        (
+                            supabase.table("part_procurement_tiers")
+                            .upsert(
+                                batch,
+                                on_conflict="part_id,vendor_id,min_quantity",
+                            )
+                            .execute()
+                        )
+            except Exception as e:
+                logger.error(
+                    f"Parts import procurement-tier insert error: {str(e)}",
+                    exc_info=True,
+                )
+                sentry_sdk.capture_exception(e)
+                # Don't fail the whole import — the parts are in. The tier
+                # write failure is logged and the user can re-import or fix
+                # via the UI.
 
         logger.info(
             f"Parts import complete: {imported_count} inserted, {updated_count} upserted, {skipped} skipped"

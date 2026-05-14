@@ -9,7 +9,6 @@ function makeTier(partial: Partial<PartPricingTier>): PartPricingTier {
     company_id: 'co-1',
     sequence: partial.sequence ?? 0,
     quantity: partial.quantity ?? 1,
-    base_cost_per_unit: partial.base_cost_per_unit ?? 0,
     markup_percent: partial.markup_percent ?? null,
     unit_price: partial.unit_price ?? null,
     created_at: '2026-01-01T00:00:00Z',

@@ -244,14 +244,6 @@ export default function InventoryPage() {
     return new Date(val).toLocaleDateString();
   };
 
-  const formatCurrency = (val: number | null | undefined): string => {
-    if (val === null || val === undefined) return '—';
-    return `$${Number(val).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  };
-
   const columnDefs: ColDef<InventoryRow>[] = [
     {
       field: 'part_name',
@@ -299,17 +291,6 @@ export default function InventoryPage() {
       headerName: 'Unit',
       width: 100,
       valueFormatter: (params) => (params.value as string | null) ?? '—',
-    },
-    {
-      field: 'cost_per_unit',
-      headerName: 'Cost / Unit',
-      width: 140,
-      type: 'rightAligned',
-      // For sub-assemblies that have not yet been recalculated, cost_per_unit
-      // is null and the cell renders an em-dash. Documented behavior, not a
-      // bug: Recalculate Cost lives on the detail page where the user can
-      // see the inputs.
-      valueFormatter: (params) => formatCurrency(params.value as number | null),
     },
     {
       field: 'updated_at',

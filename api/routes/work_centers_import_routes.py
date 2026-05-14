@@ -249,7 +249,7 @@ async def validate_import(
         # First pass: name occurrences for CSV duplicate detection
         name_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             name = row.get(name_column, "").strip() if name_column else ""
             if name:
                 name_occurrences.setdefault(name.lower(), []).append(row_number)
@@ -262,7 +262,7 @@ async def validate_import(
         conflict_rows: set[int] = set()
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             name = row.get(name_column, "").strip() if name_column else ""
 
             if not name:

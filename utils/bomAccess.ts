@@ -10,13 +10,15 @@ const BOM_COLUMNS =
   'id, parent_part_id, child_part_id, quantity, unit, sequence, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
-  'id, part_name, description, primary_unit, cost_per_unit, is_stocked, source';
+  'id, part_name, description, primary_unit, is_stocked, source';
 
 const PARENT_PART_COLUMNS = 'id, part_name, description';
 
 /**
  * Get the BOM (children) for a part. Each row carries the joined child part
- * fields the BOM panel renders (name, primary_unit, cost_per_unit, etc.).
+ * fields the BOM panel renders (name, primary_unit, etc.). Cost is no
+ * longer stored on `parts` — callers resolve it live via
+ * `getComputedPartCost` / `getPartCostExplain`.
  */
 export async function getBomForPart(partId: string): Promise<BomLineWithChildPart[]> {
   const supabase = getSupabase();
@@ -39,7 +41,6 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
           part_name: string;
           description: string | null;
           primary_unit: string | null;
-          cost_per_unit: number | null;
           is_stocked: boolean;
           source: 'made' | 'bought';
         }
@@ -48,7 +49,6 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
           part_name: string;
           description: string | null;
           primary_unit: string | null;
-          cost_per_unit: number | null;
           is_stocked: boolean;
           source: 'made' | 'bought';
         }>

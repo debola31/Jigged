@@ -92,7 +92,9 @@ class PartValidationError(BaseModel):
       - "missing_part_name", "invalid_price", "invalid_qty"
       - "missing_primary_unit": is_stocked=true but primary_unit absent
       - "invalid_quantity": quantity is negative
-      - "invalid_cost": cost_per_unit is negative
+      - "invalid_cost": cost_per_unit (CSV column) is negative — execute
+        routes this into a part_procurement_tiers row when source='bought'.
+        The parts.cost_per_unit column was dropped in migration 20260514.
       - "invalid_reorder_point": reorder_point is negative
     """
 
@@ -125,6 +127,10 @@ class PartValidateRequest(BaseModel):
     # When provided (e.g. when execute_import re-validates internally), the
     # validator will skip the AI inference step and trust these values.
     pre_resolved_uoms: dict[int, str] = {}
+    # When the frontend batches validate calls, this offset is added to the
+    # per-batch index so conflict/error row_numbers reflect the row's true
+    # position in the original CSV. Default 0 = single-shot validate.
+    batch_offset: int = 0
 
 
 class PartValidateResponse(BaseModel):
@@ -223,7 +229,7 @@ PART_SCHEMA = {
     "cost_per_unit": {
         "type": "number",
         "required": False,
-        "description": "Cost per primary unit (decimal, e.g., 12.50)",
+        "description": "Cost per primary unit (decimal, e.g., 12.50). For bought parts this is written as a NULL-vendor procurement tier at min_quantity=1; for made parts it is ignored (cost is computed live from routing + BOM).",
     },
     "reorder_point": {
         "type": "number",

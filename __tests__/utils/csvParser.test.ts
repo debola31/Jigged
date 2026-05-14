@@ -216,15 +216,69 @@ Jane`;
       expect(result[1]).toEqual(['entire value is quoted', 'another quoted']);
     });
 
-    it('handles newline characters in quoted fields', () => {
-      // Note: This is a limitation - actual newlines in quotes would need
-      // different handling. This test documents current behavior.
+    // ============== RFC 4180: Newlines Inside Quoted Fields ==============
+
+    it('preserves LF inside a quoted field as part of the value', () => {
       const csv = `name,description
-John,Simple desc`;
+"Widget","line one\nline two"`;
 
       const result = parseCSV(csv);
 
-      expect(result[1]).toEqual(['John', 'Simple desc']);
+      expect(result).toHaveLength(2);
+      expect(result[1]).toEqual(['Widget', 'line one\nline two']);
+    });
+
+    it('preserves CRLF inside a quoted field as part of the value', () => {
+      const csv = `name,description\r\n"Widget","line one\r\nline two"`;
+
+      const result = parseCSV(csv);
+
+      expect(result).toHaveLength(2);
+      expect(result[1]).toEqual(['Widget', 'line one\r\nline two']);
+    });
+
+    it('does not shift columns on the row after a multi-line quoted field', () => {
+      // Regression for parts-import bug: a quoted multi-line description
+      // followed by a numeric legacy_id column must not push the legacy_id
+      // into the vendor column of the *next* row.
+      const csv = `name,description,legacy_id,vendor
+"Part A","2in. x 7in.\nForce measurement system",15354,
+"Part B","Single line",15355,Acme`;
+
+      const result = parseCSV(csv);
+
+      expect(result).toHaveLength(3);
+      expect(result[1]).toEqual([
+        'Part A',
+        '2in. x 7in.\nForce measurement system',
+        '15354',
+        '',
+      ]);
+      expect(result[2]).toEqual(['Part B', 'Single line', '15355', 'Acme']);
+    });
+
+    it('decodes both embedded newlines and escaped quotes in the same field', () => {
+      const csv = `name,description
+"Widget","line one\nhe said ""hi""\nline three"`;
+
+      const result = parseCSV(csv);
+
+      expect(result[1]).toEqual([
+        'Widget',
+        'line one\nhe said "hi"\nline three',
+      ]);
+    });
+
+    it('handles a multi-line quoted field followed by a normal row', () => {
+      const csv = `name,description
+"A","x\ny"
+"B","z"`;
+
+      const result = parseCSV(csv);
+
+      expect(result).toHaveLength(3);
+      expect(result[1]).toEqual(['A', 'x\ny']);
+      expect(result[2]).toEqual(['B', 'z']);
     });
 
     it('handles special characters in unquoted fields', () => {

@@ -39,7 +39,7 @@ export interface PartAnalyzeResponse {
 export interface PartConflictInfo {
   row_number: number;
   csv_part_name: string | null;
-  conflict_type: 'duplicate_part_name' | 'csv_duplicate';
+  conflict_type: 'duplicate_part_name' | 'csv_duplicate' | 'csv_duplicate_legacy_id';
   existing_part_id: string; // Empty string for non-DB conflicts
   existing_value: string;
 }

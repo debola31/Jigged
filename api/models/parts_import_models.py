@@ -70,6 +70,8 @@ class PartConflictInfo(BaseModel):
     conflict_type values:
       - "duplicate_part_name": part already exists in DB with this name
       - "csv_duplicate": same part_name appears multiple times in CSV
+      - "csv_duplicate_legacy_id": same legacy_id appears multiple times in CSV
+        (would cause an ON CONFLICT DO UPDATE collision at execute time)
       - "customer_not_found": legacy customer-name lookup failed
       - "unknown_vendor": preferred_vendor_name doesn't match any existing vendor
       - "unknown_unit": primary_unit could not be resolved (alias or AI inference)

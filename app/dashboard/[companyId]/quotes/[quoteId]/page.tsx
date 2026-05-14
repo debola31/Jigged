@@ -30,6 +30,9 @@ import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
+import SendQuoteEmailDialog from '@/components/quotes/SendQuoteEmailDialog';
+import EmailIcon from '@mui/icons-material/Email';
+import Snackbar from '@mui/material/Snackbar';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import {
   quoteToFormData,
@@ -59,8 +62,10 @@ export default function QuoteDetailPage() {
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   /** Tier reference data: part_id → all tiers for that part. */
   const [tiersByPart, setTiersByPart] = useState<Record<string, PartPricingTier[]>>({});
 
@@ -146,6 +151,24 @@ export default function QuoteDetailPage() {
     }
   };
 
+  const handleOpenEmailDialog = async () => {
+    if (!quote) return;
+    setError(null);
+    setPreviewLoading(true);
+    try {
+      const c = company ?? (await getCompany(companyId));
+      if (!c) {
+        throw new Error('Company info unavailable — cannot draft email.');
+      }
+      setCompany(c);
+      setEmailDialogOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open email dialog');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -210,15 +233,25 @@ export default function QuoteDetailPage() {
         >
           Back to Quotes
         </Button>
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : <VisibilityIcon />}
-          onClick={handleOpenPreview}
-          disabled={previewLoading || actionLoading}
-        >
-          View PDF
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<EmailIcon />}
+            onClick={handleOpenEmailDialog}
+            disabled={previewLoading || actionLoading}
+          >
+            Email
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : <VisibilityIcon />}
+            onClick={handleOpenPreview}
+            disabled={previewLoading || actionLoading}
+          >
+            View PDF
+          </Button>
+        </Box>
       </Box>
 
       {/* Header with Actions */}
@@ -477,8 +510,31 @@ export default function QuoteDetailPage() {
           onClose={() => setPreviewOpen(false)}
           quote={quote}
           company={company}
+          onEmail={() => setEmailDialogOpen(true)}
         />
       )}
+
+      {/* Send Quote Email Dialog */}
+      {company && (
+        <SendQuoteEmailDialog
+          open={emailDialogOpen}
+          onClose={() => setEmailDialogOpen(false)}
+          onSent={(toEmail) => {
+            setEmailDialogOpen(false);
+            setEmailSuccess(toEmail);
+          }}
+          quote={quote}
+          company={company}
+        />
+      )}
+
+      <Snackbar
+        open={!!emailSuccess}
+        autoHideDuration={5000}
+        onClose={() => setEmailSuccess(null)}
+        message={emailSuccess ? `Quote emailed to ${emailSuccess}` : ''}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      />
 
       {/* Convert to Job Modal */}
       <ConvertToJobModal

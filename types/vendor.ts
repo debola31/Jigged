@@ -40,16 +40,13 @@ export interface VendorFormData {
 }
 
 /**
- * Vendor + the derived role counts the list page renders, plus the joined
- * primary contact (if any). `primary_contact` is hydrated by
- * `getAllVendorsWithDerivedRoles` and `getVendorWithDerivedRoles` via a
- * LEFT JOIN to vendor_contacts WHERE is_primary=true. May be null when
- * the vendor has no contacts yet (a legitimate state — see the migration's
- * NOTICE log for vendors that arrived in this state from the backfill).
+ * Vendor + its joined primary contact (if any). `primary_contact` is hydrated
+ * by `getAllVendorsWithPrimaryContact` via a lookup against vendor_contacts
+ * WHERE is_primary=true. May be null when the vendor has no contacts yet
+ * (a legitimate state — see the migration's NOTICE log for vendors that
+ * arrived in this state from the backfill).
  */
-export interface VendorWithDerivedRoles extends Vendor {
-  supplies_materials_count: number;
-  performs_outside_ops_count: number;
+export interface VendorWithPrimaryContact extends Vendor {
   primary_contact: VendorContact | null;
 }
 

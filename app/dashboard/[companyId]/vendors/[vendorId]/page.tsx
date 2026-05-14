@@ -37,7 +37,7 @@ import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
 import {
-  getVendorWithDerivedRoles,
+  getVendor,
   deleteVendor,
   getPartsByPreferredVendor,
   getWorkCentersByVendor,
@@ -49,7 +49,7 @@ import {
 } from '@/utils/vendorContactsAccess';
 import { roleDisplayLabel } from '@/types/vendorContact';
 import type { VendorContact } from '@/types/vendorContact';
-import type { VendorWithDerivedRoles } from '@/types/vendor';
+import type { Vendor } from '@/types/vendor';
 import { VendorContactModal } from '@/components/vendors';
 
 interface LinkedPart {
@@ -70,7 +70,7 @@ export default function VendorDetailPage() {
   const companyId = params.companyId as string;
   const vendorId = params.vendorId as string;
 
-  const [vendor, setVendor] = useState<VendorWithDerivedRoles | null>(null);
+  const [vendor, setVendor] = useState<Vendor | null>(null);
   const [contacts, setContacts] = useState<VendorContact[]>([]);
   const [linkedParts, setLinkedParts] = useState<LinkedPart[]>([]);
   const [linkedWorkCenters, setLinkedWorkCenters] = useState<LinkedWorkCenter[]>([]);
@@ -93,7 +93,7 @@ export default function VendorDetailPage() {
   const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
-      const v = await getVendorWithDerivedRoles(vendorId);
+      const v = await getVendor(vendorId);
       setVendor(v);
       if (v) {
         const [parts, wcs, contactList] = await Promise.all([
@@ -116,12 +116,8 @@ export default function VendorDetailPage() {
   // Lighter refresh after a contact mutation — no need to reload parts/wcs.
   const refreshContacts = useCallback(async () => {
     try {
-      const [contactList, v] = await Promise.all([
-        getContactsForVendor(vendorId),
-        getVendorWithDerivedRoles(vendorId),
-      ]);
+      const contactList = await getContactsForVendor(vendorId);
       setContacts(contactList);
-      setVendor(v);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh contacts');
     }
@@ -213,8 +209,8 @@ export default function VendorDetailPage() {
     );
   }
 
-  const supplies = vendor.supplies_materials_count > 0;
-  const outside = vendor.performs_outside_ops_count > 0;
+  const supplies = linkedParts.length > 0;
+  const outside = linkedWorkCenters.length > 0;
   const hasReferences = supplies || outside;
 
   const contactBeingDeleted = deleteContactId
@@ -281,44 +277,29 @@ export default function VendorDetailPage() {
         </Alert>
       )}
 
-      {/* Header card with name + derived role chips */}
+      {/* Header card with name + created/updated timestamps top-right. */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
             <Typography variant="h5" sx={{ fontWeight: 600 }}>
               {vendor.name}
             </Typography>
-            {!supplies && !outside ? (
-              <Chip
-                size="small"
-                label="No references yet"
-                sx={{ fontWeight: 500 }}
-                variant="outlined"
-              />
-            ) : (
-              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-                {supplies && (
-                  <Chip
-                    label={`Supplies materials · ${vendor.supplies_materials_count} part${vendor.supplies_materials_count === 1 ? '' : 's'}`}
-                    sx={{
-                      fontWeight: 500,
-                      bgcolor: 'success.dark',
-                      color: 'common.white',
-                    }}
-                  />
-                )}
-                {outside && (
-                  <Chip
-                    label={`Performs outside ops · ${vendor.performs_outside_ops_count} routing${vendor.performs_outside_ops_count === 1 ? '' : 's'}`}
-                    sx={{
-                      fontWeight: 500,
-                      bgcolor: 'warning.dark',
-                      color: 'common.white',
-                    }}
-                  />
-                )}
-              </Stack>
-            )}
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Created {formatDate(vendor.created_at)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Updated {formatDate(vendor.updated_at)}
+              </Typography>
+            </Box>
           </Box>
         </CardContent>
       </Card>
@@ -541,7 +522,7 @@ export default function VendorDetailPage() {
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="subtitle1" fontWeight={500}>
                     Parts using this vendor as preferred supplier (
-                    {vendor.supplies_materials_count})
+                    {linkedParts.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 0 }}>
@@ -573,7 +554,7 @@ export default function VendorDetailPage() {
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="subtitle1" fontWeight={500}>
                     Work centers performing outside ops at this vendor (
-                    {vendor.performs_outside_ops_count})
+                    {linkedWorkCenters.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 0 }}>
@@ -604,43 +585,6 @@ export default function VendorDetailPage() {
           </Card>
         </Grid>
 
-        {/* Metadata — non-prominent. legacy_id is the import-only identifier
-            for re-import idempotency; useful for support, not for daily use. */}
-        <Grid size={{ xs: 12 }}>
-          <Card elevation={1} sx={{ bgcolor: 'background.default' }}>
-            <CardContent>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}
-              >
-                Metadata
-              </Typography>
-              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Legacy ID
-                  </Typography>
-                  <Typography variant="body2" fontFamily="monospace">
-                    {vendor.legacy_id || '—'}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Created
-                  </Typography>
-                  <Typography variant="body2">{formatDate(vendor.created_at)}</Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Updated
-                  </Typography>
-                  <Typography variant="body2">{formatDate(vendor.updated_at)}</Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
       </Grid>
 
       {/* Add / Edit contact modal */}
@@ -703,11 +647,11 @@ export default function VendorDetailPage() {
             <Alert severity="warning" sx={{ mt: 2 }}>
               This vendor is referenced by{' '}
               {supplies
-                ? `${vendor.supplies_materials_count} part${vendor.supplies_materials_count === 1 ? '' : 's'} (preferred supplier)`
+                ? `${linkedParts.length} part${linkedParts.length === 1 ? '' : 's'} (preferred supplier)`
                 : null}
               {supplies && outside ? ' and ' : ''}
               {outside
-                ? `${vendor.performs_outside_ops_count} work center${vendor.performs_outside_ops_count === 1 ? '' : 's'}`
+                ? `${linkedWorkCenters.length} work center${linkedWorkCenters.length === 1 ? '' : 's'}`
                 : null}
               . Remove those references before deleting.
             </Alert>

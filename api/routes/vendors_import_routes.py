@@ -290,7 +290,7 @@ async def validate_import(
         # Track name occurrences
         name_to_rows: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             name = row.get(name_column, "").strip() if name_column else ""
             if name:
                 name_to_rows.setdefault(name, []).append(row_number)
@@ -306,7 +306,7 @@ async def validate_import(
         conflict_rows: set[int] = set()
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             name = row.get(name_column, "").strip() if name_column else ""
 
             if not name:

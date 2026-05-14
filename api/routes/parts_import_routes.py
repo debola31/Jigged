@@ -501,7 +501,7 @@ async def validate_import(
         part_occurrences: dict[str, list[int]] = {}
         legacy_id_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
@@ -528,7 +528,7 @@ async def validate_import(
         # Determine which rows look stocked (so we know whether to require unit)
         stocked_row_numbers: set[int] = set()
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             explicit_stocked: Optional[bool] = None
             if is_stocked_column:
                 explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
@@ -546,12 +546,18 @@ async def validate_import(
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
         elif primary_unit_column or description_column:
             stocked_rows = [
-                row for i, row in enumerate(request.rows) if (i + 1) in stocked_row_numbers
+                row
+                for i, row in enumerate(request.rows)
+                if (i + 1 + request.batch_offset) in stocked_row_numbers
             ]
             stocked_index_map = {
-                idx + 1: orig_idx + 1
+                idx + 1: orig_idx + 1 + request.batch_offset
                 for idx, orig_idx in enumerate(
-                    [i for i in range(len(request.rows)) if (i + 1) in stocked_row_numbers]
+                    [
+                        i
+                        for i in range(len(request.rows))
+                        if (i + 1 + request.batch_offset) in stocked_row_numbers
+                    ]
                 )
             }
             partial = resolve_units_for_rows(
@@ -567,7 +573,7 @@ async def validate_import(
             uom_resolutions = {}
 
         for i, row in enumerate(request.rows):
-            row_number = i + 1
+            row_number = i + 1 + request.batch_offset
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )

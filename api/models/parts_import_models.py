@@ -125,6 +125,10 @@ class PartValidateRequest(BaseModel):
     # When provided (e.g. when execute_import re-validates internally), the
     # validator will skip the AI inference step and trust these values.
     pre_resolved_uoms: dict[int, str] = {}
+    # When the frontend batches validate calls, this offset is added to the
+    # per-batch index so conflict/error row_numbers reflect the row's true
+    # position in the original CSV. Default 0 = single-shot validate.
+    batch_offset: int = 0
 
 
 class PartValidateResponse(BaseModel):

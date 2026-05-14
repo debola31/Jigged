@@ -17,7 +17,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import PrintIcon from '@mui/icons-material/Print';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
@@ -28,7 +28,8 @@ import Chip from '@mui/material/Chip';
 
 import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
 import { getCompany } from '@/utils/companyAccess';
-import { generateQuotePdf } from '@/utils/quotePdf';
+import type { Company } from '@/utils/companyAccess';
+import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import {
   quoteToFormData,
@@ -57,7 +58,9 @@ export default function QuoteDetailPage() {
     searchParams.get('convert') === 'true'
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [printing, setPrinting] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [company, setCompany] = useState<Company | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   /** Tier reference data: part_id → all tiers for that part. */
   const [tiersByPart, setTiersByPart] = useState<Record<string, PartPricingTier[]>>({});
 
@@ -123,20 +126,23 @@ export default function QuoteDetailPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  const handlePrintPdf = async () => {
+  const handleOpenPreview = async () => {
     if (!quote) return;
     setError(null);
-    setPrinting(true);
+    setPreviewLoading(true);
     try {
-      const company = await getCompany(companyId);
-      if (!company) {
+      // Fetch (or reuse) the company so the preview dialog can render the
+      // shop header without doing its own data fetch.
+      const c = company ?? (await getCompany(companyId));
+      if (!c) {
         throw new Error('Company info unavailable — cannot generate PDF.');
       }
-      await generateQuotePdf(quote, company);
+      setCompany(c);
+      setPreviewOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate PDF');
+      setError(err instanceof Error ? err.message : 'Failed to open preview');
     } finally {
-      setPrinting(false);
+      setPreviewLoading(false);
     }
   };
 
@@ -207,11 +213,11 @@ export default function QuoteDetailPage() {
         <Button
           variant="contained"
           color="primary"
-          startIcon={printing ? <CircularProgress size={16} color="inherit" /> : <PrintIcon />}
-          onClick={handlePrintPdf}
-          disabled={printing || actionLoading}
+          startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : <VisibilityIcon />}
+          onClick={handleOpenPreview}
+          disabled={previewLoading || actionLoading}
         >
-          Print PDF
+          View PDF
         </Button>
       </Box>
 
@@ -463,6 +469,16 @@ export default function QuoteDetailPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Preview PDF Dialog */}
+      {company && (
+        <QuotePdfPreviewDialog
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          quote={quote}
+          company={company}
+        />
+      )}
 
       {/* Convert to Job Modal */}
       <ConvertToJobModal

@@ -56,7 +56,7 @@ vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersForPart: vi.fn().mockResolvedValue([]),
 }));
 
-import { generateQuotePdf } from '@/utils/quotePdf';
+import { generateQuotePdf, quotePdfFilename } from '@/utils/quotePdf';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 
@@ -125,24 +125,24 @@ describe('generateQuotePdf', () => {
     vi.clearAllMocks();
   });
 
-  it('renders and saves a PDF with a filename based on the quote number', async () => {
-    await generateQuotePdf(baseQuote, baseCompany);
+  it('returns the jsPDF doc without saving (caller decides what to do)', async () => {
+    const doc = await generateQuotePdf(baseQuote, baseCompany);
 
     expect(jsPDFCtor).toHaveBeenCalledWith({ unit: 'pt', format: 'letter' });
     // One main line items table + zero tier sub-tables (no tiers loaded).
     expect(autoTableFn).toHaveBeenCalled();
 
     const docInstance = jsPDFCtor.mock.results[0].value;
-    expect(docInstance.save).toHaveBeenCalledWith('Quote-Q000123.pdf');
+    expect(doc).toBe(docInstance);
+    // Saving is the caller's responsibility now.
+    expect(docInstance.save).not.toHaveBeenCalled();
   });
 
   it('renders without a customer (null customers) without throwing', async () => {
     const sparseQuote: QuoteWithRelations = { ...baseQuote, customers: null };
 
-    await expect(generateQuotePdf(sparseQuote, baseCompany)).resolves.toBeUndefined();
-
-    const docInstance = jsPDFCtor.mock.results[0].value;
-    expect(docInstance.save).toHaveBeenCalled();
+    const doc = await generateQuotePdf(sparseQuote, baseCompany);
+    expect(doc).toBeDefined();
   });
 
   it('renders the line items table with Part / Description / Order qty / Unit price / Total', async () => {
@@ -416,5 +416,11 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered.some((t: string) => t.includes('PRICING TIERS'))).toBe(false);
+  });
+});
+
+describe('quotePdfFilename', () => {
+  it('formats as Quote-{quote_number}.pdf', () => {
+    expect(quotePdfFilename(baseQuote)).toBe('Quote-Q000123.pdf');
   });
 });

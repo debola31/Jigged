@@ -107,12 +107,28 @@ async function loadTiersForQuote(
 }
 
 /**
- * Generate and download a PDF for the given quote.
+ * Filename used both when downloading and when attaching to email.
+ * Single source of truth so the preview dialog, download button, and email
+ * route all label the PDF the same way.
+ */
+export function quotePdfFilename(quote: QuoteWithRelations): string {
+  return `Quote-${quote.quote_number}.pdf`;
+}
+
+/**
+ * Build the jsPDF document for a quote and return it without writing
+ * anything to disk. Callers choose how to consume it:
+ *   - doc.save(filename)              → download
+ *   - doc.output('bloburl') as string → URL for <iframe src> previews
+ *   - doc.output('blob')              → Blob for upload (e.g., email attach)
+ *
+ * Returning the doc instead of saving means one rendering path serves all
+ * three product entry points (download, preview, email-attach).
  */
 export async function generateQuotePdf(
   quote: QuoteWithRelations,
   company: Company,
-): Promise<void> {
+): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -442,5 +458,5 @@ export async function generateQuotePdf(
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 
-  doc.save(`Quote-${quote.quote_number}.pdf`);
+  return doc;
 }

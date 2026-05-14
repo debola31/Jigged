@@ -26,7 +26,12 @@ interface BulkApplyMarkupRateDialogProps {
   onClose: () => void;
   companyId: string;
   partIds: string[];
-  onApplied: (result: { updated: number; failed: number; rateName: string }) => void;
+  onApplied: (result: {
+    updated: number;
+    failed: number;
+    priceUncomputed: number;
+    rateName: string;
+  }) => void;
 }
 
 export default function BulkApplyMarkupRateDialog({
@@ -78,6 +83,7 @@ export default function BulkApplyMarkupRateDialog({
       onApplied({
         updated: result.updated,
         failed: result.failed.length,
+        priceUncomputed: result.priceUncomputed,
         rateName: rate.name,
       });
     } catch (err) {

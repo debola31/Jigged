@@ -478,17 +478,25 @@ export default function PartsPage() {
         onClose={() => setMarkupDialogOpen(false)}
         companyId={companyId}
         partIds={selectedIds}
-        onApplied={({ updated, failed, rateName }) => {
+        onApplied={({ updated, failed, priceUncomputed, rateName }) => {
           setMarkupDialogOpen(false);
           setSelectedIds([]);
           if (gridRef.current?.api) gridRef.current.api.deselectAll();
-          const msg =
-            failed > 0
-              ? `Applied "${rateName}" to ${updated} part${updated === 1 ? '' : 's'} (${failed} failed)`
-              : `Applied "${rateName}" to ${updated} part${updated === 1 ? '' : 's'}`;
+          // Three-state message: failed (rate write blew up), priceUncomputed
+          // (rate linked but unit_price=null — missing op rate or external
+          // pricing on the part itself), and clean success.
+          const partsWord = (n: number) => `${n} part${n === 1 ? '' : 's'}`;
+          const notes: string[] = [];
+          if (priceUncomputed > 0) {
+            notes.push(`${partsWord(priceUncomputed)} couldn't compute a price`);
+          }
+          if (failed > 0) {
+            notes.push(`${failed} failed`);
+          }
+          const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
           setSnackbar({
             open: true,
-            message: msg,
+            message: `Applied "${rateName}" to ${partsWord(updated)}${suffix}`,
             severity: failed > 0 ? 'error' : 'success',
           });
         }}

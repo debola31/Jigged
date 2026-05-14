@@ -268,39 +268,64 @@ export async function cascadeRateUpdateToParts(
 }
 
 /**
- * Apply a rate to many parts in one go. Same per-part semantics as
- * applyRateToPart (link FK + snapshot tiers), sequential like
- * cascadeRateUpdateToParts so a single failure surfaces in the result
- * rather than aborting the batch. Returns counts so the caller can
- * report partial failures to the user.
+ * Apply a rate to many parts in one go. Delegates to the SQL function
+ * `bulk_apply_markup_rate` (one RPC, server-side loop) so an 8000-part
+ * apply is a single round-trip rather than 80,000+ HTTP hops via a
+ * client-side per-part loop. Same semantics as applyRateToPart:
+ *   - replaces each part's tiers with the rate's breakpoints
+ *   - links parts.markup_rate_id to the rate
+ *   - per-part errors collected (the SQL fn wraps each part in its own
+ *     EXCEPTION block so one bad part doesn't abort the batch)
+ *
+ * `priceUncomputed` is the count of parts that linked successfully but
+ * ended up with at least one null unit_price — compute_part_cost_at_qty
+ * raised (missing op rate, missing external pricing) or returned NULL
+ * (BOM bought leaf with no procurement tier). The rate IS applied for
+ * those parts; surfacing the count tells the user how many still need
+ * upstream data fixed before their prices materialize.
  */
+interface BulkApplyMarkupRateResult {
+  updated: number;
+  failed: Array<{ partId: string; error: string }>;
+  priceUncomputed: number;
+}
+
+interface BulkApplyMarkupRateRpcResult {
+  updated: number;
+  price_uncomputed: number;
+  failed: Array<{ part_id: string; error: string }>;
+}
+
 export async function bulkApplyMarkupRate(
   companyId: string,
   partIds: string[],
   rateId: string,
-): Promise<{ updated: number; failed: Array<{ partId: string; error: string }> }> {
-  if (partIds.length === 0) return { updated: 0, failed: [] };
+): Promise<BulkApplyMarkupRateResult> {
+  if (partIds.length === 0) return { updated: 0, failed: [], priceUncomputed: 0 };
 
-  const rate = await getMarkupRate(rateId);
-  if (!rate) {
-    throw new Error(`Markup rate ${rateId} not found`);
-  }
-  const tiers = breakpointsToTierInputs(rate);
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('bulk_apply_markup_rate', {
+    p_company_id: companyId,
+    p_part_ids: partIds,
+    p_rate_id: rateId,
+  });
 
-  const failed: Array<{ partId: string; error: string }> = [];
-  let updated = 0;
-  for (const partId of partIds) {
-    try {
-      await replaceTiersForPart(companyId, partId, tiers, { rateId: rate.id });
-      updated += 1;
-    } catch (err) {
-      failed.push({
-        partId,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      });
-    }
+  if (error) {
+    console.error('Error bulk-applying markup rate:', error);
+    throw error;
   }
-  return { updated, failed };
+
+  const result = (data ?? {
+    updated: 0,
+    price_uncomputed: 0,
+    failed: [],
+  }) as BulkApplyMarkupRateRpcResult;
+
+  return {
+    updated: result.updated,
+    priceUncomputed: result.price_uncomputed,
+    failed: result.failed.map((f) => ({ partId: f.part_id, error: f.error })),
+  };
 }
 
 export async function deleteMarkupRate(rateId: string): Promise<void> {

@@ -26,12 +26,18 @@
 
 BEGIN;
 
+-- statement_timeout: bumped from the default authenticated-role limit (8s on
+-- Supabase) because each part runs compute_part_cost_at_qty per breakpoint, and
+-- the client still chunks at a few hundred parts per call. 2 minutes gives a
+-- chunk plenty of headroom while still bounding a runaway call. Function-level
+-- SET only applies while inside this function — it doesn't leak to the session.
 CREATE OR REPLACE FUNCTION public.bulk_apply_markup_rate(
     p_company_id uuid,
     p_part_ids   uuid[],
     p_rate_id    uuid
 ) RETURNS jsonb
 LANGUAGE plpgsql
+SET statement_timeout = '120s'
 AS $$
 DECLARE
     v_rate_breakpoints jsonb;

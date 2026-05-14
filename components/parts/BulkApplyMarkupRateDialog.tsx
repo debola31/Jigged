@@ -13,6 +13,7 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import CircularProgress from '@mui/material/CircularProgress';
+import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import RadioButtonCheckedIcon from '@mui/icons-material/RadioButtonChecked';
@@ -45,6 +46,7 @@ export default function BulkApplyMarkupRateDialog({
   const [loadingRates, setLoadingRates] = useState(false);
   const [selectedRateId, setSelectedRateId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -77,9 +79,15 @@ export default function BulkApplyMarkupRateDialog({
     const rate = rates.find((r) => r.id === selectedRateId);
     if (!rate) return;
     setApplying(true);
+    setProgress({ done: 0, total: partIds.length });
     setError(null);
     try {
-      const result = await bulkApplyMarkupRate(companyId, partIds, selectedRateId);
+      const result = await bulkApplyMarkupRate(
+        companyId,
+        partIds,
+        selectedRateId,
+        (done, total) => setProgress({ done, total }),
+      );
       onApplied({
         updated: result.updated,
         failed: result.failed.length,
@@ -90,6 +98,7 @@ export default function BulkApplyMarkupRateDialog({
       setError(err instanceof Error ? err.message : 'Failed to apply markup rate');
     } finally {
       setApplying(false);
+      setProgress(null);
     }
   };
 
@@ -114,6 +123,22 @@ export default function BulkApplyMarkupRateDialog({
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
+        )}
+        {progress && (
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                Applying...
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {progress.done} / {progress.total}
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={progress.total > 0 ? (progress.done / progress.total) * 100 : 0}
+            />
+          </Box>
         )}
         {loadingRates ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>

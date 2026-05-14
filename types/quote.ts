@@ -67,7 +67,6 @@ export interface QuoteWithRelations extends Quote {
     contact_email?: string | null;
     addresses?: Array<{
       id: string;
-      label: string | null;
       address_line1: string | null;
       address_line2: string | null;
       city: string | null;

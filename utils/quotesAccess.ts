@@ -74,7 +74,7 @@ const QUOTE_DETAIL_SELECT = `
   customers!left(
     id, name, website, contact_name, contact_phone, contact_email,
     addresses:customer_addresses(
-      id, label,
+      id,
       address_line1, address_line2, city, state, postal_code, country,
       is_billing, is_shipping
     )

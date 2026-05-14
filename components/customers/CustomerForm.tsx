@@ -151,20 +151,10 @@ export default function CustomerForm({
   };
 
   const removeAddress = (index: number) => {
-    setFormData((prev) => {
-      const removed = prev.addresses[index];
-      const remaining = prev.addresses.filter((_, i) => i !== index);
-      // If we removed the billing or shipping row, promote the first
-      // remaining address into that role so the customer is never left
-      // without a billing address (which would break quote generation).
-      if (removed?.is_billing && remaining.length > 0 && !remaining.some((a) => a.is_billing)) {
-        remaining[0].is_billing = true;
-      }
-      if (removed?.is_shipping && remaining.length > 0 && !remaining.some((a) => a.is_shipping)) {
-        remaining[0].is_shipping = true;
-      }
-      return { ...prev, addresses: remaining };
-    });
+    setFormData((prev) => ({
+      ...prev,
+      addresses: prev.addresses.filter((_, i) => i !== index),
+    }));
   };
 
   const validateForm = async (): Promise<boolean> => {
@@ -178,21 +168,10 @@ export default function CustomerForm({
       errors.contact_email = 'Invalid email format';
     }
 
-    // Address-set validation. A customer needs at least one address tagged
-    // as billing — quote PDFs render BILL TO from it. Shipping is optional;
-    // pickShippingAddress() falls back to billing when unset.
-    if (formData.addresses.length === 0) {
-      errors.addresses = 'At least one address is required';
-    } else {
-      const anyRoleMissing = formData.addresses.some(
-        (a) => !a.is_billing && !a.is_shipping,
-      );
-      if (anyRoleMissing) {
-        errors.addresses = 'Every address must be used for billing, shipping, or both';
-      } else if (!formData.addresses.some((a) => a.is_billing)) {
-        errors.addresses = 'Pick a billing address';
-      }
-    }
+    // Addresses are optional. A row with no Billing/Shipping selected is
+    // allowed — the customer can keep an address on file without using it
+    // for either role. Quote PDFs render BILL TO from whichever address is
+    // tagged is_billing, falling back to blank if none is tagged.
 
     if (formData.name.trim() && !errors.name) {
       try {
@@ -387,18 +366,8 @@ export default function CustomerForm({
                 borderRadius: 1,
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                <TextField
-                  size="small"
-                  label="Label"
-                  placeholder="HQ / Warehouse / etc."
-                  value={addr.label}
-                  onChange={(e) => updateAddress(idx, { label: e.target.value })}
-                  disabled={loading}
-                  sx={{ flex: 1, maxWidth: 300 }}
-                />
-                <Box sx={{ flex: 1 }} />
-                {formData.addresses.length > 1 && (
+              {formData.addresses.length > 1 && (
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
                   <Tooltip title="Remove this address">
                     <IconButton
                       onClick={() => removeAddress(idx)}
@@ -408,8 +377,8 @@ export default function CustomerForm({
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                )}
-              </Box>
+                </Box>
+              )}
 
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12 }}>
@@ -495,8 +464,8 @@ export default function CustomerForm({
                     <Radio
                       name="customer-billing-address"
                       checked={addr.is_billing}
-                      onChange={() =>
-                        updateAddress(idx, { is_billing: true })
+                      onClick={() =>
+                        updateAddress(idx, { is_billing: !addr.is_billing })
                       }
                       disabled={loading}
                     />
@@ -508,8 +477,8 @@ export default function CustomerForm({
                     <Radio
                       name="customer-shipping-address"
                       checked={addr.is_shipping}
-                      onChange={() =>
-                        updateAddress(idx, { is_shipping: true })
+                      onClick={() =>
+                        updateAddress(idx, { is_shipping: !addr.is_shipping })
                       }
                       disabled={loading}
                     />

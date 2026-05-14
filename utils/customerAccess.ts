@@ -209,7 +209,6 @@ function addressRowFor(
 ): Record<string, unknown> {
   return {
     customer_id: customerId,
-    label: addr.label.trim() || null,
     address_line1: addr.address_line1.trim() || null,
     address_line2: addr.address_line2.trim() || null,
     city: addr.city.trim() || null,

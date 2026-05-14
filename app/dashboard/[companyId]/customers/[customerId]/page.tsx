@@ -266,11 +266,6 @@ export default function CustomerDetailPage() {
                   {customer.addresses.map((a) => (
                     <Box key={a.id}>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center', mb: 0.5 }}>
-                        {a.label && (
-                          <Typography variant="body2" fontWeight={600} sx={{ mr: 1 }}>
-                            {a.label}
-                          </Typography>
-                        )}
                         {a.is_billing && (
                           <Chip size="small" color="primary" label="Billing" />
                         )}

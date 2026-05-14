@@ -19,7 +19,6 @@ export interface Customer {
 export interface CustomerAddress {
   id: string;
   customer_id: string;
-  label: string | null;
   address_line1: string | null;
   address_line2: string | null;
   city: string | null;
@@ -40,7 +39,6 @@ export interface CustomerAddress {
 export interface CustomerAddressFormData {
   /** Present for existing addresses, absent for newly-added rows. */
   id?: string;
-  label: string;
   address_line1: string;
   address_line2: string;
   city: string;
@@ -79,7 +77,6 @@ export interface ImportResult {
 }
 
 export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
-  label: '',
   address_line1: '',
   address_line2: '',
   city: '',
@@ -111,7 +108,6 @@ export function customerToFormData(
     contact_email: customer.contact_email || '',
     addresses: addresses.map((a) => ({
       id: a.id,
-      label: a.label ?? '',
       address_line1: a.address_line1 ?? '',
       address_line2: a.address_line2 ?? '',
       city: a.city ?? '',

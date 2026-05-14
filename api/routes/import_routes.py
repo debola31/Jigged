@@ -473,7 +473,6 @@ async def execute_import(
                             continue
                         address_rows_to_insert.append({
                             "customer_id": inserted_customer["id"],
-                            "label": "Primary",
                             **address_data,
                             "is_billing": True,
                             "is_shipping": True,

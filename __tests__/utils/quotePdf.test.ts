@@ -84,7 +84,6 @@ const baseQuote: QuoteWithRelations = {
     addresses: [
       {
         id: 'addr-1',
-        label: 'HQ',
         address_line1: '500 Industrial Ave',
         address_line2: null,
         city: 'Detroit',

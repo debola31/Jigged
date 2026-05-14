@@ -204,7 +204,6 @@ describe('customerAccess utilities', () => {
       contact_email: 'john@test.com',
       addresses: [
         {
-          label: 'HQ',
           address_line1: '123 Main St',
           address_line2: '',
           city: 'Springfield',

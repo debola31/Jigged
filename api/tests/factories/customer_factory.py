@@ -78,7 +78,6 @@ class CustomerFactory:
         """Convert to a customer_addresses row, tagged billing+shipping."""
         return {
             "customer_id": self.id,
-            "label": "Primary",
             "address_line1": self.address_line1,
             "address_line2": self.address_line2,
             "city": self.city,

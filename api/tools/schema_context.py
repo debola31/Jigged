@@ -33,12 +33,11 @@ SCHEMA_CONTEXT = """
 ### customer_addresses
 - id: UUID (PK)
 - customer_id: UUID (FK -> customers.id) -- join via customer.id
-- label: TEXT (optional, e.g. "HQ", "Warehouse 2")
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT (default 'USA')
 - is_billing: BOOLEAN (at most one per customer — unique partial index)
 - is_shipping: BOOLEAN (at most one per customer — unique partial index)
-- CHECK constraint: at least one of is_billing/is_shipping must be true
+- Both roles can be unset; the row stays on file as a reference.
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### vendors (suppliers and outside-process providers)

@@ -135,7 +135,6 @@ describe('CustomerForm', () => {
       addresses: [
         {
           id: 'addr-1',
-          label: 'HQ',
           address_line1: '123 Main St',
           address_line2: 'Suite 100',
           city: 'Springfield',

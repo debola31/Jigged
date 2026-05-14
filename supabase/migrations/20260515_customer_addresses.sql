@@ -1,11 +1,12 @@
 -- Migration: Move customers from a single embedded address to a separate
--- customer_addresses table tagged with billing/shipping roles.
+-- customer_addresses table tagged with optional billing/shipping roles.
 --
 -- Why: customers (especially the larger ones that buy from a shop) often
 -- ship to a different facility than the one that's billed. The flat
 -- address_line1/.../country columns on customers cannot model that. The
--- new table lets a customer carry many addresses; exactly one is tagged
--- as billing and exactly one as shipping (commonly the same address).
+-- new table lets a customer carry many addresses; at most one is tagged
+-- as billing and at most one as shipping (commonly the same address).
+-- Either or both roles can be unset.
 --
 -- Clean-break per CLAUDE.md "no silent runtime fallbacks for data-at-rest
 -- issues": this migration creates the new table, backfills every existing
@@ -14,10 +15,9 @@
 -- addresses.
 --
 -- Backfill rule: for each customer with any non-null address field today,
--- insert one customer_addresses row labelled 'Primary', tagged both
--- billing+shipping. Customers with no address on record produce no rows —
--- their quote PDFs already render blank BILL TO blocks today, and this
--- migration preserves that.
+-- insert one customer_addresses row tagged both billing+shipping. Customers
+-- with no address on record produce no rows — their quote PDFs already
+-- render blank BILL TO blocks today, and this migration preserves that.
 --
 -- Read path post-migration: utils/customerAccess.ts exposes
 -- pickBillingAddress()/pickShippingAddress() helpers. The "ship-to falls
@@ -30,7 +30,6 @@ BEGIN;
 CREATE TABLE public.customer_addresses (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
-    label text,
     address_line1 text,
     address_line2 text,
     city text,
@@ -40,11 +39,7 @@ CREATE TABLE public.customer_addresses (
     is_billing boolean NOT NULL DEFAULT false,
     is_shipping boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-
-    -- An address must serve at least one role.
-    CONSTRAINT customer_addresses_has_a_role
-        CHECK (is_billing OR is_shipping)
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- At most one billing address and one shipping address per customer.
@@ -86,12 +81,12 @@ CREATE POLICY "Company members manage their customer addresses"
 
 -- Backfill: one row per existing customer that has any address content.
 INSERT INTO public.customer_addresses (
-    customer_id, label,
+    customer_id,
     address_line1, address_line2, city, state, postal_code, country,
     is_billing, is_shipping
 )
 SELECT
-    id, 'Primary',
+    id,
     address_line1, address_line2, city, state, postal_code, country,
     true, true
 FROM public.customers

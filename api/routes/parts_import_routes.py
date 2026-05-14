@@ -669,6 +669,12 @@ async def validate_import(
                 row.get(vendor_column, "").strip() if vendor_column else ""
             )
             if vendor_name and vendor_name.lower() not in vendor_name_to_id:
+                hint = (
+                    " The value looks like a numeric ID, not a vendor name — "
+                    "the source row may have been split incorrectly during CSV parsing."
+                    if vendor_name.isdigit()
+                    else ""
+                )
                 conflicts.append(
                     PartConflictInfo(
                         row_number=row_number,
@@ -676,7 +682,7 @@ async def validate_import(
                         csv_customer_code=None,
                         conflict_type="unknown_vendor",
                         existing_part_id="",
-                        existing_value=f"Vendor '{vendor_name}' not found. Import vendors first.",
+                        existing_value=f"Vendor '{vendor_name}' not found. Import vendors first.{hint}",
                     )
                 )
                 conflict_rows.add(row_number)

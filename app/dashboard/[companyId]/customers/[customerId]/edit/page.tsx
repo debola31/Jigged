@@ -30,7 +30,7 @@ export default function CustomerEditPage() {
           setError('Customer not found');
           setInitialData(EMPTY_CUSTOMER_FORM);
         } else {
-          setInitialData(customerToFormData(customer, customer.addresses));
+          setInitialData(customerToFormData(customer));
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');

@@ -278,16 +278,29 @@ describe('quotesAccess utilities', () => {
         customers: {
           id: 'customer-1',
           name: 'Test Customer',
-          contact_name: 'Jane Doe',
-          contact_email: 'jane@example.com',
-          contact_phone: '555-0100',
-          address_line1: '123 Main St',
-          address_line2: null,
-          city: 'Springfield',
-          state: 'IL',
-          postal_code: '62701',
-          country: 'USA',
           website: null,
+          customer_contacts: [
+            {
+              id: 'contact-1',
+              name: 'Jane Doe',
+              email: 'jane@example.com',
+              phone: '555-0100',
+              is_primary: true,
+            },
+          ],
+          addresses: [
+            {
+              id: 'addr-1',
+              address_line1: '123 Main St',
+              address_line2: null,
+              city: 'Springfield',
+              state: 'IL',
+              postal_code: '62701',
+              country: 'USA',
+              is_billing: true,
+              is_shipping: true,
+            },
+          ],
         },
         parts: { id: 'part-1', part_name: 'PART001', description: 'Test Part', pricing: [] },
         jobs: null,
@@ -299,13 +312,14 @@ describe('quotesAccess utilities', () => {
       const result = await getQuoteWithRelations('quote-1', 'company-1');
 
       expect(mockQueryBuilder.select).toHaveBeenCalled();
-      // Verify the expanded customer fields are requested so the PDF Bill-To
-      // block has what it needs without a second fetch.
+      // Verify the joins the PDF needs are requested: customer_contacts
+      // (for the primary contact's name/email/phone) and customer_addresses
+      // (for the BILL TO / SHIP TO blocks).
       const selectCall = (mockQueryBuilder.select as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(selectCall).toContain('contact_name');
-      expect(selectCall).toContain('contact_email');
+      expect(selectCall).toContain('customer_contacts');
       expect(selectCall).toContain('address_line1');
       expect(selectCall).toContain('postal_code');
+      expect(selectCall).toContain('is_billing');
       expect(result).not.toBeNull();
     });
   });

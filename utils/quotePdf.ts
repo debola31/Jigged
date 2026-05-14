@@ -101,6 +101,17 @@ function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
  * Includes the customer name + contact name as the first lines so each
  * block reads as a self-contained "who/where" pair.
  */
+/**
+ * Pick the customer's primary contact (at most one per the
+ * customer_contacts_one_primary index). Returns null when none is set.
+ */
+function pickPrimaryContact(
+  contacts: NonNullable<QuoteCustomer['customer_contacts']> | undefined,
+) {
+  if (!contacts || contacts.length === 0) return null;
+  return contacts.find((c) => c.is_primary) ?? null;
+}
+
 function buildAddressLines(
   customer: QuoteCustomer | null | undefined,
   address: QuoteCustomerAddress | null,
@@ -108,9 +119,11 @@ function buildAddressLines(
 ): string[] {
   if (!customer) return ['(No customer)'];
 
+  const primary = pickPrimaryContact(customer.customer_contacts);
+
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-  if (customer.contact_name) lines.push(customer.contact_name);
+  if (primary?.name) lines.push(primary.name);
 
   if (address) {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -124,8 +137,8 @@ function buildAddressLines(
   }
 
   if (withContact) {
-    if (customer.contact_phone) lines.push(customer.contact_phone);
-    if (customer.contact_email) lines.push(customer.contact_email);
+    if (primary?.phone) lines.push(primary.phone);
+    if (primary?.email) lines.push(primary.email);
   }
   return lines;
 }

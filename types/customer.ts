@@ -3,18 +3,17 @@ export interface Customer {
   company_id: string;
   name: string;
   website: string | null;
-  contact_name: string | null;
-  contact_phone: string | null;
-  contact_email: string | null;
   created_at: string;
   updated_at: string;
 }
 
 /**
  * A single address for a customer. A customer can have multiple addresses;
- * exactly one is tagged billing and exactly one is tagged shipping (the
- * same row can be both, which is the common case). See migration
- * 20260515_customer_addresses.sql.
+ * at most one is tagged as billing and at most one as shipping (the same
+ * row can be both — the common case). See migration
+ * 20260515_customer_addresses.sql + the 20260516 relax follow-up.
+ *
+ * Roles are optional — a row with neither flag set is allowed.
  */
 export interface CustomerAddress {
   id: string;
@@ -32,9 +31,8 @@ export interface CustomerAddress {
 }
 
 /**
- * Address fields the form edits. Excludes server-managed identity and
- * timestamps so the form can build new addresses and patch existing ones
- * through the same shape.
+ * Address fields the form/modal edits. Excludes server-managed identity and
+ * timestamps so create and update can use the same shape.
  */
 export interface CustomerAddressFormData {
   /** Present for existing addresses, absent for newly-added rows. */
@@ -49,19 +47,29 @@ export interface CustomerAddressFormData {
   is_shipping: boolean;
 }
 
+/**
+ * Form data captured on the create/edit Customer page. Contacts and
+ * addresses are NOT included here — they're managed via dedicated modals
+ * on the customer detail page (mirrors the vendor pattern). The create
+ * flow optionally captures one initial contact, passed alongside this
+ * form data to createCustomer().
+ */
 export interface CustomerFormData {
   name: string;
   website: string;
-  contact_name: string;
-  contact_phone: string;
-  contact_email: string;
-  addresses: CustomerAddressFormData[];
 }
 
 export type CustomerFilter = 'all' | 'active' | 'inactive';
 
 export interface CustomerWithRelations extends Customer {
   addresses: CustomerAddress[];
+  /** Primary contact only — list/detail pages fetch the full list separately. */
+  primary_contact: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
   quotes_count: number;
   jobs_count: number;
 }
@@ -90,32 +98,11 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
   name: '',
   website: '',
-  contact_name: '',
-  contact_phone: '',
-  contact_email: '',
-  addresses: [{ ...EMPTY_CUSTOMER_ADDRESS }],
 };
 
-export function customerToFormData(
-  customer: Customer,
-  addresses: CustomerAddress[],
-): CustomerFormData {
+export function customerToFormData(customer: Customer): CustomerFormData {
   return {
     name: customer.name,
     website: customer.website || '',
-    contact_name: customer.contact_name || '',
-    contact_phone: customer.contact_phone || '',
-    contact_email: customer.contact_email || '',
-    addresses: addresses.map((a) => ({
-      id: a.id,
-      address_line1: a.address_line1 ?? '',
-      address_line2: a.address_line2 ?? '',
-      city: a.city ?? '',
-      state: a.state ?? '',
-      postal_code: a.postal_code ?? '',
-      country: a.country ?? 'USA',
-      is_billing: a.is_billing,
-      is_shipping: a.is_shipping,
-    })),
   };
 }

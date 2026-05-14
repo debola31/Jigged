@@ -66,9 +66,6 @@ describe('CustomerForm', () => {
         company_id: 'test-company-id',
         name: 'New Test Company',
         website: null,
-        contact_name: null,
-        contact_phone: null,
-        contact_email: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -77,30 +74,30 @@ describe('CustomerForm', () => {
 
       render(<CustomerForm mode="create" initialData={validFormData} />);
 
-      // Click save
-      const saveButton = screen.getByRole('button', { name: /save/i });
+      const saveButton = screen.getByRole('button', { name: /create customer/i });
       await user.click(saveButton);
 
-      // Wait for form submission
       await waitFor(() => {
         expect(mockCheckCustomerNameExists).toHaveBeenCalledWith(
           'test-company-id',
           'New Test Company',
-          undefined
+          undefined,
         );
       });
 
       await waitFor(() => {
+        // 3rd arg is the optional initial-contact payload (undefined when
+        // the user didn't fill in the Initial Contact accordion).
         expect(mockCreateCustomer).toHaveBeenCalledWith(
           'test-company-id',
-          validFormData
+          validFormData,
+          undefined,
         );
       });
 
-      // Should redirect to customer detail page
       await waitFor(() => {
         expect(routerMocks.push).toHaveBeenCalledWith(
-          '/dashboard/test-company-id/customers/new-customer-uuid'
+          '/dashboard/test-company-id/customers/new-customer-uuid',
         );
       });
     });
@@ -111,8 +108,7 @@ describe('CustomerForm', () => {
 
       render(<CustomerForm mode="create" initialData={validFormData} />);
 
-      // Click save
-      const saveButton = screen.getByRole('button', { name: /save/i });
+      const saveButton = screen.getByRole('button', { name: /create customer/i });
       await user.click(saveButton);
 
       // Should show duplicate error
@@ -129,22 +125,6 @@ describe('CustomerForm', () => {
     const existingCustomerData: CustomerFormData = {
       name: 'Existing Company',
       website: 'https://existing.com',
-      contact_name: 'John Doe',
-      contact_phone: '555-5678',
-      contact_email: 'john@existing.com',
-      addresses: [
-        {
-          id: 'addr-1',
-          address_line1: '123 Main St',
-          address_line2: 'Suite 100',
-          city: 'Springfield',
-          state: 'IL',
-          postal_code: '62701',
-          country: 'USA',
-          is_billing: true,
-          is_shipping: true,
-        },
-      ],
     };
 
     it('pre-fills form with existing customer data', () => {
@@ -153,16 +133,17 @@ describe('CustomerForm', () => {
           mode="edit"
           initialData={existingCustomerData}
           customerId="existing-customer-uuid"
-        />
+        />,
       );
 
-      // Check that top-level fields are pre-filled
       expect(screen.getByLabelText(/company name/i)).toHaveValue('Existing Company');
-      expect(screen.getByLabelText(/contact name/i)).toHaveValue('John Doe');
-      // Address fields live inside the Addresses card
-      expect(screen.getByLabelText(/city/i)).toHaveValue('Springfield');
+      expect(screen.getByLabelText(/website/i)).toHaveValue('https://existing.com');
 
-      // Delete button should be visible in edit mode
+      // Edit mode hides the Initial Contact accordion — contacts +
+      // addresses are managed from the detail page.
+      expect(screen.queryByLabelText(/contact name/i)).not.toBeInTheDocument();
+
+      // Delete button is visible in edit mode
       expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
     });
   });

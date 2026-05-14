@@ -404,9 +404,11 @@ async def execute_import(
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
 
-        # Address fields live on customer_addresses now, not customers.
-        # Split each CSV row into (customer_row, address_row) so we can
-        # insert the parent first, then the child with the returned id.
+        # Contact + address fields live on customer_contacts / customer_addresses
+        # respectively. Split each CSV row into a customers payload + (optional)
+        # contact row + (optional) address row so we can insert the parent first,
+        # then the children with the returned id.
+        contact_field_keys = {"contact_name", "contact_email", "contact_phone"}
         address_field_keys = {
             "address_line1",
             "address_line2",
@@ -416,24 +418,20 @@ async def execute_import(
             "country",
         }
 
-        # Prepare rows for insertion. Keep parent + child rows together so
-        # the second insert lines up with the rows that survived the first.
-        prepared = []  # list of (customer_row, address_row_or_None)
+        prepared = []  # list of (customer_row, contact_row_or_None, address_row_or_None)
         errors = []
         skipped = 0
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
 
-            # Skip rows that failed validation or have conflicts
             if row_number in skip_row_numbers:
                 skipped += 1
                 continue
 
-            customer_data = {
-                "company_id": request.company_id,
-            }
-            address_data = {}
+            customer_data = {"company_id": request.company_id}
+            contact_data: dict = {}
+            address_data: dict = {}
 
             for db_field in CUSTOMER_SCHEMA.keys():
                 csv_column = reverse_mappings.get(db_field)
@@ -442,41 +440,67 @@ async def execute_import(
                     if value and value.lower() != "undefined":
                         if db_field in address_field_keys:
                             address_data[db_field] = value
+                        elif db_field in contact_field_keys:
+                            # contact_name → name, contact_email → email, etc.
+                            contact_data[db_field.replace("contact_", "")] = value
                         else:
                             customer_data[db_field] = value
 
-            # Default country if the CSV gave us no value for any address
-            # field (we still want a valid USA fallback for partial rows).
             if address_data and "country" not in address_data:
                 address_data["country"] = "USA"
 
+            # Only create a contact row when there's a real name — never
+            # silently invent a contact (mirrors the vendor migration's
+            # data-quality rule).
+            contact_row = None
+            if contact_data.get("name"):
+                contact_row = {
+                    "name": contact_data["name"],
+                    "role": "buyer",
+                    "email": contact_data.get("email"),
+                    "phone": contact_data.get("phone"),
+                    "is_primary": True,
+                }
+
             prepared.append(
-                (customer_data, address_data if address_data else None)
+                (
+                    customer_data,
+                    contact_row,
+                    address_data if address_data else None,
+                )
             )
 
-        # Bulk insert: customers first, then a per-customer address row for
-        # each row that had any address content.
+        # Bulk insert: customers first, then a per-customer contact row and
+        # address row for each row that had matching content.
         imported_count = 0
         if prepared:
             try:
-                customers_payload = [c for c, _ in prepared]
+                customers_payload = [c for c, _, _ in prepared]
                 response = supabase.table("customers").insert(customers_payload).execute()
                 imported_count = len(response.data) if response.data else 0
 
-                # Insert the matching address rows. response.data preserves
-                # insert order, so we can zip it back to the (customer, address)
-                # pairs we prepared.
                 if response.data:
+                    contact_rows_to_insert = []
                     address_rows_to_insert = []
-                    for inserted_customer, (_, address_data) in zip(response.data, prepared):
-                        if not address_data:
-                            continue
-                        address_rows_to_insert.append({
-                            "customer_id": inserted_customer["id"],
-                            **address_data,
-                            "is_billing": True,
-                            "is_shipping": True,
-                        })
+                    for inserted_customer, (_, contact_row, address_data) in zip(
+                        response.data, prepared
+                    ):
+                        if contact_row:
+                            contact_rows_to_insert.append({
+                                "customer_id": inserted_customer["id"],
+                                **contact_row,
+                            })
+                        if address_data:
+                            address_rows_to_insert.append({
+                                "customer_id": inserted_customer["id"],
+                                **address_data,
+                                "is_billing": True,
+                                "is_shipping": True,
+                            })
+                    if contact_rows_to_insert:
+                        supabase.table("customer_contacts").insert(
+                            contact_rows_to_insert
+                        ).execute()
                     if address_rows_to_insert:
                         supabase.table("customer_addresses").insert(
                             address_rows_to_insert

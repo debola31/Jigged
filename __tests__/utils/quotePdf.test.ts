@@ -77,10 +77,16 @@ const baseQuote: QuoteWithRelations = {
   customers: {
     id: 'customer-1',
     name: 'Acme Machining',
-    contact_name: 'Jane Smith',
-    contact_email: 'jane@acme.example',
-    contact_phone: '555-0123',
     website: null,
+    customer_contacts: [
+      {
+        id: 'contact-1',
+        name: 'Jane Smith',
+        email: 'jane@acme.example',
+        phone: '555-0123',
+        is_primary: true,
+      },
+    ],
     addresses: [
       {
         id: 'addr-1',

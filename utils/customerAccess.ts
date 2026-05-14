@@ -2,16 +2,59 @@ import { getSupabase } from '@/lib/supabase';
 import type {
   Customer,
   CustomerAddress,
-  CustomerAddressFormData,
   CustomerFormData,
   CustomerFilter,
   CustomerWithRelations,
   CustomerWithAddresses,
   ImportResult,
 } from '@/types/customer';
+import type {
+  CustomerContact,
+  CustomerContactFormData,
+} from '@/types/customerContact';
+import { createCustomerContact } from '@/utils/customerContactsAccess';
 
 /**
- * Get paginated list of customers for a company
+ * Customer access layer.
+ *
+ * Customer rows hold just identity (name, website). Contacts live in
+ * customer_contacts and are managed via utils/customerContactsAccess.ts.
+ * Addresses live in customer_addresses and are managed via
+ * utils/customerAddressesAccess.ts.
+ *
+ * createCustomer() optionally takes one initial contact, which is inserted
+ * as the primary after the parent row is created — mirrors VendorForm's
+ * "Initial Contact (optional)" accordion behavior.
+ */
+
+/** Joined customer + primary contact shape returned by the list queries. */
+type CustomerWithPrimaryContactRow = Customer & {
+  customer_contacts?: Array<{
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    is_primary: boolean;
+  }> | null;
+};
+
+function extractPrimaryContact(
+  row: CustomerWithPrimaryContactRow,
+): CustomerWithRelations['primary_contact'] {
+  const primary = (row.customer_contacts ?? []).find((c) => c.is_primary);
+  if (!primary) return null;
+  return {
+    id: primary.id,
+    name: primary.name,
+    email: primary.email,
+    phone: primary.phone,
+  };
+}
+
+/**
+ * Get paginated list of customers for a company.
+ * Joins customer_contacts (primary only) + customer_addresses so the AG Grid
+ * list can render Contact and Location columns without per-row fetches.
  */
 export async function getCustomers(
   companyId: string,
@@ -21,13 +64,16 @@ export async function getCustomers(
   limit: number = 25,
   sortField: string = 'name',
   sortDirection: 'asc' | 'desc' = 'asc'
-): Promise<{ data: CustomerWithAddresses[]; total: number }> {
+): Promise<{ data: CustomerWithRelations[]; total: number }> {
   const supabase = getSupabase();
   const offset = (page - 1) * limit;
 
   let query = supabase
     .from('customers')
-    .select('*, addresses:customer_addresses(*)', { count: 'exact' })
+    .select(
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      { count: 'exact' },
+    )
     .eq('company_id', companyId)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
@@ -43,13 +89,19 @@ export async function getCustomers(
     throw error;
   }
 
-  return { data: data || [], total: count || 0 };
+  const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
+    ...r,
+    addresses: r.addresses ?? [],
+    primary_contact: extractPrimaryContact(r),
+    quotes_count: 0,
+    jobs_count: 0,
+  }));
+
+  return { data: rows, total: count || 0 };
 }
 
 /**
  * Get all customers for a company (no pagination).
- * Fetches in batches of 1000 to bypass Supabase's default row limit.
- * Use this for client-side pagination in AG Grid.
  */
 export async function getAllCustomers(
   companyId: string,
@@ -57,17 +109,19 @@ export async function getAllCustomers(
   search: string = '',
   sortField: string = 'name',
   sortDirection: 'asc' | 'desc' = 'asc'
-): Promise<CustomerWithAddresses[]> {
+): Promise<CustomerWithRelations[]> {
   const supabase = getSupabase();
   const BATCH_SIZE = 1000;
-  let allData: CustomerWithAddresses[] = [];
+  let allData: CustomerWithRelations[] = [];
   let offset = 0;
   let hasMore = true;
 
   while (hasMore) {
     let query = supabase
       .from('customers')
-      .select('*, addresses:customer_addresses(*)')
+      .select(
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      )
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -83,7 +137,15 @@ export async function getAllCustomers(
       throw error;
     }
 
-    allData = [...allData, ...(data || [])];
+    const batch = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
+      ...r,
+      addresses: r.addresses ?? [],
+      primary_contact: extractPrimaryContact(r),
+      quotes_count: 0,
+      jobs_count: 0,
+    }));
+
+    allData = [...allData, ...batch];
 
     hasMore = (data?.length || 0) === BATCH_SIZE;
     offset += BATCH_SIZE;
@@ -93,7 +155,8 @@ export async function getAllCustomers(
 }
 
 /**
- * Get a single customer by ID, with their addresses joined.
+ * Get a single customer by ID, with addresses joined.
+ * Use getContactsForCustomer() from customerContactsAccess for the contact list.
  */
 export async function getCustomer(
   customerId: string,
@@ -120,7 +183,9 @@ export async function getCustomer(
 }
 
 /**
- * Get a customer with addresses + related quotes and jobs counts
+ * Get a customer with addresses + related quotes/jobs counts.
+ * (Contacts are loaded separately by the detail page so the inline contact
+ * CRUD has its own fetch path.)
  */
 export async function getCustomerWithRelations(
   customerId: string
@@ -129,7 +194,9 @@ export async function getCustomerWithRelations(
 
   const { data: customer, error: customerError } = await supabase
     .from('customers')
-    .select('*, addresses:customer_addresses(*)')
+    .select(
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+    )
     .eq('id', customerId)
     .single();
 
@@ -160,17 +227,19 @@ export async function getCustomerWithRelations(
     console.error('Error fetching jobs count:', jobsError);
   }
 
+  const typedCustomer = customer as CustomerWithPrimaryContactRow & {
+    addresses?: CustomerAddress[];
+  };
+
   return {
-    ...customer,
-    addresses: (customer.addresses ?? []) as CustomerAddress[],
+    ...typedCustomer,
+    addresses: typedCustomer.addresses ?? [],
+    primary_contact: extractPrimaryContact(typedCustomer),
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
   };
 }
 
-/**
- * Check if a customer name already exists for a company
- */
 export async function checkCustomerNameExists(
   companyId: string,
   name: string,
@@ -199,38 +268,14 @@ export async function checkCustomerNameExists(
 }
 
 /**
- * Normalize an address form row for insert/update against the
- * customer_addresses table. Empty strings become NULL so the DB doesn't
- * store filler whitespace.
- */
-function addressRowFor(
-  customerId: string,
-  addr: CustomerAddressFormData,
-): Record<string, unknown> {
-  return {
-    customer_id: customerId,
-    address_line1: addr.address_line1.trim() || null,
-    address_line2: addr.address_line2.trim() || null,
-    city: addr.city.trim() || null,
-    state: addr.state.trim() || null,
-    postal_code: addr.postal_code.trim() || null,
-    country: addr.country.trim() || 'USA',
-    is_billing: addr.is_billing,
-    is_shipping: addr.is_shipping,
-  };
-}
-
-/**
- * Create a new customer along with its addresses.
- *
- * Supabase doesn't support client-side multi-table transactions. We insert
- * the parent customer first, then the address rows. If the address insert
- * fails, the orphan customer remains — the caller is expected to surface
- * the error and let the user retry (or delete and recreate).
+ * Create a new customer. Optionally captures one initial contact (forced
+ * to is_primary=true) — matches the VendorForm "Initial Contact" pattern.
+ * Addresses are added separately from the detail page after creation.
  */
 export async function createCustomer(
   companyId: string,
-  formData: CustomerFormData
+  formData: CustomerFormData,
+  initialContact?: CustomerContactFormData,
 ): Promise<Customer> {
   const supabase = getSupabase();
 
@@ -240,9 +285,6 @@ export async function createCustomer(
       company_id: companyId,
       name: formData.name.trim(),
       website: formData.website.trim() || null,
-      contact_name: formData.contact_name.trim() || null,
-      contact_phone: formData.contact_phone.trim() || null,
-      contact_email: formData.contact_email.trim() || null,
     })
     .select()
     .single();
@@ -252,40 +294,35 @@ export async function createCustomer(
     throw error;
   }
 
-  if (formData.addresses.length > 0) {
-    const rows = formData.addresses.map((a) => addressRowFor(customer.id, a));
-    const { error: addrError } = await supabase
-      .from('customer_addresses')
-      .insert(rows);
-    if (addrError) {
-      console.error('Error creating customer addresses:', addrError);
-      throw addrError;
+  if (initialContact) {
+    try {
+      await createCustomerContact(customer.id, {
+        ...initialContact,
+        is_primary: true,
+      });
+    } catch (contactError) {
+      // Customer row was created but contact insert failed. Surface the
+      // error so the user can retry from the detail page — leaving the
+      // orphan customer is preferable to silently swallowing the contact.
+      console.error('Initial contact insert failed:', contactError);
+      throw contactError;
     }
   }
 
   return customer;
 }
 
-/**
- * Update an existing customer and replace its address set. We delete the
- * old addresses and re-insert from the form to avoid the ordering
- * complexity of diffing the two sets — the table is small per customer
- * (typically 1–3 rows) so the rewrite is cheap.
- */
 export async function updateCustomer(
   customerId: string,
   formData: CustomerFormData
 ): Promise<Customer> {
   const supabase = getSupabase();
 
-  const { data: customer, error } = await supabase
+  const { data, error } = await supabase
     .from('customers')
     .update({
       name: formData.name.trim(),
       website: formData.website.trim() || null,
-      contact_name: formData.contact_name.trim() || null,
-      contact_phone: formData.contact_phone.trim() || null,
-      contact_email: formData.contact_email.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', customerId)
@@ -297,51 +334,21 @@ export async function updateCustomer(
     throw error;
   }
 
-  const { error: delError } = await supabase
-    .from('customer_addresses')
-    .delete()
-    .eq('customer_id', customerId);
-  if (delError) {
-    console.error('Error clearing customer addresses:', delError);
-    throw delError;
-  }
-
-  if (formData.addresses.length > 0) {
-    const rows = formData.addresses.map((a) => addressRowFor(customerId, a));
-    const { error: addrError } = await supabase
-      .from('customer_addresses')
-      .insert(rows);
-    if (addrError) {
-      console.error('Error inserting customer addresses:', addrError);
-      throw addrError;
-    }
-  }
-
-  return customer;
+  return data;
 }
 
-/**
- * Delete a customer permanently. Addresses cascade via FK.
- */
 export async function softDeleteCustomer(customerId: string): Promise<void> {
   const supabase = getSupabase();
-
   const { error } = await supabase
     .from('customers')
     .delete()
     .eq('id', customerId);
-
   if (error) {
     console.error('Error deleting customer:', error);
     throw error;
   }
 }
 
-/**
- * Bulk delete customers permanently.
- * Deletes in batches to avoid URL length limits.
- * CRITICAL: Catches FK constraint error and throws user-friendly message.
- */
 export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<void> {
   if (customerIds.length === 0) return;
 
@@ -377,19 +384,23 @@ export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<vo
 }
 
 /**
- * Bulk import customers from CSV data.
+ * Bulk import customers from CSV. Mapped CSV columns can populate the
+ * customers row (name, website) and optionally a single contact row +
+ * single address row per imported customer.
  *
- * Each row produces one customer row plus one customer_addresses row
- * (tagged billing+shipping, default for both, label 'Primary') when any
- * address field is populated. Customers with no address fields produce no
- * address row.
+ * NOTE: the FastAPI importer in api/routes/import_routes.py is the
+ * primary path for production CSV import. This helper exists for
+ * client-side imports / tests.
  */
 export async function bulkImportCustomers(
   companyId: string,
-  rows: CustomerFormData[]
+  rows: Array<CustomerFormData & {
+    contact?: CustomerContactFormData;
+    address?: CustomerAddress;
+  }>,
 ): Promise<ImportResult> {
-  const supabase = getSupabase();
   const results: ImportResult = { imported: 0, skipped: 0, errors: [] };
+  const supabase = getSupabase();
 
   const { data: existing } = await supabase
     .from('customers')
@@ -397,9 +408,8 @@ export async function bulkImportCustomers(
     .eq('company_id', companyId);
 
   const existingNames = new Set(
-    (existing || []).map((c: { name: string }) => c.name.toLowerCase())
+    (existing || []).map((c: { name: string }) => c.name.toLowerCase()),
   );
-
   const importedNames = new Set<string>();
 
   for (let i = 0; i < rows.length; i++) {
@@ -432,51 +442,30 @@ export async function bulkImportCustomers(
       continue;
     }
 
-    const { data: created, error } = await supabase
-      .from('customers')
-      .insert({
-        company_id: companyId,
-        name: row.name.trim(),
-        website: row.website?.trim() || null,
-        contact_name: row.contact_name?.trim() || null,
-        contact_phone: row.contact_phone?.trim() || null,
-        contact_email: row.contact_email?.trim() || null,
-      })
-      .select()
-      .single();
-
-    if (error || !created) {
-      results.errors.push({ row: rowNum, reason: error?.message ?? 'insert failed' });
+    try {
+      await createCustomer(
+        companyId,
+        { name: row.name.trim(), website: row.website ?? '' },
+        row.contact,
+      );
+      results.imported++;
+      importedNames.add(nameKey);
+      existingNames.add(nameKey);
+    } catch (err) {
+      results.errors.push({
+        row: rowNum,
+        reason: err instanceof Error ? err.message : 'insert failed',
+      });
       results.skipped++;
-      continue;
     }
-
-    if (row.addresses && row.addresses.length > 0) {
-      const addressRows = row.addresses.map((a) => addressRowFor(created.id, a));
-      const { error: addrError } = await supabase
-        .from('customer_addresses')
-        .insert(addressRows);
-      if (addrError) {
-        // Customer row was created but address insert failed. Surface the
-        // error with the customer name so the operator can fix in-app.
-        results.errors.push({
-          row: rowNum,
-          reason: `Customer created but address insert failed: ${addrError.message}`,
-        });
-      }
-    }
-
-    results.imported++;
-    importedNames.add(nameKey);
-    existingNames.add(nameKey);
   }
 
   return results;
 }
 
 /**
- * Return the address tagged is_billing for the customer (at most one
- * exists per the unique partial index). Returns null when none is set.
+ * Return the address tagged is_billing for the customer. Returns null when
+ * none is set.
  */
 export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
@@ -497,3 +486,7 @@ export function pickShippingAddress(
     pickBillingAddress(customer)
   );
 }
+
+// Helper re-exports so older callers that imported types from this file
+// keep working without changes.
+export type { CustomerContact };

@@ -72,7 +72,8 @@ const QUOTE_LIST_SELECT = `
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(
-    id, name, website, contact_name, contact_phone, contact_email,
+    id, name, website,
+    customer_contacts(id, name, email, phone, is_primary),
     addresses:customer_addresses(
       id,
       address_line1, address_line2, city, state, postal_code, country,

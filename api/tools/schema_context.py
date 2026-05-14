@@ -55,8 +55,9 @@ SCHEMA_CONTEXT = """
 - is_stocked: BOOLEAN (default false) -- this part is tracked as on-hand stock
 - primary_unit: TEXT (required when is_stocked=true; e.g. 'ea', 'lb', 'ft')
 - quantity: NUMERIC (default 0; current stock-on-hand, >= 0)
-- cost_per_unit: NUMERIC(12,4) (latest computed unit cost; nullable until recalculated)
-- cost_recalculated_at: TIMESTAMPTZ (nullable; set by recalculate_part_cost())
+- (Cost is computed live by compute_part_cost_at_qty(part_id, qty); no
+  cost column on parts. For bought parts the cost comes from
+  part_procurement_tiers; for made parts it's labor + setup/qty + BOM rollup.)
 - reorder_point: NUMERIC (nullable; reorder when quantity drops to this)
 - preferred_vendor_id: UUID (FK -> vendors.id, nullable)
 - legacy_id: TEXT (unique per company; carried from a prior system on import)
@@ -73,10 +74,12 @@ SCHEMA_CONTEXT = """
 - company_id: UUID -- ALWAYS filter with $1
 - sequence: INTEGER (unique per part)
 - quantity: INTEGER (>0; tier breakpoint)
-- base_cost_per_unit: NUMERIC(12,4)
 - markup_percent: NUMERIC(5,2)
-- unit_price: NUMERIC(12,4)
+- unit_price: NUMERIC(12,4) (computed at save time: live base × (1 + markup/100))
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- The base cost for a tier is recomputed live via
+  compute_part_cost_at_qty(part_id, tier.quantity) — no stored
+  base_cost_per_unit column.
 
 ### parts_bom (Bill-Of-Materials — REPLACES routing_materials; NO company_id, join via parts)
 - id: UUID (PK)
@@ -237,11 +240,14 @@ SCHEMA_CONTEXT = """
 - external_setup_cost: NUMERIC(12,4) -- one-time per job (external only)
 - instructions: TEXT, metadata: JSONB
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- COST CONTRACT (mirrors recalculate_part_cost):
+- COST CONTRACT (mirrors compute_part_cost_at_qty, migration 20260514):
     * internal: cost = (setup_minutes/qty + cycle_minutes_per_unit)
                        * COALESCE(labor_rate_override, work_centers.labor_rate)
                        / 60.0
     * external: cost = external_unit_price + external_setup_cost / qty
+  Setup amortization for sub-assemblies follows from bom_qty * sub_cost_at(
+  cumulative_qty): one sub-assembly setup spread across the whole parent
+  batch run, contributing sub_setup / parent_order_qty per parent unit.
 
 ### inventory_transactions (stock movements; references parts.id, NOT inventory_items)
 - id: UUID (PK)

@@ -354,7 +354,12 @@ export async function createQuote(
     sequence += 10;
 
     try {
-      await writeCostSnapshotsForPart(quote.id, companyId, block.part_id);
+      await writeCostSnapshotsForPart(
+        quote.id,
+        companyId,
+        block.part_id,
+        block.order_quantity,
+      );
     } catch (snapshotError) {
       console.warn('Failed to write cost snapshot for part:', block.part_id, snapshotError);
       Sentry.captureException(snapshotError, { level: 'warning' });
@@ -467,15 +472,21 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
  * Write (or overwrite) per-op + per-material cost snapshots for a single
  * (quote, part) pair using the live routing. Multi-part quotes call this
  * once per distinct part.
+ *
+ * `orderQuantity` is passed through to `calculateRoutingCost` so each
+ * material's per-unit cost in the snapshot reflects the child's tier at
+ * the cumulative qty the parent batch consumes. Without this, a quote at
+ * qty=100 would snapshot child costs as if qty were 1.
  */
 async function writeCostSnapshotsForPart(
   quoteId: string,
   companyId: string,
   partId: string,
+  orderQuantity: number,
 ): Promise<void> {
   const supabase = getSupabase();
 
-  const breakdown = await calculateRoutingCost(partId);
+  const breakdown = await calculateRoutingCost(partId, orderQuantity);
   if (!breakdown) return;
 
   // Clear existing snapshot rows for this (quote, part) — idempotent.

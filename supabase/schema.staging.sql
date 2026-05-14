@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-14T12:20:42Z
+-- Generated: 2026-05-14T17:39:57Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -269,8 +269,6 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "is_stocked" boolean NOT NULL DEFAULT false,
     "primary_unit" text,
     "quantity" numeric NOT NULL DEFAULT 0,
-    "cost_per_unit" numeric(12,4),
-    "cost_recalculated_at" timestamp with time zone,
     "reorder_point" numeric,
     "preferred_vendor_id" uuid,
     "legacy_id" text,
@@ -293,7 +291,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "company_id" uuid NOT NULL,
     "sequence" integer NOT NULL,
     "quantity" integer NOT NULL,
-    "base_cost_per_unit" numeric(12,4),
     "markup_percent" numeric(5,2),
     "unit_price" numeric(12,4),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
@@ -2137,6 +2134,204 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.compute_part_cost_at_qty(p_part_id uuid, p_qty numeric)
+ RETURNS numeric
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_source text;
+    v_routing_id uuid;
+    v_total numeric := 0;
+    v_op RECORD;
+    v_op_cost numeric;
+    v_bom RECORD;
+    v_to_primary_factor numeric;
+    v_qty_in_primary_unit numeric;
+    v_child_cost numeric;
+    v_tier_cost numeric;
+BEGIN
+    IF p_qty IS NULL OR p_qty <= 0 THEN
+        RAISE EXCEPTION 'compute_part_cost_at_qty: p_qty must be > 0 (got %)', p_qty
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT source INTO v_source FROM public.parts WHERE id = p_part_id;
+    IF v_source IS NULL THEN
+        RAISE EXCEPTION 'compute_part_cost_at_qty: part % not found', p_part_id;
+    END IF;
+
+    -- ---------- Bought parts: resolve to a procurement tier ----------
+    IF v_source = 'bought' THEN
+        SELECT t.cost_per_unit
+          INTO v_tier_cost
+          FROM public.part_procurement_tiers t
+         WHERE t.part_id = p_part_id
+           AND t.min_quantity <= p_qty
+           AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+         ORDER BY (t.vendor_id IS NULL) ASC,
+                  t.cost_per_unit ASC,
+                  t.min_quantity DESC
+         LIMIT 1;
+        RETURN v_tier_cost;  -- NULL propagates if no tier matches
+    END IF;
+
+    -- ---------- Made parts: own routing + BOM rollup ----------
+    SELECT id INTO v_routing_id FROM public.routings WHERE part_id = p_part_id;
+
+    IF v_routing_id IS NOT NULL THEN
+        FOR v_op IN
+            SELECT ro.setup_minutes,
+                   ro.cycle_minutes_per_unit,
+                   ro.labor_rate_override,
+                   ro.external_unit_price,
+                   ro.external_setup_cost,
+                   wc.kind          AS wc_kind,
+                   wc.labor_rate    AS wc_labor_rate
+              FROM public.routing_operations ro
+              JOIN public.work_centers wc ON wc.id = ro.work_center_id
+             WHERE ro.routing_id = v_routing_id
+        LOOP
+            IF v_op.wc_kind = 'internal' THEN
+                IF v_op.labor_rate_override IS NULL AND v_op.wc_labor_rate IS NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot compute cost for part %: internal routing op has no labor rate (neither override nor work_center default)',
+                        p_part_id
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                v_op_cost := (COALESCE(v_op.setup_minutes, 0) / p_qty
+                              + COALESCE(v_op.cycle_minutes_per_unit, 0))
+                             * COALESCE(v_op.labor_rate_override, v_op.wc_labor_rate)
+                             / 60.0;
+            ELSE
+                IF v_op.external_unit_price IS NULL AND v_op.external_setup_cost IS NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot compute cost for part %: external routing op has no pricing (neither external_unit_price nor external_setup_cost)',
+                        p_part_id
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                v_op_cost := COALESCE(v_op.external_unit_price, 0)
+                             + COALESCE(v_op.external_setup_cost, 0) / p_qty;
+            END IF;
+            v_total := v_total + v_op_cost;
+        END LOOP;
+    END IF;
+
+    FOR v_bom IN
+        SELECT b.quantity,
+               b.unit,
+               b.child_part_id,
+               c.primary_unit AS child_primary_unit
+          FROM public.parts_bom b
+          JOIN public.parts c ON c.id = b.child_part_id
+         WHERE b.parent_part_id = p_part_id
+    LOOP
+        IF v_bom.unit IS DISTINCT FROM v_bom.child_primary_unit THEN
+            SELECT to_primary_factor INTO v_to_primary_factor
+              FROM public.parts_unit_conversions
+             WHERE part_id = v_bom.child_part_id
+               AND from_unit = v_bom.unit;
+            IF v_to_primary_factor IS NULL THEN
+                RAISE EXCEPTION
+                    'No unit conversion from % to % for part %',
+                    v_bom.unit, v_bom.child_primary_unit, v_bom.child_part_id
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            v_qty_in_primary_unit := v_bom.quantity * v_to_primary_factor;
+        ELSE
+            v_qty_in_primary_unit := v_bom.quantity;
+        END IF;
+
+        v_child_cost := public.compute_part_cost_at_qty(
+            v_bom.child_part_id,
+            p_qty * v_qty_in_primary_unit
+        );
+
+        IF v_child_cost IS NULL THEN
+            RETURN NULL;
+        END IF;
+
+        v_total := v_total + v_qty_in_primary_unit * v_child_cost;
+    END LOOP;
+
+    RETURN v_total;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_part_cost_explain(p_part_id uuid, p_qty numeric)
+ RETURNS TABLE(unit_cost numeric, missing_leaves jsonb)
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_missing jsonb;
+BEGIN
+    WITH RECURSIVE tree(part_id, part_name, source, cumulative_qty, depth) AS (
+        SELECT p.id, p.part_name, p.source, p_qty, 0
+          FROM public.parts p
+         WHERE p.id = p_part_id
+
+        UNION ALL
+
+        SELECT c.id,
+               c.part_name,
+               c.source,
+               t.cumulative_qty *
+                   CASE
+                       WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
+                           b.quantity * COALESCE(
+                               (SELECT uc.to_primary_factor
+                                  FROM public.parts_unit_conversions uc
+                                 WHERE uc.part_id = c.id
+                                   AND uc.from_unit = b.unit),
+                               1
+                           )
+                       ELSE b.quantity
+                   END,
+               t.depth + 1
+          FROM tree t
+          JOIN public.parts_bom b ON b.parent_part_id = t.part_id
+          JOIN public.parts c     ON c.id = b.child_part_id
+         WHERE t.source = 'made'
+           AND t.depth < 50
+    ),
+    missing AS (
+        SELECT tr.part_id, tr.part_name, tr.depth, tr.cumulative_qty AS qty_required
+          FROM tree tr
+         WHERE tr.source = 'bought'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM public.part_procurement_tiers t
+                WHERE t.part_id = tr.part_id
+                  AND t.min_quantity <= tr.cumulative_qty
+                  AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+           )
+    )
+    SELECT COALESCE(
+              jsonb_agg(
+                  jsonb_build_object(
+                      'part_id', m.part_id,
+                      'part_name', m.part_name,
+                      'depth', m.depth,
+                      'qty_required', m.qty_required
+                  )
+                  ORDER BY m.depth DESC, m.part_name ASC
+              ),
+              '[]'::jsonb
+           )
+      INTO v_missing
+      FROM missing m;
+
+    unit_cost := public.compute_part_cost_at_qty(p_part_id, p_qty);
+    missing_leaves := v_missing;
+    RETURN NEXT;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.create_demo_company(p_source_company_id uuid, p_user_id uuid, p_template_name character varying DEFAULT 'default'::character varying)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -2341,20 +2536,20 @@ CREATE OR REPLACE FUNCTION public.get_procurement_cost(p_part_id uuid, p_qty num
 AS $function$
 DECLARE
     v_tier RECORD;
-    v_fallback numeric;
 BEGIN
-    -- Pick the cheapest non-expired tier across vendors where the requested
-    -- quantity meets or exceeds the tier's min_quantity break.
+    -- Pick the cheapest non-expired tier where min_quantity ≤ p_qty, with
+    -- vendor-specific tiers (vendor_id IS NOT NULL) preferred over NULL-vendor
+    -- tiers (import / internal-estimate rows). NULL-vendor wins only when no
+    -- vendor-specific tier matches the qty.
     SELECT t.id, t.cost_per_unit, t.vendor_id
       INTO v_tier
       FROM public.part_procurement_tiers t
      WHERE t.part_id = p_part_id
        AND t.min_quantity <= p_qty
        AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
-     ORDER BY t.cost_per_unit ASC,
-              t.min_quantity DESC,
-              -- Prefer a real vendor over an "internal estimate" tie.
-              t.vendor_id NULLS LAST
+     ORDER BY (t.vendor_id IS NULL) ASC,
+              t.cost_per_unit ASC,
+              t.min_quantity DESC
      LIMIT 1;
 
     IF FOUND THEN
@@ -2363,23 +2558,8 @@ BEGIN
         tier_id := v_tier.id;
         source := 'tier';
         RETURN NEXT;
-        RETURN;
     END IF;
-
-    -- No matching tier — fall back to the part's snapshot cost. This branch
-    -- intentionally fires for:
-    --   - bought parts with no tier sheet at all
-    --   - bought parts whose tier sheets all start above p_qty
-    --   - bought parts whose tier sheets are all expired
-    --   - made parts (which never have tier sheets; cost_per_unit is the
-    --     recalculate_part_cost snapshot)
-    SELECT cost_per_unit INTO v_fallback FROM public.parts WHERE id = p_part_id;
-
-    unit_cost := v_fallback;
-    vendor_id := NULL;
-    tier_id := NULL;
-    source := 'fallback';
-    RETURN NEXT;
+    -- No row returned when no tier matches. Callers must treat empty as NULL.
 END;
 $function$
 
@@ -2513,138 +2693,6 @@ CREATE OR REPLACE FUNCTION public.is_system_admin(check_user_id uuid)
 AS $function$
 BEGIN
     RETURN EXISTS (SELECT 1 FROM system_admins WHERE user_id = check_user_id);
-END;
-$function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.recalculate_part_cost(p_part_id uuid)
- RETURNS numeric
- LANGUAGE plpgsql
-AS $function$
-DECLARE
-    v_source text;
-    v_routing_id uuid;
-    v_total_cost numeric := 0;
-    v_op record;
-    v_op_cost numeric;
-    v_bom record;
-    v_to_primary_factor numeric;
-    v_qty_in_primary_unit numeric;
-    v_child_unit_cost numeric;
-BEGIN
-    SELECT source INTO v_source FROM parts WHERE id = p_part_id;
-    IF v_source IS NULL THEN
-        RAISE EXCEPTION 'part % not found', p_part_id;
-    END IF;
-    IF v_source <> 'made' THEN
-        -- Bought parts: cost is the procurement cost; no rollup to compute.
-        RETURN (SELECT cost_per_unit FROM parts WHERE id = p_part_id);
-    END IF;
-
-    SELECT id INTO v_routing_id FROM routings WHERE part_id = p_part_id;
-
-    -- Routing operations (only if a routing exists; some made parts may not
-    -- have one yet, e.g. immediately after creation).
-    IF v_routing_id IS NOT NULL THEN
-        FOR v_op IN
-            SELECT ro.setup_minutes,
-                   ro.cycle_minutes_per_unit,
-                   ro.labor_rate_override,
-                   ro.external_unit_price,
-                   ro.external_setup_cost,
-                   wc.kind AS wc_kind,
-                   wc.labor_rate AS wc_labor_rate
-            FROM routing_operations ro
-            JOIN work_centers wc ON wc.id = ro.work_center_id
-            WHERE ro.routing_id = v_routing_id
-        LOOP
-            IF v_op.wc_kind = 'internal' THEN
-                -- Per the no-silent-fallbacks engineering principle: if neither
-                -- the per-op override nor the work-center default rate is set,
-                -- we cannot price this operation. Raise rather than silently
-                -- treating as $0 cost (which would let users quote at zero
-                -- labor without ever seeing the missing data).
-                IF v_op.labor_rate_override IS NULL AND v_op.wc_labor_rate IS NULL THEN
-                    RAISE EXCEPTION 'Cannot recalculate cost for part %: routing op has no labor rate (neither override nor work_center default)', p_part_id
-                        USING ERRCODE = 'check_violation';
-                END IF;
-                v_op_cost := (COALESCE(v_op.setup_minutes, 0) / 1
-                               + COALESCE(v_op.cycle_minutes_per_unit, 0))
-                             * COALESCE(v_op.labor_rate_override, v_op.wc_labor_rate)
-                             / 60.0;
-            ELSE
-                -- External op: at least one of unit_price or setup_cost should be
-                -- set (a free outside op is meaningless). NULL on both means
-                -- the user hasn't filled in pricing yet — refuse to compute.
-                IF v_op.external_unit_price IS NULL AND v_op.external_setup_cost IS NULL THEN
-                    RAISE EXCEPTION 'Cannot recalculate cost for part %: external routing op has no pricing (neither external_unit_price nor external_setup_cost)', p_part_id
-                        USING ERRCODE = 'check_violation';
-                END IF;
-                v_op_cost := COALESCE(v_op.external_unit_price, 0)
-                             + COALESCE(v_op.external_setup_cost, 0) / 1;
-            END IF;
-            v_total_cost := v_total_cost + v_op_cost;
-        END LOOP;
-    END IF;
-
-    -- BOM children. Convert BOM unit → child.primary_unit if they differ;
-    -- error explicitly when no conversion exists (matches the existing
-    -- unknown_* validation pattern).
-    --
-    -- Child unit cost is resolved through get_procurement_cost(child_id, 1)
-    -- per the function's documented contract — this works for any child
-    -- kind (bought-with-tiers, bought-without-tiers, made-snapshot). No
-    -- caller-side guard needed. Phase 1 uses qty=1; Phase 2 will revisit
-    -- to enable tier-aware aggregate-quantity rollups at quote time.
-    FOR v_bom IN
-        SELECT b.quantity, b.unit, b.child_part_id,
-               c.primary_unit AS child_primary_unit
-        FROM parts_bom b
-        JOIN parts c ON c.id = b.child_part_id
-        WHERE b.parent_part_id = p_part_id
-    LOOP
-        SELECT unit_cost
-          INTO v_child_unit_cost
-          FROM public.get_procurement_cost(v_bom.child_part_id, 1);
-
-        IF v_child_unit_cost IS NULL THEN
-            -- Per the no-silent-fallbacks principle: a BOM child without a
-            -- cost can't contribute to the parent's cost rollup. Raise rather
-            -- than treating as $0 (which would let users quote without ever
-            -- noticing the missing child cost). The UI should walk the BOM
-            -- bottom-up and refuse to recalc the parent until all leaves are
-            -- priced.
-            RAISE EXCEPTION 'Cannot recalculate cost for part %: BOM child % has no cost_per_unit (recalc the child first, or add a procurement tier)', p_part_id, v_bom.child_part_id
-                USING ERRCODE = 'check_violation';
-        END IF;
-
-        IF v_bom.unit IS DISTINCT FROM v_bom.child_primary_unit THEN
-            SELECT to_primary_factor INTO v_to_primary_factor
-            FROM parts_unit_conversions
-            WHERE part_id = v_bom.child_part_id
-              AND from_unit = v_bom.unit;
-
-            IF v_to_primary_factor IS NULL THEN
-                RAISE EXCEPTION 'No unit conversion from % to % for part %',
-                    v_bom.unit, v_bom.child_primary_unit, v_bom.child_part_id
-                    USING ERRCODE = 'check_violation';
-            END IF;
-
-            v_qty_in_primary_unit := v_bom.quantity * v_to_primary_factor;
-        ELSE
-            v_qty_in_primary_unit := v_bom.quantity;
-        END IF;
-
-        v_total_cost := v_total_cost + v_qty_in_primary_unit * v_child_unit_cost;
-    END LOOP;
-
-    UPDATE parts
-    SET cost_per_unit = v_total_cost,
-        cost_recalculated_at = now()
-    WHERE id = p_part_id;
-
-    RETURN v_total_cost;
 END;
 $function$
 
@@ -2811,6 +2859,8 @@ DECLARE
     v_job_id uuid;
     v_job_part_id uuid;
     v_part_id uuid;
+    v_part_source text;
+    v_part_cost numeric;
 BEGIN
     SELECT template_data INTO v_template
     FROM demo_data_templates
@@ -2821,11 +2871,6 @@ BEGIN
         RAISE EXCEPTION 'No active demo template found with name: %', p_template_name;
     END IF;
 
-    -- ── Vendors ───────────────────────────────────────────────────────────
-    -- Inserts the vendor row WITHOUT the dropped contact_name/email/phone/
-    -- notes columns. Each entry in v_item->'contacts' becomes a
-    -- vendor_contacts row, with is_primary respected (defaulting to false
-    -- when omitted).
     IF v_template->'vendors' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'vendors') LOOP
             v_new_id := gen_random_uuid();
@@ -2855,9 +2900,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Work centers ──────────────────────────────────────────────────────
-    -- Resolves vendor_ref via the ref-map for external work_centers.
-    -- The CHECK constraints on work_centers enforce internal/external ↔ vendor.
     IF v_template->'work_centers' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'work_centers') LOOP
             v_new_id := gen_random_uuid();
@@ -2875,35 +2917,39 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Parts ─────────────────────────────────────────────────────────────
-    -- Inserted before parts_bom so child refs resolve. preferred_vendor_ref
-    -- resolves through the ref-map. Reads `source` / `is_stocked` from
-    -- template_data (renamed from `is_manufacturable` / `is_stockable` in
-    -- the 20260504_part_source_enum_and_stocked_rename migration).
+    -- Parts: cost_per_unit dropped from parts. For bought parts with a
+    -- template-supplied cost, emit a NULL-vendor procurement tier.
     IF v_template->'parts' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts') LOOP
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
+            v_part_source := COALESCE(v_item->>'source', 'made');
+            v_part_cost := NULLIF(v_item->>'cost_per_unit', '')::numeric;
+
             INSERT INTO parts (id, company_id, part_name, description,
                                source, is_stocked,
-                               primary_unit, quantity, cost_per_unit,
+                               primary_unit, quantity,
                                reorder_point, preferred_vendor_id, legacy_id)
             VALUES (v_new_id, p_company_id,
                     v_item->>'part_name', v_item->>'description',
-                    COALESCE(v_item->>'source', 'made'),
+                    v_part_source,
                     COALESCE((v_item->>'is_stocked')::boolean, false),
                     v_item->>'primary_unit',
                     COALESCE((v_item->>'quantity')::numeric, 0),
-                    NULLIF(v_item->>'cost_per_unit', '')::numeric,
                     NULLIF(v_item->>'reorder_point', '')::numeric,
                     CASE WHEN v_item->>'preferred_vendor_ref' IS NOT NULL
                          THEN (v_ref_map->>(v_item->>'preferred_vendor_ref'))::uuid
                          ELSE NULL END,
                     v_item->>'legacy_id');
+
+            IF v_part_source = 'bought' AND v_part_cost IS NOT NULL AND v_part_cost > 0 THEN
+                INSERT INTO part_procurement_tiers
+                    (part_id, vendor_id, min_quantity, cost_per_unit)
+                VALUES (v_new_id, NULL, 1, v_part_cost);
+            END IF;
         END LOOP;
     END IF;
 
-    -- ── parts_bom edges ───────────────────────────────────────────────────
     IF v_template->'parts_bom' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts_bom') LOOP
             INSERT INTO parts_bom (parent_part_id, child_part_id, quantity, unit, sequence, notes)
@@ -2916,7 +2962,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Routings + nested routing_operations ──────────────────────────────
     IF v_template->'routings' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'routings') LOOP
             v_routing_id := gen_random_uuid();
@@ -2950,10 +2995,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Customers ─────────────────────────────────────────────────────────
-    -- Customers still carry the embedded contact fields; multi-contact for
-    -- customers is a parallel follow-up. When that ships, this block needs
-    -- the same kind of treatment as vendors above.
     IF v_template->'customers' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'customers') LOOP
             v_new_id := gen_random_uuid();
@@ -2972,7 +3013,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Quotes + nested line_items ────────────────────────────────────────
     IF v_template->'quotes' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'quotes') LOOP
             v_quote_id := gen_random_uuid();
@@ -3006,7 +3046,6 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- ── Jobs + job_parts ──────────────────────────────────────────────────
     IF v_template->'jobs' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'jobs') LOOP
             v_job_id := gen_random_uuid();
@@ -3602,12 +3641,6 @@ COMMENT ON COLUMN "public"."parts"."primary_unit"
 
 COMMENT ON COLUMN "public"."parts"."quantity"
     IS 'On-hand quantity in primary_unit. Defaults to 0; updated by inventory_transactions and the import flow.';
-
-COMMENT ON COLUMN "public"."parts"."cost_per_unit"
-    IS 'Per-primary_unit cost. For bought items (source=''bought''), the procurement cost. For made items (source=''made''), snapshot from the most recent recalculate_part_cost call.';
-
-COMMENT ON COLUMN "public"."parts"."cost_recalculated_at"
-    IS 'When recalculate_part_cost last ran for this part. Used by the part detail page to surface a "Cost may be stale" badge when any BOM descendant has updated_at newer than this timestamp.';
 
 COMMENT ON COLUMN "public"."parts"."reorder_point"
     IS 'Threshold below which the inventory alert fires (quantity <= reorder_point). NULL disables the alert.';

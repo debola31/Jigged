@@ -30,7 +30,6 @@ import TuneIcon from '@mui/icons-material/Tune';
 import {
   getPartWithRelations,
   deletePart,
-  recalculatePartCost,
   getPartUnitConversions,
 } from '@/utils/partsAccess';
 import type { Part, PartUnitConversion } from '@/types/part';
@@ -47,21 +46,6 @@ import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEdi
 const formatDate = (s: string | null): string => {
   if (!s) return '—';
   return new Date(s).toLocaleString();
-};
-
-const formatTimeAgo = (s: string | null): string => {
-  if (!s) return '—';
-  const then = Date.parse(s);
-  if (!Number.isFinite(then)) return '—';
-  const diff = Date.now() - then;
-  if (diff < 60_000) return 'just now';
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} hr ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
-  return new Date(s).toLocaleDateString();
 };
 
 export default function PartDetailPage() {
@@ -95,7 +79,6 @@ export default function PartDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [recalcLoading, setRecalcLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<{
@@ -152,66 +135,18 @@ export default function PartDetailPage() {
   }, [fetchPart]);
 
   /**
-   * Always recalculate the cost on mount for made parts that have inputs to
-   * cost (routing operations or BOM children). Replaces the old "Cost may
-   * be stale" badge: instead of showing the user a flag and asking them to
-   * click, we just always recompute when the page loads. recalculate_part_cost
-   * is idempotent and cheap (single SQL function, single-level walk), so
-   * running it on every detail-page open keeps the displayed cost current
-   * without any user action — a child cost change, a procurement tier
-   * change anywhere in the BOM tree, all picked up the next time a parent
-   * page is opened.
-   *
-   * Bounded to one fire per mount: dep array is just `part?.id`, and
-   * triggerAutoRecalc no-ops while a recalc is already in flight.
+   * Trigger a UI refresh after a routing or BOM mutation. The old
+   * `recalculate_part_cost` SQL function was dropped in migration
+   * 20260514 along with the `parts.cost_per_unit` snapshot — costs are
+   * now computed live by `compute_part_cost_at_qty(part_id, qty)`. The
+   * PartPricing and PartBomPanel components recompute themselves via
+   * the bumped refreshKey, so all this needs to do is refetch the part's
+   * relation counts and bump the key.
    */
-  useEffect(() => {
-    if (!part) return;
-    if (part.source !== 'made') return;
-    const hasOps = (part.routing?.nodes_count ?? 0) > 0;
-    const hasBom = (part.bom_lines_count ?? 0) > 0;
-    if (!hasOps && !hasBom) return;
-    triggerAutoRecalc();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [part?.id]);
-
-  /**
-   * Auto-recalculate the part's cost. Fires on mount and after every
-   * routing or BOM mutation. Silent on success and on failure: the
-   * Pricing card on the same page already shows live numbers from the
-   * routing + materials inputs, so the snapshot value is mostly useful
-   * for parent rollups elsewhere. If the recalc can't compute (missing
-   * labor rate, missing child cost, missing unit conversion) we log to
-   * console and leave the previous snapshot in place — no chip, no
-   * surprise red badge. The user fixes those at their natural surfaces:
-   * the operation editor for missing rates, the child part for a missing
-   * child cost.
-   *
-   * Doesn't cascade up the BOM tree on success. Parents pick up child
-   * cost changes the next time they're opened.
-   */
-  const triggerAutoRecalc = useCallback(async () => {
-    if (recalcLoading) return; // simple debounce — drop overlapping requests
-    setRecalcLoading(true);
-    try {
-      // The snapshot recalc can legitimately fail (missing labor rate on an
-      // op, BOM child without cost_per_unit, etc.). Swallow that failure on
-      // its own — we still want the live Pricing panel to reload its
-      // breakdown so its "Heads up" warnings reflect the latest saved state
-      // (e.g. a labor rate the user just entered). The previous structure
-      // skipped the refetch + refreshKey bump whenever recalc threw, leaving
-      // stale warnings on screen.
-      try {
-        await recalculatePartCost(partId);
-      } catch (err) {
-        console.warn('Auto-recalc snapshot failed (live panel will still refresh):', err);
-      }
-      await fetchPart(true);
-      setRefreshKey((k) => k + 1);
-    } finally {
-      setRecalcLoading(false);
-    }
-  }, [partId, fetchPart, recalcLoading]);
+  const refreshAfterMutation = useCallback(async () => {
+    await fetchPart(true);
+    setRefreshKey((k) => k + 1);
+  }, [fetchPart]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -335,9 +270,10 @@ export default function PartDetailPage() {
           Edit pencil on the top right. The pencil opens the same edit form
           as before — anchoring the action on this card makes the scope
           obvious (the form edits the data shown here). The "Cost may be
-          stale" badge was removed in favour of always-recalc-on-mount
-          (see triggerAutoRecalc useEffect above); recalc errors still
-          surface as an inline chip. */}
+          stale" badge and the live "Recalculating cost…" indicator were
+          removed when the cost_per_unit snapshot was dropped — cost is
+          now computed live by compute_part_cost_at_qty in PartPricing /
+          PartBomPanel. */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
@@ -346,12 +282,6 @@ export default function PartDetailPage() {
                 <Typography variant="h5" sx={{ fontWeight: 600 }}>
                   {part.part_name}
                 </Typography>
-                {recalcLoading && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary' }}>
-                    <CircularProgress size={14} />
-                    <Typography variant="caption">Recalculating cost…</Typography>
-                  </Box>
-                )}
               </Box>
               {part.description && (
                 <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
@@ -528,7 +458,7 @@ export default function PartDetailPage() {
                     companyId={companyId}
                     partId={partId}
                     onRoutingSaved={() => {
-                      triggerAutoRecalc();
+                      refreshAfterMutation();
                     }}
                   />
 
@@ -542,7 +472,7 @@ export default function PartDetailPage() {
                         partId={partId}
                         companyId={companyId}
                         description={`Parts consumed when manufacturing this ${part.part_name}.`}
-                        onChanged={triggerAutoRecalc}
+                        onChanged={refreshAfterMutation}
                       />
                     </>
                   )}
@@ -566,7 +496,7 @@ export default function PartDetailPage() {
                       partId={partId}
                       companyId={companyId}
                       description={`Parts consumed when manufacturing this ${part.part_name}.`}
-                      onChanged={triggerAutoRecalc}
+                      onChanged={refreshAfterMutation}
                     />
                   </CardContent>
                 </Card>
@@ -623,14 +553,6 @@ export default function PartDetailPage() {
                   </Typography>
                 </Box>
                 <Divider orientation="vertical" flexItem />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Cost calculated
-                  </Typography>
-                  <Typography variant="body2">
-                    {formatTimeAgo(part.cost_recalculated_at)}
-                  </Typography>
-                </Box>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
                     Created

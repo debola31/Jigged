@@ -86,8 +86,6 @@ describe('partsAccess utilities', () => {
     is_stocked: false,
     primary_unit: null,
     quantity: 0,
-    cost_per_unit: null,
-    cost_recalculated_at: null,
     reorder_point: null,
     preferred_vendor_id: null,
     legacy_id: null,
@@ -302,7 +300,6 @@ describe('partsAccess utilities', () => {
       is_stocked: false,
       primary_unit: null,
       quantity: 0,
-      cost_per_unit: null,
       reorder_point: null,
       preferred_vendor_id: null,
     };
@@ -317,8 +314,6 @@ describe('partsAccess utilities', () => {
         is_stocked: false,
         primary_unit: null,
         quantity: 0,
-        cost_per_unit: null,
-        cost_recalculated_at: null,
         reorder_point: null,
         preferred_vendor_id: null,
         legacy_id: null,
@@ -357,7 +352,6 @@ describe('partsAccess utilities', () => {
       is_stocked: false,
       primary_unit: null,
       quantity: 0,
-      cost_per_unit: null,
       reorder_point: null,
       preferred_vendor_id: null,
     };

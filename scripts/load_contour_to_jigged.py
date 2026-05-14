@@ -439,6 +439,7 @@ def load_parts(
     rows = read_csv(PARTS_CSV)
 
     records: list[tuple] = []
+    tier_records: list[tuple] = []
     name_to_id: dict[str, str] = {}
     seen_legacy_ids: set[str] = set()
 
@@ -470,6 +471,9 @@ def load_parts(
         if pv_name:
             preferred_vendor_id = vendor_name_to_id.get(pv_name.strip())
 
+        cost_val = parse_numeric(r.get("cost_per_unit"))
+        source_val = r.get("source", "made").strip() or "made"
+
         records.append((
             pid,
             company_id,
@@ -478,19 +482,26 @@ def load_parts(
             is_stocked,
             primary_unit,
             parse_numeric(r.get("quantity")) or 0,
-            parse_numeric(r.get("cost_per_unit")),
             parse_numeric(r.get("reorder_point")),
             preferred_vendor_id,
             legacy_id,
-            r.get("source", "made").strip() or "made",
+            source_val,
         ))
+
+        # parts.cost_per_unit was dropped in migration 20260514. For bought
+        # rows that carry a cost, route the value into a NULL-vendor
+        # procurement tier (min_quantity=1) so quote-time tier lookup picks
+        # it up. Made-row costs are ignored — compute_part_cost_at_qty
+        # recomputes them live.
+        if source_val == "bought" and cost_val is not None and cost_val > 0:
+            tier_records.append((pid, 1, float(cost_val)))
 
     execute_values(
         cur,
         """
         INSERT INTO parts (
             id, company_id, part_name, description,
-            is_stocked, primary_unit, quantity, cost_per_unit,
+            is_stocked, primary_unit, quantity,
             reorder_point, preferred_vendor_id, legacy_id, source
         )
         VALUES %s
@@ -499,6 +510,19 @@ def load_parts(
         page_size=BATCH_SIZE,
     )
     log(f"inserted parts: {len(records)}", indent=1)
+
+    if tier_records:
+        execute_values(
+            cur,
+            """
+            INSERT INTO part_procurement_tiers (part_id, vendor_id, min_quantity, cost_per_unit)
+            VALUES %s
+            """,
+            [(pid, None, qty, cost) for pid, qty, cost in tier_records],
+            page_size=BATCH_SIZE,
+        )
+        log(f"inserted NULL-vendor procurement tiers: {len(tier_records)}", indent=1)
+
     return name_to_id
 
 

@@ -57,10 +57,10 @@ interface PartFormProps {
  * stocked sub-assembly is made in-shop, no vendor).
  *
  * What this form does NOT edit:
- *   - cost_per_unit. Made parts derive it from routing + BOM via
- *     recalculate_part_cost; bought parts get it from the Procurement
- *     Cost panel's tier sheets on the detail page. The form never writes
- *     this field (formDataToInsert strips it).
+ *   - Cost. There is no stored cost column on parts anymore (dropped in
+ *     migration 20260514). Made parts derive cost live from routing + BOM
+ *     via compute_part_cost_at_qty; bought parts get cost from the
+ *     Procurement Cost panel's tier sheets on the detail page.
  *   - quantity. Only inventory_transactions ever changes the on-hand
  *     count, for audit-trail consistency.
  *   - Unit conversions. Managed inline on the Inventory panel of the
@@ -223,12 +223,11 @@ export default function PartForm({
         formData.is_stocked && formData.primary_unit && formData.primary_unit.trim() !== ''
           ? formData.primary_unit.trim()
           : null,
-      // `cost_per_unit` and `quantity` are stripped by formDataToInsert
-      // before the DB write — cost is owned by recalculate_part_cost (made
-      // parts) or the Procurement Cost panel's tier sheets (bought parts);
-      // quantity only changes through inventory_transactions for audit. The
-      // form never writes either, regardless of whatever value is in
-      // formData.
+      // `quantity` is stripped by formDataToInsert before the DB write —
+      // it only changes through inventory_transactions for audit. The form
+      // also never writes cost; cost is computed live by
+      // compute_part_cost_at_qty (made parts) or read from the Procurement
+      // Cost panel's tier sheets (bought parts).
     };
 
     try {

@@ -2,6 +2,7 @@ import { getSupabase } from '@/lib/supabase';
 import type { QuoteLineItem } from '@/types/quote';
 import type { PartPricingTier } from '@/types/partPricing';
 import { resolveTier } from '@/utils/quotePricingResolver';
+import { getComputedPartCost } from '@/utils/partsAccess';
 
 /**
  * Load line items for a quote (ordered by sequence) with the part joined in.
@@ -58,7 +59,6 @@ export async function insertLineItemForPart(
 
   let unitPrice: number;
   let markupPercent: number | null;
-  let baseCost: number | null;
   let sourceTierId: string | null;
 
   if (override) {
@@ -66,9 +66,6 @@ export async function insertLineItemForPart(
     markupPercent = override.markup_percent;
     const resolved = resolveTier(tiers, orderQuantity);
     sourceTierId = resolved?.source_tier_id ?? null;
-    baseCost = resolved
-      ? tiers.find((t) => t.id === resolved.source_tier_id)?.base_cost_per_unit ?? null
-      : null;
   } else {
     const resolved = resolveTier(tiers, orderQuantity);
     if (!resolved) {
@@ -80,7 +77,20 @@ export async function insertLineItemForPart(
     sourceTierId = resolved.source_tier_id;
     const matchedTier = tiers.find((t) => t.id === resolved.source_tier_id);
     markupPercent = matchedTier?.markup_percent ?? null;
-    baseCost = matchedTier?.base_cost_per_unit ?? null;
+  }
+
+  // Snapshot the base cost live at the order quantity. The SQL function
+  // cascades through the BOM at cumulative qty per sub-assembly, so this
+  // matches what `quote_line_items.base_cost_per_unit` should freeze for
+  // the historical record. Tier rows no longer carry base_cost_per_unit.
+  let baseCost: number | null;
+  try {
+    baseCost = await getComputedPartCost(partId, orderQuantity);
+  } catch {
+    // Cost RAISES on missing labor rates / external pricing / unit
+    // conversions. Snapshot a null so the breakdown view can fall through
+    // to its computed-live fallback rather than persisting wrong data.
+    baseCost = null;
   }
 
   const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;

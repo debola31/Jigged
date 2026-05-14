@@ -1,6 +1,6 @@
 import { getSupabase } from '@/lib/supabase';
 import type { PartPricingTier, PartPricingTierInput } from '@/types/partPricing';
-import { calculateRoutingCost, calculateTierPricing } from '@/utils/routingCostCalculation';
+import { getComputedPartCost } from '@/utils/partsAccess';
 
 /**
  * Get all pricing tiers for a part, ordered by sequence.
@@ -62,8 +62,6 @@ export async function replaceTiersForPart(
 ): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
 
-  const breakdown = await calculateRoutingCost(partId);
-
   // Fetch existing tiers so we can diff for deletes.
   const { data: existing, error: existingErr } = await supabase
     .from('part_pricing_tiers')
@@ -90,9 +88,21 @@ export async function replaceTiersForPart(
   }
 
   for (const tier of tiers) {
-    const { baseCostPerUnit, unitPrice } = breakdown
-      ? calculateTierPricing(breakdown, tier.quantity, tier.markup_percent)
-      : { baseCostPerUnit: 0, unitPrice: null };
+    // Compute the base cost live at this tier's quantity. The SQL function
+    // amortizes setup over the passed qty and cascades through the BOM at
+    // cumulative qty per sub-assembly.
+    let unitPrice: number | null = null;
+    try {
+      const baseCost = await getComputedPartCost(partId, tier.quantity);
+      if (baseCost !== null && tier.markup_percent !== null) {
+        unitPrice = baseCost * (1 + tier.markup_percent / 100);
+      }
+    } catch {
+      // compute_part_cost RAISES on missing labor rates / external pricing /
+      // unit conversions. Store unit_price as null so the UI surfaces the
+      // gap rather than persisting a wrong price.
+      unitPrice = null;
+    }
 
     if (tier.id) {
       const { error } = await supabase
@@ -100,7 +110,6 @@ export async function replaceTiersForPart(
         .update({
           sequence: tier.sequence,
           quantity: tier.quantity,
-          base_cost_per_unit: baseCostPerUnit,
           markup_percent: tier.markup_percent,
           unit_price: unitPrice,
         })
@@ -114,7 +123,6 @@ export async function replaceTiersForPart(
           company_id: companyId,
           sequence: tier.sequence,
           quantity: tier.quantity,
-          base_cost_per_unit: baseCostPerUnit,
           markup_percent: tier.markup_percent,
           unit_price: unitPrice,
         });

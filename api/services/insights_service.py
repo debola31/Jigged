@@ -416,8 +416,8 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
                       + estimated_run_minutes_per_unit * job_part.quantity)
                      / 60.0 * labor_rate
               If both override and default are NULL we cannot price the op
-              and RAISE — matching recalculate_part_cost's no-silent-fallback
-              behavior.
+              and RAISE — matching compute_part_cost_at_qty's
+              no-silent-fallback behavior.
           * For external work centers (kind = 'external'):
               cost = external_unit_price * quantity + external_setup_cost
               Read from routing_operations (the immutable source); job_operations

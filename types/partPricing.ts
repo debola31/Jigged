@@ -1,7 +1,12 @@
 /**
  * Part pricing tier — the "estimate" layer. Lives on the Part (not the Quote).
  * Each tier represents a quantity break-point with its own markup/price.
- * Setup cost amortizes into baseCostPerUnit at the tier's quantity.
+ *
+ * `base_cost_per_unit` was dropped in migration 20260514 — the base is no
+ * longer stored. Callers that need it call `getComputedPartCost(partId,
+ * tier.quantity)` to compute live (which also cascades through the BOM at
+ * the cascaded qty). `unit_price` is still stored and is recomputed and
+ * written on every tier save.
  */
 export interface PartPricingTier {
   id: string;
@@ -9,7 +14,6 @@ export interface PartPricingTier {
   company_id: string;
   sequence: number;
   quantity: number;
-  base_cost_per_unit: number | null;
   markup_percent: number | null;
   unit_price: number | null;
   created_at: string;

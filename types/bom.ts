@@ -31,7 +31,6 @@ export interface BomLineWithChildPart extends BomLine {
     part_name: string;
     description: string | null;
     primary_unit: string | null;
-    cost_per_unit: number | null;
     is_stocked: boolean;
     source: 'made' | 'bought';
   };

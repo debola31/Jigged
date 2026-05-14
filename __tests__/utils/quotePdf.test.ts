@@ -362,12 +362,12 @@ describe('generateQuotePdf', () => {
     getTiersMock.mockResolvedValueOnce([
       {
         id: 't1', part_id: 'part-1', company_id: 'company-1', sequence: 1, quantity: 1,
-        base_cost_per_unit: 50, markup_percent: 40, unit_price: 70,
+        markup_percent: 40, unit_price: 70,
         created_at: '', updated_at: '',
       },
       {
         id: 't10', part_id: 'part-1', company_id: 'company-1', sequence: 2, quantity: 10,
-        base_cost_per_unit: 50, markup_percent: 40, unit_price: 65,
+        markup_percent: 40, unit_price: 65,
         created_at: '', updated_at: '',
       },
     ]);

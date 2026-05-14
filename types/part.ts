@@ -20,8 +20,6 @@ export interface Part {
   is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
-  cost_per_unit: number | null;
-  cost_recalculated_at: string | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   // Live link to a markup rate. NULL means "Custom" (no rate is governing
@@ -82,7 +80,6 @@ export interface PartFormData {
   is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
-  cost_per_unit: number | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
 }
@@ -94,7 +91,6 @@ export const EMPTY_PART_FORM: PartFormData = {
   is_stocked: false,
   primary_unit: null,
   quantity: 0,
-  cost_per_unit: null,
   reorder_point: null,
   preferred_vendor_id: null,
 };
@@ -118,7 +114,6 @@ export function partToFormData(
     is_stocked: part.is_stocked,
     primary_unit: part.primary_unit,
     quantity: part.quantity,
-    cost_per_unit: part.cost_per_unit,
     reorder_point: part.reorder_point,
     preferred_vendor_id: part.preferred_vendor_id,
   };

@@ -20,7 +20,6 @@ export interface PartOption {
   is_stocked: boolean;
   source: 'made' | 'bought';
   primary_unit: string | null;
-  cost_per_unit: number | null;
 }
 
 export interface MaterialEditorValue {

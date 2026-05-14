@@ -3,16 +3,17 @@
  *
  * Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor's
  * tier sheet for a specific part. `vendor_id` may be NULL to represent an
- * "internal estimate" — a sketch cost added before sourcing is finalized.
+ * import/internal-estimate row — a sketch cost added before sourcing is
+ * finalized (or, in practice, populated by parts CSV import).
  *
  * Tier ordering within a vendor's sheet is derived from `min_quantity`
  * ascending (no separate `sequence` column on the table — see the migration
  * header).
  *
  * Resolved at read time via the `get_procurement_cost(part_id, qty)` RPC,
- * which picks the cheapest non-expired tier where `min_quantity <= qty`
- * across all vendors and falls back to `parts.cost_per_unit` when no tier
- * matches.
+ * which picks the cheapest non-expired tier where `min_quantity <= qty`,
+ * preferring vendor-specific tiers over NULL-vendor ones when both match.
+ * Returns zero rows when nothing matches (no fallback to a parts column).
  */
 export interface ProcurementTier {
   id: string;
@@ -69,20 +70,17 @@ export function procurementTierToFormData(
 /**
  * Return shape of the `get_procurement_cost(p_part_id, p_qty)` RPC.
  *
- * - `source='tier'` — a live, non-expired tier matched. `vendor_id` and
- *   `tier_id` identify which tier won.
- * - `source='fallback'` — no tier matched (or the part has no tiers / is a
- *   made part). `unit_cost` is `parts.cost_per_unit` and `vendor_id` /
- *   `tier_id` are both NULL.
- *
- * Per the RPC's documented contract, callers MUST NOT add a "is this a
- * bought part" guard before invoking — the function handles all part kinds.
+ * - The RPC returns at most one row (`source='tier'`) when a live,
+ *   non-expired tier matched. `vendor_id` and `tier_id` identify which tier
+ *   won. Vendor-specific tiers win over NULL-vendor tiers when both match.
+ * - When nothing matches, the RPC returns zero rows. The TS wrapper
+ *   normalises that to a `null` result; callers must handle the null.
  */
 export interface ProcurementCostResult {
   unit_cost: number | null;
   vendor_id: string | null;
   tier_id: string | null;
-  source: 'tier' | 'fallback';
+  source: 'tier';
 }
 
 /**

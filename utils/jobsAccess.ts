@@ -114,7 +114,7 @@ export async function getJobWithRelations(
         ),
         job_materials(
           *,
-          material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity, cost_per_unit)
+          material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity)
         )
       )
     `)
@@ -172,7 +172,7 @@ export async function updateJobMaterial(
     .eq('id', materialId)
     .select(`
       *,
-      material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity, cost_per_unit)
+      material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity)
     `)
     .single();
 

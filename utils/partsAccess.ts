@@ -9,7 +9,7 @@ import type { InventoryTransaction, InventoryTransactionType } from '@/types/par
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, cost_per_unit, cost_recalculated_at, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -20,8 +20,6 @@ interface PartRow {
   is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
-  cost_per_unit: number | null;
-  cost_recalculated_at: string | null;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   markup_rate_id: string | null;
@@ -43,8 +41,6 @@ function rowToPart(row: PartRow): Part {
     is_stocked: row.is_stocked,
     primary_unit: row.primary_unit,
     quantity: Number(row.quantity ?? 0),
-    cost_per_unit: row.cost_per_unit !== null ? Number(row.cost_per_unit) : null,
-    cost_recalculated_at: row.cost_recalculated_at,
     reorder_point: row.reorder_point !== null ? Number(row.reorder_point) : null,
     preferred_vendor_id: row.preferred_vendor_id,
     markup_rate_id: row.markup_rate_id,
@@ -393,7 +389,6 @@ export async function getPartsForSelect(
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
-  cost_per_unit: number | null;
 }>> {
   const supabase = getSupabase();
 
@@ -407,7 +402,6 @@ export async function getPartsForSelect(
       source,
       primary_unit,
       quantity,
-      cost_per_unit,
       routings(id)
     `)
     .eq('company_id', companyId)
@@ -435,7 +429,6 @@ export async function getPartsForSelect(
       source: p.source as 'made' | 'bought',
       primary_unit: p.primary_unit as string | null,
       quantity: Number(p.quantity ?? 0),
-      cost_per_unit: p.cost_per_unit !== null ? Number(p.cost_per_unit) : null,
     };
   });
 }
@@ -475,18 +468,12 @@ export async function checkPartNameExists(
 // ============================================================
 
 function formDataToInsert(formData: PartFormData): Record<string, unknown> {
-  // Two fields are intentionally NOT written through this path:
-  //   - `quantity`: only inventory_transactions ever changes the on-hand
-  //     count (PartTransactionModal / recordInventoryTransaction) so there
-  //     is always an audit row explaining where the number came from.
-  //   - `cost_per_unit`: made parts get it from recalculate_part_cost.
-  //     Bought parts price exclusively through the Procurement Cost
-  //     panel's per-vendor tier sheets at quote time; the column stays
-  //     null for them. Letting the part edit form rewrite this field
-  //     directly would silently break the made-part invariant and
-  //     reintroduce a "default cost" concept we deliberately removed.
-  // On create the columns default to 0/null respectively; on update,
-  // omitting them leaves the existing values untouched.
+  // `quantity` is intentionally NOT written through this path: only
+  // inventory_transactions ever changes the on-hand count
+  // (PartTransactionModal / recordInventoryTransaction) so there is always
+  // an audit row explaining where the number came from. On create it
+  // defaults to 0; on update, omitting it leaves the existing value
+  // untouched.
   return {
     part_name: formData.part_name.trim(),
     description: formData.description.trim() || null,
@@ -704,27 +691,93 @@ export async function replacePartUnitConversions(
 }
 
 // ============================================================
-// COST RECALCULATION + STALE DETECTION
+// LIVE COST LOOKUP
 // ============================================================
 
 /**
- * Trigger a server-side cost rollup for a manufacturable part. Calls the
- * `recalculate_part_cost` SQL function and returns the new `cost_per_unit`.
- * The function also stamps `cost_recalculated_at`.
+ * Compute a part's per-unit cost at a given quantity by calling the
+ * canonical SQL function `compute_part_cost_at_qty`. The function walks the
+ * BOM recursively, picks each bought leaf's procurement tier at the
+ * cumulative cascaded qty, and rolls labor + setup/qty + materials up to
+ * the root.
+ *
+ * Returns `null` when any bought leaf in the subtree has no matching
+ * procurement tier. Callers that need to surface *which* leaf is missing
+ * should use `getPartCostExplain` instead.
+ *
+ * Throws when a made part has a routing operation with no labor rate or
+ * no external pricing, or when a BOM line uses a unit with no conversion
+ * to the child's primary unit.
  */
-export async function recalculatePartCost(partId: string): Promise<number> {
+export async function getComputedPartCost(
+  partId: string,
+  qty: number,
+): Promise<number | null> {
   const supabase = getSupabase();
 
-  const { data, error } = await supabase.rpc('recalculate_part_cost', {
+  const { data, error } = await supabase.rpc('compute_part_cost_at_qty', {
     p_part_id: partId,
+    p_qty: qty,
   });
 
   if (error) {
-    console.error('Error recalculating part cost:', error);
+    console.error('Error computing part cost:', error);
     throw error;
   }
 
-  return data === null ? 0 : Number(data);
+  return data === null ? null : Number(data);
+}
+
+export interface PartCostMissingLeaf {
+  part_id: string;
+  part_name: string;
+  depth: number;
+  qty_required: number;
+}
+
+/**
+ * Same cost as `getComputedPartCost`, plus an array of the bought leaves
+ * whose procurement tier lookup returned NULL at the cascaded qty. UI
+ * surfaces these in tooltips so the user can navigate to the offending
+ * leaf and add a tier.
+ *
+ * `missing_leaves` is skinny — it only contains the offending bought
+ * leaves, never the made-part ancestors above them. Diamond BOM
+ * occurrences may appear more than once (different cumulative qtys per
+ * branch).
+ */
+export async function getPartCostExplain(
+  partId: string,
+  qty: number,
+): Promise<{ unit_cost: number | null; missing_leaves: PartCostMissingLeaf[] }> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .rpc('compute_part_cost_explain', {
+      p_part_id: partId,
+      p_qty: qty,
+    })
+    .single();
+
+  if (error) {
+    console.error('Error explaining part cost:', error);
+    throw error;
+  }
+
+  const row = (data ?? { unit_cost: null, missing_leaves: [] }) as {
+    unit_cost: number | null;
+    missing_leaves: PartCostMissingLeaf[] | null;
+  };
+
+  return {
+    unit_cost: row.unit_cost === null ? null : Number(row.unit_cost),
+    missing_leaves: (row.missing_leaves ?? []).map((leaf) => ({
+      part_id: leaf.part_id,
+      part_name: leaf.part_name,
+      depth: Number(leaf.depth),
+      qty_required: Number(leaf.qty_required),
+    })),
+  };
 }
 
 // ============================================================

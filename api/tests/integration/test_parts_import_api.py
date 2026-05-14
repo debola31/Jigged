@@ -155,16 +155,25 @@ class MockSupabase:
         self._upsert_log.append({"data": data, "on_conflict": on_conflict})
 
     def _record_insert_factory(self, table_name):
-        # Wrap the table to also record inserts so tests can introspect
+        # Wrap the table to also record inserts AND upserts so tests can
+        # introspect both. The parts importer writes parts via insert/upsert
+        # and procurement tiers via upsert, all into the same insert_log.
         def _wrap(table):
             original_insert = table.insert
+            original_upsert = table.upsert
             insert_log = self._insert_log
 
             def _insert(data):
                 insert_log.append({"table": table_name, "data": data})
                 return original_insert(data)
 
+            def _upsert(data, on_conflict=None):
+                items = data if isinstance(data, list) else [data]
+                insert_log.append({"table": table_name, "data": items})
+                return original_upsert(data, on_conflict=on_conflict)
+
             table.insert = _insert
+            table.upsert = _upsert
             return table
         return _wrap
 
@@ -741,7 +750,16 @@ class TestPartsExecuteEndpoint:
         assert inserted["source"] == "bought"
         assert inserted["primary_unit"] == "pounds"
         assert inserted["quantity"] == 250.0
-        assert inserted["cost_per_unit"] == 12.5
+        # cost_per_unit was dropped from parts in migration 20260514; the CSV
+        # cost is routed into a NULL-vendor procurement tier instead. Assert
+        # the tier was emitted with the right shape.
+        assert "cost_per_unit" not in inserted
+        tier_inserts = [r for r in insert_log if r["table"] == "part_procurement_tiers"]
+        assert len(tier_inserts) == 1
+        tier = tier_inserts[0]["data"][0]
+        assert tier["vendor_id"] is None
+        assert tier["min_quantity"] == 1
+        assert tier["cost_per_unit"] == 12.5
 
     @pytest.mark.unit
     async def test_execute_resolves_preferred_vendor_to_id(self, test_client):

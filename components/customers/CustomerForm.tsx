@@ -60,7 +60,28 @@ export default function CustomerForm({
   const params = useParams();
   const companyId = companyIdProp || (params.companyId as string);
 
-  const [formData, setFormData] = useState<CustomerFormData>(initialData);
+  // Normalize the incoming addresses so at most one row is_billing=true and
+  // at most one row is_shipping=true. Defensive against pre-existing data
+  // that pre-dates the unique partial indexes (or that came in from a
+  // different code path that didn't enforce single-select). Keeps the *first*
+  // occurrence — picks deterministically rather than silently losing data.
+  const [formData, setFormData] = useState<CustomerFormData>(() => {
+    let billingSeen = false;
+    let shippingSeen = false;
+    const addresses = initialData.addresses.map((a) => {
+      const next = { ...a };
+      if (next.is_billing) {
+        if (billingSeen) next.is_billing = false;
+        else billingSeen = true;
+      }
+      if (next.is_shipping) {
+        if (shippingSeen) next.is_shipping = false;
+        else shippingSeen = true;
+      }
+      return next;
+    });
+    return { ...initialData, addresses };
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});

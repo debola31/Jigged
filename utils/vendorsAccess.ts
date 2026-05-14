@@ -2,7 +2,7 @@ import { getSupabase } from '@/lib/supabase';
 import type {
   Vendor,
   VendorFormData,
-  VendorWithDerivedRoles,
+  VendorWithPrimaryContact,
   VendorImportResult,
 } from '@/types/vendor';
 import type {
@@ -68,72 +68,17 @@ export async function getVendor(vendorId: string): Promise<Vendor | null> {
 }
 
 /**
- * Hydrate a single vendor with its derived role counts:
- * supplies materials = parts where preferred_vendor_id = vendor.id;
- * performs outside ops = work_centers where vendor_id = vendor.id.
- *
- * Also fetches the vendor's primary contact (if any) for display in the
- * detail page header / list contact column. `primary_contact` is null when
- * the vendor has no contact rows or no contact is marked is_primary
- * (legitimate state — see the migration's NOTICE log).
+ * List all vendors with their primary contact (if any) joined in. Primary
+ * contacts come from a single query against vendor_contacts
+ * WHERE is_primary=true; the result is stitched onto each vendor by
+ * vendor_id (null when no primary exists).
  */
-export async function getVendorWithDerivedRoles(
-  vendorId: string,
-): Promise<VendorWithDerivedRoles | null> {
-  const supabase = getSupabase();
-
-  const vendor = await getVendor(vendorId);
-  if (!vendor) return null;
-
-  const [
-    { count: suppliesCount, error: supError },
-    { count: opsCount, error: opError },
-    { data: primaryRows, error: contactError },
-  ] = await Promise.all([
-    supabase
-      .from('parts')
-      .select('*', { count: 'exact', head: true })
-      .eq('preferred_vendor_id', vendorId),
-    supabase
-      .from('work_centers')
-      .select('*', { count: 'exact', head: true })
-      .eq('vendor_id', vendorId),
-    supabase
-      .from('vendor_contacts')
-      .select(VENDOR_CONTACT_COLUMNS)
-      .eq('vendor_id', vendorId)
-      .eq('is_primary', true)
-      .limit(1),
-  ]);
-
-  if (supError) throw supError;
-  if (opError) throw opError;
-  if (contactError) throw contactError;
-
-  const primaryContact =
-    ((primaryRows || []) as VendorContact[])[0] || null;
-
-  return {
-    ...vendor,
-    supplies_materials_count: suppliesCount || 0,
-    performs_outside_ops_count: opsCount || 0,
-    primary_contact: primaryContact,
-  };
-}
-
-/**
- * List all vendors with their derived role counts in a single round trip.
- * The role counts come from two aggregate queries fanned across the company,
- * not row-by-row. Primary contacts come from a single query against
- * vendor_contacts WHERE is_primary=true; the result is stitched onto each
- * vendor by vendor_id (null when no primary exists).
- */
-export async function getAllVendorsWithDerivedRoles(
+export async function getAllVendorsWithPrimaryContact(
   companyId: string,
   search: string = '',
   sortField: string = 'name',
   sortDirection: 'asc' | 'desc' = 'asc',
-): Promise<VendorWithDerivedRoles[]> {
+): Promise<VendorWithPrimaryContact[]> {
   const supabase = getSupabase();
 
   const vendors = await getAllVendors(companyId, search, sortField, sortDirection);
@@ -141,44 +86,13 @@ export async function getAllVendorsWithDerivedRoles(
 
   const vendorIds = vendors.map((v) => v.id);
 
-  const [
-    { data: partRows, error: partError },
-    { data: wcRows, error: wcError },
-    { data: contactRows, error: contactError },
-  ] = await Promise.all([
-    supabase
-      .from('parts')
-      .select('preferred_vendor_id')
-      .eq('company_id', companyId)
-      .not('preferred_vendor_id', 'is', null),
-    supabase
-      .from('work_centers')
-      .select('vendor_id')
-      .eq('company_id', companyId)
-      .not('vendor_id', 'is', null),
-    supabase
-      .from('vendor_contacts')
-      .select(VENDOR_CONTACT_COLUMNS)
-      .in('vendor_id', vendorIds)
-      .eq('is_primary', true),
-  ]);
+  const { data: contactRows, error: contactError } = await supabase
+    .from('vendor_contacts')
+    .select(VENDOR_CONTACT_COLUMNS)
+    .in('vendor_id', vendorIds)
+    .eq('is_primary', true);
 
-  if (partError) throw partError;
-  if (wcError) throw wcError;
   if (contactError) throw contactError;
-
-  const suppliesByVendor = new Map<string, number>();
-  for (const r of (partRows || []) as Array<{ preferred_vendor_id: string }>) {
-    suppliesByVendor.set(
-      r.preferred_vendor_id,
-      (suppliesByVendor.get(r.preferred_vendor_id) || 0) + 1,
-    );
-  }
-
-  const opsByVendor = new Map<string, number>();
-  for (const r of (wcRows || []) as Array<{ vendor_id: string }>) {
-    opsByVendor.set(r.vendor_id, (opsByVendor.get(r.vendor_id) || 0) + 1);
-  }
 
   const primaryByVendor = new Map<string, VendorContact>();
   for (const c of (contactRows || []) as VendorContact[]) {
@@ -187,8 +101,6 @@ export async function getAllVendorsWithDerivedRoles(
 
   return vendors.map((v) => ({
     ...v,
-    supplies_materials_count: suppliesByVendor.get(v.id) || 0,
-    performs_outside_ops_count: opsByVendor.get(v.id) || 0,
     primary_contact: primaryByVendor.get(v.id) || null,
   }));
 }

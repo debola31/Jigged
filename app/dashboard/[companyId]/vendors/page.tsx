@@ -16,12 +16,6 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import Chip from '@mui/material/Chip';
-import Stack from '@mui/material/Stack';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
@@ -37,47 +31,34 @@ import type {
   SortChangedEvent,
   RowClickedEvent,
   CellKeyDownEvent,
-  ICellRendererParams,
 } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import {
-  getAllVendorsWithDerivedRoles,
+  getAllVendorsWithPrimaryContact,
   bulkDeleteVendors,
 } from '@/utils/vendorsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import type { VendorWithDerivedRoles } from '@/types/vendor';
-
-/**
- * Role-filter values:
- *  - 'all'      → no filter
- *  - 'supplies' → supplies_materials_count > 0
- *  - 'outside'  → performs_outside_ops_count > 0
- *  - 'both'     → both > 0
- *  - 'neither'  → both === 0 (vendor exists but nothing references it yet —
- *                 common right after import before classifications are set)
- */
-type RoleFilter = 'all' | 'supplies' | 'outside' | 'both' | 'neither';
+import type { VendorWithPrimaryContact } from '@/types/vendor';
 
 export default function VendorsPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [allRows, setAllRows] = useState<VendorWithDerivedRoles[]>([]);
+  const [rows, setRows] = useState<VendorWithPrimaryContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'name',
     sort: 'asc',
   });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const gridRef = useRef<AgGridReact<VendorWithDerivedRoles>>(null);
+  const gridRef = useRef<AgGridReact<VendorWithPrimaryContact>>(null);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
@@ -96,17 +77,13 @@ export default function VendorsPage() {
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
-      // Sort by `name` even when the user sorts by a derived-count column —
-      // the count columns aren't queryable, so we let AG Grid sort them
-      // client-side over the already-fetched set.
-      const sortField = sortModel.field === 'name' ? 'name' : 'name';
-      const data = await getAllVendorsWithDerivedRoles(
+      const data = await getAllVendorsWithPrimaryContact(
         companyId,
         searchDebounced,
-        sortField,
+        sortModel.field,
         sortModel.sort,
       );
-      setAllRows(data);
+      setRows(data);
     } catch (err) {
       console.error('Error fetching vendors:', err);
       setSnackbar({
@@ -123,38 +100,12 @@ export default function VendorsPage() {
     fetchRows();
   }, [fetchRows]);
 
-  // Client-side role filter operates on the derived counts. Both counts come
-  // from the same `getAllVendorsWithDerivedRoles` query — there's no second
-  // round-trip needed when the filter changes.
-  const rows = useMemo(() => {
-    switch (roleFilter) {
-      case 'supplies':
-        return allRows.filter(
-          (v) => v.supplies_materials_count > 0 && v.performs_outside_ops_count === 0,
-        );
-      case 'outside':
-        return allRows.filter(
-          (v) => v.performs_outside_ops_count > 0 && v.supplies_materials_count === 0,
-        );
-      case 'both':
-        return allRows.filter(
-          (v) => v.supplies_materials_count > 0 && v.performs_outside_ops_count > 0,
-        );
-      case 'neither':
-        return allRows.filter(
-          (v) => v.supplies_materials_count === 0 && v.performs_outside_ops_count === 0,
-        );
-      default:
-        return allRows;
-    }
-  }, [allRows, roleFilter]);
-
   useEffect(() => {
     setSelectedIds([]);
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, roleFilter]);
+  }, [searchDebounced]);
 
   const gridHeight = useMemo(() => {
     if (loading || rows.length === 0) return 600;
@@ -165,7 +116,7 @@ export default function VendorsPage() {
     return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
   }, [loading, rows.length]);
 
-  const handleGridReady = (event: GridReadyEvent<VendorWithDerivedRoles>) => {
+  const handleGridReady = (event: GridReadyEvent<VendorWithPrimaryContact>) => {
     event.api.applyColumnState({
       state: [{ colId: 'name', sort: 'asc' }],
       defaultState: { sort: null },
@@ -185,7 +136,7 @@ export default function VendorsPage() {
     }
   };
 
-  const handleSelectionChanged = (event: SelectionChangedEvent<VendorWithDerivedRoles>) => {
+  const handleSelectionChanged = (event: SelectionChangedEvent<VendorWithPrimaryContact>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
       .map((node) => node.data?.id)
@@ -193,13 +144,13 @@ export default function VendorsPage() {
     setSelectedIds(selectedData);
   };
 
-  const handleRowClicked = (event: RowClickedEvent<VendorWithDerivedRoles>) => {
+  const handleRowClicked = (event: RowClickedEvent<VendorWithPrimaryContact>) => {
     if (event.data) {
       router.push(`/dashboard/${companyId}/vendors/${event.data.id}`);
     }
   };
 
-  const handleCellKeyDown = (event: CellKeyDownEvent<VendorWithDerivedRoles>) => {
+  const handleCellKeyDown = (event: CellKeyDownEvent<VendorWithPrimaryContact>) => {
     const keyboardEvent = event.event as KeyboardEvent | undefined;
     if (keyboardEvent?.key === 'Enter' && event.data) {
       router.push(`/dashboard/${companyId}/vendors/${event.data.id}`);
@@ -240,60 +191,13 @@ export default function VendorsPage() {
     return new Date(val).toLocaleDateString();
   };
 
-  const columnDefs: ColDef<VendorWithDerivedRoles>[] = [
+  const columnDefs: ColDef<VendorWithPrimaryContact>[] = [
     {
       field: 'name',
       headerName: 'Name',
       flex: 1.5,
       minWidth: 200,
       pinned: 'left' as const,
-    },
-    {
-      colId: 'roles',
-      headerName: 'Roles',
-      flex: 1.5,
-      minWidth: 280,
-      sortable: false,
-      // Cell renders both derived-role chips, with em-dash if neither role is set.
-      cellRenderer: (params: ICellRendererParams<VendorWithDerivedRoles>) => {
-        const v = params.data;
-        if (!v) return null;
-        const supplies = v.supplies_materials_count > 0;
-        const outside = v.performs_outside_ops_count > 0;
-        if (!supplies && !outside) {
-          return (
-            <Typography variant="body2" color="text.secondary">
-              —
-            </Typography>
-          );
-        }
-        return (
-          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
-            {supplies && (
-              <Chip
-                size="small"
-                label={`Supplies materials · ${v.supplies_materials_count} part${v.supplies_materials_count === 1 ? '' : 's'}`}
-                sx={{
-                  fontWeight: 500,
-                  bgcolor: 'success.dark',
-                  color: 'common.white',
-                }}
-              />
-            )}
-            {outside && (
-              <Chip
-                size="small"
-                label={`Performs outside ops · ${v.performs_outside_ops_count} routing${v.performs_outside_ops_count === 1 ? '' : 's'}`}
-                sx={{
-                  fontWeight: 500,
-                  bgcolor: 'warning.dark',
-                  color: 'common.white',
-                }}
-              />
-            )}
-          </Stack>
-        );
-      },
     },
     {
       colId: 'contact',
@@ -362,22 +266,6 @@ export default function VendorsPage() {
           }}
         />
 
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel id="role-filter-label">Filter by role</InputLabel>
-          <Select
-            labelId="role-filter-label"
-            value={roleFilter}
-            label="Filter by role"
-            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
-          >
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="supplies">Supplies materials</MenuItem>
-            <MenuItem value="outside">Performs outside ops</MenuItem>
-            <MenuItem value="both">Both</MenuItem>
-            <MenuItem value="neither">Neither (unreferenced)</MenuItem>
-          </Select>
-        </FormControl>
-
         {selectedIds.length > 0 && (
           <>
             <ExportCsvButton
@@ -425,11 +313,11 @@ export default function VendorsPage() {
               No vendors yet
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || roleFilter !== 'all'
-                ? 'No vendors match your filters.'
+              {searchDebounced
+                ? 'No vendors match your search.'
                 : 'Add your first vendor or import from CSV.'}
             </Typography>
-            {!searchDebounced && roleFilter === 'all' && (
+            {!searchDebounced && (
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
                 <Button
                   variant="outlined"
@@ -464,7 +352,7 @@ export default function VendorsPage() {
               },
             }}
           >
-            <AgGridReact<VendorWithDerivedRoles>
+            <AgGridReact<VendorWithPrimaryContact>
               ref={gridRef}
               rowData={rows}
               columnDefs={columnDefs}

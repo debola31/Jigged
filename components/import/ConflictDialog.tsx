@@ -14,7 +14,33 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Box from '@mui/material/Box';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import DownloadIcon from '@mui/icons-material/Download';
 import type { ConflictDialogProps } from './types';
+
+function escapeCsvField(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (/[",\n\r]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]): void {
+  const lines = [headers.map(escapeCsvField).join(',')];
+  for (const row of rows) {
+    lines.push(row.map(escapeCsvField).join(','));
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Shared dialog for displaying import conflicts and validation errors.
@@ -41,12 +67,27 @@ export default function ConflictDialog<
   const errorRowNumbers = new Set(validationErrors.map((e) => e.row_number));
   const totalSkippedRows = new Set([...conflictRowNumbers, ...errorRowNumbers]).size;
 
-  // Limit displayed items
-  const maxDisplayed = 8;
-  const displayedConflicts = conflicts.slice(0, maxDisplayed);
-  const hasMoreConflicts = conflicts.length > maxDisplayed;
-  const displayedErrors = validationErrors.slice(0, 5);
-  const hasMoreErrors = validationErrors.length > 5;
+  const entitySlug = entityName.toLowerCase().replace(/\s+/g, '-');
+
+  const handleDownloadConflicts = () => {
+    const headers = ['Row', ...conflictColumns.map((c) => c.label), 'Conflict', 'Conflicting With'];
+    const rows = conflicts.map((conflict) => {
+      const record = conflict as Record<string, unknown>;
+      return [
+        conflict.row_number,
+        ...conflictColumns.map((col) => (record[col.key] as string) ?? ''),
+        getConflictLabel(conflict),
+        (record.existing_value as string) ?? '',
+      ];
+    });
+    downloadCsv(`${entitySlug}-import-conflicts.csv`, headers, rows);
+  };
+
+  const handleDownloadErrors = () => {
+    const headers = ['Row', 'Error'];
+    const rows = validationErrors.map((error) => [error.row_number, getErrorMessage(error)]);
+    downloadCsv(`${entitySlug}-import-errors.csv`, headers, rows);
+  };
 
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="md" fullWidth>
@@ -86,10 +127,19 @@ export default function ConflictDialog<
         {/* Conflicts Table */}
         {conflicts.length > 0 && (
           <>
-            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
-              Conflicting Rows ({conflicts.length})
-            </Typography>
-            <TableContainer sx={{ maxHeight: 300 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                Conflicting Rows ({conflicts.length})
+              </Typography>
+              <Button
+                size="small"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadConflicts}
+              >
+                Download CSV
+              </Button>
+            </Box>
+            <TableContainer sx={{ maxHeight: 360 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
@@ -104,7 +154,7 @@ export default function ConflictDialog<
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {displayedConflicts.map((conflict, idx) => (
+                  {conflicts.map((conflict, idx) => (
                     <TableRow key={`${conflict.row_number}-${idx}`}>
                       <TableCell>{conflict.row_number}</TableCell>
                       {conflictColumns.map((col) => (
@@ -127,21 +177,25 @@ export default function ConflictDialog<
                 </TableBody>
               </Table>
             </TableContainer>
-            {hasMoreConflicts && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                ... and {conflicts.length - maxDisplayed} more conflicts
-              </Typography>
-            )}
           </>
         )}
 
         {/* Validation Errors Table */}
         {validationErrors.length > 0 && (
           <>
-            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600, mt: 3 }}>
-              Validation Errors ({validationErrors.length})
-            </Typography>
-            <TableContainer sx={{ maxHeight: 200 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 3, mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                Validation Errors ({validationErrors.length})
+              </Typography>
+              <Button
+                size="small"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownloadErrors}
+              >
+                Download CSV
+              </Button>
+            </Box>
+            <TableContainer sx={{ maxHeight: 300 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
@@ -150,7 +204,7 @@ export default function ConflictDialog<
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {displayedErrors.map((error, idx) => (
+                  {validationErrors.map((error, idx) => (
                     <TableRow key={`${error.row_number}-${idx}`}>
                       <TableCell>{error.row_number}</TableCell>
                       <TableCell>
@@ -163,11 +217,6 @@ export default function ConflictDialog<
                 </TableBody>
               </Table>
             </TableContainer>
-            {hasMoreErrors && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                ... and {validationErrors.length - 5} more errors
-              </Typography>
-            )}
           </>
         )}
       </DialogContent>

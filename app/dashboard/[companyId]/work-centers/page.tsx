@@ -276,6 +276,7 @@ export default function WorkCentersPage() {
           (nodeA.data?.labor_rate ?? -Infinity) - (nodeB.data?.labor_rate ?? -Infinity)
         );
       },
+      cellStyle: { display: 'flex', alignItems: 'center' },
       cellRenderer: (params: ICellRendererParams<WorkCenterRow>) => {
         const wc = params.data;
         if (!wc) return null;
@@ -285,7 +286,7 @@ export default function WorkCentersPage() {
               variant="body2"
               sx={{ fontStyle: 'italic', color: 'text.secondary' }}
             >
-              Per routing op
+              Per operation
             </Typography>
           );
         }

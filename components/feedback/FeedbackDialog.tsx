@@ -78,6 +78,24 @@ function getPageTitle(pathname: string): string {
   if (segments.includes('settings')) return 'Settings';
   if (segments.includes('team')) return 'Team';
 
+  if (segments.includes('vendors')) {
+    if (segments.includes('new')) return 'New Vendor';
+    if (segments.includes('edit')) return 'Edit Vendor';
+    if (segments.includes('import')) return 'Import Vendors';
+    const idx = segments.indexOf('vendors');
+    if (idx < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[idx + 1])) return 'Vendor Details';
+    return 'Vendors';
+  }
+
+  if (segments.includes('work-centers')) {
+    if (segments.includes('new')) return 'New Work Center';
+    if (segments.includes('edit')) return 'Edit Work Center';
+    if (segments.includes('import')) return 'Import Work Centers';
+    const idx = segments.indexOf('work-centers');
+    if (idx < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[idx + 1])) return 'Work Center Details';
+    return 'Work Centers';
+  }
+
   return 'Dashboard';
 }
 

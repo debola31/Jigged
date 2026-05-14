@@ -24,6 +24,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import UploadIcon from '@mui/icons-material/Upload';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -342,6 +343,13 @@ export default function InventoryPage() {
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
           <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
+          >
+            Import CSV
+          </Button>
+          <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => setAddModalOpen(true)}
@@ -407,6 +415,14 @@ export default function InventoryPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
+
+        <Button
+          variant="outlined"
+          startIcon={<UploadIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
+        >
+          Import
+        </Button>
 
         <Button
           variant="contained"

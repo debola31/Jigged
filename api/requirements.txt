@@ -18,6 +18,11 @@ google-genai>=0.3.0
 # Error monitoring
 sentry-sdk[fastapi]>=2.0.0
 
+# Outbound email (quote-to-customer, future invitation emails)
+resend>=0.17.0
+# FastAPI multipart uploads (used by /api/quotes/{id}/email for the PDF blob).
+python-multipart>=0.0.9
+
 # Database
 psycopg2-binary>=2.9.0
 asyncpg>=0.29.0

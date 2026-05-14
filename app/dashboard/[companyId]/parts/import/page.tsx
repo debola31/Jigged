@@ -47,6 +47,17 @@ const MAX_ROWS_PER_REQUEST = 500;
 
 const steps = ['Upload', 'AI Analysis', 'Review Mappings', 'Validate', 'Import'];
 
+function formatApiError(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => (d && typeof d === 'object' && 'msg' in d ? String(d.msg) : JSON.stringify(d)))
+      .join('; ');
+  }
+  if (detail) return JSON.stringify(detail);
+  return fallback;
+}
+
 type ImportStep =
   | 'upload'
   | 'analyzing'
@@ -274,6 +285,7 @@ export default function ImportPartsPage() {
         body: JSON.stringify({
           company_id: companyId,
           mappings: mappingsObj,
+          pricing_columns: [],
           rows: rowObjects,
           total_rows: allRows.length,
         }),
@@ -281,7 +293,7 @@ export default function ImportPartsPage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Validation failed');
+        throw new Error(formatApiError(errorData.detail, 'Validation failed'));
       }
 
       const data: PartValidateResponse = await response.json();
@@ -348,6 +360,7 @@ export default function ImportPartsPage() {
           body: JSON.stringify({
             company_id: companyId,
             mappings: mappingsObj,
+            pricing_columns: [],
             rows: batch,
             skip_conflicts: skipConflicts,
             batch_offset: batchIndex * MAX_ROWS_PER_REQUEST,
@@ -356,7 +369,7 @@ export default function ImportPartsPage() {
 
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(errorData.detail || `Import failed on batch ${batchIndex + 1}`);
+          throw new Error(formatApiError(errorData.detail, `Import failed on batch ${batchIndex + 1}`));
         }
 
         const data: PartExecuteResponse = await response.json();

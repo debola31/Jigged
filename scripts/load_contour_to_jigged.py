@@ -60,8 +60,10 @@ except ImportError:
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 COMPANY_ID = os.environ.get("CONTOUR_COMPANY_ID", "")
 
-# Directory containing the cleaned CSV files
-DATA_DIR = Path(__file__).parent
+# Directory containing the cleaned CSV files. Kept out of git (contains
+# customer/vendor PII from the usability-test snapshot) — see .gitignore.
+# Run the loader after dropping the source CSVs into scripts/data/.
+DATA_DIR = Path(__file__).parent / "data"
 
 # Source files
 VENDORS_CSV = DATA_DIR / "vendors.csv"

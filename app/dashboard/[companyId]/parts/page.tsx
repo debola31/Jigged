@@ -26,6 +26,7 @@ import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
+import PercentIcon from '@mui/icons-material/Percent';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -45,6 +46,7 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import PartFormModal from '@/components/parts/PartFormModal';
+import BulkApplyMarkupRateDialog from '@/components/parts/BulkApplyMarkupRateDialog';
 import type { Part } from '@/types/part';
 
 type PartRow = Part;
@@ -75,6 +77,8 @@ export default function PartsPage() {
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
+
+  const [markupDialogOpen, setMarkupDialogOpen] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -369,6 +373,13 @@ export default function PartsPage() {
               selectedCount={selectedIds.length}
             />
             <Button
+              variant="outlined"
+              startIcon={<PercentIcon />}
+              onClick={() => setMarkupDialogOpen(true)}
+            >
+              Set markup ({selectedIds.length})
+            </Button>
+            <Button
               variant="contained"
               color="error"
               startIcon={<DeleteIcon />}
@@ -460,6 +471,27 @@ export default function PartsPage() {
         onClose={() => setAddModalOpen(false)}
         onCreated={handlePartCreatedOrEdited}
         companyId={companyId}
+      />
+
+      <BulkApplyMarkupRateDialog
+        open={markupDialogOpen}
+        onClose={() => setMarkupDialogOpen(false)}
+        companyId={companyId}
+        partIds={selectedIds}
+        onApplied={({ updated, failed, rateName }) => {
+          setMarkupDialogOpen(false);
+          setSelectedIds([]);
+          if (gridRef.current?.api) gridRef.current.api.deselectAll();
+          const msg =
+            failed > 0
+              ? `Applied "${rateName}" to ${updated} part${updated === 1 ? '' : 's'} (${failed} failed)`
+              : `Applied "${rateName}" to ${updated} part${updated === 1 ? '' : 's'}`;
+          setSnackbar({
+            open: true,
+            message: msg,
+            severity: failed > 0 ? 'error' : 'success',
+          });
+        }}
       />
 
       <Dialog

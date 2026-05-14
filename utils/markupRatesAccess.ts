@@ -267,6 +267,42 @@ export async function cascadeRateUpdateToParts(
   return { updated, failed };
 }
 
+/**
+ * Apply a rate to many parts in one go. Same per-part semantics as
+ * applyRateToPart (link FK + snapshot tiers), sequential like
+ * cascadeRateUpdateToParts so a single failure surfaces in the result
+ * rather than aborting the batch. Returns counts so the caller can
+ * report partial failures to the user.
+ */
+export async function bulkApplyMarkupRate(
+  companyId: string,
+  partIds: string[],
+  rateId: string,
+): Promise<{ updated: number; failed: Array<{ partId: string; error: string }> }> {
+  if (partIds.length === 0) return { updated: 0, failed: [] };
+
+  const rate = await getMarkupRate(rateId);
+  if (!rate) {
+    throw new Error(`Markup rate ${rateId} not found`);
+  }
+  const tiers = breakpointsToTierInputs(rate);
+
+  const failed: Array<{ partId: string; error: string }> = [];
+  let updated = 0;
+  for (const partId of partIds) {
+    try {
+      await replaceTiersForPart(companyId, partId, tiers, { rateId: rate.id });
+      updated += 1;
+    } catch (err) {
+      failed.push({
+        partId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+  return { updated, failed };
+}
+
 export async function deleteMarkupRate(rateId: string): Promise<void> {
   const supabase = getSupabase();
 

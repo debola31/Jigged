@@ -16,8 +16,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
-import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Radio from '@mui/material/Radio';
 import IconButton from '@mui/material/IconButton';
 import Divider from '@mui/material/Divider';
 import Tooltip from '@mui/material/Tooltip';
@@ -492,10 +492,11 @@ export default function CustomerForm({
                 </Typography>
                 <FormControlLabel
                   control={
-                    <Checkbox
+                    <Radio
+                      name="customer-billing-address"
                       checked={addr.is_billing}
-                      onChange={(e) =>
-                        updateAddress(idx, { is_billing: e.target.checked })
+                      onChange={() =>
+                        updateAddress(idx, { is_billing: true })
                       }
                       disabled={loading}
                     />
@@ -504,10 +505,11 @@ export default function CustomerForm({
                 />
                 <FormControlLabel
                   control={
-                    <Checkbox
+                    <Radio
+                      name="customer-shipping-address"
                       checked={addr.is_shipping}
-                      onChange={(e) =>
-                        updateAddress(idx, { is_shipping: e.target.checked })
+                      onChange={() =>
+                        updateAddress(idx, { is_shipping: true })
                       }
                       disabled={loading}
                     />

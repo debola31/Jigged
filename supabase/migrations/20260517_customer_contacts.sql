@@ -2,7 +2,7 @@
 -- Customer multi-contact: extract contacts to customer_contacts table
 -- ============================================================================
 --
--- Context. Customers still carry the embedded contact_name / contact_email /
+-- Context. Customers carried embedded contact_name / contact_email /
 -- contact_phone columns from iteration 1. The vendor side moved to a
 -- multi-contact pattern in 20260504_vendor_contacts_and_drop_notes (referenced
 -- there as the "customer parallel follow-up"). This is that follow-up.
@@ -13,19 +13,24 @@
 -- couldn't model that. We now mirror the vendor_contacts shape: a separate
 -- customer_contacts table with a role enum + role_label override + is_primary.
 --
--- Forward-only. Single BEGIN/COMMIT.
---
 -- The role enum is customer-flavored — 'buyer' replaces vendor's 'sales' since
 -- the relationship inverts (we're selling TO them, so their primary contact
 -- is usually a buyer/purchasing manager, not a salesperson).
+--
+-- IDEMPOTENT. Every step uses IF [NOT] EXISTS so the migration can be
+-- re-applied against partial state (e.g. an earlier run that succeeded at
+-- table creation but errored later). The backfill skips customers that
+-- already have a contact row, so re-running won't duplicate.
+--
+-- Forward-only. Single BEGIN/COMMIT.
 
 BEGIN;
 
 -- ============================================================================
--- Phase 1: Create customer_contacts table
+-- Phase 1: Create customer_contacts table (idempotent)
 -- ============================================================================
 
-CREATE TABLE public.customer_contacts (
+CREATE TABLE IF NOT EXISTS public.customer_contacts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
     name text NOT NULL,
@@ -56,7 +61,7 @@ COMMENT ON COLUMN public.customer_contacts.role_label
 COMMENT ON COLUMN public.customer_contacts.is_primary
     IS 'True for the contact treated as the customer''s primary point of contact. Surfaced on the customers list page and as a star badge on the customer detail page. Enforced unique-per-customer by the customer_contacts_one_primary partial index.';
 
-CREATE INDEX idx_customer_contacts_customer
+CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer
     ON public.customer_contacts (customer_id);
 
 
@@ -64,51 +69,86 @@ CREATE INDEX idx_customer_contacts_customer
 -- Phase 2: Partial unique index for the one-primary-per-customer invariant
 -- ============================================================================
 
-CREATE UNIQUE INDEX customer_contacts_one_primary
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary
     ON public.customer_contacts (customer_id) WHERE is_primary;
 
 
 -- ============================================================================
--- Phase 3: Backfill from the existing single-contact columns
+-- Phase 3: Backfill from the existing single-contact columns (idempotent)
 -- ============================================================================
 --
 -- Same rule as vendor_contacts: only insert rows where contact_name IS NOT NULL.
--- Customers with email/phone but no contact_name are reported via the DO $$
--- NOTICE block so the user can prioritize adding real contacts. The customer
--- detail page's empty-state ("No contacts yet. + Add Contact") handles the
--- no-contact case explicitly.
+-- Wrapped in a column-existence check so re-running after Phase 5 has already
+-- dropped the source columns is a no-op. We also skip customers that already
+-- have a contact row, so the backfill is safe to re-run mid-state.
 
-INSERT INTO public.customer_contacts (customer_id, name, role, email, phone, is_primary)
-SELECT id, contact_name, 'buyer', contact_email, contact_phone, true
-FROM public.customers
-WHERE contact_name IS NOT NULL
-  AND length(trim(contact_name)) > 0;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'customers'
+           AND column_name = 'contact_name'
+    ) THEN
+        EXECUTE $sql$
+            INSERT INTO public.customer_contacts (
+                customer_id, name, role, email, phone, is_primary
+            )
+            SELECT c.id, c.contact_name, 'buyer', c.contact_email, c.contact_phone, true
+              FROM public.customers c
+             WHERE c.contact_name IS NOT NULL
+               AND length(trim(c.contact_name)) > 0
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM public.customer_contacts cc
+                    WHERE cc.customer_id = c.id
+               )
+        $sql$;
+    END IF;
+END $$;
 
 
 -- ============================================================================
 -- Phase 4: Data-quality report — customers with email/phone but no name
 -- ============================================================================
+--
+-- Same column-existence guard as Phase 3 so re-runs after Phase 5 stay quiet.
 
 DO $$
 DECLARE
     v_orphan_count integer;
     v_row record;
 BEGIN
-    SELECT count(*) INTO v_orphan_count
-      FROM public.customers
-     WHERE (contact_name IS NULL OR length(trim(contact_name)) = 0)
-       AND (contact_email IS NOT NULL OR contact_phone IS NOT NULL);
+    IF NOT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'customers'
+           AND column_name = 'contact_name'
+    ) THEN
+        RETURN;
+    END IF;
+
+    EXECUTE $sql$
+        SELECT count(*)
+          FROM public.customers
+         WHERE (contact_name IS NULL OR length(trim(contact_name)) = 0)
+           AND (contact_email IS NOT NULL OR contact_phone IS NOT NULL)
+    $sql$ INTO v_orphan_count;
 
     IF v_orphan_count > 0 THEN
         RAISE NOTICE
             'customer_contacts backfill: % customer(s) had email/phone but no contact_name. They have no contact row yet — add real contacts via the new Contacts UI on each customer detail page:',
             v_orphan_count;
         FOR v_row IN
-            SELECT id, name, contact_email, contact_phone
-              FROM public.customers
-             WHERE (contact_name IS NULL OR length(trim(contact_name)) = 0)
-               AND (contact_email IS NOT NULL OR contact_phone IS NOT NULL)
-             ORDER BY name
+            EXECUTE $sql$
+                SELECT id, name, contact_email, contact_phone
+                  FROM public.customers
+                 WHERE (contact_name IS NULL OR length(trim(contact_name)) = 0)
+                   AND (contact_email IS NOT NULL OR contact_phone IS NOT NULL)
+                 ORDER BY name
+            $sql$
         LOOP
             RAISE NOTICE '  customer %: % | email=% | phone=%',
                 v_row.id, v_row.name,
@@ -120,13 +160,13 @@ END $$;
 
 
 -- ============================================================================
--- Phase 5: Drop the old single-contact columns
+-- Phase 5: Drop the old single-contact columns (idempotent)
 -- ============================================================================
 
 ALTER TABLE public.customers
-    DROP COLUMN contact_name,
-    DROP COLUMN contact_email,
-    DROP COLUMN contact_phone;
+    DROP COLUMN IF EXISTS contact_name,
+    DROP COLUMN IF EXISTS contact_email,
+    DROP COLUMN IF EXISTS contact_phone;
 
 
 -- ============================================================================

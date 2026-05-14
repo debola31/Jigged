@@ -267,6 +267,90 @@ export async function cascadeRateUpdateToParts(
   return { updated, failed };
 }
 
+/**
+ * Apply a rate to many parts. Delegates to the SQL function
+ * `bulk_apply_markup_rate` (one RPC, server-side loop). Same per-part
+ * semantics as applyRateToPart:
+ *   - replaces each part's tiers with the rate's breakpoints
+ *   - links parts.markup_rate_id to the rate
+ *   - per-part errors collected; the batch never aborts on one bad part
+ *
+ * Chunked because the per-tier cost compute is heavy and the default
+ * Supabase authenticated statement_timeout (8s) doesn't fit 8000 parts
+ * in one call. The SQL function itself bumps its own timeout to 120s
+ * so each chunk has plenty of headroom; chunk size below stays well
+ * within that budget. Chunks run sequentially so the server isn't
+ * fighting itself for CPU on heavy cost rollups, and so progress
+ * reports are monotonic.
+ *
+ * `priceUncomputed`: parts that linked successfully but ended up with
+ * at least one null unit_price (compute_part_cost_at_qty raised or
+ * returned NULL — missing op rate, missing procurement tier, etc.).
+ */
+const BULK_APPLY_CHUNK_SIZE = 200;
+
+interface BulkApplyMarkupRateResult {
+  updated: number;
+  failed: Array<{ partId: string; error: string }>;
+  priceUncomputed: number;
+}
+
+interface BulkApplyMarkupRateRpcResult {
+  updated: number;
+  price_uncomputed: number;
+  failed: Array<{ part_id: string; error: string }>;
+}
+
+export async function bulkApplyMarkupRate(
+  companyId: string,
+  partIds: string[],
+  rateId: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<BulkApplyMarkupRateResult> {
+  if (partIds.length === 0) return { updated: 0, failed: [], priceUncomputed: 0 };
+
+  const supabase = getSupabase();
+  const total = partIds.length;
+
+  let updated = 0;
+  let priceUncomputed = 0;
+  const failed: Array<{ partId: string; error: string }> = [];
+
+  for (let i = 0; i < partIds.length; i += BULK_APPLY_CHUNK_SIZE) {
+    const slice = partIds.slice(i, i + BULK_APPLY_CHUNK_SIZE);
+    const { data, error } = await supabase.rpc('bulk_apply_markup_rate', {
+      p_company_id: companyId,
+      p_part_ids: slice,
+      p_rate_id: rateId,
+    });
+
+    if (error) {
+      // Whole-chunk failure (timeout, network, etc.). Record each part
+      // in the chunk as failed and keep going — matches the per-part
+      // partial-failure model for everything else.
+      console.error('Error bulk-applying markup rate (chunk):', error);
+      for (const partId of slice) {
+        failed.push({ partId, error: error.message });
+      }
+    } else {
+      const result = (data ?? {
+        updated: 0,
+        price_uncomputed: 0,
+        failed: [],
+      }) as BulkApplyMarkupRateRpcResult;
+      updated += result.updated;
+      priceUncomputed += result.price_uncomputed;
+      for (const f of result.failed) {
+        failed.push({ partId: f.part_id, error: f.error });
+      }
+    }
+
+    onProgress?.(Math.min(i + slice.length, total), total);
+  }
+
+  return { updated, failed, priceUncomputed };
+}
+
 export async function deleteMarkupRate(rateId: string): Promise<void> {
   const supabase = getSupabase();
 

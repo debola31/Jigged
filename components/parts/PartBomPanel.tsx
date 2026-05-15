@@ -504,6 +504,7 @@ export default function PartBomPanel({
                   key={row.id}
                   parts={parts}
                   partsLoading={partsLoading}
+                  companyId={companyId}
                   initial={editingInitial}
                   lockChildPart
                   saving={saving}
@@ -619,6 +620,7 @@ export default function PartBomPanel({
             <MaterialRowEditor
               parts={parts}
               partsLoading={partsLoading}
+              companyId={companyId}
               saving={saving}
               error={editorError}
               onSave={handleEditorSave}

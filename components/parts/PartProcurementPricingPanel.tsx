@@ -24,6 +24,7 @@ import {
   addTier as addTierApi,
   updateTier as updateTierApi,
   deleteTier as deleteTierApi,
+  getProcurementCost,
 } from '@/utils/procurementTiersAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
 import { updatePartPreferredVendor } from '@/utils/partsAccess';
@@ -77,10 +78,14 @@ function tempId(): string {
  * an existing sheet on this part are flagged with a tier-count caption,
  * so the user sees at a glance who they already have rates from.
  *
- * Multi-vendor data still works — the user can have sheets from any
- * number of vendors, but only one is shown/edited at a time. Quote-time
- * pricing (`get_procurement_cost`) still picks the cheapest applicable
- * tier across every sheet regardless of which one is currently visible.
+ * Cost source contract: only the part's preferred vendor's sheet drives
+ * cost (in `compute_part_cost_at_qty` and `get_procurement_cost`). Picking
+ * a vendor in this panel sets it as preferred AND switches the displayed
+ * sheet — keeping the two concepts unified. Sheets under non-preferred
+ * vendors and `vendor_id=NULL` "Internal estimate" rows remain editable
+ * for reference but never feed rollup. The "Effective cost @ qty 1" line
+ * below the picker confirms which tier (if any) is currently active so the
+ * user has one transparent answer to "where does the price come from?".
  *
  * Saves are optimistic and in-place — adding/editing/removing a tier
  * never triggers a panel-wide reload or a page-level refetch.
@@ -99,6 +104,27 @@ export default function PartProcurementPricingPanel({
 
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [rows, setRows] = useState<EditRow[]>([]);
+
+  // Live "effective cost @ qty 1" — the result of get_procurement_cost(partId, 1)
+  // under the new preferred-vendor-only contract. Surfaced under the picker so
+  // the user can answer "where does the BOM cost come from?" without leaving
+  // the panel. Refreshed on initial load and after every tier mutation.
+  const [effectiveCost, setEffectiveCost] = useState<number | null>(null);
+  const [effectiveCostLoading, setEffectiveCostLoading] = useState(false);
+
+  const refreshEffectiveCost = useCallback(async () => {
+    setEffectiveCostLoading(true);
+    try {
+      const result = await getProcurementCost(partId, 1);
+      setEffectiveCost(result.unit_cost);
+    } catch {
+      // Non-fatal — the indicator is auxiliary; the tier table is the
+      // authoritative editing surface.
+      setEffectiveCost(null);
+    } finally {
+      setEffectiveCostLoading(false);
+    }
+  }, [partId]);
 
   const initialLoad = useCallback(async () => {
     try {
@@ -121,7 +147,8 @@ export default function PartProcurementPricingPanel({
 
   useEffect(() => {
     initialLoad();
-  }, [initialLoad]);
+    refreshEffectiveCost();
+  }, [initialLoad, refreshEffectiveCost]);
 
   // Pick an initial vendor on first load: preferred vendor first (whether
   // or not it has a sheet yet), then the first vendor that does have one,
@@ -255,6 +282,9 @@ export default function PartProcurementPricingPanel({
           ];
         });
       }
+      // Re-derive the effective cost so the badge reflects the just-saved
+      // tier without waiting for the next mount.
+      void refreshEffectiveCost();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save tier');
     } finally {
@@ -286,6 +316,7 @@ export default function PartProcurementPricingPanel({
             : g,
         ),
       );
+      void refreshEffectiveCost();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete tier');
     } finally {
@@ -312,6 +343,9 @@ export default function PartProcurementPricingPanel({
     setSelectedVendorId(nextId);
     try {
       await updatePartPreferredVendor(partId, nextId);
+      // Effective cost depends on which sheet is preferred — refresh so the
+      // badge below the picker reflects the new resolution immediately.
+      void refreshEffectiveCost();
     } catch (err) {
       setSelectedVendorId(prevId);
       setError(
@@ -389,10 +423,46 @@ export default function PartProcurementPricingPanel({
             {...params}
             label="Preferred vendor"
             placeholder="Pick a vendor"
-            helperText="Sets the default supplier and shows their qty-break pricing below."
+            helperText="Sets the default supplier and drives the BOM cost from this sheet."
           />
         )}
       />
+
+      {/* Effective-cost indicator. The single transparent answer to "where
+          does the BOM cost come from?" — derived from get_procurement_cost
+          (preferred vendor's cheapest non-expired tier with min_qty <= 1).
+          When this shows "—", the part contributes NULL to any parent BOM
+          and the parent surfaces the actionable missing-cost tooltip. */}
+      <Box
+        sx={{
+          mb: 2,
+          px: 1.5,
+          py: 1,
+          borderRadius: 1,
+          bgcolor: 'action.hover',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 2,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Typography variant="caption" color="text.secondary">
+          Effective cost @ qty 1 (drives BOM rollup)
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {effectiveCostLoading && <CircularProgress size={12} />}
+          <Typography
+            variant="body2"
+            sx={{
+              fontWeight: 600,
+              color: effectiveCost === null ? 'text.secondary' : 'text.primary',
+            }}
+          >
+            {effectiveCost === null ? '— no tier' : formatCurrency(effectiveCost)}
+          </Typography>
+        </Box>
+      </Box>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>

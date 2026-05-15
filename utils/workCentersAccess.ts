@@ -121,22 +121,6 @@ export async function getWorkCentersForRouting(
 }>> {
   const supabase = getSupabase();
 
-  let query = supabase
-    .from('work_centers')
-    .select(`id, name, kind, labor_rate, vendor:vendors(name)`)
-    .eq('company_id', companyId)
-    .order('name', { ascending: true });
-
-  if (kind) {
-    query = query.eq('kind', kind);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching work centers for routing:', error);
-    throw error;
-  }
-
   type Row = {
     id: string;
     name: string;
@@ -145,7 +129,35 @@ export async function getWorkCentersForRouting(
     vendor: { name: string } | { name: string }[] | null;
   };
 
-  return ((data || []) as Row[]).map((r) => {
+  const BATCH_SIZE = 1000;
+  let allData: Row[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let query = supabase
+      .from('work_centers')
+      .select(`id, name, kind, labor_rate, vendor:vendors(name)`)
+      .eq('company_id', companyId)
+      .order('name', { ascending: true })
+      .range(offset, offset + BATCH_SIZE - 1);
+
+    if (kind) {
+      query = query.eq('kind', kind);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching work centers for routing:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as Row[]) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
+  }
+
+  return allData.map((r) => {
     const vendor = Array.isArray(r.vendor) ? r.vendor[0] : r.vendor;
     return {
       id: r.id,

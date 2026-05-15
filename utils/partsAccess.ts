@@ -114,24 +114,36 @@ export async function getStockedParts(
   sortDirection: 'asc' | 'desc' = 'asc',
 ): Promise<Part[]> {
   const supabase = getSupabase();
+  const BATCH_SIZE = 1000;
+  let allData: PartRow[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  let query = supabase
-    .from('parts')
-    .select(PART_COLUMNS)
-    .eq('company_id', companyId)
-    .eq('is_stocked', true)
-    .order(sortField, { ascending: sortDirection === 'asc' });
+  while (hasMore) {
+    let query = supabase
+      .from('parts')
+      .select(PART_COLUMNS)
+      .eq('company_id', companyId)
+      .eq('is_stocked', true)
+      .order(sortField, { ascending: sortDirection === 'asc' })
+      .range(offset, offset + BATCH_SIZE - 1);
 
-  if (search.trim()) {
-    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    if (search.trim()) {
+      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching stocked parts:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as PartRow[]) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
   }
 
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching stocked parts:', error);
-    throw error;
-  }
-  return ((data as PartRow[]) || []).map(rowToPart);
+  return allData.map(rowToPart);
 }
 
 /**
@@ -144,24 +156,36 @@ export async function getMadeParts(
   sortDirection: 'asc' | 'desc' = 'asc',
 ): Promise<Part[]> {
   const supabase = getSupabase();
+  const BATCH_SIZE = 1000;
+  let allData: PartRow[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  let query = supabase
-    .from('parts')
-    .select(`${PART_COLUMNS}, routings(id)`)
-    .eq('company_id', companyId)
-    .eq('source', 'made')
-    .order(sortField, { ascending: sortDirection === 'asc' });
+  while (hasMore) {
+    let query = supabase
+      .from('parts')
+      .select(`${PART_COLUMNS}, routings(id)`)
+      .eq('company_id', companyId)
+      .eq('source', 'made')
+      .order(sortField, { ascending: sortDirection === 'asc' })
+      .range(offset, offset + BATCH_SIZE - 1);
 
-  if (search.trim()) {
-    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    if (search.trim()) {
+      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching made parts:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as PartRow[]) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
   }
 
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching made parts:', error);
-    throw error;
-  }
-  return ((data as PartRow[]) || []).map(rowToPart);
+  return allData.map(rowToPart);
 }
 
 /**
@@ -176,24 +200,36 @@ export async function getBoughtParts(
   sortDirection: 'asc' | 'desc' = 'asc',
 ): Promise<Part[]> {
   const supabase = getSupabase();
+  const BATCH_SIZE = 1000;
+  let allData: PartRow[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  let query = supabase
-    .from('parts')
-    .select(PART_COLUMNS)
-    .eq('company_id', companyId)
-    .eq('source', 'bought')
-    .order(sortField, { ascending: sortDirection === 'asc' });
+  while (hasMore) {
+    let query = supabase
+      .from('parts')
+      .select(PART_COLUMNS)
+      .eq('company_id', companyId)
+      .eq('source', 'bought')
+      .order(sortField, { ascending: sortDirection === 'asc' })
+      .range(offset, offset + BATCH_SIZE - 1);
 
-  if (search.trim()) {
-    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    if (search.trim()) {
+      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching bought parts:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as PartRow[]) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
   }
 
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching bought parts:', error);
-    throw error;
-  }
-  return ((data as PartRow[]) || []).map(rowToPart);
+  return allData.map(rowToPart);
 }
 
 /**
@@ -377,10 +413,7 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
  * between the unified, made, stocked, or bought subset (matches the saved
  * views on the parts list page).
  */
-export async function getPartsForSelect(
-  companyId: string,
-  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
-): Promise<Array<{
+export interface PartSelectOption {
   id: string;
   part_name: string;
   description: string | null;
@@ -389,48 +422,137 @@ export async function getPartsForSelect(
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
-}>> {
+}
+
+const PART_SELECT_COLUMNS = `
+  id,
+  part_name,
+  description,
+  is_stocked,
+  source,
+  primary_unit,
+  quantity,
+  routings(id)
+`;
+
+function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
+  const routings = p.routings as Array<{ id: string }> | { id: string } | null;
+  return {
+    id: p.id as string,
+    part_name: p.part_name as string,
+    description: p.description as string | null,
+    has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
+    is_stocked: p.is_stocked as boolean,
+    source: p.source as 'made' | 'bought',
+    primary_unit: p.primary_unit as string | null,
+    quantity: Number(p.quantity ?? 0),
+  };
+}
+
+export async function getPartsForSelect(
+  companyId: string,
+  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
+): Promise<PartSelectOption[]> {
+  const supabase = getSupabase();
+  const BATCH_SIZE = 1000;
+  let allData: Array<Record<string, unknown>> = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let query = supabase
+      .from('parts')
+      .select(PART_SELECT_COLUMNS)
+      .eq('company_id', companyId)
+      .order('part_name', { ascending: true })
+      .range(offset, offset + BATCH_SIZE - 1);
+
+    if (kind === 'stocked') query = query.eq('is_stocked', true);
+    else if (kind === 'made') query = query.eq('source', 'made');
+    else if (kind === 'bought') query = query.eq('source', 'bought');
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching parts for select:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as Array<Record<string, unknown>>) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
+  }
+
+  return allData.map(rowToPartSelectOption);
+}
+
+/**
+ * Server-side search variant of `getPartsForSelect` for autocomplete pickers
+ * over very large parts tables. Returns at most `limit` rows matching `query`
+ * (ILIKE on part_name + description). When `query` is empty, returns the
+ * first `limit` parts alphabetically — gives the dropdown something to show
+ * on focus without hydrating every row.
+ *
+ * Callers should debounce input changes (e.g. 300ms) so we don't fire one
+ * request per keystroke.
+ */
+export async function searchPartsForSelect(
+  companyId: string,
+  query: string,
+  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
+  limit: number = 50,
+): Promise<PartSelectOption[]> {
   const supabase = getSupabase();
 
-  let query = supabase
+  let q = supabase
     .from('parts')
-    .select(`
-      id,
-      part_name,
-      description,
-      is_stocked,
-      source,
-      primary_unit,
-      quantity,
-      routings(id)
-    `)
+    .select(PART_SELECT_COLUMNS)
     .eq('company_id', companyId)
-    .order('part_name', { ascending: true });
+    .order('part_name', { ascending: true })
+    .limit(limit);
 
-  if (kind === 'stocked') query = query.eq('is_stocked', true);
-  else if (kind === 'made') query = query.eq('source', 'made');
-  else if (kind === 'bought') query = query.eq('source', 'bought');
+  if (kind === 'stocked') q = q.eq('is_stocked', true);
+  else if (kind === 'made') q = q.eq('source', 'made');
+  else if (kind === 'bought') q = q.eq('source', 'bought');
 
-  const { data, error } = await query;
+  const trimmed = query.trim();
+  if (trimmed) {
+    q = q.or(`part_name.ilike.%${trimmed}%,description.ilike.%${trimmed}%`);
+  }
+
+  const { data, error } = await q;
 
   if (error) {
-    console.error('Error fetching parts for select:', error);
+    console.error('Error searching parts for select:', error);
     throw error;
   }
 
-  return (data || []).map((p: Record<string, unknown>) => {
-    const routings = p.routings as Array<{ id: string }> | { id: string } | null;
-    return {
-      id: p.id as string,
-      part_name: p.part_name as string,
-      description: p.description as string | null,
-      has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
-      is_stocked: p.is_stocked as boolean,
-      source: p.source as 'made' | 'bought',
-      primary_unit: p.primary_unit as string | null,
-      quantity: Number(p.quantity ?? 0),
-    };
-  });
+  return ((data as Array<Record<string, unknown>>) || []).map(rowToPartSelectOption);
+}
+
+/**
+ * Hydrate selection-state for an autocomplete that uses
+ * `searchPartsForSelect`. Given a list of part IDs (e.g. the ids currently
+ * referenced by an edit-mode form), returns the same row shape as the search
+ * function so the picker can display each id's label without an extra search.
+ */
+export async function getPartsForSelectByIds(
+  partIds: string[],
+): Promise<PartSelectOption[]> {
+  if (partIds.length === 0) return [];
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts')
+    .select(PART_SELECT_COLUMNS)
+    .in('id', partIds);
+
+  if (error) {
+    console.error('Error fetching parts by ids for select:', error);
+    throw error;
+  }
+
+  return ((data as Array<Record<string, unknown>>) || []).map(rowToPartSelectOption);
 }
 
 /**

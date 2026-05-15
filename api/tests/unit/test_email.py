@@ -54,9 +54,10 @@ def test_sends_with_attachment(monkeypatch):
         message_id = send_email(
             to=["customer@example.com"],
             cc=["sales@shop.example"],
+            bcc=["sender@shop.example"],
             subject="Quote Q-0001",
             body_text="Please find attached.",
-            reply_to="shop@example.com",
+            reply_to="sender@shop.example",
             attachments=[
                 EmailAttachment(filename="Quote-Q-0001.pdf", content=b"%PDF-1.4 ..."),
             ],
@@ -67,9 +68,10 @@ def test_sends_with_attachment(monkeypatch):
     assert params["from"] == "noreply@mail.jigged.app"
     assert params["to"] == ["customer@example.com"]
     assert params["cc"] == ["sales@shop.example"]
+    assert params["bcc"] == ["sender@shop.example"]
     assert params["subject"] == "Quote Q-0001"
     assert params["text"] == "Please find attached."
-    assert params["reply_to"] == "shop@example.com"
+    assert params["reply_to"] == "sender@shop.example"
     assert len(params["attachments"]) == 1
     att = params["attachments"][0]
     assert att["filename"] == "Quote-Q-0001.pdf"

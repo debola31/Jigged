@@ -35,11 +35,13 @@ def _service_client() -> Client:
     return create_client(url, key)
 
 
-async def _verify_quote_access(request: Request, quote_id: str) -> tuple[str, dict, dict]:
+async def _verify_quote_access(
+    request: Request, quote_id: str
+) -> tuple[str, str | None, dict, dict]:
     """
     Extract the caller's user id from the Authorization header and verify
     they have access to the quote's company. Returns
-    (user_id, quote_row, company_row).
+    (user_id, user_email, quote_row, company_row).
     """
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     if not token:
@@ -51,6 +53,7 @@ async def _verify_quote_access(request: Request, quote_id: str) -> tuple[str, di
         if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid token")
         user_id = user_response.user.id
+        user_email = user_response.user.email
     except HTTPException:
         raise
     except Exception as e:
@@ -80,7 +83,7 @@ async def _verify_quote_access(request: Request, quote_id: str) -> tuple[str, di
 
     company_resp = (
         client.table("companies")
-        .select("id, name, email")
+        .select("id, name")
         .eq("id", quote["company_id"])
         .single()
         .execute()
@@ -88,7 +91,7 @@ async def _verify_quote_access(request: Request, quote_id: str) -> tuple[str, di
     if not company_resp.data:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    return user_id, quote, company_resp.data
+    return user_id, user_email, quote, company_resp.data
 
 
 class EmailQuoteResponse(BaseModel):
@@ -109,25 +112,26 @@ async def email_quote(
     Send a quote PDF to the given email address.
 
     The frontend produces the PDF, the user edits the body, then we send
-    it through Resend. Reply-To is set to the company's email so customer
-    replies land in the shop's mailbox, not on a noreply alias.
+    it through Resend. Reply-To is set to the sending user's email so
+    customer replies land in their personal inbox, and the sender is
+    BCC'd so they have a copy of every quote they sent.
     """
-    _, quote, company = await _verify_quote_access(request, quote_id)
+    _, user_email, quote, _ = await _verify_quote_access(request, quote_id)
 
     pdf_bytes = await pdf.read()
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="Empty PDF upload")
 
     filename = f"Quote-{quote.get('quote_number') or quote_id}.pdf"
-    reply_to = company.get("email")
 
     try:
         message_id = send_email(
             to=[to.strip()],
             cc=[cc.strip()] if cc and cc.strip() else None,
+            bcc=[user_email] if user_email else None,
             subject=subject,
             body_text=body,
-            reply_to=reply_to,
+            reply_to=user_email,
             attachments=[EmailAttachment(filename=filename, content=pdf_bytes)],
         )
     except EmailServiceUnavailable as e:

@@ -28,7 +28,6 @@ import {
   checkBomCycle,
 } from '@/utils/bomAccess';
 import {
-  getPartsForSelect,
   getComputedPartCost,
   getPartCostExplain,
   type PartCostMissingLeaf,
@@ -38,7 +37,7 @@ import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
-  type PartOption,
+  type PartSelectOption,
 } from '@/components/parts/MaterialRowEditor';
 
 interface PartBomPanelProps {
@@ -131,11 +130,6 @@ export default function PartBomPanel({
   >({ mode: 'closed' });
   const [editorError, setEditorError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Parts list for the picker, loaded once at panel mount and reused across
-  // every editor invocation. Excludes the parent part (DB also enforces this).
-  const [parts, setParts] = useState<PartOption[]>([]);
-  const [partsLoading, setPartsLoading] = useState(false);
 
   const [pendingDelete, setPendingDelete] = useState<BomLineWithChildPart | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -295,40 +289,6 @@ export default function PartBomPanel({
     };
   }, [rows, partId]);
 
-  // Load parts list for the picker once. Re-fetches if partId or companyId
-  // changes (rare — only on detail-page navigation).
-  useEffect(() => {
-    let cancelled = false;
-    setPartsLoading(true);
-    getPartsForSelect(companyId, 'all')
-      .then((list) => {
-        if (cancelled) return;
-        setParts(
-          list
-            .filter((p) => p.id !== partId)
-            .map((p) => ({
-              id: p.id,
-              part_name: p.part_name,
-              description: p.description,
-              is_stocked: p.is_stocked,
-              source: p.source,
-              primary_unit: p.primary_unit,
-            })),
-        );
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error('Failed to load parts for material picker:', err);
-        setError('Failed to load parts list.');
-      })
-      .finally(() => {
-        if (!cancelled) setPartsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, partId]);
-
   const closeEditor = () => {
     setEditorState({ mode: 'closed' });
     setEditorError(null);
@@ -416,15 +376,18 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        childPart:
-          parts.find((p) => p.id === editingRow.child_part_id) ?? {
-            id: editingRow.child_part.id,
-            part_name: editingRow.child_part.part_name,
-            description: editingRow.child_part.description,
-            is_stocked: editingRow.child_part.is_stocked,
-            source: editingRow.child_part.source,
-            primary_unit: editingRow.child_part.primary_unit,
-          },
+        // child-part picker is locked in edit mode, so has_routing/quantity
+        // are display-only fillers — synthesize the option from the BOM row.
+        childPart: {
+          id: editingRow.child_part.id,
+          part_name: editingRow.child_part.part_name,
+          description: editingRow.child_part.description,
+          has_routing: false,
+          is_stocked: editingRow.child_part.is_stocked,
+          source: editingRow.child_part.source,
+          primary_unit: editingRow.child_part.primary_unit,
+          quantity: 0,
+        } satisfies PartSelectOption,
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
       }
@@ -502,8 +465,8 @@ export default function PartBomPanel({
               return (
                 <MaterialRowEditor
                   key={row.id}
-                  parts={parts}
-                  partsLoading={partsLoading}
+                  companyId={companyId}
+                  excludeIds={[partId]}
                   initial={editingInitial}
                   lockChildPart
                   saving={saving}
@@ -617,8 +580,8 @@ export default function PartBomPanel({
 
           {editorState.mode === 'add' && (
             <MaterialRowEditor
-              parts={parts}
-              partsLoading={partsLoading}
+              companyId={companyId}
+              excludeIds={[partId]}
               saving={saving}
               error={editorError}
               onSave={handleEditorSave}

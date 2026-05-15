@@ -4,33 +4,23 @@ import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import Autocomplete from '@mui/material/Autocomplete';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 
-/**
- * Lightweight part option used by the material picker. Mirrors the shape
- * returned by `getPartsForSelect`. Defined here (vs imported from
- * partsAccess) to keep the editor's prop surface explicit.
- */
-export interface PartOption {
-  id: string;
-  part_name: string;
-  description: string | null;
-  is_stocked: boolean;
-  source: 'made' | 'bought';
-  primary_unit: string | null;
-}
+import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+
+export type { PartSelectOption };
 
 export interface MaterialEditorValue {
-  childPart: PartOption | null;
+  childPart: PartSelectOption | null;
   quantity: string;
   unit: string;
 }
 
 export interface MaterialRowEditorProps {
-  parts: PartOption[];
-  partsLoading: boolean;
+  companyId: string;
+  /** Part IDs to hide from the child-part picker (e.g. the parent itself). */
+  excludeIds?: string[];
   /** When provided, the editor is in edit mode for an existing material row. */
   initial?: MaterialEditorValue;
   /**
@@ -63,8 +53,8 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * updateBomLine calls live in PartBomPanel which holds the state machine.
  */
 export default function MaterialRowEditor({
-  parts,
-  partsLoading,
+  companyId,
+  excludeIds,
   initial,
   lockChildPart = false,
   saving = false,
@@ -80,7 +70,7 @@ export default function MaterialRowEditor({
     setValue(initial ?? EMPTY_VALUE);
   }, [initial]);
 
-  const handlePartChange = (option: PartOption | null) => {
+  const handlePartChange = (option: PartSelectOption | null) => {
     setValue((prev) => ({
       ...prev,
       childPart: option,
@@ -111,59 +101,15 @@ export default function MaterialRowEditor({
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap' }}>
         <Box sx={{ flex: '1 1 240px', minWidth: 200 }}>
-          <Autocomplete
-            options={parts}
-            loading={partsLoading}
+          <PartAutocomplete
+            companyId={companyId}
             value={value.childPart}
-            onChange={(_, option) => handlePartChange(option)}
-            getOptionLabel={(option) => option.part_name}
-            isOptionEqualToValue={(option, v) => option.id === v.id}
+            onChange={handlePartChange}
+            excludeIds={excludeIds}
             disabled={lockChildPart || saving}
-            size="small"
-            renderOption={(props, option) => {
-              const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & {
-                key?: React.Key;
-              };
-              return (
-                <Box component="li" {...rest} key={key as React.Key} sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {option.part_name}
-                  </Typography>
-                  {option.description && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {option.description}
-                    </Typography>
-                  )}
-                </Box>
-              );
-            }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Material part"
-                required
-                autoFocus={!lockChildPart}
-                size="small"
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {partsLoading ? <CircularProgress size={16} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
+            label="Material part"
+            required
+            autoFocus={!lockChildPart}
           />
         </Box>
 

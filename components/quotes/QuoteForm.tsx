@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import NextLink from 'next/link';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -15,6 +16,8 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
+import Link from '@mui/material/Link';
+import Tooltip from '@mui/material/Tooltip';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
@@ -309,53 +312,52 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     return { sum: Math.round(sum * 100) / 100, allComputable };
   }, [partBlocks, blockPreviews]);
 
-  const handleSubmit = async () => {
-    setError(null);
-
-    if (!formData.customer_id) {
-      setError('Pick a customer.');
-      return;
-    }
-    if (partBlocks.length === 0) {
-      setError('Add at least one part to the quote.');
-      return;
+  /**
+   * First reason the form is not submittable, or null when valid.
+   * Drives the disabled state of the Create/Save button instead of inline error alerts.
+   */
+  const validationError = useMemo<string | null>(() => {
+    if (!formData.customer_id) return 'Pick a customer.';
+    if (partBlocks.length === 0) return 'Add at least one part to the quote.';
+    const leadRaw = formData.lead_time_days;
+    const leadNum = Number(leadRaw);
+    if (
+      leadRaw === '' ||
+      !Number.isFinite(leadNum) ||
+      leadNum < 0 ||
+      !Number.isInteger(leadNum)
+    ) {
+      return 'Enter a lead time (whole number of days).';
     }
     const seen = new Set<string>();
     for (const block of partBlocks) {
-      if (!block.part_id) {
-        setError('Every part block must have a part selected.');
-        return;
-      }
-      if (seen.has(block.part_id)) {
-        setError('A part can only appear once on a quote.');
-        return;
-      }
+      if (!block.part_id) return 'Every part block must have a part selected.';
+      if (seen.has(block.part_id)) return 'A part can only appear once on a quote.';
       seen.add(block.part_id);
       const orderQty = Number(block.order_quantity);
       if (!Number.isFinite(orderQty) || orderQty <= 0) {
-        setError('Every part needs an order quantity greater than zero.');
-        return;
+        return 'Every part needs an order quantity greater than zero.';
       }
-      if (!Number.isInteger(orderQty)) {
-        setError('Order quantity must be a whole number.');
-        return;
-      }
+      if (!Number.isInteger(orderQty)) return 'Order quantity must be a whole number.';
       if (block.override_open) {
         const overridePrice = Number(block.override_unit_price);
         if (!Number.isFinite(overridePrice) || overridePrice < 0) {
-          setError('Override unit price must be a non-negative number.');
-          return;
+          return 'Override unit price must be a non-negative number.';
         }
       } else {
+        if (block.loading) return 'Loading pricing tiers…';
         const resolved = resolveTier(block.tiers, orderQty);
         if (!resolved) {
-          setError(
-            'At least one part has no priced tiers — open the part page to add pricing tiers, or use a custom price override.',
-          );
-          return;
+          return 'At least one part has no priced tiers — add tiers on the part page or use a custom price.';
         }
       }
     }
+    return null;
+  }, [formData, partBlocks]);
+
+  const handleSubmit = async () => {
+    if (validationError) return;
+    setError(null);
 
     const payload: QuoteFormData = {
       ...formData,
@@ -496,8 +498,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
                 {!block.loading && block.part_id && block.tiers.length === 0 && !block.error && (
                   <Alert severity="warning">
-                    This part has no pricing tiers yet. Add pricing tiers on the part page, or
-                    enter a custom unit price below.
+                    This part has no pricing tiers yet.{' '}
+                    <Link
+                      component={NextLink}
+                      href={`/dashboard/${companyId}/parts/${block.part_id}`}
+                      target="_blank"
+                      rel="noopener"
+                      underline="always"
+                    >
+                      Add pricing tiers on the part page
+                    </Link>
+                    , or enter a custom unit price below.
                   </Alert>
                 )}
 
@@ -651,6 +662,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 type="number"
                 size="small"
                 fullWidth
+                required
                 value={formData.lead_time_days}
                 onChange={(e) => handleFieldChange('lead_time_days', e.target.value)}
                 inputProps={{ min: 0, step: 1 }}
@@ -706,14 +718,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           <Button onClick={handleCancel} disabled={loading}>
             Cancel
           </Button>
-          <Button
-            variant="contained"
-            onClick={handleSubmit}
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={14} color="inherit" /> : null}
-          >
-            {mode === 'create' ? 'Create quote' : 'Save changes'}
-          </Button>
+          <Tooltip title={validationError ?? ''} disableHoverListener={!validationError}>
+            <span>
+              <Button
+                variant="contained"
+                onClick={handleSubmit}
+                disabled={loading || !!validationError}
+                startIcon={loading ? <CircularProgress size={14} color="inherit" /> : null}
+              >
+                {mode === 'create' ? 'Create quote' : 'Save changes'}
+              </Button>
+            </span>
+          </Tooltip>
         </Box>
       </Box>
 

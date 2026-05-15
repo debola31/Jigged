@@ -26,25 +26,37 @@ export async function getAllVendors(
   sortDirection: 'asc' | 'desc' = 'asc',
 ): Promise<Vendor[]> {
   const supabase = getSupabase();
+  const BATCH_SIZE = 1000;
+  let allData: Vendor[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  let query = supabase
-    .from('vendors')
-    .select(VENDOR_COLUMNS)
-    .eq('company_id', companyId)
-    .order(sortField, { ascending: sortDirection === 'asc' });
+  while (hasMore) {
+    let query = supabase
+      .from('vendors')
+      .select(VENDOR_COLUMNS)
+      .eq('company_id', companyId)
+      .order(sortField, { ascending: sortDirection === 'asc' })
+      .range(offset, offset + BATCH_SIZE - 1);
 
-  if (search.trim()) {
-    // Search the vendor name + city only. Contact-name search would require a
-    // join through vendor_contacts; defer until usability shows users want it.
-    query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%`);
+    if (search.trim()) {
+      // Search the vendor name + city only. Contact-name search would require a
+      // join through vendor_contacts; defer until usability shows users want it.
+      query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching vendors:', error);
+      throw error;
+    }
+
+    allData = [...allData, ...((data as Vendor[]) || [])];
+    hasMore = (data?.length || 0) === BATCH_SIZE;
+    offset += BATCH_SIZE;
   }
 
-  const { data, error } = await query;
-  if (error) {
-    console.error('Error fetching vendors:', error);
-    throw error;
-  }
-  return (data || []) as Vendor[];
+  return allData;
 }
 
 /**

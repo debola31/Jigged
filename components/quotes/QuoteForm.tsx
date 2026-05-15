@@ -23,7 +23,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
 import { createQuote, updateQuote } from '@/utils/quotesAccess';
-import { getPartsForSelect } from '@/utils/partsAccess';
+import { searchPartsForSelect, getPartsForSelectByIds } from '@/utils/partsAccess';
 import { getAllCustomers } from '@/utils/customerAccess';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
@@ -108,6 +108,132 @@ function blockFromInitial(p: QuoteFormData['parts'][number]): PartBlockState {
   };
 }
 
+interface PartAutocompleteProps {
+  companyId: string;
+  partId: string;
+  initialOption?: PartOption | null;
+  onChange: (partId: string) => void;
+  onCreateNew: () => void;
+  label: string;
+}
+
+/**
+ * Server-side search autocomplete for parts. Used for each part block on the
+ * quote form. Avoids loading every row in the company (8000+ at the Contour
+ * shop) just to drive client-side filtering.
+ *
+ * Own state:
+ *  - `inputValue` is the text in the input. Drives the debounced search.
+ *  - `options` is the current search-result page (capped at 50).
+ *  - `selectedOption` is what the Autocomplete renders as the current value.
+ *    Hydrated by `getPartsForSelectByIds` when `partId` is set without a label
+ *    (e.g. edit mode, or just after creating a new part via the modal).
+ */
+function PartAutocomplete({
+  companyId,
+  partId,
+  initialOption,
+  onChange,
+  onCreateNew,
+  label,
+}: PartAutocompleteProps) {
+  const [open, setOpen] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [options, setOptions] = useState<PartOption[]>([CREATE_NEW_PART]);
+  const [loading, setLoading] = useState(false);
+  const [selectedOption, setSelectedOption] = useState<PartOption | null>(
+    initialOption ?? null,
+  );
+
+  // Hydrate `selectedOption` when `partId` is set but we don't have a matching
+  // option (initial edit-mode load, or a fresh part_id from the create modal).
+  useEffect(() => {
+    if (!partId) {
+      setSelectedOption(null);
+      return;
+    }
+    if (selectedOption && selectedOption.id === partId) return;
+    let active = true;
+    getPartsForSelectByIds([partId])
+      .then((rows) => {
+        if (!active) return;
+        const row = rows[0];
+        if (!row) return;
+        setSelectedOption({
+          id: row.id,
+          part_name: row.part_name,
+          description: row.description,
+          has_routing: row.has_routing,
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to hydrate part option:', err);
+      });
+    return () => {
+      active = false;
+    };
+    // selectedOption is intentionally excluded — we only resync on partId changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partId]);
+
+  // Debounced search whenever the dropdown is open and the input changes.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoading(true);
+    const delay = inputValue.trim() ? 300 : 0;
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchPartsForSelect(companyId, inputValue, 'all', 50);
+        if (!active) return;
+        setOptions([
+          CREATE_NEW_PART,
+          ...results.map((r) => ({
+            id: r.id,
+            part_name: r.part_name,
+            description: r.description,
+            has_routing: r.has_routing,
+          })),
+        ]);
+      } catch (err) {
+        console.error('Part search failed:', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, delay);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [inputValue, companyId, open]);
+
+  return (
+    <Autocomplete
+      size="small"
+      open={open}
+      onOpen={() => setOpen(true)}
+      onClose={() => setOpen(false)}
+      options={options}
+      filterOptions={(x) => x}
+      loading={loading}
+      value={selectedOption}
+      inputValue={inputValue}
+      onInputChange={(_, v) => setInputValue(v)}
+      onChange={(_, v) => {
+        if (v?.isCreateNew) {
+          onCreateNew();
+          return;
+        }
+        setSelectedOption(v);
+        onChange(v?.id ?? '');
+      }}
+      getOptionLabel={(o) => o.part_name}
+      isOptionEqualToValue={(o, v) => o.id === v.id}
+      renderInput={(params) => <TextField {...params} label={label} />}
+    />
+  );
+}
+
 export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave }: QuoteFormProps) {
   const router = useRouter();
   const params = useParams();
@@ -119,7 +245,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   );
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
-  const [parts, setParts] = useState<PartOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,22 +256,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const loadData = useCallback(async () => {
     try {
       setLoadingData(true);
-      const [customersData, partsData] = await Promise.all([
-        getAllCustomers(companyId),
-        getPartsForSelect(companyId),
-      ]);
+      const customersData = await getAllCustomers(companyId);
       setCustomers([
         CREATE_NEW_CUSTOMER,
         ...customersData.map((c) => ({ id: c.id, name: c.name })),
-      ]);
-      setParts([
-        CREATE_NEW_PART,
-        ...partsData.map((p) => ({
-          id: p.id,
-          part_name: p.part_name,
-          description: p.description,
-          has_routing: p.has_routing,
-        })),
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -210,25 +323,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setPartBlocks((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const updatePartInBlock = (idx: number, part: PartOption | null) => {
-    if (!part) {
-      setPartBlocks((prev) => {
-        const next = [...prev];
-        next[idx] = emptyBlock();
-        return next;
-      });
-      return;
-    }
-    if (part.isCreateNew) {
-      setPartModalTargetIdx(idx);
-      setPartModalOpen(true);
-      return;
-    }
+  const updatePartIdInBlock = (idx: number, partId: string) => {
     setPartBlocks((prev) => {
       const next = [...prev];
-      next[idx] = { ...emptyBlock(), part_id: part.id };
+      next[idx] = { ...emptyBlock(), part_id: partId };
       return next;
     });
+  };
+
+  const openCreatePartModalForBlock = (idx: number) => {
+    setPartModalTargetIdx(idx);
+    setPartModalOpen(true);
   };
 
   const updateBlockField = (
@@ -254,8 +359,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setCustomerModalOpen(false);
   };
 
-  const handlePartCreated = async (part: { id: string }) => {
-    await loadData();
+  const handlePartCreated = (part: { id: string }) => {
     if (partModalTargetIdx !== null) {
       setPartBlocks((prev) => {
         const next = [...prev];
@@ -457,7 +561,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           )}
 
           {partBlocks.map((block, idx) => {
-            const selectedPart = parts.find((p) => p.id === block.part_id) ?? null;
             const preview = blockPreviews[idx];
             const orderQtyNum = Number(block.order_quantity);
             const hasOrderQty =
@@ -470,13 +573,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 {idx > 0 && <Divider sx={{ mb: 3 }} />}
                 <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 2 }}>
                   <Box sx={{ flex: 1 }}>
-                    <Autocomplete
-                      size="small"
-                      options={parts}
-                      getOptionLabel={(o) => o.part_name}
-                      value={selectedPart}
-                      onChange={(_, v) => updatePartInBlock(idx, v)}
-                      renderInput={(params) => <TextField {...params} label={`Part ${idx + 1}`} />}
+                    <PartAutocomplete
+                      companyId={companyId}
+                      partId={block.part_id}
+                      onChange={(partId) => updatePartIdInBlock(idx, partId)}
+                      onCreateNew={() => openCreatePartModalForBlock(idx)}
+                      label={`Part ${idx + 1}`}
                     />
                   </Box>
                   <IconButton

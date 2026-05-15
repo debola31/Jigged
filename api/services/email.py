@@ -44,6 +44,7 @@ def send_email(
     subject: str,
     body_text: str,
     cc: list[str] | None = None,
+    bcc: list[str] | None = None,
     reply_to: str | None = None,
     attachments: Sequence[EmailAttachment] = (),
 ) -> str:
@@ -84,6 +85,8 @@ def send_email(
     }
     if cc:
         params["cc"] = cc
+    if bcc:
+        params["bcc"] = bcc
     if reply_to:
         # Resend SDK accepts a string or list for reply_to.
         params["reply_to"] = reply_to

@@ -21,7 +21,6 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Stack from '@mui/material/Stack';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Autocomplete from '@mui/material/Autocomplete';
 import BuildIcon from '@mui/icons-material/Build';
 import LocalMallIcon from '@mui/icons-material/LocalMall';
 import type { Part, PartFormData } from '@/types/part';
@@ -31,8 +30,7 @@ import {
   deletePart,
   checkPartNameExists,
 } from '@/utils/partsAccess';
-import { getAllVendors } from '@/utils/vendorsAccess';
-import type { Vendor } from '@/types/vendor';
+import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 
@@ -97,9 +95,6 @@ export default function PartForm({
     severity: 'error',
   });
 
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
-
   // Sync external initialData changes (e.g. when the search-first modal swaps
   // from create -> editing-existing as the user picks a suggestion).
   useEffect(() => {
@@ -107,27 +102,6 @@ export default function PartForm({
     setFieldErrors({});
     setError(null);
   }, [initialData]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadVendors() {
-      setVendorsLoading(true);
-      try {
-        const data = await getAllVendors(companyId);
-        if (!cancelled) setVendors(data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load vendors');
-        }
-      } finally {
-        if (!cancelled) setVendorsLoading(false);
-      }
-    }
-    loadVendors();
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
 
   // Generic text-change handler for top-level string fields.
   const handleTextChange =
@@ -273,9 +247,6 @@ export default function PartForm({
   };
 
   const canDelete = !part || ((part.quotes_count ?? 0) === 0 && (part.jobs_count ?? 0) === 0);
-
-  const selectedVendor =
-    vendors.find((v) => v.id === formData.preferred_vendor_id) || null;
 
   const showUomField = formData.is_stocked;
   // Preferred vendor is procurement-only — a stocked sub-assembly has no
@@ -433,39 +404,18 @@ export default function PartForm({
               )}
               {showVendorPicker && (
                 <Grid size={{ xs: 12 }}>
-                  <Autocomplete
-                    options={vendors}
-                    getOptionLabel={(opt) => opt.name}
-                    value={selectedVendor}
-                    loading={vendorsLoading}
-                    onChange={(_event, newValue) => {
+                  <VendorAutocomplete
+                    companyId={companyId}
+                    valueId={formData.preferred_vendor_id}
+                    onChange={(vendor) => {
                       setFormData((prev) => ({
                         ...prev,
-                        preferred_vendor_id: newValue ? newValue.id : null,
+                        preferred_vendor_id: vendor ? vendor.id : null,
                       }));
                     }}
                     disabled={loading}
-                    isOptionEqualToValue={(opt, val) => opt.id === val.id}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Preferred Vendor"
-                        helperText="Optional. The default supplier for this part."
-                        slotProps={{
-                          input: {
-                            ...params.InputProps,
-                            endAdornment: (
-                              <>
-                                {vendorsLoading ? (
-                                  <CircularProgress color="inherit" size={20} />
-                                ) : null}
-                                {params.InputProps.endAdornment}
-                              </>
-                            ),
-                          },
-                        }}
-                      />
-                    )}
+                    label="Preferred Vendor"
+                    helperText="Optional. The default supplier for this part."
                   />
                 </Grid>
               )}

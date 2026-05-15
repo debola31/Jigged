@@ -13,7 +13,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Autocomplete from '@mui/material/Autocomplete';
 import Grid from '@mui/material/Grid';
 import FactoryIcon from '@mui/icons-material/Factory';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -28,8 +27,7 @@ import {
   updateWorkCenter,
   checkWorkCenterNameExists,
 } from '@/utils/workCentersAccess';
-import { getAllVendors } from '@/utils/vendorsAccess';
-import type { Vendor } from '@/types/vendor';
+import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 
 interface WorkCenterFormProps {
@@ -60,34 +58,6 @@ export default function WorkCenterForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
-  const [vendorsLoaded, setVendorsLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadVendors() {
-      setVendorsLoading(true);
-      try {
-        const data = await getAllVendors(companyId);
-        if (!cancelled) {
-          setVendors(data);
-          setVendorsLoaded(true);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load vendors');
-        }
-      } finally {
-        if (!cancelled) setVendorsLoading(false);
-      }
-    }
-    loadVendors();
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
 
   const handleTextChange = (field: keyof WorkCenterFormData) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -206,8 +176,6 @@ export default function WorkCenterForm({
     }
   };
 
-  const selectedVendor = vendors.find((v) => v.id === formData.vendor_id) || null;
-
   return (
     <Box component="form" onSubmit={handleSubmit}>
       {error && (
@@ -323,49 +291,25 @@ export default function WorkCenterForm({
 
             {formData.kind === 'external' && (
               <Grid size={{ xs: 12, sm: 6 }}>
-                <Autocomplete
-                  options={vendors}
-                  getOptionLabel={(opt) => opt.name}
-                  value={selectedVendor}
-                  loading={vendorsLoading}
-                  onChange={(_event, newValue) => {
+                <VendorAutocomplete
+                  companyId={companyId}
+                  valueId={formData.vendor_id}
+                  onChange={(vendor) => {
                     setFormData((prev) => ({
                       ...prev,
-                      vendor_id: newValue ? newValue.id : null,
+                      vendor_id: vendor ? vendor.id : null,
                     }));
                     if (fieldErrors.vendor_id) {
                       setFieldErrors((prev) => ({ ...prev, vendor_id: '' }));
                     }
                   }}
                   disabled={loading}
-                  isOptionEqualToValue={(opt, val) => opt.id === val.id}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      required
-                      label="Vendor"
-                      error={!!fieldErrors.vendor_id}
-                      helperText={
-                        fieldErrors.vendor_id ||
-                        (vendorsLoaded && vendors.length === 0
-                          ? 'No vendors yet — add one in Vendors first.'
-                          : 'Vendor performing this outside operation')
-                      }
-                      slotProps={{
-                        input: {
-                          ...params.InputProps,
-                          endAdornment: (
-                            <>
-                              {vendorsLoading ? (
-                                <CircularProgress color="inherit" size={20} />
-                              ) : null}
-                              {params.InputProps.endAdornment}
-                            </>
-                          ),
-                        },
-                      }}
-                    />
-                  )}
+                  required
+                  label="Vendor"
+                  error={!!fieldErrors.vendor_id}
+                  helperText={
+                    fieldErrors.vendor_id || 'Vendor performing this outside operation'
+                  }
                 />
               </Grid>
             )}

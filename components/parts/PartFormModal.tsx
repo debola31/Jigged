@@ -17,7 +17,6 @@ import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Autocomplete from '@mui/material/Autocomplete';
 import CloseIcon from '@mui/icons-material/Close';
 import BuildIcon from '@mui/icons-material/Build';
 import LocalMallIcon from '@mui/icons-material/LocalMall';
@@ -25,7 +24,7 @@ import { EMPTY_PART_FORM } from '@/types/part';
 import type { Part, PartFormData } from '@/types/part';
 import type { Vendor } from '@/types/vendor';
 import { createPart, checkPartNameExists } from '@/utils/partsAccess';
-import { getAllVendors } from '@/utils/vendorsAccess';
+import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
 
@@ -78,6 +77,7 @@ export default function PartFormModal({
   );
 
   const [formData, setFormData] = useState<PartFormData>(baseCreate);
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
@@ -85,36 +85,12 @@ export default function PartFormModal({
     primary_unit?: string;
   }>({});
 
-  // Vendor list — only fetched/shown when the form is in Bought mode, since
-  // preferred_vendor doesn't apply to made parts. Lazy-loaded the first time
-  // the modal opens so closed-modal cost is zero.
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setVendorsLoading(true);
-    getAllVendors(companyId)
-      .then((rows) => {
-        if (!cancelled) setVendors(rows);
-      })
-      .catch((err) => {
-        if (!cancelled) console.warn('Failed to load vendors:', err);
-      })
-      .finally(() => {
-        if (!cancelled) setVendorsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, companyId]);
-
   // Reset whenever the modal closes/reopens, or when defaults change (e.g.
   // user navigates from Parts to Inventory and reopens).
   useEffect(() => {
     if (open) {
       setFormData(baseCreate);
+      setSelectedVendor(null);
       setError(null);
       setFieldErrors({});
     }
@@ -129,6 +105,7 @@ export default function PartFormModal({
       // Made so the field doesn't carry a stale value into the new shape.
       preferred_vendor_id: next === 'made' ? null : prev.preferred_vendor_id,
     }));
+    if (next === 'made') setSelectedVendor(null);
   };
 
   const handleStockedChange = (_e: unknown, checked: boolean) => {
@@ -329,42 +306,22 @@ export default function PartFormModal({
               detail page. Made parts have no vendor concept, so the field
               hides entirely when source='made'. */}
           {formData.source === 'bought' && (
-            <Autocomplete<Vendor>
-              options={vendors}
-              loading={vendorsLoading}
-              value={
-                vendors.find((v) => v.id === formData.preferred_vendor_id) ?? null
-              }
-              onChange={(_e, next) =>
-                setFormData((prev) => ({
-                  ...prev,
-                  preferred_vendor_id: next ? next.id : null,
-                }))
-              }
-              getOptionLabel={(opt) => opt.name}
-              isOptionEqualToValue={(opt, val) => opt.id === val.id}
-              size="small"
-              disabled={submitting}
-              sx={{ mt: 3 }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Preferred vendor"
-                  helperText="Optional. The default supplier for this part."
-                  slotProps={{
-                    input: {
-                      ...params.InputProps,
-                      endAdornment: (
-                        <>
-                          {vendorsLoading ? <CircularProgress size={14} /> : null}
-                          {params.InputProps.endAdornment}
-                        </>
-                      ),
-                    },
-                  }}
-                />
-              )}
-            />
+            <Box sx={{ mt: 3 }}>
+              <VendorAutocomplete
+                companyId={companyId}
+                value={selectedVendor}
+                onChange={(vendor) => {
+                  setSelectedVendor(vendor);
+                  setFormData((prev) => ({
+                    ...prev,
+                    preferred_vendor_id: vendor ? vendor.id : null,
+                  }));
+                }}
+                disabled={submitting}
+                label="Preferred vendor"
+                helperText="Optional. The default supplier for this part."
+              />
+            </Box>
           )}
         </DialogContent>
 

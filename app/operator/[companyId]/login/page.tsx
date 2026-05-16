@@ -71,10 +71,7 @@ export default function OperatorLoginPage() {
             sessionStorage.setItem('jigged_operator_station', stationId);
           }
 
-          // Check if password change required
-          if (session.user.user_metadata?.needs_password_change) {
-            router.push(`/operator/${companyId}/change-password`);
-          } else if (jobId) {
+          if (jobId) {
             router.push(`/operator/${companyId}/jobs/${jobId}`);
           } else {
             router.push(`/operator/${companyId}/jobs`);
@@ -138,18 +135,12 @@ export default function OperatorLoginPage() {
 
       // Note: Supabase auth automatically tracks last_sign_in_at
 
-      // 4. Check if password change required
-      if (data.user.user_metadata?.needs_password_change) {
-        router.push(`/operator/${companyId}/change-password`);
-        return;
-      }
-
-      // 5. Persist station to sessionStorage for station context
+      // 4. Persist station to sessionStorage for station context
       if (stationId && typeof window !== 'undefined') {
         sessionStorage.setItem('jigged_operator_station', stationId);
       }
 
-      // 6. Redirect to job detail (if scanned from job QR) or jobs list
+      // 5. Redirect to job detail (if scanned from job QR) or jobs list
       if (jobId) {
         router.push(`/operator/${companyId}/jobs/${jobId}`);
       } else {

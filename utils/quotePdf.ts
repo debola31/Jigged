@@ -510,9 +510,7 @@ export async function generateQuotePdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(60);
-  const acceptCopy = quote.expiration_date
-    ? `To accept, sign below or reply with a PO referencing this quote. Prices valid until ${formatDate(quote.expiration_date)}.`
-    : 'To accept, sign below or reply with a PO referencing this quote.';
+  const acceptCopy = 'To accept, sign below or reply with a PO referencing this quote.';
   const wrappedCopy = doc.splitTextToSize(acceptCopy, pageWidth - MARGIN * 2);
   doc.text(wrappedCopy, MARGIN, cursorY);
   cursorY += wrappedCopy.length * 12 + 14;

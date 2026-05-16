@@ -12,6 +12,7 @@
  */
 
 import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
+import { getOriginUrl } from '../_shared/origin.ts';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -49,38 +50,6 @@ async function verifyAdmin(
   }
 
   return user.id;
-}
-
-/**
- * Allowed origin patterns for redirect links.
- * Prevents arbitrary URL injection while allowing all legitimate environments.
- */
-const ALLOWED_ORIGIN_PATTERNS = [
-  /^https:\/\/.*\.jigged\.app$/,
-  /^https:\/\/.*\.vercel\.app$/,
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-];
-
-/**
- * Get the origin URL for redirect links from the request.
- * Reads the Origin (or Referer) header and validates against an allowlist.
- * Falls back to SITE_URL env var if no valid origin is present.
- */
-function getOriginUrl(req: Request): string {
-  const origin = req.headers.get('origin') || req.headers.get('referer');
-  if (origin) {
-    try {
-      const parsed = new URL(origin);
-      const originBase = parsed.origin;
-      if (ALLOWED_ORIGIN_PATTERNS.some(p => p.test(originBase))) {
-        return originBase;
-      }
-    } catch {
-      // Invalid URL — fall through to default
-    }
-  }
-  return Deno.env.get('SITE_URL') || Deno.env.get('NEXT_PUBLIC_APP_URL') || 'http://localhost:3000';
 }
 
 /**

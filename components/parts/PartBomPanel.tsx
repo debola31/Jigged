@@ -19,7 +19,9 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import NextLink from 'next/link';
+import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import {
   getBomForPart,
   deleteBomLine,
@@ -43,6 +45,14 @@ import MaterialRowEditor, {
 interface PartBomPanelProps {
   partId: string;
   companyId: string;
+  /**
+   * The drill-down chain on the page hosting this panel — i.e. the result
+   * of `parseBackChain(searchParams)` from the part-detail page. Used to
+   * build child-part hrefs that push the *current* part onto the trail
+   * via `pushPartToChain`. Defaults to empty so callers outside the
+   * part-detail page don't need to thread it through.
+   */
+  currentChain?: string[];
   /** When true, hides add/edit/remove controls (display-only mode). */
   readOnly?: boolean;
   /**
@@ -108,6 +118,7 @@ interface BomRowCost {
 export default function PartBomPanel({
   partId,
   companyId,
+  currentChain = [],
   readOnly = false,
   description,
   onChanged,
@@ -488,13 +499,30 @@ export default function PartBomPanel({
                 }}
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {/* Restyled to read as an obvious link: primary color +
+                      always-underlined + trailing chevron. The rest of
+                      the row stays inert; edit/remove icons keep their
+                      own click targets. The href pushes this part onto
+                      the back chain so the destination renders a
+                      breadcrumb back to here. */}
                   <Link
                     component={NextLink}
-                    href={`/dashboard/${companyId}/parts/${child.id}`}
-                    underline="hover"
-                    sx={{ fontWeight: 500 }}
+                    href={buildPartHref({
+                      companyId,
+                      targetPartId: child.id,
+                      chain: pushPartToChain(currentChain, partId, child.id),
+                    })}
+                    underline="always"
+                    color="primary.main"
+                    sx={{
+                      fontWeight: 500,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 0.25,
+                    }}
                   >
                     {child.part_name}
+                    <ChevronRightIcon sx={{ fontSize: 16 }} />
                   </Link>
                 </Box>
                 <Box sx={{ minWidth: 110, textAlign: 'right' }}>
@@ -524,7 +552,15 @@ export default function PartBomPanel({
                     >
                       <Box
                         component={NextLink}
-                        href={`/dashboard/${companyId}/parts/${rowCost?.missingLeaf?.part_id ?? child.id}`}
+                        href={buildPartHref({
+                          companyId,
+                          targetPartId: rowCost?.missingLeaf?.part_id ?? child.id,
+                          chain: pushPartToChain(
+                            currentChain,
+                            partId,
+                            rowCost?.missingLeaf?.part_id ?? child.id,
+                          ),
+                        })}
                         sx={{
                           display: 'inline-flex',
                           alignItems: 'center',

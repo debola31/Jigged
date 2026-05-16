@@ -19,10 +19,12 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Chip from '@mui/material/Chip';
 import Snackbar from '@mui/material/Snackbar';
+import Breadcrumbs from '@mui/material/Breadcrumbs';
+import MuiLink from '@mui/material/Link';
+import NextLink from 'next/link';
 
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
@@ -31,7 +33,9 @@ import {
   getPartWithRelations,
   deletePart,
   getPartUnitConversions,
+  getPartNamesByIds,
 } from '@/utils/partsAccess';
+import { parseBackChain, buildPartHref } from '@/lib/partNavStack';
 import type { Part, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
@@ -55,24 +59,49 @@ export default function PartDetailPage() {
   const companyId = params.companyId as string;
   const partId = params.partId as string;
 
-  // Back link routes to whichever list page the user came from. Only the
-  // Parts and Inventory list pages set ?from=; entry points from BOM rows,
-  // routing rows, quote line items, "where used", and jobs do not, and the
-  // back link falls through to /parts (the closer match for "I came from
-  // somewhere that isn't a list"). Documented scope boundary: this is a
-  // list-page back link, not a universal browser-history back button.
+  // List-page crumb (root of the breadcrumb). Reflects where the user
+  // entered the part-detail flow from — Parts vs. Inventory. Only the
+  // list pages set ?from=; entry points from BOM rows, quote line items,
+  // jobs etc. fall through to /parts.
   const partsListHref = useMemo(() => {
     const from = searchParams.get('from');
     if (from === 'inventory') return `/dashboard/${companyId}/inventory`;
     return `/dashboard/${companyId}/parts`;
   }, [companyId, searchParams]);
 
-  // Label matches the destination so the back link reflects where the user
-  // came from. Same fall-through rule as partsListHref.
   const partsListLabel = useMemo(() => {
     const from = searchParams.get('from');
-    return from === 'inventory' ? 'Back to Inventory' : 'Back to Parts';
+    return from === 'inventory' ? 'Inventory' : 'Parts';
   }, [searchParams]);
+
+  // Drill-down chain from `?back=id1,id2,id3`. Each entry is a part the
+  // user passed through to get here (oldest → most-recent). Empty when
+  // the user landed directly (list page, quote, deep-link, etc.).
+  const currentChain = useMemo(() => parseBackChain(searchParams), [searchParams]);
+
+  // Lazy-loaded id → display name map for the chain. One Supabase call
+  // per chain change. Names come from getPartNamesByIds; ids that don't
+  // resolve (deleted/garbage) just won't appear in the map and the
+  // breadcrumb falls back to "(unknown)".
+  const [chainNames, setChainNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (currentChain.length === 0) {
+      setChainNames(new Map());
+      return;
+    }
+    let cancelled = false;
+    getPartNamesByIds(currentChain)
+      .then((map) => {
+        if (!cancelled) setChainNames(map);
+      })
+      .catch((err) => {
+        // Non-fatal — the breadcrumb still renders with placeholders.
+        if (!cancelled) console.warn('Failed to load breadcrumb part names:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentChain]);
 
   const [part, setPart] = useState<Part | null>(null);
   const [unitConversions, setUnitConversions] = useState<PartUnitConversion[]>([]);
@@ -213,27 +242,54 @@ export default function PartDetailPage() {
 
   return (
     <Box>
-      {/* Top action bar: Back link left, Delete right. Edit moved into the
-          header card below — the form only edits the data shown there
-          (name, description, source, stocked, UOM), so anchoring it on the
-          card it modifies matches the user's mental model. Delete stays
-          page-level: it's the destructive global action and visually
-          separating it from Edit reduces accidental-click risk. */}
+      {/* Top action bar: breadcrumb on the left, Delete on the right. The
+          breadcrumb collapses to just the list-page crumb when the chain
+          is empty (direct-land), and expands to show the BOM drill-down
+          trail when the user reached this page via a series of part
+          links. The current part is the rightmost crumb (plain text —
+          "you are here"). Each prior crumb's href points back to that
+          part with the chain truncated up to and including its slot, so
+          clicking any crumb pops everything after it. */}
       <Box
         sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          gap: 2,
           mb: 3,
         }}
       >
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => router.push(partsListHref)}
-          sx={{ color: 'text.secondary' }}
-        >
-          {partsListLabel}
-        </Button>
+        <Breadcrumbs separator="›" sx={{ flex: 1, minWidth: 0 }}>
+          <MuiLink
+            component={NextLink}
+            href={partsListHref}
+            underline="hover"
+            color="text.secondary"
+          >
+            {partsListLabel}
+          </MuiLink>
+          {currentChain.map((id, i) => (
+            <MuiLink
+              key={`${id}-${i}`}
+              component={NextLink}
+              href={buildPartHref({
+                companyId,
+                targetPartId: id,
+                // Chain to attach to the destination = everything before
+                // this slot. Clicking entry i lands you on that part with
+                // all entries 0..i-1 still in the trail.
+                chain: currentChain.slice(0, i),
+              })}
+              underline="hover"
+              color="text.secondary"
+            >
+              {chainNames.get(id) ?? '…'}
+            </MuiLink>
+          ))}
+          <Typography color="text.primary" sx={{ fontWeight: 500 }}>
+            {part.part_name}
+          </Typography>
+        </Breadcrumbs>
 
         <Tooltip
           title={
@@ -442,7 +498,12 @@ export default function PartDetailPage() {
             <Grid size={{ xs: 12, md: 7 }}>
               <Card elevation={2} sx={{ height: '100%' }}>
                 <CardContent>
-                  <PartPricing companyId={companyId} part={part} refreshKey={refreshKey} />
+                  <PartPricing
+                    companyId={companyId}
+                    part={part}
+                    refreshKey={refreshKey}
+                    currentChain={currentChain}
+                  />
                 </CardContent>
               </Card>
             </Grid>
@@ -471,6 +532,7 @@ export default function PartDetailPage() {
                       <PartBomPanel
                         partId={partId}
                         companyId={companyId}
+                        currentChain={currentChain}
                         description={`Parts consumed when manufacturing this ${part.part_name}.`}
                         onChanged={refreshAfterMutation}
                       />
@@ -506,7 +568,12 @@ export default function PartDetailPage() {
             <Grid size={{ xs: 12 }}>
               <Card elevation={2}>
                 <CardContent>
-                  <PartPricing companyId={companyId} part={part} refreshKey={refreshKey} />
+                  <PartPricing
+                    companyId={companyId}
+                    part={part}
+                    refreshKey={refreshKey}
+                    currentChain={currentChain}
+                  />
                 </CardContent>
               </Card>
             </Grid>
@@ -525,7 +592,11 @@ export default function PartDetailPage() {
                   Other parts whose BOM includes this part as a component.
                 </Typography>
                 <Divider sx={{ my: 2 }} />
-                <PartWhereUsedPanel partId={partId} companyId={companyId} />
+                <PartWhereUsedPanel
+                  partId={partId}
+                  companyId={companyId}
+                  currentChain={currentChain}
+                />
               </CardContent>
             </Card>
           </Grid>

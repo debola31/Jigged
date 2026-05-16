@@ -480,6 +480,33 @@ describe('calculateRoutingCost', () => {
       expect(result!.total_material_cost).toBe(0);
     });
 
+    it('exposes child_part_name + detail on missing_material_cost so the renderer can link the part name', async () => {
+      // The Pricing-card warning UI replaced the trailing "Open child →" link
+      // with `<Link>{child_part_name}</Link> {detail}` so the part name itself
+      // is the click target. Verify the warning carries those fields and that
+      // `message` still composes them for backwards-compatible callers.
+      mockGetRoutingForPart.mockResolvedValue(null);
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({
+          quantity: 5,
+          childName: 'UNPRICED-PART',
+          childCost: null,
+        }),
+      ]);
+
+      const result = await calculateRoutingCost('part-1');
+
+      const w = result!.warnings[0];
+      expect(w.child_part_name).toBe('UNPRICED-PART');
+      expect(typeof w.detail).toBe('string');
+      expect(w.detail).not.toBe('');
+      // detail should NOT include the "PARTNAME: " prefix — that's the
+      // renderer's job, composed via the Link wrapper.
+      expect(w.detail).not.toMatch(/^UNPRICED-PART:/);
+      // message still combines them for legacy callers.
+      expect(w.message).toBe(`UNPRICED-PART: ${w.detail}`);
+    });
+
     it('falls back to child.primary_unit when bom.unit is empty', async () => {
       mockGetRoutingForPart.mockResolvedValue(null);
       mockGetBomForPart.mockResolvedValue([

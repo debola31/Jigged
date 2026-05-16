@@ -10,12 +10,21 @@ import Stack from '@mui/material/Stack';
 import Divider from '@mui/material/Divider';
 import TablePagination from '@mui/material/TablePagination';
 import NextLink from 'next/link';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getBomParents } from '@/utils/bomAccess';
 import type { BomLineWithParentPart } from '@/types/bom';
+import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 
 interface PartWhereUsedPanelProps {
   partId: string;
   companyId: string;
+  /**
+   * Drill-down chain on the page hosting this panel — passed through to
+   * `pushPartToChain` when building the parent-part hrefs so back-nav
+   * breadcrumbs accumulate. Defaults to empty for callers outside the
+   * part-detail page.
+   */
+  currentChain?: string[];
 }
 
 const formatQuantity = (n: number): string =>
@@ -31,7 +40,11 @@ const formatQuantity = (n: number): string =>
  * functionally, but pagination keeps the panel a predictable height and
  * matches the transaction-history table's UX.
  */
-export default function PartWhereUsedPanel({ partId, companyId }: PartWhereUsedPanelProps) {
+export default function PartWhereUsedPanel({
+  partId,
+  companyId,
+  currentChain = [],
+}: PartWhereUsedPanelProps) {
   const [rows, setRows] = useState<BomLineWithParentPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,13 +109,28 @@ export default function PartWhereUsedPanel({ partId, companyId }: PartWhereUsedP
             sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1.5 }}
           >
             <Box sx={{ flex: 1, minWidth: 0 }}>
+              {/* Same link affordance as PartBomPanel: primary color +
+                  always-underlined + chevron. Pushes the current part
+                  onto the back chain so the parent renders a breadcrumb
+                  back to here. */}
               <Link
                 component={NextLink}
-                href={`/dashboard/${companyId}/parts/${row.parent_part.id}`}
-                underline="hover"
-                sx={{ fontWeight: 500 }}
+                href={buildPartHref({
+                  companyId,
+                  targetPartId: row.parent_part.id,
+                  chain: pushPartToChain(currentChain, partId, row.parent_part.id),
+                })}
+                underline="always"
+                color="primary.main"
+                sx={{
+                  fontWeight: 500,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 0.25,
+                }}
               >
                 {row.parent_part.part_name}
+                <ChevronRightIcon sx={{ fontSize: 16 }} />
               </Link>
             </Box>
             <Box sx={{ minWidth: 140, textAlign: 'right' }}>

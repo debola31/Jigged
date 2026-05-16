@@ -3,9 +3,17 @@ import { Page, expect } from '@playwright/test';
 /**
  * Navigate to a module via the sidebar.
  * Sidebar items have their module name as primary text (e.g., "Quotes", "Parts").
+ *
+ * Scoped to the sidebar's `aria-label="Main navigation"` so it doesn't
+ * clash with other nav landmarks on the page (e.g. MUI Breadcrumbs render
+ * as `<nav>` and would otherwise produce a strict-mode violation when a
+ * crumb has the same label as a sidebar item).
  */
 export async function navigateTo(page: Page, moduleName: string) {
-  await page.getByRole('navigation').getByText(moduleName, { exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByText(moduleName, { exact: true })
+    .click();
   // Wait for navigation to settle
   await page.waitForLoadState('networkidle');
 }

@@ -259,7 +259,11 @@ export default function PartDetailPage() {
           mb: 3,
         }}
       >
-        <Breadcrumbs separator="›" sx={{ flex: 1, minWidth: 0 }}>
+        <Breadcrumbs
+          aria-label="Part trail"
+          separator="›"
+          sx={{ flex: 1, minWidth: 0 }}
+        >
           <MuiLink
             component={NextLink}
             href={partsListHref}

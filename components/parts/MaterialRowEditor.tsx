@@ -4,43 +4,32 @@ import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import Autocomplete from '@mui/material/Autocomplete';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
 import Link from 'next/link';
+
+import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartUnitConversions } from '@/utils/partsAccess';
 
-/**
- * Lightweight part option used by the material picker. Mirrors the shape
- * returned by `getPartsForSelect`. Defined here (vs imported from
- * partsAccess) to keep the editor's prop surface explicit.
- */
-export interface PartOption {
-  id: string;
-  part_name: string;
-  description: string | null;
-  is_stocked: boolean;
-  source: 'made' | 'bought';
-  primary_unit: string | null;
-}
+export type { PartSelectOption };
 
 export interface MaterialEditorValue {
-  childPart: PartOption | null;
+  childPart: PartSelectOption | null;
   quantity: string;
   unit: string;
 }
 
 export interface MaterialRowEditorProps {
-  parts: PartOption[];
-  partsLoading: boolean;
   /**
-   * Used to build the "add a unit conversion on the child part" link in the
-   * helper caption when the child has only its primary_unit available. Not
-   * load-bearing for save logic.
+   * Used both by the embedded PartAutocomplete and by the "add a unit
+   * conversion on the child part" helper link rendered when the child has
+   * only its primary_unit available.
    */
   companyId: string;
+  /** Part IDs to hide from the child-part picker (e.g. the parent itself). */
+  excludeIds?: string[];
   /** When provided, the editor is in edit mode for an existing material row. */
   initial?: MaterialEditorValue;
   /**
@@ -69,13 +58,18 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * consistency. The user toggles a row into edit mode in place; "Add
  * Material" appends an editor row at the end of the list.
  *
+ * The Unit field is constrained to the child's primary_unit + every
+ * parts_unit_conversions.from_unit row for that child — typing an
+ * unconvertible unit would silently break the cost rollup later in
+ * compute_part_cost_at_qty. Children with no primary_unit fall back to
+ * free-text since there's no canonical anchor to lock to.
+ *
  * The editor is purely presentational. Cycle pre-check + addBomLine /
  * updateBomLine calls live in PartBomPanel which holds the state machine.
  */
 export default function MaterialRowEditor({
-  parts,
-  partsLoading,
   companyId,
+  excludeIds,
   initial,
   lockChildPart = false,
   saving = false,
@@ -161,7 +155,7 @@ export default function MaterialRowEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitOptions, conversionsLoading, noPrimaryUnit]);
 
-  const handlePartChange = (option: PartOption | null) => {
+  const handlePartChange = (option: PartSelectOption | null) => {
     setValue((prev) => ({
       ...prev,
       childPart: option,
@@ -196,59 +190,15 @@ export default function MaterialRowEditor({
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap' }}>
         <Box sx={{ flex: '1 1 240px', minWidth: 200 }}>
-          <Autocomplete
-            options={parts}
-            loading={partsLoading}
+          <PartAutocomplete
+            companyId={companyId}
             value={value.childPart}
-            onChange={(_, option) => handlePartChange(option)}
-            getOptionLabel={(option) => option.part_name}
-            isOptionEqualToValue={(option, v) => option.id === v.id}
+            onChange={handlePartChange}
+            excludeIds={excludeIds}
             disabled={lockChildPart || saving}
-            size="small"
-            renderOption={(props, option) => {
-              const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & {
-                key?: React.Key;
-              };
-              return (
-                <Box component="li" {...rest} key={key as React.Key} sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {option.part_name}
-                  </Typography>
-                  {option.description && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {option.description}
-                    </Typography>
-                  )}
-                </Box>
-              );
-            }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Material part"
-                required
-                autoFocus={!lockChildPart}
-                size="small"
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {partsLoading ? <CircularProgress size={16} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
+            label="Material part"
+            required
+            autoFocus={!lockChildPart}
           />
         </Box>
 

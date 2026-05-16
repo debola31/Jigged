@@ -14,16 +14,14 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Card from '@mui/material/Card';
 import IconButton from '@mui/material/IconButton';
-import Autocomplete from '@mui/material/Autocomplete';
 import Fade from '@mui/material/Fade';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { completeJob, getJobPartMaterialsForCompletion } from '@/utils/operatorAccess';
-import { getStockedParts } from '@/utils/partsAccess';
+import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
-import type { Part } from '@/types/part';
 
 interface JobCompleteModalProps {
   open: boolean;
@@ -68,8 +66,6 @@ export default function JobCompleteModal({
 
   // For adding extra materials
   const [showAddMaterial, setShowAddMaterial] = useState(false);
-  const [stockableParts, setStockableParts] = useState<Part[]>([]);
-  const [loadingItems, setLoadingItems] = useState(false);
 
   // Update elapsed time while modal is open
   useEffect(() => {
@@ -115,22 +111,11 @@ export default function JobCompleteModal({
     setMaterials((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleAddMaterial = async () => {
-    if (stockableParts.length === 0) {
-      setLoadingItems(true);
-      try {
-        const items = await getStockedParts(companyId);
-        setStockableParts(items);
-      } catch {
-        // Silently fail — user can retry
-      } finally {
-        setLoadingItems(false);
-      }
-    }
+  const handleAddMaterial = () => {
     setShowAddMaterial(true);
   };
 
-  const handleSelectNewMaterial = (part: Part | null) => {
+  const handleSelectNewMaterial = (part: PartSelectOption | null) => {
     if (!part) return;
 
     // Don't add duplicates
@@ -358,22 +343,14 @@ export default function JobCompleteModal({
             {/* Add Material */}
             {showAddMaterial ? (
               <Card elevation={1} sx={{ p: 2 }}>
-                <Autocomplete
-                  options={stockableParts.filter(
-                    (item) => !materials.some((m) => m.inventory_item_id === item.id)
-                  )}
-                  getOptionLabel={(option) => option.part_name}
-                  loading={loadingItems}
-                  onChange={(_, value) => handleSelectNewMaterial(value)}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Search inventory items"
-                      size="small"
-                      autoFocus
-                    />
-                  )}
-                  size="small"
+                <PartAutocomplete
+                  companyId={companyId}
+                  kind="stocked"
+                  value={null}
+                  onChange={handleSelectNewMaterial}
+                  excludeIds={materials.map((m) => m.inventory_item_id)}
+                  label="Search inventory items"
+                  autoFocus
                 />
                 <Button
                   size="small"

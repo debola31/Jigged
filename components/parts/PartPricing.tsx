@@ -48,12 +48,20 @@ import {
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
+import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 
 interface PartPricingProps {
   companyId: string;
   part: Part;
   /** Bumped by the parent whenever the routing changes — triggers a reload + recompute. */
   refreshKey?: number;
+  /**
+   * Drill-down chain on the page hosting this card — passed through to
+   * `pushPartToChain` when building the href on each "Heads up" warning
+   * link so back-navigation breadcrumbs accumulate. Defaults to empty
+   * for callers outside the part-detail page.
+   */
+  currentChain?: string[];
 }
 
 /**
@@ -126,7 +134,12 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
  * tier rows; rate-linked = read-only display of the rate's breakpoints
  * + Switch-to-Custom / Edit-the-rate buttons.
  */
-export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPricingProps) {
+export default function PartPricing({
+  companyId,
+  part,
+  refreshKey = 0,
+  currentChain = [],
+}: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
 
@@ -466,22 +479,44 @@ export default function PartPricing({ companyId, part, refreshKey = 0 }: PartPri
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
             Heads up:
           </Typography>
-          {breakdown.warnings.map((w, i) => (
-            <Typography key={i} variant="body2">
-              • {w.message}
-              {w.child_part_id && (
-                <>
-                  {' '}
-                  <Link
-                    href={`/dashboard/${companyId}/parts/${w.child_part_id}`}
-                    style={{ color: 'inherit', textDecoration: 'underline' }}
-                  >
-                    Open child →
-                  </Link>
-                </>
-              )}
-            </Typography>
-          ))}
+          {breakdown.warnings.map((w, i) => {
+            // missing_material_cost warnings expose `child_part_name` +
+            // `detail` so the part name itself can be the link (no
+            // trailing "Open child →"). Other warning types fall back
+            // to the bare `message` string with no link, since they
+            // don't point at a navigable target.
+            const isLinkable = !!w.child_part_id && !!w.child_part_name;
+            return (
+              <Typography key={i} variant="body2">
+                {'• '}
+                {isLinkable ? (
+                  <>
+                    <Link
+                      href={buildPartHref({
+                        companyId,
+                        targetPartId: w.child_part_id as string,
+                        chain: pushPartToChain(
+                          currentChain,
+                          part.id,
+                          w.child_part_id as string,
+                        ),
+                      })}
+                      style={{
+                        color: 'inherit',
+                        textDecoration: 'underline',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {w.child_part_name} ›
+                    </Link>{' '}
+                    {w.detail ?? ''}
+                  </>
+                ) : (
+                  w.message
+                )}
+              </Typography>
+            );
+          })}
         </Alert>
       )}
 

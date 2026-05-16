@@ -6,8 +6,12 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
+import MenuItem from '@mui/material/MenuItem';
+import InputAdornment from '@mui/material/InputAdornment';
+import Link from 'next/link';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import { getPartUnitConversions } from '@/utils/partsAccess';
 
 export type { PartSelectOption };
 
@@ -18,6 +22,11 @@ export interface MaterialEditorValue {
 }
 
 export interface MaterialRowEditorProps {
+  /**
+   * Used both by the embedded PartAutocomplete and by the "add a unit
+   * conversion on the child part" helper link rendered when the child has
+   * only its primary_unit available.
+   */
   companyId: string;
   /** Part IDs to hide from the child-part picker (e.g. the parent itself). */
   excludeIds?: string[];
@@ -49,6 +58,12 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * consistency. The user toggles a row into edit mode in place; "Add
  * Material" appends an editor row at the end of the list.
  *
+ * The Unit field is constrained to the child's primary_unit + every
+ * parts_unit_conversions.from_unit row for that child — typing an
+ * unconvertible unit would silently break the cost rollup later in
+ * compute_part_cost_at_qty. Children with no primary_unit fall back to
+ * free-text since there's no canonical anchor to lock to.
+ *
  * The editor is purely presentational. Cycle pre-check + addBomLine /
  * updateBomLine calls live in PartBomPanel which holds the state machine.
  */
@@ -64,20 +79,90 @@ export default function MaterialRowEditor({
 }: MaterialRowEditorProps) {
   const [value, setValue] = useState<MaterialEditorValue>(initial ?? EMPTY_VALUE);
 
+  // Conversions for the currently-selected child part. Drives the Unit picker
+  // options: primary_unit + every parts_unit_conversions.from_unit row. Empty
+  // until a child is picked or the load resolves.
+  const [conversionUnits, setConversionUnits] = useState<string[]>([]);
+  const [conversionsLoading, setConversionsLoading] = useState(false);
+
   // Reset when initial changes (e.g. user cancels add then opens edit on a
   // different row in the same panel mount).
   useEffect(() => {
     setValue(initial ?? EMPTY_VALUE);
   }, [initial]);
 
+  // Load the child's secondary units whenever it changes. The Unit picker
+  // is constrained to primary_unit + these — entering a unit with no
+  // conversion would just blow up later in compute_part_cost_at_qty.
+  useEffect(() => {
+    const childId = value.childPart?.id;
+    if (!childId) {
+      setConversionUnits([]);
+      return;
+    }
+    let cancelled = false;
+    setConversionsLoading(true);
+    getPartUnitConversions(childId)
+      .then((rows) => {
+        if (cancelled) return;
+        setConversionUnits(rows.map((r) => r.from_unit));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load unit conversions for child:', err);
+        setConversionUnits([]);
+      })
+      .finally(() => {
+        if (!cancelled) setConversionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [value.childPart?.id]);
+
+  // Build the constrained option list: primary_unit first, then every
+  // conversion `from_unit`, de-duped, preserving order. When the child has
+  // no primary_unit (legacy/odd parts), this is empty and we fall back to
+  // free-text below — there's no canonical anchor unit to lock to.
+  const unitOptions = useMemo<string[]>(() => {
+    const child = value.childPart;
+    if (!child) return [];
+    const list: string[] = [];
+    if (child.primary_unit) list.push(child.primary_unit);
+    for (const u of conversionUnits) {
+      if (!list.includes(u)) list.push(u);
+    }
+    return list;
+  }, [value.childPart, conversionUnits]);
+
+  const noPrimaryUnit = !!value.childPart && !value.childPart.primary_unit;
+  const onlyPrimaryAvailable =
+    !!value.childPart && !!value.childPart.primary_unit && conversionUnits.length === 0;
+
+  // Auto-correct the unit when the child changes and the previously-typed
+  // unit isn't valid for the new child. Snap to primary_unit (the canonical
+  // default) so the user starts from a working state. We only run this once
+  // the conversions load completes for the current child to avoid clobbering
+  // an in-flight selection.
+  useEffect(() => {
+    if (conversionsLoading) return;
+    const child = value.childPart;
+    if (!child) return;
+    if (noPrimaryUnit) return; // free-text fallback handles this
+    if (unitOptions.includes(value.unit)) return;
+    setValue((prev) => ({ ...prev, unit: child.primary_unit ?? '' }));
+    // value.unit and value.childPart are read; updating value here is fine.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitOptions, conversionsLoading, noPrimaryUnit]);
+
   const handlePartChange = (option: PartSelectOption | null) => {
     setValue((prev) => ({
       ...prev,
       childPart: option,
       // Default the BOM unit to the child's primary unit on first selection
-      // (one-click for the common case). Don't clobber if the user already
-      // typed a unit — they may have intentionally chosen a different one.
-      unit: prev.unit?.trim() ? prev.unit : option?.primary_unit ?? '',
+      // (one-click for the common case). The conversions-load effect will
+      // re-snap to primary_unit if the previous typed value is invalid.
+      unit: option?.primary_unit ?? '',
     }));
   };
 
@@ -86,8 +171,12 @@ export default function MaterialRowEditor({
     const qty = parseFloat(value.quantity);
     if (!Number.isFinite(qty) || qty <= 0) return false;
     if (!value.unit?.trim()) return false;
+    // When a primary_unit is defined, the unit must match one of the
+    // resolvable options. The free-text fallback (noPrimaryUnit) skips this
+    // check since there are no conversions to validate against.
+    if (!noPrimaryUnit && !unitOptions.includes(value.unit)) return false;
     return true;
-  }, [value]);
+  }, [value, unitOptions, noPrimaryUnit]);
 
   return (
     <Box
@@ -125,16 +214,55 @@ export default function MaterialRowEditor({
           sx={{ width: 120 }}
         />
 
-        <TextField
-          label="Unit"
-          value={value.unit}
-          onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
-          required
-          placeholder={value.childPart?.primary_unit ?? ''}
-          size="small"
-          disabled={saving}
-          sx={{ width: 100 }}
-        />
+        {/* Unit picker: constrained to the child's primary_unit + every
+            parts_unit_conversions.from_unit row. Free-text was removed
+            because typed-but-unconvertible units silently broke the cost
+            rollup later. The no-primary-unit branch (legacy parts) keeps
+            the old free-text behavior. */}
+        {noPrimaryUnit ? (
+          <TextField
+            label="Unit"
+            value={value.unit}
+            onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
+            required
+            size="small"
+            disabled={saving}
+            sx={{ width: 110 }}
+            helperText="Child has no primary unit"
+          />
+        ) : (
+          <TextField
+            select
+            label="Unit"
+            value={value.childPart && unitOptions.includes(value.unit) ? value.unit : ''}
+            onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
+            required
+            size="small"
+            disabled={saving || !value.childPart || conversionsLoading || onlyPrimaryAvailable}
+            sx={{ width: 130 }}
+            slotProps={{
+              input: {
+                endAdornment: conversionsLoading ? (
+                  <InputAdornment position="end">
+                    <CircularProgress size={14} />
+                  </InputAdornment>
+                ) : undefined,
+              },
+            }}
+          >
+            {unitOptions.length === 0 && (
+              <MenuItem value="" disabled>
+                {value.childPart ? 'No units available' : 'Pick a part first'}
+              </MenuItem>
+            )}
+            {unitOptions.map((u) => (
+              <MenuItem key={u} value={u}>
+                {u}
+                {value.childPart?.primary_unit === u ? ' (primary)' : ''}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
       </Box>
 
       {value.childPart?.primary_unit &&
@@ -142,9 +270,24 @@ export default function MaterialRowEditor({
         value.unit !== value.childPart.primary_unit && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
             Child&apos;s primary unit: {value.childPart.primary_unit}. The cost
-            calculation will use unit conversions to bridge.
+            calculation will use the matching conversion to bridge.
           </Typography>
         )}
+
+      {onlyPrimaryAvailable && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
+          Only the child&apos;s primary unit ({value.childPart?.primary_unit}) is
+          available. To use a different unit,{' '}
+          <Link
+            href={`/dashboard/${companyId}/parts/${value.childPart?.id ?? ''}`}
+            target="_blank"
+            style={{ textDecoration: 'underline', color: 'inherit' }}
+          >
+            add a unit conversion on the child part
+          </Link>
+          .
+        </Typography>
+      )}
 
       {error && (
         <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.75, ml: 1 }}>

@@ -556,6 +556,33 @@ export async function getPartsForSelectByIds(
 }
 
 /**
+ * Slim id → part_name lookup. Used by the part-detail breadcrumb to label
+ * a chain of ancestor parts in a single query. Missing ids (deleted parts,
+ * URL-tampered junk) simply don't appear in the returned Map — callers
+ * should fall back to a placeholder for those.
+ */
+export async function getPartNamesByIds(partIds: string[]): Promise<Map<string, string>> {
+  if (partIds.length === 0) return new Map();
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts')
+    .select('id, part_name')
+    .in('id', partIds);
+
+  if (error) {
+    console.error('Error fetching part names by ids:', error);
+    throw error;
+  }
+
+  const out = new Map<string, string>();
+  for (const row of (data ?? []) as Array<{ id: string; part_name: string }>) {
+    out.set(row.id, row.part_name);
+  }
+  return out;
+}
+
+/**
  * Check if a part name already exists for a company.
  */
 export async function checkPartNameExists(

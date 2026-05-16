@@ -10,6 +10,11 @@ export interface CostWarning {
     | 'missing_material_cost'
     | 'no_operations'
     | 'missing_external_pricing';
+  /**
+   * Backwards-compatible single-string rendering of the warning. Newer
+   * callers should prefer `child_part_name` + `detail` (when present) so
+   * the part name can be styled as a link separately from the detail.
+   */
   message: string;
   node_id?: string;
   material_id?: string;
@@ -17,6 +22,20 @@ export interface CostWarning {
   child_part_id?: string;
   /** For `missing_material_cost`: drives the suggested fix in the warning copy. */
   child_part_source?: 'made' | 'bought';
+  /**
+   * For `missing_material_cost`: the offending leaf's display name. The
+   * Pricing-card warning renderer wraps this in a link to that part so
+   * the part name itself is the click target — replacing the old trailing
+   * "Open child →" affordance.
+   */
+  child_part_name?: string;
+  /**
+   * For `missing_material_cost`: the part of the warning copy that comes
+   * after the part name (e.g. "no priced tier covers qty 6"). Lets the
+   * renderer compose `<Link>{name}</Link> {detail}` without parsing the
+   * full `message` string.
+   */
+  detail?: string;
 }
 
 export interface LaborItem {
@@ -203,11 +222,14 @@ export async function calculateRoutingCost(
       if (childPrimary !== null && effectiveBomUnit !== null && effectiveBomUnit !== childPrimary) {
         const factor = conversionMap.get(`${child.id}:${effectiveBomUnit}`);
         if (factor === undefined) {
+          const detail = `no unit conversion from "${effectiveBomUnit}" to "${childPrimary}" — add one on the child part`;
           warnings.push({
             type: 'missing_material_cost',
-            message: `${itemName}: no unit conversion from "${effectiveBomUnit}" to "${childPrimary}" — add one on the child part`,
+            message: `${itemName}: ${detail}`,
+            detail,
             material_id: line.id,
             child_part_id: child.id,
+            child_part_name: itemName,
             child_part_source: child.source,
           });
           continue;
@@ -223,11 +245,14 @@ export async function calculateRoutingCost(
       try {
         childUnitCost = await getComputedPartCost(child.id, cumulativeQty);
       } catch (err) {
+        const detail = `cost lookup failed (${(err as Error).message})`;
         warnings.push({
           type: 'missing_material_cost',
-          message: `${itemName}: cost lookup failed (${(err as Error).message})`,
+          message: `${itemName}: ${detail}`,
+          detail,
           material_id: line.id,
           child_part_id: child.id,
+          child_part_name: itemName,
           child_part_source: child.source,
         });
         continue;
@@ -259,8 +284,10 @@ export async function calculateRoutingCost(
         warnings.push({
           type: 'missing_material_cost',
           message: `${itemName}: ${leafHint}`,
+          detail: leafHint,
           material_id: line.id,
           child_part_id: child.id,
+          child_part_name: itemName,
           child_part_source: child.source,
         });
         continue;

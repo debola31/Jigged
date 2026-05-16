@@ -19,6 +19,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import {
   getTiersForPart,
   addTier as addTierApi,
@@ -77,13 +78,19 @@ function tempId(): string {
  * an existing sheet on this part are flagged with a tier-count caption,
  * so the user sees at a glance who they already have rates from.
  *
- * Multi-vendor data still works — the user can have sheets from any
- * number of vendors, but only one is shown/edited at a time. Quote-time
- * pricing (`get_procurement_cost`) still picks the cheapest applicable
- * tier across every sheet regardless of which one is currently visible.
+ * Cost source contract: only the part's preferred vendor's sheet drives
+ * cost (in `compute_part_cost_at_qty` and `get_procurement_cost`). Picking
+ * a vendor in this panel sets it as preferred AND switches the displayed
+ * sheet — keeping the two concepts unified. The first tier save under a
+ * freshly-picked vendor also re-asserts the preferred vendor in the DB,
+ * so legacy parts that loaded with a NULL preferred_vendor_id can't end
+ * up with tiers that the SQL filter then ignores. Sheets under
+ * non-preferred vendors and `vendor_id=NULL` "Internal estimate" rows
+ * remain editable for reference but never feed rollup.
  *
- * Saves are optimistic and in-place — adding/editing/removing a tier
- * never triggers a panel-wide reload or a page-level refetch.
+ * Saves are optimistic, per-row, and triggered on field blur. Each row
+ * shows a "Saving…" / "Saved ✓" badge so the auto-save isn't invisible
+ * (users were looking for a Save button before this).
  */
 export default function PartProcurementPricingPanel({
   partId,
@@ -99,6 +106,34 @@ export default function PartProcurementPricingPanel({
 
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [rows, setRows] = useState<EditRow[]>([]);
+
+  // Tracks parts.preferred_vendor_id as it currently is in the DB. Distinct
+  // from the prop (which is the value at mount) and from selectedVendorId
+  // (which is the picker's local selection — the auto-select effect below
+  // can set this without persisting). compute_part_cost_at_qty filters tiers
+  // by parts.preferred_vendor_id; if the panel saves a tier under
+  // selectedVendorId but the DB's preferred_vendor_id is still NULL (or a
+  // stale other vendor), the cost rollup silently returns NULL. saveRow
+  // syncs this just before saving the tier.
+  const [effectivePreferredVendorId, setEffectivePreferredVendorId] = useState<
+    string | null
+  >(preferredVendorId ?? null);
+
+  // Per-row save status: "saving" while the API call is in flight, "saved"
+  // for ~2 s after success so the user sees a confirmation tick. Keyed by
+  // row id (or tempKey for unsaved rows). Auto-save with no Save button is
+  // confusing without this — multiple users have asked "did it save?".
+  const [rowStatus, setRowStatus] = useState<Map<string, 'saving' | 'saved'>>(
+    new Map(),
+  );
+  const setRowStatusFor = (key: string, status: 'saving' | 'saved' | null) => {
+    setRowStatus((prev) => {
+      const next = new Map(prev);
+      if (status === null) next.delete(key);
+      else next.set(key, status);
+      return next;
+    });
+  };
 
   const initialLoad = useCallback(async () => {
     try {
@@ -194,8 +229,38 @@ export default function PartProcurementPricingPanel({
     if (qty === null || qty <= 0) return;
     if (cost === null || cost <= 0) return;
 
+    // Skip save if the persisted values match what the user typed —
+    // tab-out on an unchanged row shouldn't cause a network round-trip
+    // or a "Saved" flash.
+    if (row.id) {
+      const persisted = rows[idx];
+      // We compare against the current rows snapshot's source-of-truth in
+      // `groups` rather than itself; the editor mirrors groups, so if
+      // values match, the row hasn't been touched. Cheap string compare.
+      const group = groups.find((g) => g.vendor_id === selectedVendorId);
+      const tier = group?.tiers.find((t) => t.id === row.id);
+      if (
+        tier &&
+        String(tier.min_quantity) === persisted.quantity &&
+        String(tier.cost_per_unit) === persisted.cost
+      ) {
+        return;
+      }
+    }
+
+    const rowKey = row.id ?? row.tempKey ?? `idx-${idx}`;
+    setRowStatusFor(rowKey, 'saving');
     setSavingCount((c) => c + 1);
     try {
+      // First save under a freshly-picked vendor whose preferred-vendor-id
+      // never made it to the DB (auto-select on mount doesn't persist).
+      // Without this, compute_part_cost_at_qty silently returns NULL because
+      // it filters on parts.preferred_vendor_id and finds no match.
+      if (effectivePreferredVendorId !== selectedVendorId) {
+        await updatePartPreferredVendor(partId, selectedVendorId);
+        setEffectivePreferredVendorId(selectedVendorId);
+      }
+
       if (row.id) {
         const updated = await updateTierApi(row.id, {
           part_id: partId,
@@ -211,6 +276,17 @@ export default function PartProcurementPricingPanel({
             i === idx
               ? { id: updated.id, quantity: String(updated.min_quantity), cost: String(updated.cost_per_unit) }
               : r,
+          ),
+        );
+        // Mirror into groups so the next computed snapshot matches.
+        setGroups((prev) =>
+          prev.map((g) =>
+            g.vendor_id === selectedVendorId
+              ? {
+                  ...g,
+                  tiers: g.tiers.map((t) => (t.id === updated.id ? updated : t)),
+                }
+              : g,
           ),
         );
       } else {
@@ -254,8 +330,18 @@ export default function PartProcurementPricingPanel({
             },
           ];
         });
+        // The new row is now persisted under `created.id`; route the
+        // "saved" flash to that key rather than the stale tempKey.
+        const newKey = created.id;
+        setRowStatusFor(rowKey, null);
+        setRowStatusFor(newKey, 'saved');
+        window.setTimeout(() => setRowStatusFor(newKey, null), 2000);
+        return; // skip the default flash path below; we already routed it
       }
+      setRowStatusFor(rowKey, 'saved');
+      window.setTimeout(() => setRowStatusFor(rowKey, null), 2000);
     } catch (err) {
+      setRowStatusFor(rowKey, null);
       setError(err instanceof Error ? err.message : 'Failed to save tier');
     } finally {
       setSavingCount((c) => c - 1);
@@ -286,6 +372,8 @@ export default function PartProcurementPricingPanel({
             : g,
         ),
       );
+      // Drop any in-flight save state for the deleted row.
+      setRowStatusFor(row.id, null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete tier');
     } finally {
@@ -312,6 +400,9 @@ export default function PartProcurementPricingPanel({
     setSelectedVendorId(nextId);
     try {
       await updatePartPreferredVendor(partId, nextId);
+      // Track DB-side preferred vendor so saveRow knows whether it needs
+      // to re-persist on the next tier write.
+      setEffectivePreferredVendorId(nextId);
     } catch (err) {
       setSelectedVendorId(prevId);
       setError(
@@ -389,7 +480,7 @@ export default function PartProcurementPricingPanel({
             {...params}
             label="Preferred vendor"
             placeholder="Pick a vendor"
-            helperText="Sets the default supplier and shows their qty-break pricing below."
+            helperText="Sets the default supplier and drives the BOM cost from this sheet."
           />
         )}
       />
@@ -437,8 +528,10 @@ export default function PartProcurementPricingPanel({
                 ) : (
                   rows.map((row, idx) => {
                     const costNum = parseNumber(row.cost);
+                    const rowKey = row.id ?? row.tempKey ?? `idx-${idx}`;
+                    const status = rowStatus.get(rowKey);
                     return (
-                      <TableRow key={row.id ?? row.tempKey ?? idx}>
+                      <TableRow key={rowKey}>
                         <TableCell sx={{ minWidth: 110 }}>
                           <TextField
                             size="small"
@@ -498,7 +591,27 @@ export default function PartProcurementPricingPanel({
                             }}
                           />
                         </TableCell>
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                          {/* Per-row save state. Inline in the actions cell so
+                              the user sees the auto-save take effect right next
+                              to the field they just left. Renders nothing while
+                              idle to keep the row visually quiet. */}
+                          {status === 'saving' && (
+                            <Tooltip title="Saving…">
+                              <CircularProgress
+                                size={14}
+                                sx={{ mr: 1, verticalAlign: 'middle', color: 'text.secondary' }}
+                              />
+                            </Tooltip>
+                          )}
+                          {status === 'saved' && (
+                            <Tooltip title="Saved">
+                              <CheckCircleOutlineIcon
+                                fontSize="small"
+                                sx={{ mr: 1, verticalAlign: 'middle', color: 'success.main' }}
+                              />
+                            </Tooltip>
+                          )}
                           <Tooltip title="Delete tier">
                             <IconButton
                               size="small"
@@ -530,8 +643,9 @@ export default function PartProcurementPricingPanel({
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            Costs are per {unit}. Quotes use the cheapest applicable tier
-            across every vendor sheet on file.
+            Costs are per {unit}. Tiers save automatically when you click
+            out of a field — there&apos;s no Save button. Quotes use the
+            cheapest applicable tier under the preferred vendor.
           </Typography>
         </>
       )}

@@ -3,6 +3,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
@@ -17,11 +18,27 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
-import { useAuth } from '@/components/providers/AuthProvider';
 
+/**
+ * Logged-in self-rotate password page.
+ *
+ * Requires the user to enter their current password before setting a new
+ * one — the shop-floor deployment environment has shared/unattended
+ * workstations, so a hijacked session must not yield instant account
+ * takeover. Supabase's `updateUser({password})` only requires an active
+ * session, so we add the current-password check ourselves via a throwaway
+ * `signInWithPassword` round-trip.
+ *
+ * CRITICAL: the current-password check uses a separate `verifier` client
+ * with `persistSession: false`. Calling `signInWithPassword` on the
+ * shared `supabase` singleton would issue a fresh session, replace
+ * persisted tokens, and fire `onAuthStateChange('SIGNED_IN')` on every
+ * subscriber — AuthGuard (which routes on auth state) would react
+ * mid-flow and could redirect away before `updateUser` runs. The
+ * throwaway client isolates verification from app state.
+ */
 export default function ChangePassword() {
   const router = useRouter();
-  const { signOut } = useAuth();
 
   const [email, setEmail] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -32,6 +49,7 @@ export default function ChangePassword() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
@@ -44,23 +62,12 @@ export default function ChangePassword() {
         return;
       }
 
-      if (!session.user.user_metadata?.needs_password_change) {
-        const redirectRoute = await getPostLoginRoute(session.user.id);
-        router.replace(redirectRoute);
-        return;
-      }
-
       setEmail(session.user.email ?? null);
       setCheckingSession(false);
     };
 
     checkSession();
   }, [router]);
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace('/login');
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,12 +99,64 @@ export default function ChangePassword() {
 
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.email) {
+        throw new Error('Session lost. Please sign in again.');
+      }
+
+      // Throwaway verifier client — see file-level comment.
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase client is not configured');
+      }
+      const verifier = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      });
+
+      // TODO: MFA — signInWithPassword surfaces an MFA challenge if MFA
+      // is ever enabled on this project. Currently disabled; revisit
+      // when enabled.
+      const { error: verifyErr } = await verifier.auth.signInWithPassword({
+        email: session.user.email,
+        password: currentPassword,
+      });
+
+      if (verifyErr) {
+        // Supabase rate-limits repeated failed sign-ins. Distinguish
+        // rate-limit from "wrong password" so a user who genuinely
+        // mistyped doesn't see a misleading lockout message — and so
+        // we get a server-side breadcrumb when pilot users hit it.
+        const status = (verifyErr as { status?: number }).status;
+        const isRateLimit = status === 429 || /rate ?limit/i.test(verifyErr.message);
+        if (isRateLimit) {
+          try {
+            Sentry.captureMessage('change_password: signInWithPassword rate-limited', {
+              level: 'warning',
+              extra: { user_id: session.user.id },
+            });
+          } catch {
+            console.warn('change_password rate-limited', session.user.id);
+          }
+          setError('Too many attempts. Please wait a minute and try again.');
+        } else {
+          setError('Current password is incorrect');
+        }
+        return;
+      }
+
+      // Verification passed. Update the password on the SHARED client
+      // (the one carrying the user's real session).
       const { data: { user }, error: updateError } = await supabase.auth.updateUser({
         password: newPassword,
-        data: { needs_password_change: false },
       });
 
       if (updateError) {
@@ -108,8 +167,22 @@ export default function ChangePassword() {
         throw new Error('Session lost during password change. Please sign in again.');
       }
 
-      const redirectRoute = await getPostLoginRoute(user.id);
-      router.replace(redirectRoute);
+      // Invalidate other active sessions on this user (other devices,
+      // other browsers). scope='others' leaves the current tab signed
+      // in. Default-on for the shop-floor context where shared
+      // workstations are common.
+      await supabase.auth.signOut({ scope: 'others' });
+
+      setSuccess('Password updated. Other devices have been signed out.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      // Redirect to the user's home shortly after success.
+      setTimeout(async () => {
+        const redirectRoute = await getPostLoginRoute(user.id);
+        router.replace(redirectRoute);
+      }, 1500);
     } catch (err) {
       console.error('Change password error:', err);
       Sentry.captureException(err);
@@ -136,26 +209,13 @@ export default function ChangePassword() {
     <Card elevation={3}>
       <CardContent sx={{ p: 4 }}>
         <Typography variant="h5" component="h2" gutterBottom align="center">
-          Change Your Password
-        </Typography>
-        <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 1 }}>
-          Your administrator reset your password. Please set a new one to continue.
+          Change your password
         </Typography>
         {email && (
-          <Typography variant="body2" align="center" sx={{ mb: 1, fontWeight: 500 }}>
+          <Typography variant="body2" align="center" sx={{ mb: 3, color: 'text.secondary' }}>
             Signed in as {email}
           </Typography>
         )}
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <Button
-            variant="text"
-            size="small"
-            onClick={handleSignOut}
-            disabled={loading}
-          >
-            Not you? Sign out
-          </Button>
-        </Box>
 
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>
@@ -163,9 +223,15 @@ export default function ChangePassword() {
           </Alert>
         )}
 
+        {success && (
+          <Alert severity="success" sx={{ mb: 3 }}>
+            {success}
+          </Alert>
+        )}
+
         <Box component="form" onSubmit={handleSubmit}>
           <TextField
-            label="Current (Temporary) Password"
+            label="Current Password"
             type={showCurrentPassword ? 'text' : 'password'}
             fullWidth
             required

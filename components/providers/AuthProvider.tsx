@@ -105,7 +105,12 @@ export default function AuthProvider({ children }: AuthProviderProps) {
   const signOut = async () => {
     intentionalSignOut.current = true;
     const supabase = getSupabase();
-    await supabase.auth.signOut();
+    // Explicit scope='global' — revokes every session for this user
+    // across all devices. The ResetPassword flow relies on this to
+    // invalidate the lost/old device after an admin-triggered reset.
+    // Do NOT narrow this scope without also updating the password-reset
+    // flow's session-invalidation guarantee.
+    await supabase.auth.signOut({ scope: 'global' });
   };
 
   return (

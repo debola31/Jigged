@@ -15,7 +15,6 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Chip from '@mui/material/Chip';
 import Snackbar from '@mui/material/Snackbar';
-import LockIcon from '@mui/icons-material/Lock';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import FeedbackDialog from '@/components/feedback/FeedbackDialog';
@@ -175,18 +174,11 @@ export default function OperatorProfilePage() {
       <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
         <Button
           variant="outlined"
-          startIcon={<LockIcon />}
-          onClick={() => router.push(`/operator/${companyId}/change-password`)}
-          sx={{ flex: 1, minHeight: 48, minWidth: 140 }}
-        >
-          Change Password
-        </Button>
-        <Button
-          variant="outlined"
           color="error"
           startIcon={<LogoutIcon />}
           onClick={handleLogout}
-          sx={{ flex: 1, minHeight: 48, minWidth: 140 }}
+          fullWidth
+          sx={{ minHeight: 48 }}
         >
           Logout
         </Button>

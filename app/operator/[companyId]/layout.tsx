@@ -53,8 +53,8 @@ export default function OperatorLayout({
   // Check authentication on mount
   useEffect(() => {
     const checkAuth = async () => {
-      // Skip auth check on login and change-password pages
-      if (pathname?.includes('/login') || pathname?.includes('/change-password')) {
+      // Skip auth check on login page
+      if (pathname?.includes('/login')) {
         setIsLoading(false);
         return;
       }
@@ -67,13 +67,7 @@ export default function OperatorLayout({
         return;
       }
 
-      // 2. Check if password change required
-      if (session.user.user_metadata?.needs_password_change) {
-        router.push(`/operator/${companyId}/change-password`);
-        return;
-      }
-
-      // 3. Validate user has access to this company (uses user_company_access)
+      // 2. Validate user has access to this company (uses user_company_access)
       const { data: operatorAccess } = await supabase
         .from('user_company_access')
         .select('id, name, role')
@@ -135,8 +129,8 @@ export default function OperatorLayout({
     }
   };
 
-  // Don't show header/nav on login or change-password page
-  const isAuthPage = pathname?.includes('/login') || pathname?.includes('/change-password');
+  // Don't show header/nav on login page
+  const isAuthPage = pathname?.includes('/login');
 
   if (isAuthPage) {
     return (

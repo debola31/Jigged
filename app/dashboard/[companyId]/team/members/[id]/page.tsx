@@ -14,8 +14,6 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import IconButton from '@mui/material/IconButton';
-import InputAdornment from '@mui/material/InputAdornment';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
@@ -23,14 +21,9 @@ import MenuItem from '@mui/material/MenuItem';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import DeleteIcon from '@mui/icons-material/Delete';
-import Visibility from '@mui/icons-material/Visibility';
-import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import type { TeamMember } from '@/types/team';
 
-/**
- * Get the Edge Function URL for unified team endpoint.
- */
 const getTeamUrl = () => getEdgeFunctionUrl('team');
 
 /**
@@ -38,7 +31,9 @@ const getTeamUrl = () => getEdgeFunctionUrl('team');
  *
  * Allows viewing and editing team member role for all roles (admin, user, operator).
  * Email and name are read-only (stored in auth.users).
- * Includes password reset functionality.
+ *
+ * Password reset triggers an email-link recovery flow — admin never sees,
+ * sets, or transmits a password. See plans/we-need-to-replace-atomic-wirth.md.
  */
 export default function EditTeamMemberPage() {
   const router = useRouter();
@@ -53,10 +48,8 @@ export default function EditTeamMemberPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Password reset dialog
+  // Password reset confirmation dialog — NO password input, just confirm.
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [resetting, setResetting] = useState(false);
 
   // Delete dialog
@@ -126,15 +119,14 @@ export default function EditTeamMemberPage() {
     }
   };
 
-  // Reset password
-  const handleResetPassword = async () => {
-    if (!newPassword || newPassword.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-
+  // Send password reset email. The Edge Function returns a generic
+  // success body for every outcome (success / forbidden / failed) — we
+  // never display the underlying state to avoid leaking account
+  // existence. Distinct outcomes are visible only via the audit log.
+  const handleSendResetEmail = async () => {
     setResetting(true);
     setError(null);
+    setSuccess(null);
 
     try {
       const supabase = getSupabase();
@@ -151,20 +143,18 @@ export default function EditTeamMemberPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ new_password: newPassword }),
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to reset password' }));
-        throw new Error(errorData.error || 'Failed to reset password');
+        throw new Error('Failed to send password reset email');
       }
 
       setResetDialogOpen(false);
-      setNewPassword('');
-      setSuccess('Password has been reset');
+      setSuccess('If that user has an account, a reset link has been sent.');
     } catch (err) {
-      console.error('Error resetting password:', err);
-      setError(err instanceof Error ? err.message : 'Failed to reset password');
+      console.error('Error sending password reset email:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send password reset email');
     } finally {
       setResetting(false);
     }
@@ -302,7 +292,7 @@ export default function EditTeamMemberPage() {
             startIcon={<LockResetIcon />}
             onClick={() => setResetDialogOpen(true)}
           >
-            Reset Password
+            Send Password Reset Email
           </Button>
           <Button
             variant="outlined"
@@ -315,40 +305,22 @@ export default function EditTeamMemberPage() {
         </Box>
       </Paper>
 
-      {/* Reset Password Dialog */}
+      {/* Password Reset Confirmation Dialog — no password input. */}
       <Dialog
         open={resetDialogOpen}
         onClose={() => !resetting && setResetDialogOpen(false)}
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Reset Password</DialogTitle>
+        <DialogTitle>Send password reset email?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Set a new temporary password. The user will be required to change it on next login.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            We&apos;ll email <strong>{member.email || 'this user'}</strong> a single-use,
+            expiring link to set a new password. The link expires in 1 hour.
           </Typography>
-          <TextField
-            label="New Password"
-            type={showPassword ? 'text' : 'password'}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            fullWidth
-            autoFocus
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                    >
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
+          <Typography variant="body2" color="text.secondary">
+            You will never see or set the password yourself.
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button
@@ -358,12 +330,12 @@ export default function EditTeamMemberPage() {
             Cancel
           </Button>
           <Button
-            onClick={handleResetPassword}
+            onClick={handleSendResetEmail}
             variant="contained"
-            disabled={resetting || !newPassword}
+            disabled={resetting}
             startIcon={resetting ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {resetting ? 'Resetting...' : 'Reset Password'}
+            {resetting ? 'Sending...' : 'Send Reset Email'}
           </Button>
         </DialogActions>
       </Dialog>

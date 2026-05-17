@@ -37,7 +37,9 @@ export default function ResetPassword() {
   useEffect(() => {
     const supabase = getSupabase();
 
-    // Listen for the PASSWORD_RECOVERY event (fires if we arrive before AuthProvider processes it)
+    // Listen for the PASSWORD_RECOVERY event (fires for the implicit/hash
+    // flow when Supabase JS detects #access_token=...&type=recovery in
+    // the URL on load).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsValidRecovery(true);
@@ -45,25 +47,70 @@ export default function ResetPassword() {
       }
     });
 
-    // Also check if there's already an active session (the PASSWORD_RECOVERY event
-    // may have already fired in AuthProvider before this component mounted)
-    const checkExistingSession = async () => {
+    const init = async () => {
+      const url = new URL(window.location.href);
+
+      // PKCE flow: Supabase appends ?code=... to the redirect URL and
+      // expects exchangeCodeForSession to mint the session.
+      const code = url.searchParams.get('code');
+      if (code) {
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (!exchangeError) {
+          url.searchParams.delete('code');
+          window.history.replaceState({}, '', url.toString());
+          setIsValidRecovery(true);
+          setChecking(false);
+          return;
+        }
+        console.error('ResetPassword: exchangeCodeForSession failed', exchangeError);
+      }
+
+      // Implicit/hash flow: Supabase appends #access_token=...&refresh_token=...&type=recovery
+      // to the redirect URL. The @supabase/ssr browser client does NOT
+      // process URL hash fragments automatically (it's opinionated about
+      // PKCE + cookie storage), so we have to read the hash and
+      // establish the session ourselves via setSession.
+      if (window.location.hash && window.location.hash.length > 1) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        const type = hashParams.get('type');
+        if (accessToken && refreshToken && type === 'recovery') {
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (!setSessionError) {
+            // Strip the hash so a refresh/back doesn't try to re-use
+            // an already-consumed recovery token.
+            window.history.replaceState({}, '', url.pathname + url.search);
+            setIsValidRecovery(true);
+            setChecking(false);
+            return;
+          }
+          console.error('ResetPassword: setSession from hash failed', setSessionError);
+        }
+      }
+
+      // Already-authenticated session (e.g. PASSWORD_RECOVERY fired in
+      // an earlier mount, or the user is just visiting the page while
+      // logged in).
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setIsValidRecovery(true);
         setChecking(false);
-      } else {
-        // No session and event hasn't fired — give it a moment, then mark invalid
-        setTimeout(() => {
-          setChecking((prev) => {
-            // Only update if still checking (event may have fired in the meantime)
-            return prev ? false : prev;
-          });
-        }, 3000);
+        return;
       }
+
+      // Nothing usable — mark invalid after a short grace period to
+      // let the PASSWORD_RECOVERY listener fire if Supabase ever does
+      // process the hash on its own.
+      setTimeout(() => {
+        setChecking((prev) => (prev ? false : prev));
+      }, 3000);
     };
 
-    checkExistingSession();
+    init();
 
     return () => {
       subscription.unsubscribe();

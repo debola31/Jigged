@@ -151,7 +151,7 @@ export default function EditTeamMemberPage() {
       }
 
       setResetDialogOpen(false);
-      setSuccess('If that user has an account, a reset link has been sent.');
+      setSuccess(`Reset link sent to ${member.email}.`);
     } catch (err) {
       console.error('Error sending password reset email:', err);
       setError(err instanceof Error ? err.message : 'Failed to send password reset email');
@@ -292,7 +292,7 @@ export default function EditTeamMemberPage() {
             startIcon={<LockResetIcon />}
             onClick={() => setResetDialogOpen(true)}
           >
-            Send Password Reset Email
+            Reset Password
           </Button>
           <Button
             variant="outlined"
@@ -312,7 +312,7 @@ export default function EditTeamMemberPage() {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Send password reset email?</DialogTitle>
+        <DialogTitle>Reset password?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             We&apos;ll email <strong>{member.email || 'this user'}</strong> a single-use,
@@ -335,7 +335,7 @@ export default function EditTeamMemberPage() {
             disabled={resetting}
             startIcon={resetting ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {resetting ? 'Sending...' : 'Send Reset Email'}
+            {resetting ? 'Sending...' : 'Reset Password'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -28,7 +28,11 @@ export default function ForgotPassword() {
     try {
       const supabase = getSupabase();
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        // Land directly on /reset-password — the page handles both
+        // PKCE (?code=...) and implicit (#access_token=...) flows.
+        // Going through /auth/callback would break the implicit flow
+        // because the server-side route can't see hash fragments.
+        redirectTo: `${window.location.origin}/reset-password`,
       });
 
       if (resetError) {

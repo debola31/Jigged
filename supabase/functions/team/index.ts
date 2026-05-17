@@ -389,7 +389,14 @@ Deno.serve(async (req)=>{
       }
 
       const siteUrl = getOriginUrl(req);
-      const redirectTo = `${siteUrl}/auth/callback?next=/reset-password`;
+      // Land directly on /reset-password. Recovery sessions are
+      // delivered either as a `?code=...` (PKCE) or in the URL hash
+      // (implicit). The server-side /auth/callback route only handles
+      // the query-param form — sending users through it for recovery
+      // breaks the hash flow (the hash is preserved through the
+      // redirect but the destination doesn't know what to do with it).
+      // The /reset-password page handles both shapes directly.
+      const redirectTo = `${siteUrl}/reset-password`;
 
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
         type: 'recovery',

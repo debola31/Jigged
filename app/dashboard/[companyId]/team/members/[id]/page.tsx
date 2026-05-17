@@ -151,7 +151,7 @@ export default function EditTeamMemberPage() {
       }
 
       setResetDialogOpen(false);
-      setSuccess(`Reset link sent to ${member.email}.`);
+      setSuccess(`Reset link sent to ${member?.email || 'this user'}.`);
     } catch (err) {
       console.error('Error sending password reset email:', err);
       setError(err instanceof Error ? err.message : 'Failed to send password reset email');

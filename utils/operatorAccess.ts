@@ -132,7 +132,7 @@ export async function getCurrentOperator(companyId: string): Promise<{
 /**
  * Check whether a specific job_operation is ready to start. An operation is
  * ready when every job_operation with a lower sequence WITHIN ITS OWN job_part
- * is completed or skipped.
+ * is completed.
  */
 async function isJobOperationReady(jobOperationId: string | null): Promise<boolean> {
   if (!jobOperationId) return true;
@@ -152,7 +152,7 @@ async function isJobOperationReady(jobOperationId: string | null): Promise<boole
     .select('id')
     .eq('job_part_id', op.job_part_id)
     .lt('sequence', op.sequence)
-    .not('status', 'in', '("completed","skipped")');
+    .neq('status', 'completed');
 
   return !unfinishedPreds || unfinishedPreds.length === 0;
 }
@@ -216,7 +216,7 @@ export async function getOperatorJobs(
   const jobPartIds = readyRows.map((r) => r.job_part_id);
   const operationIds = readyRows.map((r) => r.job_operation_id);
 
-  // Fetch per-part progress (count of ops total + completed/skipped per part).
+  // Fetch per-part progress (count of ops total + completed per part).
   const { data: partOps } = await supabase
     .from('job_operations')
     .select('job_part_id, status')
@@ -227,7 +227,7 @@ export async function getOperatorJobs(
   for (const row of (partOps ?? []) as PartOpRow[]) {
     const acc = progressByPart.get(row.job_part_id) ?? { total: 0, done: 0 };
     acc.total += 1;
-    if (row.status === 'completed' || row.status === 'skipped') acc.done += 1;
+    if (row.status === 'completed') acc.done += 1;
     progressByPart.set(row.job_part_id, acc);
   }
 
@@ -422,9 +422,7 @@ export async function getOperatorJobPartDetail(
   type OpStatus = { status: string };
   const allRows = (allOps ?? []) as OpStatus[];
   const operationsTotal = allRows.length;
-  const operationsCompleted = allRows.filter(
-    (op) => op.status === 'completed' || op.status === 'skipped',
-  ).length;
+  const operationsCompleted = allRows.filter((op) => op.status === 'completed').length;
 
   // Materials are scoped to this job_part.
   let materials: Array<{ name: string; quantity: number; unit: string }> = [];
@@ -538,9 +536,9 @@ export async function getOperatorJobParts(
     const partOps = opsByPart.get(part.id) ?? [];
 
     const total = partOps.length;
-    const done = partOps.filter((o) => o.status === 'completed' || o.status === 'skipped').length;
+    const done = partOps.filter((o) => o.status === 'completed').length;
 
-    // Pick the first pending or in-progress op. For pending, ensure DAG-ready.
+    // Pick the first pending or in-progress op. For pending, ensure predecessors are done.
     let nextOp: OpRow | null = null;
     for (const op of partOps) {
       if (op.status === 'in_progress') {
@@ -549,7 +547,7 @@ export async function getOperatorJobParts(
       }
       if (op.status === 'pending') {
         const earlierUnfinished = partOps.some(
-          (prev) => prev.sequence < op.sequence && prev.status !== 'completed' && prev.status !== 'skipped',
+          (prev) => prev.sequence < op.sequence && prev.status !== 'completed',
         );
         if (!earlierUnfinished) {
           nextOp = op;
@@ -865,7 +863,7 @@ export async function completeJob(
     .from('job_operations')
     .select('id')
     .eq('job_part_id', jobPartId)
-    .not('status', 'in', '("completed","skipped")');
+    .neq('status', 'completed');
 
   const partCompleted = !remaining || remaining.length === 0;
 

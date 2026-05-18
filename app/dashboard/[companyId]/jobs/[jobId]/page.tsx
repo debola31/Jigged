@@ -18,8 +18,12 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import QrCode2Icon from '@mui/icons-material/QrCode2';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Collapse from '@mui/material/Collapse';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -47,6 +51,7 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [qrExpanded, setQrExpanded] = useState(false);
 
   useEffect(() => {
     fetchJob();
@@ -109,11 +114,6 @@ export default function JobDetailPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  const formatDateTime = (dateStr: string | null): string => {
-    if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleString();
-  };
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -162,19 +162,6 @@ export default function JobDetailPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <JobStatusChip status={job.status} size="medium" />
             <JobOverdueBadge job={job} size="medium" />
-            <Typography variant="body2" color="text.secondary">
-              Created {formatDate(job.created_at)}
-            </Typography>
-            {job.due_date && (
-              <Typography variant="body2" color="text.secondary">
-                Due {formatDate(job.due_date)}
-              </Typography>
-            )}
-            {job.lead_time_days !== null && (
-              <Typography variant="body2" color="text.secondary">
-                Lead: {job.lead_time_days}d
-              </Typography>
-            )}
           </Box>
         </Box>
 
@@ -244,73 +231,62 @@ export default function JobDetailPage() {
       )}
 
       <Grid container spacing={3}>
-        {/* Customer + Timeline */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Customer
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              {job.customers ? (
-                <MuiLink
-                  component={Link}
-                  href={`/dashboard/${companyId}/customers/${job.customer_id}`}
-                  sx={{ fontWeight: 500 }}
-                >
-                  {job.customers.name}
-                </MuiLink>
-              ) : (
-                <Typography color="text.secondary">—</Typography>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, md: 6 }}>
+        {/* Job Details — customer, dates, expandable QR code */}
+        <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Timeline
+                Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Customer</Typography>
+                  {job.customers ? (
+                    <MuiLink
+                      component={Link}
+                      href={`/dashboard/${companyId}/customers/${job.customer_id}`}
+                      sx={{ fontWeight: 500 }}
+                    >
+                      {job.customers.name}
+                    </MuiLink>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">—</Typography>
+                  )}
+                </Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Typography variant="body2" color="text.secondary">Created</Typography>
-                  <Typography variant="body2">{formatDateTime(job.created_at)}</Typography>
+                  <Typography variant="body2">{formatDate(job.created_at)}</Typography>
                 </Box>
-                {job.started_at && (
+                {job.due_date && (
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Started</Typography>
-                    <Typography variant="body2">{formatDateTime(job.started_at)}</Typography>
+                    <Typography variant="body2" color="text.secondary">Due</Typography>
+                    <Typography variant="body2">{formatDate(job.due_date)}</Typography>
                   </Box>
                 )}
-                {job.completed_at && (
+                {job.lead_time_days !== null && (
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Completed</Typography>
-                    <Typography variant="body2">{formatDateTime(job.completed_at)}</Typography>
-                  </Box>
-                )}
-                {job.shipped_at && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Shipped</Typography>
-                    <Typography variant="body2">{formatDateTime(job.shipped_at)}</Typography>
+                    <Typography variant="body2" color="text.secondary">Lead time</Typography>
+                    <Typography variant="body2">{job.lead_time_days}d</Typography>
                   </Box>
                 )}
               </Box>
-            </CardContent>
-          </Card>
-        </Grid>
 
-        {/* Job QR Code */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Job QR Code
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  onClick={() => setQrExpanded((v) => !v)}
+                  startIcon={<QrCode2Icon />}
+                  endIcon={qrExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  sx={{ color: 'text.secondary' }}
+                >
+                  {qrExpanded ? 'Hide QR Code' : 'View QR Code'}
+                </Button>
+                <Collapse in={qrExpanded}>
+                  <Box sx={{ mt: 2 }}>
+                    <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
+                  </Box>
+                </Collapse>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

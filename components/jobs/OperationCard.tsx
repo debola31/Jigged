@@ -71,7 +71,6 @@ export default function OperationCard({
 
   const hasDetails =
     operation.started_at ||
-    operation.completed_at ||
     operation.actual_setup_minutes !== null ||
     operation.actual_run_minutes !== null ||
     operation.notes;
@@ -204,25 +203,13 @@ export default function OperationCard({
             mt: 0,
           }}
         >
-          {/* Timing Info */}
-          {(operation.started_at || operation.completed_at) && (
-            <Box sx={{ mt: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {operation.started_at && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    Started
-                  </Typography>
-                  <Typography variant="body2">{formatDateTime(operation.started_at)}</Typography>
-                </Box>
-              )}
-              {operation.completed_at && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    Completed
-                  </Typography>
-                  <Typography variant="body2">{formatDateTime(operation.completed_at)}</Typography>
-                </Box>
-              )}
+          {/* Started — Completed is already shown inline on the row. */}
+          {operation.started_at && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                Started
+              </Typography>
+              <Typography variant="body2">{formatDateTime(operation.started_at)}</Typography>
             </Box>
           )}
 

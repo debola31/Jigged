@@ -542,6 +542,70 @@ function WorkOrderCard({ workOrder }) {
 
 ---
 
+## Page Layout Patterns
+
+CLAUDE.md covers list, create/edit, and import pages. This section names the conventions for **detail pages** — the page that shows a single record of an entity.
+
+Two patterns coexist by content type. Pick the one that matches the entity; don't mix.
+
+### Pattern A — Reference entity detail
+
+Used by **Parts, Customers, Vendors, Work Centers**. Reference entities are things users open to read settings, see relations, or scan a QR — not to drive a workflow.
+
+```
+[← Back to <List>]                           [Edit]  [Delete]
+
+┌───────────────────────────────────────────────────────────┐
+│ <Entity name>   [identity chip(s)]   <inline secondary>   │   ← title card
+└───────────────────────────────────────────────────────────┘
+
+┌──────────────────────────┬────────────────────────────────┐
+│ Details (md=6)           │ Secondary (md=6)               │
+│ — key/value rows         │ — QR code, contacts, address…  │
+└──────────────────────────┴────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────┐
+│ Optional full-width footer: related counts, timestamps    │
+└───────────────────────────────────────────────────────────┘
+```
+
+- **Title card** (separate `<Card>`) holds the name + identity chips (kind, status) inline on one row.
+- **Body** is a `<Grid container>` of `xs=12 md=6` cards. Both cards use `sx={{ height: '100%' }}` so their bottoms align even when content lengths differ.
+- **QR code goes in the md=6 right slot** when present (always visible, no toggle).
+
+### Pattern B — Workflow / document entity detail
+
+Used by **Jobs, Quotes**. Workflow entities are things users open to act on a process (ship, cancel, send PDF) or to step through a child collection (operations, line items).
+
+```
+[← Back to <List>]                  [Workflow action] [Workflow action] [Delete]
+
+<Entity number>  [status pill]  [overdue/etc. badge]           ← inline title strip
+                                                                 (no title card)
+
+┌──────────────────────────┬────────────────────────────────┐
+│ <Entity> Details (md=6)  │ QR Code or other summary (md=6)│
+│ — customer, dates, terms │ — always-visible, no toggle    │
+└──────────────────────────┴────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────┐
+│ Workhorse panel (full width): parts/operations, line      │
+│ items, etc. — the reason the user opened the page.        │
+└───────────────────────────────────────────────────────────┘
+```
+
+- **No title card.** The entity number, status pill, and any badges sit inline on one row (`flex` + `gap: 2`). Don't stack the pill on its own line below the title — it looks orphaned.
+- **Summary row** of `xs=12 md=6` metadata cards above the workhorse panel. Same `height: '100%'` rule.
+- **Workhorse panel is full-width** below — that's where the user spends their time.
+
+### Where deviation is fine
+
+- **Content-driven branching** (e.g., Parts' stocked vs made-to-order layout): keep it.
+- **Document-style pages with rich document chrome** (Quotes' Email/View PDF buttons): keep the chrome; the body still follows Pattern B.
+- New detail pages should default to one of the two patterns. If neither fits, that's a signal to push back on the content shape — not invent a third pattern.
+
+---
+
 ## Mobile Considerations
 
 ### Shop Floor Requirements

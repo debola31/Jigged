@@ -71,6 +71,7 @@ export default function OperationCard({
 
   const hasDetails =
     operation.started_at ||
+    operation.completed_at ||
     operation.actual_setup_minutes !== null ||
     operation.actual_run_minutes !== null ||
     operation.notes;

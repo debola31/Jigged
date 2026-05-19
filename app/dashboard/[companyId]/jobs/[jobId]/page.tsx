@@ -269,16 +269,6 @@ export default function JobDetailPage() {
                     </Typography>
                   </Box>
                 )}
-                {job.lead_time_days !== null && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Lead time
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {job.lead_time_days}d
-                    </Typography>
-                  </Box>
-                )}
               </Box>
             </CardContent>
           </Card>

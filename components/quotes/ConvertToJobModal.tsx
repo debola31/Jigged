@@ -12,7 +12,6 @@ import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
 import type { QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
@@ -30,11 +29,17 @@ function formatDate(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-function computeDueDate(leadTimeDays: number | null): string | null {
-  if (leadTimeDays === null || leadTimeDays === undefined || isNaN(leadTimeDays)) return null;
+/** Today + N days as an ISO date string (yyyy-mm-dd) for the date input. */
+function defaultDueDateISO(leadTimeDays: number | null): string {
   const d = new Date();
-  d.setDate(d.getDate() + leadTimeDays);
-  return d.toLocaleDateString();
+  if (leadTimeDays !== null && !isNaN(leadTimeDays)) {
+    d.setDate(d.getDate() + leadTimeDays);
+  }
+  // toISOString gives UTC; trim to local-date shape.
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export default function ConvertToJobModal({
@@ -46,8 +51,8 @@ export default function ConvertToJobModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [leadTimeInput, setLeadTimeInput] = useState<string>(
-    quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
+  const [dueDateInput, setDueDateInput] = useState<string>(
+    defaultDueDateISO(quote.lead_time_days),
   );
 
   const lineItems = useMemo(
@@ -57,17 +62,11 @@ export default function ConvertToJobModal({
 
   useEffect(() => {
     if (!open) return;
-    setLeadTimeInput(quote.lead_time_days !== null ? String(quote.lead_time_days) : '');
+    setDueDateInput(defaultDueDateISO(quote.lead_time_days));
     setError(null);
   }, [open, quote.lead_time_days]);
 
-  const leadTimeNumber = leadTimeInput !== '' ? parseInt(leadTimeInput, 10) : null;
-  const leadTimeValid =
-    leadTimeInput === '' ||
-    (!isNaN(leadTimeNumber as number) &&
-      (leadTimeNumber as number) >= 0 &&
-      (leadTimeNumber as number) <= 3650);
-  const duePreview = leadTimeValid ? computeDueDate(leadTimeNumber) : null;
+  const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
 
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
 
@@ -76,7 +75,7 @@ export default function ConvertToJobModal({
     setError(null);
     try {
       const result = await convertQuoteToJob(quote.id, {
-        leadTimeDays: leadTimeValid ? leadTimeNumber : null,
+        dueDate: dueDateInput || null,
       });
       onConverted(result.job.id);
     } catch (err) {
@@ -137,28 +136,33 @@ export default function ConvertToJobModal({
             </Alert>
           )}
 
-          <Box sx={{ mt: 2 }}>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Quoted lead time
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {quote.lead_time_days !== null
+                  ? `${quote.lead_time_days} day${quote.lead_time_days === 1 ? '' : 's'}`
+                  : 'Not specified'}
+              </Typography>
+            </Box>
             <TextField
-              label="Lead time (applies to the whole job)"
-              type="number"
+              label="Due date"
+              type="date"
               size="small"
               fullWidth
-              value={leadTimeInput}
-              onChange={(e) => setLeadTimeInput(e.target.value)}
+              value={dueDateInput}
+              onChange={(e) => setDueDateInput(e.target.value)}
               disabled={loading}
-              error={!leadTimeValid}
+              error={!dueDateValid}
               helperText={
-                !leadTimeValid
-                  ? 'Enter a number between 0 and 3,650'
-                  : duePreview
-                    ? `Due date: ${duePreview}`
-                    : 'Leave blank for no due date'
+                !dueDateValid
+                  ? 'Enter a valid date'
+                  : 'Defaults to today + the quoted lead time. Adjust if you committed to a different ship date.'
               }
               slotProps={{
-                input: {
-                  endAdornment: <InputAdornment position="end">days</InputAdornment>,
-                },
-                htmlInput: { min: 0, step: 1 },
+                inputLabel: { shrink: true },
               }}
             />
           </Box>
@@ -171,7 +175,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || lineItems.length === 0 || !leadTimeValid}
+          disabled={loading || lineItems.length === 0 || !dueDateValid}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating…' : `Create ${expectedJobNumber}`}

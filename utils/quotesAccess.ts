@@ -625,8 +625,14 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
 // ============== Convert to Job ==============
 
 export interface ConvertToJobOptions {
-  /** Override the quote's lead time on the resulting job. */
-  leadTimeDays?: number | null;
+  /**
+   * Ship-by date for the new job. ISO date string (yyyy-mm-dd). When omitted,
+   * defaults to today + the quote's lead_time_days; when the quote has no
+   * lead time and no override is provided, the job is created without a due
+   * date. The quote's lead_time_days is always carried over to the job
+   * as the promise snapshot — it is not overridable here.
+   */
+  dueDate?: string | null;
 }
 
 export interface ConvertToJobResult {
@@ -715,16 +721,17 @@ export async function convertQuoteToJob(
     throw new Error('Authentication required. Please log in and try again.');
   }
 
-  // Lead time resolution: explicit override > quote value > null
-  const resolvedLeadTime =
-    options.leadTimeDays !== undefined && options.leadTimeDays !== null
-      ? options.leadTimeDays
-      : quote.lead_time_days;
+  // The lead time the customer was quoted is the promise — copy it to the job
+  // as a historical snapshot, never overridden here.
+  const promisedLeadTime = quote.lead_time_days;
 
+  // Due date resolution: explicit override > today + quoted lead time > null
   let dueDate: string | null = null;
-  if (resolvedLeadTime !== null && resolvedLeadTime !== undefined) {
+  if (options.dueDate !== undefined && options.dueDate !== null && options.dueDate !== '') {
+    dueDate = options.dueDate;
+  } else if (promisedLeadTime !== null && promisedLeadTime !== undefined) {
     const d = new Date();
-    d.setDate(d.getDate() + resolvedLeadTime);
+    d.setDate(d.getDate() + promisedLeadTime);
     dueDate = d.toISOString().slice(0, 10);
   }
 
@@ -741,7 +748,7 @@ export async function convertQuoteToJob(
       job_number: jobNumber,
       status: 'not_started',
       due_date: dueDate,
-      lead_time_days: resolvedLeadTime,
+      lead_time_days: promisedLeadTime,
       created_by: user.id,
     })
     .select('id, job_number')

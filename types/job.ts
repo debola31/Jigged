@@ -21,7 +21,7 @@ export interface JobOperation {
   estimated_run_minutes_per_unit: number;
   actual_setup_minutes: number | null;
   actual_run_minutes: number | null;
-  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+  status: 'pending' | 'in_progress' | 'completed';
   started_at: string | null;
   completed_at: string | null;
   assigned_to: string | null;
@@ -192,19 +192,18 @@ export const JOB_STATUS_CONFIG: Record<
 /**
  * Operation status values.
  */
-export type OperationStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
+export type OperationStatus = 'pending' | 'in_progress' | 'completed';
 
 /**
  * Operation status display configuration.
  */
 export const OPERATION_STATUS_CONFIG: Record<
   OperationStatus,
-  { label: string; color: 'default' | 'info' | 'success' | 'warning' }
+  { label: string; color: 'default' | 'info' | 'success' }
 > = {
   pending: { label: 'Pending', color: 'default' },
   in_progress: { label: 'In Progress', color: 'info' },
   completed: { label: 'Completed', color: 'success' },
-  skipped: { label: 'Skipped', color: 'warning' },
 };
 
 /**

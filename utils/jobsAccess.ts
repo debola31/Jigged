@@ -380,12 +380,11 @@ async function recomputeJobPartStatus(
     return { changed: false, newStatus: part.status as JobStatus };
   }
 
-  const allDone = opRows.every((o) => o.status === 'completed' || o.status === 'skipped');
-  const hasCompleted = opRows.some((o) => o.status === 'completed');
+  const allDone = opRows.every((o) => o.status === 'completed');
   const anyTouched = opRows.some((o) => o.status !== 'pending');
 
   let newStatus: JobStatus;
-  if (allDone && hasCompleted) newStatus = 'completed';
+  if (allDone) newStatus = 'completed';
   else if (anyTouched) newStatus = 'in_progress';
   else newStatus = 'not_started';
 
@@ -525,7 +524,7 @@ export async function startJobOperation(
 
 /**
  * Complete a job_operation with optional time-entry data. Flips the
- * job_part to 'completed' once every op on that part is completed/skipped.
+ * job_part to 'completed' once every op on that part is completed.
  */
 export async function completeJobOperation(
   operationId: string,
@@ -576,52 +575,7 @@ export async function completeJobOperation(
 }
 
 /**
- * Skip a job_operation with optional reason.
- */
-export async function skipJobOperation(
-  operationId: string,
-  jobId: string,
-  reason?: string,
-): Promise<OperationUpdateResult> {
-  const supabase = getSupabase();
-  const ctx = await getJobIdForOperation(operationId);
-  void jobId;
-
-  const updateData: Record<string, unknown> = {
-    status: 'skipped',
-    updated_at: new Date().toISOString(),
-  };
-  if (reason) updateData.notes = reason;
-
-  const { data: operation, error: updateError } = await supabase
-    .from('job_operations')
-    .update(updateData)
-    .eq('id', operationId)
-    .eq('status', 'pending')
-    .select(`
-      *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
-    `)
-    .single();
-  if (updateError) {
-    console.error('Error skipping operation:', updateError);
-    throw updateError;
-  }
-
-  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
-  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
-
-  return {
-    operation: operation as JobOperation,
-    jobPartStatusChanged: partResult.changed,
-    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
-    jobStatusChanged: jobResult.changed,
-    newJobStatus: jobResult.newStatus,
-  };
-}
-
-/**
- * Undo a job_operation (completed/skipped → pending). Clears timestamps,
+ * Undo a completed job_operation back to pending. Clears timestamps,
  * actuals, and completed_by. Recomputes the parent job_part status (it may
  * fall back to in_progress or not_started).
  */
@@ -641,7 +595,7 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
       updated_at: new Date().toISOString(),
     })
     .eq('id', operationId)
-    .in('status', ['completed', 'skipped'])
+    .eq('status', 'completed')
     .select(`
       *,
       work_center:work_centers!left(id, name, labor_rate, kind)

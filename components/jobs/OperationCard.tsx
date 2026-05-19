@@ -9,11 +9,11 @@ import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckIcon from '@mui/icons-material/Check';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
 import UndoIcon from '@mui/icons-material/Undo';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
 import { formatTime } from '@/types/routings';
@@ -22,10 +22,10 @@ import OperationStatusChip from './OperationStatusChip';
 interface OperationCardProps {
   operation: JobOperation;
   hasInProgressOperation: boolean;
+  isNextReady: boolean;
   disabled?: boolean;
   onStart: (operationId: string) => void;
   onComplete: (operationId: string) => void;
-  onSkip: (operationId: string) => void;
   onUndo: (operationId: string) => void;
 }
 
@@ -43,19 +43,15 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
     bg: 'rgba(16, 185, 129, 0.1)',
     border: 'success.main',
   },
-  skipped: {
-    bg: 'rgba(245, 158, 11, 0.1)',
-    border: 'warning.main',
-  },
 };
 
 export default function OperationCard({
   operation,
   hasInProgressOperation,
+  isNextReady,
   disabled = false,
   onStart,
   onComplete,
-  onSkip,
   onUndo,
 }: OperationCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -64,10 +60,9 @@ export default function OperationCard({
   const styles = STATUS_STYLES[status];
 
   // Determine available actions based on status and context
-  const canStart = status === 'pending' && !hasInProgressOperation;
+  const canStart = status === 'pending' && !hasInProgressOperation && isNextReady;
   const canComplete = status === 'in_progress';
-  const canSkip = status === 'pending';
-  const canUndo = status === 'completed' || status === 'skipped';
+  const canUndo = status === 'completed';
 
   const formatDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '—';
@@ -114,6 +109,14 @@ export default function OperationCard({
                 : ''}{formatTime(operation.estimated_run_minutes_per_unit)}/unit
             </Typography>
           </Box>
+          {status === 'completed' && operation.completed_at && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+              <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
+              <Typography variant="caption" color="text.secondary">
+                Completed {formatDateTime(operation.completed_at)}
+              </Typography>
+            </Box>
+          )}
         </Box>
 
         {/* Status Chip */}
@@ -155,24 +158,6 @@ export default function OperationCard({
                 >
                   Complete
                 </Button>
-              </span>
-            </Tooltip>
-          )}
-
-          {canSkip && (
-            <Tooltip title="Skip Operation">
-              <span>
-                <IconButton
-                  size="small"
-                  color="warning"
-                  onClick={() => onSkip(operation.id)}
-                  disabled={disabled}
-                  sx={{
-                    '&:hover': { bgcolor: 'rgba(245, 158, 11, 0.1)' },
-                  }}
-                >
-                  <SkipNextIcon fontSize="small" />
-                </IconButton>
               </span>
             </Tooltip>
           )}

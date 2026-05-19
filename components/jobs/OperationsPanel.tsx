@@ -14,12 +14,10 @@ import type { Job, JobOperation, JobStatus } from '@/types/job';
 import {
   startJobOperation,
   completeJobOperation,
-  skipJobOperation,
   undoJobOperation,
 } from '@/utils/jobsAccess';
 import OperationCard from './OperationCard';
 import CompleteOperationModal from './CompleteOperationModal';
-import SkipOperationDialog from './SkipOperationDialog';
 
 interface OperationsPanelProps {
   job: Job;
@@ -42,7 +40,6 @@ export default function OperationsPanel({
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
-  const [skipDialogOpen, setSkipDialogOpen] = useState(false);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
@@ -51,13 +48,24 @@ export default function OperationsPanel({
   });
 
   // Calculate progress
-  const completedCount = operations.filter(
-    (op) => op.status === 'completed' || op.status === 'skipped'
-  ).length;
+  const completedCount = operations.filter((op) => op.status === 'completed').length;
   const progressPercent = operations.length > 0 ? (completedCount / operations.length) * 100 : 0;
 
   // Check if any operation is in progress
   const hasInProgressOperation = operations.some((op) => op.status === 'in_progress');
+
+  // The "next" pending op is the lowest-sequence pending op with no earlier
+  // unfinished predecessor — only it should expose a Start button.
+  const nextReadyOperationId = (() => {
+    const sorted = [...operations].sort((a, b) => a.sequence - b.sequence);
+    for (const op of sorted) {
+      if (op.status === 'completed') continue;
+      // First non-completed op in sequence is the next eligible — if it's
+      // pending, it's the one that can start.
+      return op.status === 'pending' ? op.id : null;
+    }
+    return null;
+  })();
 
   // Check if job is in a disabled state
   const isJobDisabled = job.status === 'cancelled' || job.status === 'shipped';
@@ -139,35 +147,6 @@ export default function OperationsPanel({
     }
   };
 
-  const handleSkipClick = (operationId: string) => {
-    setSelectedOperationId(operationId);
-    setSkipDialogOpen(true);
-  };
-
-  const handleSkipConfirm = async (reason?: string) => {
-    if (!selectedOperationId) return;
-
-    setLoading(true);
-    setSkipDialogOpen(false);
-    try {
-      const result = await skipJobOperation(selectedOperationId, job.id, reason);
-      if (result.jobStatusChanged || result.jobPartStatusChanged) {
-        handleStatusChanges(
-          result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
-          result.jobStatusChanged ? result.newJobStatus : undefined,
-        );
-      } else {
-        showSnackbar('Operation skipped', 'warning');
-      }
-      onOperationUpdate();
-    } catch (err) {
-      showSnackbar(err instanceof Error ? err.message : 'Failed to skip operation', 'error');
-    } finally {
-      setLoading(false);
-      setSelectedOperationId(null);
-    }
-  };
-
   const handleUndo = async (operationId: string) => {
     setLoading(true);
     try {
@@ -236,10 +215,10 @@ export default function OperationsPanel({
                 key={operation.id}
                 operation={operation}
                 hasInProgressOperation={hasInProgressOperation}
+                isNextReady={operation.id === nextReadyOperationId}
                 disabled={isDisabled}
                 onStart={handleStart}
                 onComplete={handleCompleteClick}
-                onSkip={handleSkipClick}
                 onUndo={handleUndo}
               />
             ))}
@@ -256,18 +235,6 @@ export default function OperationsPanel({
           setSelectedOperationId(null);
         }}
         onConfirm={handleCompleteConfirm}
-        loading={loading}
-      />
-
-      {/* Skip Dialog */}
-      <SkipOperationDialog
-        open={skipDialogOpen}
-        operation={selectedOperation}
-        onClose={() => {
-          setSkipDialogOpen(false);
-          setSelectedOperationId(null);
-        }}
-        onConfirm={handleSkipConfirm}
         loading={loading}
       />
 

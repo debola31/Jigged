@@ -224,6 +224,7 @@ export default function JobDetailPage() {
       )}
 
       <Grid container spacing={3}>
+        {/* Job Details — customer, dates, expandable QR code */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
@@ -231,9 +232,11 @@ export default function JobDetailPage() {
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Customer</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Customer
+                  </Typography>
                   {job.customers ? (
                     <MuiLink
                       component={Link}
@@ -243,23 +246,37 @@ export default function JobDetailPage() {
                       {job.customers.name}
                     </MuiLink>
                   ) : (
-                    <Typography variant="body2" color="text.secondary">—</Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      —
+                    </Typography>
                   )}
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2" color="text.secondary">Created</Typography>
-                  <Typography variant="body2">{formatDate(job.created_at)}</Typography>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Created
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {formatDate(job.created_at)}
+                  </Typography>
                 </Box>
                 {job.due_date && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Due</Typography>
-                    <Typography variant="body2">{formatDate(job.due_date)}</Typography>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Due
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {formatDate(job.due_date)}
+                    </Typography>
                   </Box>
                 )}
                 {job.lead_time_days !== null && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Lead time</Typography>
-                    <Typography variant="body2">{job.lead_time_days}d</Typography>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Lead time
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {job.lead_time_days}d
+                    </Typography>
                   </Box>
                 )}
               </Box>

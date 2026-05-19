@@ -18,12 +18,8 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import Collapse from '@mui/material/Collapse';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -51,7 +47,6 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [qrExpanded, setQrExpanded] = useState(false);
 
   useEffect(() => {
     fetchJob();
@@ -155,14 +150,12 @@ export default function JobDetailPage() {
           gap: 2,
         }}
       >
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Typography variant="h4" component="h1" sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
             {job.job_number}
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <JobStatusChip status={job.status} size="medium" />
-            <JobOverdueBadge job={job} size="medium" />
-          </Box>
+          <JobStatusChip status={job.status} size="medium" />
+          <JobOverdueBadge job={job} size="medium" />
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -232,16 +225,18 @@ export default function JobDetailPage() {
 
       <Grid container spacing={3}>
         {/* Job Details — customer, dates, expandable QR code */}
-        <Grid size={{ xs: 12 }}>
-          <Card elevation={2}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Customer</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Customer
+                  </Typography>
                   {job.customers ? (
                     <MuiLink
                       component={Link}
@@ -251,42 +246,42 @@ export default function JobDetailPage() {
                       {job.customers.name}
                     </MuiLink>
                   ) : (
-                    <Typography variant="body2" color="text.secondary">—</Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      —
+                    </Typography>
                   )}
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2" color="text.secondary">Created</Typography>
-                  <Typography variant="body2">{formatDate(job.created_at)}</Typography>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Created
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {formatDate(job.created_at)}
+                  </Typography>
                 </Box>
                 {job.due_date && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Due</Typography>
-                    <Typography variant="body2">{formatDate(job.due_date)}</Typography>
-                  </Box>
-                )}
-                {job.lead_time_days !== null && (
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">Lead time</Typography>
-                    <Typography variant="body2">{job.lead_time_days}d</Typography>
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Due
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {formatDate(job.due_date)}
+                    </Typography>
                   </Box>
                 )}
               </Box>
+            </CardContent>
+          </Card>
+        </Grid>
 
-              <Box sx={{ mt: 2 }}>
-                <Button
-                  onClick={() => setQrExpanded((v) => !v)}
-                  startIcon={<QrCode2Icon />}
-                  endIcon={qrExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                  sx={{ color: 'text.secondary' }}
-                >
-                  {qrExpanded ? 'Hide QR Code' : 'View QR Code'}
-                </Button>
-                <Collapse in={qrExpanded}>
-                  <Box sx={{ mt: 2 }}>
-                    <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
-                  </Box>
-                </Collapse>
-              </Box>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card elevation={2} sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                Job QR Code
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
             </CardContent>
           </Card>
         </Grid>

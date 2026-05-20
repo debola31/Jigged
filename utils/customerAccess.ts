@@ -11,6 +11,7 @@ import type {
 import type {
   CustomerContact,
   CustomerContactFormData,
+  CustomerContactRole,
 } from '@/types/customerContact';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
 
@@ -32,6 +33,7 @@ type CustomerWithPrimaryContactRow = Customer & {
   customer_contacts?: Array<{
     id: string;
     name: string;
+    role: CustomerContactRole;
     email: string | null;
     phone: string | null;
     is_primary: boolean;
@@ -71,7 +73,7 @@ export async function getCustomers(
   let query = supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       { count: 'exact' },
     )
     .eq('company_id', companyId)
@@ -92,6 +94,7 @@ export async function getCustomers(
   const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
     ...r,
     addresses: r.addresses ?? [],
+    customer_contacts: r.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(r),
     quotes_count: 0,
     jobs_count: 0,
@@ -120,7 +123,7 @@ export async function getAllCustomers(
     let query = supabase
       .from('customers')
       .select(
-        '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       )
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
@@ -140,6 +143,7 @@ export async function getAllCustomers(
     const batch = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
       ...r,
       addresses: r.addresses ?? [],
+      customer_contacts: r.customer_contacts ?? [],
       primary_contact: extractPrimaryContact(r),
       quotes_count: 0,
       jobs_count: 0,
@@ -195,7 +199,7 @@ export async function getCustomerWithRelations(
   const { data: customer, error: customerError } = await supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
     )
     .eq('id', customerId)
     .single();
@@ -234,6 +238,7 @@ export async function getCustomerWithRelations(
   return {
     ...typedCustomer,
     addresses: typedCustomer.addresses ?? [],
+    customer_contacts: typedCustomer.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(typedCustomer),
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
@@ -466,6 +471,10 @@ export async function bulkImportCustomers(
 /**
  * Return the address tagged default_billing for the customer. Returns null
  * when none is set.
+ *
+ * Used by QuoteForm at quote-creation time to pre-populate
+ * quotes.billing_address_id. After PR 2 the printed quote reads the FK
+ * directly off the quote row, not the customer's current default.
  */
 export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
@@ -485,6 +494,47 @@ export function pickShippingAddress(
     customer.addresses.find((a) => a.default_shipping) ??
     pickBillingAddress(customer)
   );
+}
+
+/** Shape just the contact-by-role pickers need. */
+type ContactPickShape = { id: string; role: CustomerContactRole };
+
+function pickContactByRole<T extends ContactPickShape>(
+  contacts: T[] | undefined,
+  primary: CustomerContactRole,
+  fallback?: CustomerContactRole,
+): T | null {
+  if (!contacts || contacts.length === 0) return null;
+  const matched = contacts.find((c) => c.role === primary);
+  if (matched) return matched;
+  if (fallback) return contacts.find((c) => c.role === fallback) ?? null;
+  return null;
+}
+
+/**
+ * Pick the customer contact treated as the billing recipient. Resolves
+ * role accounts_payable first, falling back to buyer. Returns null when
+ * neither role exists. Used by QuoteForm at quote-creation time to
+ * pre-populate quotes.billing_contact_id; mirrored in the shipments
+ * RPC backfill in PR 2's migration.
+ */
+export function pickDefaultBillingContact<T extends ContactPickShape>(
+  contacts: T[] | undefined,
+): T | null {
+  return pickContactByRole(contacts, 'accounts_payable', 'buyer');
+}
+
+/**
+ * Pick the customer contact treated as the shipping recipient. Resolves
+ * role shipping_receiving first, falling back to buyer. Returns null
+ * when neither role exists. Used by QuoteForm at quote-creation time to
+ * pre-populate quotes.shipping_contact_id; mirrored by the shipment-form
+ * default in PR 4.
+ */
+export function pickDefaultShippingContact<T extends ContactPickShape>(
+  contacts: T[] | undefined,
+): T | null {
+  return pickContactByRole(contacts, 'shipping_receiving', 'buyer');
 }
 
 // Helper re-exports so older callers that imported types from this file

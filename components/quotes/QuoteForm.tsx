@@ -24,14 +24,25 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import type { QuoteFormData } from '@/types/quote';
 import { createQuote, updateQuote } from '@/utils/quotesAccess';
 import { getPartsForSelectByIds } from '@/utils/partsAccess';
-import { getAllCustomers } from '@/utils/customerAccess';
+import {
+  getAllCustomers,
+  pickBillingAddress,
+  pickShippingAddress,
+  pickDefaultBillingContact,
+  pickDefaultShippingContact,
+} from '@/utils/customerAccess';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import type { PartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
-import type { Customer } from '@/types/customer';
+import type {
+  Customer,
+  CustomerAddress,
+  CustomerListContact,
+  CustomerWithRelations,
+} from '@/types/customer';
 
 interface QuoteFormProps {
   mode: 'create' | 'edit';
@@ -107,6 +118,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   );
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  // Full customer rows (with addresses + contacts) keyed by id so the
+  // customer-change handler can resolve address/contact defaults without
+  // refetching. Source: getAllCustomers — already loaded for the dropdown.
+  const [customersById, setCustomersById] = useState<Map<string, CustomerWithRelations>>(
+    () => new Map(),
+  );
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +146,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         CREATE_NEW_CUSTOMER,
         ...customersData.map((c) => ({ id: c.id, name: c.name })),
       ]);
+      setCustomersById(new Map(customersData.map((c) => [c.id, c])));
       if (hydratedParts.length > 0) {
         const byId = new Map(hydratedParts.map((p) => [p.id, p]));
         setPartBlocks((prev) =>
@@ -195,6 +213,86 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
   };
 
+  /**
+   * Customer change clears the previous customer's address/contact FKs
+   * (they belong to a different customer and would be rejected by the
+   * integrity trigger) and pre-populates the four defaults from the
+   * newly-selected customer. PO number is also cleared — POs are
+   * customer-specific.
+   *
+   * In edit mode this still fires when the user changes customer, which
+   * is the correct semantics: the original FKs become invalid.
+   */
+  const handleCustomerChange = (customerId: string) => {
+    if (!customerId) {
+      setFormData((prev) => ({
+        ...prev,
+        customer_id: '',
+        customer_po_number: '',
+        billing_address_id: '',
+        shipping_address_id: '',
+        billing_contact_id: '',
+        shipping_contact_id: '',
+      }));
+      return;
+    }
+    if (customerId === formData.customer_id) return;
+
+    const customer = customersById.get(customerId);
+    const billing = customer ? pickBillingAddress(customer) : null;
+    const shipping = customer ? pickShippingAddress(customer) : null;
+    const billingContact = customer
+      ? pickDefaultBillingContact(customer.customer_contacts)
+      : null;
+    const shippingContact = customer
+      ? pickDefaultShippingContact(customer.customer_contacts)
+      : null;
+
+    setFormData((prev) => ({
+      ...prev,
+      customer_id: customerId,
+      customer_po_number: '',
+      billing_address_id: billing?.id ?? '',
+      shipping_address_id: shipping?.id ?? '',
+      billing_contact_id: billingContact?.id ?? '',
+      shipping_contact_id: shippingContact?.id ?? '',
+    }));
+  };
+
+  /** Addresses + contacts for the currently-selected customer (or empty). */
+  const selectedCustomer = formData.customer_id
+    ? customersById.get(formData.customer_id) ?? null
+    : null;
+  const customerAddresses: CustomerAddress[] = selectedCustomer?.addresses ?? [];
+  const customerContacts: CustomerListContact[] = selectedCustomer?.customer_contacts ?? [];
+
+  /**
+   * Compact line for the dropdown options — first line of the address +
+   * city/state. Mirrors what shows on the customer detail page so the
+   * salesperson recognizes the row at a glance.
+   */
+  const formatAddressOption = (a: CustomerAddress): string => {
+    const cityState = [a.city, a.state].filter(Boolean).join(', ');
+    const first = [a.address_line1, cityState].filter(Boolean).join(' · ');
+    return first || '(empty address)';
+  };
+
+  const formatContactOption = (c: CustomerListContact): string => {
+    const tag =
+      c.role === 'accounts_payable'
+        ? 'AP'
+        : c.role === 'shipping_receiving'
+          ? 'Shipping'
+          : c.role === 'buyer'
+            ? 'Buyer'
+            : c.role === 'engineering'
+              ? 'Engineering'
+              : c.role === 'quality'
+                ? 'Quality'
+                : 'Other';
+    return `${c.name} · ${tag}`;
+  };
+
   const addPartBlock = () => {
     setPartBlocks((prev) => [...prev, emptyBlock()]);
   };
@@ -235,7 +333,23 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       ...prev.filter((c) => !c.isCreateNew),
       { id: customer.id, name: customer.name },
     ]);
-    handleFieldChange('customer_id', customer.id);
+    // The new customer has no addresses or contacts yet; insert a blank
+    // CustomerWithRelations shell so handleCustomerChange's lookup hits
+    // and clears the previous customer's FKs. The salesperson will add
+    // address + contacts on the customer page before the quote prints.
+    setCustomersById((prev) => {
+      const next = new Map(prev);
+      next.set(customer.id, {
+        ...customer,
+        addresses: [],
+        customer_contacts: [],
+        primary_contact: null,
+        quotes_count: 0,
+        jobs_count: 0,
+      });
+      return next;
+    });
+    handleCustomerChange(customer.id);
     setCustomerModalOpen(false);
   };
 
@@ -423,12 +537,122 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 setCustomerModalOpen(true);
                 return;
               }
-              handleFieldChange('customer_id', v?.id ?? '');
+              handleCustomerChange(v?.id ?? '');
             }}
             renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
         </CardContent>
       </Card>
+
+      {/* Order details: customer PO + addresses + contacts. Hidden until a
+          customer is selected — the address/contact selectors have no
+          options to draw from otherwise. */}
+      {formData.customer_id && (
+        <Card elevation={2} sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Order details
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Customer PO #"
+                  value={formData.customer_po_number}
+                  onChange={(e) => handleFieldChange('customer_po_number', e.target.value)}
+                  helperText="The PO number the customer referenced on this order. Optional."
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>{/* spacer column */}</Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Autocomplete
+                  size="small"
+                  options={customerAddresses}
+                  getOptionLabel={formatAddressOption}
+                  value={
+                    customerAddresses.find((a) => a.id === formData.billing_address_id) ?? null
+                  }
+                  onChange={(_, v) =>
+                    handleFieldChange('billing_address_id', v?.id ?? '')
+                  }
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Bill to address"
+                      helperText={
+                        customerAddresses.length === 0
+                          ? 'This customer has no saved addresses — add one on the customer page.'
+                          : ' '
+                      }
+                    />
+                  )}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Autocomplete
+                  size="small"
+                  options={customerAddresses}
+                  getOptionLabel={formatAddressOption}
+                  value={
+                    customerAddresses.find((a) => a.id === formData.shipping_address_id) ?? null
+                  }
+                  onChange={(_, v) =>
+                    handleFieldChange('shipping_address_id', v?.id ?? '')
+                  }
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Ship to address" helperText=" " />
+                  )}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Autocomplete
+                  size="small"
+                  options={customerContacts}
+                  getOptionLabel={formatContactOption}
+                  value={
+                    customerContacts.find((c) => c.id === formData.billing_contact_id) ?? null
+                  }
+                  onChange={(_, v) =>
+                    handleFieldChange('billing_contact_id', v?.id ?? '')
+                  }
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Bill to contact"
+                      helperText={
+                        customerContacts.length === 0
+                          ? 'This customer has no saved contacts — add one on the customer page.'
+                          : ' '
+                      }
+                    />
+                  )}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Autocomplete
+                  size="small"
+                  options={customerContacts}
+                  getOptionLabel={formatContactOption}
+                  value={
+                    customerContacts.find((c) => c.id === formData.shipping_contact_id) ?? null
+                  }
+                  onChange={(_, v) =>
+                    handleFieldChange('shipping_contact_id', v?.id ?? '')
+                  }
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Ship to contact" helperText=" " />
+                  )}
+                />
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Parts */}
       <Card elevation={2} sx={{ mb: 3 }}>

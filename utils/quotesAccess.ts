@@ -73,7 +73,7 @@ const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(
     id, name, website,
-    customer_contacts(id, name, email, phone, is_primary),
+    customer_contacts(id, name, role, email, phone, is_primary),
     addresses:customer_addresses(
       id,
       address_line1, address_line2, city, state, postal_code, country,
@@ -326,11 +326,24 @@ export async function createQuote(
 
   const { data: { user } } = await supabase.auth.getUser();
 
+  // Empty strings on the form's address/contact FKs map to NULL in the DB.
+  // The form pre-populates these when the customer is selected, so the
+  // common case is that all four arrive populated. NULL is allowed for
+  // backwards compatibility with legacy edit paths that didn't have the
+  // selectors — the integrity trigger only validates non-null FKs.
+  const nullIfEmpty = (s: string | null | undefined) =>
+    s && s.trim() !== '' ? s : null;
+
   const { data: quote, error } = await supabase
     .from('quotes')
     .insert({
       company_id: companyId,
       customer_id: formData.customer_id,
+      customer_po_number: nullIfEmpty(formData.customer_po_number),
+      billing_address_id: nullIfEmpty(formData.billing_address_id),
+      shipping_address_id: nullIfEmpty(formData.shipping_address_id),
+      billing_contact_id: nullIfEmpty(formData.billing_contact_id),
+      shipping_contact_id: nullIfEmpty(formData.shipping_contact_id),
       lead_time_days: leadTimeDays,
       expiration_date: expirationDate,
       status: 'active',
@@ -404,10 +417,18 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw new Error('Lead time must be between 0 and 3,650 days');
   }
 
+  const nullIfEmpty = (s: string | null | undefined) =>
+    s && s.trim() !== '' ? s : null;
+
   const { data, error } = await supabase
     .from('quotes')
     .update({
       customer_id: formData.customer_id,
+      customer_po_number: nullIfEmpty(formData.customer_po_number),
+      billing_address_id: nullIfEmpty(formData.billing_address_id),
+      shipping_address_id: nullIfEmpty(formData.shipping_address_id),
+      billing_contact_id: nullIfEmpty(formData.billing_contact_id),
+      shipping_contact_id: nullIfEmpty(formData.shipping_contact_id),
       lead_time_days: leadTimeDays,
       expiration_date: formData.expiration_date || null,
       updated_at: new Date().toISOString(),

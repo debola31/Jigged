@@ -283,6 +283,7 @@ describe('quotesAccess utilities', () => {
             {
               id: 'contact-1',
               name: 'Jane Doe',
+              role: 'buyer',
               email: 'jane@example.com',
               phone: '555-0100',
               is_primary: true,

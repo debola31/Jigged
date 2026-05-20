@@ -5,12 +5,23 @@ export type QuoteStatus = 'active' | 'expired';
 
 /**
  * Quote header record. Part/quantity/pricing lives on quote_line_items.
+ *
+ * The four address/contact FKs (billing_address_id, shipping_address_id,
+ * billing_contact_id, shipping_contact_id) are set at quote creation from
+ * the customer's defaults and stay fixed after that — even if the customer's
+ * defaults change later, the printed quote reflects what the customer
+ * originally saw. See migration 20260520_shipments_pr2_quote_addresses.
  */
 export interface Quote {
   id: string;
   company_id: string;
   quote_number: string;
   customer_id: string;
+  customer_po_number: string | null;
+  billing_address_id: string | null;
+  shipping_address_id: string | null;
+  billing_contact_id: string | null;
+  shipping_contact_id: string | null;
   lead_time_days: number | null;
   expiration_date: string | null;
   status: QuoteStatus;
@@ -56,9 +67,12 @@ export interface QuoteLineItem {
  * Quote with joined relation data
  */
 export interface QuoteWithRelations extends Quote {
-  // Joined customer data + their addresses + primary contact, so the
-  // printable quote can render BILL TO and SHIP TO blocks (with the
-  // primary contact's name + email/phone) without a second query.
+  // Joined customer data + their addresses + their contacts. The quote PDF
+  // resolves BILL TO / SHIP TO by looking up addresses by id against the
+  // quote's billing_address_id / shipping_address_id FKs (set at quote
+  // creation). Contacts are resolved the same way against billing_contact_id /
+  // shipping_contact_id. The customer_contacts join also surfaces the
+  // is_primary flag so customer-detail pages can render the primary chip.
   customers?: {
     id: string;
     name: string;
@@ -66,6 +80,7 @@ export interface QuoteWithRelations extends Quote {
     customer_contacts?: Array<{
       id: string;
       name: string;
+      role: string;
       email: string | null;
       phone: string | null;
       is_primary: boolean;
@@ -121,10 +136,20 @@ export interface QuoteFormPartBlock {
 }
 
 /**
- * Form data for creating/editing quotes
+ * Form data for creating/editing quotes.
+ *
+ * Address/contact IDs are empty strings ('') when nothing is selected — the
+ * Supabase create/update layer translates '' to NULL. Defaults are loaded
+ * from the customer when the customer is first selected (only when the
+ * field is empty, so edit mode doesn't clobber the original FK).
  */
 export interface QuoteFormData {
   customer_id: string;
+  customer_po_number: string;
+  billing_address_id: string;
+  shipping_address_id: string;
+  billing_contact_id: string;
+  shipping_contact_id: string;
   parts: QuoteFormPartBlock[];
   lead_time_days: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
@@ -166,6 +191,11 @@ function defaultExpirationDate(): string {
 
 export const EMPTY_QUOTE_FORM: QuoteFormData = {
   customer_id: '',
+  customer_po_number: '',
+  billing_address_id: '',
+  shipping_address_id: '',
+  billing_contact_id: '',
+  shipping_contact_id: '',
   parts: [],
   lead_time_days: '',
   expiration_date: defaultExpirationDate(),
@@ -187,6 +217,11 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
   }
   return {
     customer_id: quote.customer_id,
+    customer_po_number: quote.customer_po_number ?? '',
+    billing_address_id: quote.billing_address_id ?? '',
+    shipping_address_id: quote.shipping_address_id ?? '',
+    billing_contact_id: quote.billing_contact_id ?? '',
+    shipping_contact_id: quote.shipping_contact_id ?? '',
     parts: Array.from(byPart.values()).map((li) => ({
       part_id: li.part_id,
       order_quantity: li.quantity,

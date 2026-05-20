@@ -70,65 +70,52 @@ function buildShopHeaderLines(company: Company): string[] {
 
 type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
 type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
+type QuoteCustomerContact = NonNullable<QuoteCustomer['customer_contacts']>[number];
 
 /**
- * Pick the customer's default billing address (at most one exists per the
- * unique partial index on customer_addresses). Returns null when none
- * is set.
- *
- * NOTE: PR 2 replaces this fallback with explicit quote.billing_address_id /
- * quote.shipping_address_id FKs that are set at quote creation (legacy
- * quotes are backfilled in that migration). This local helper is kept for
- * PR 1 to preserve current behavior across the column rename.
+ * Resolve an embedded customer_addresses row by id. The quote carries
+ * billing_address_id / shipping_address_id set at quote-creation time
+ * (migration 20260520) — these point at the address rows joined under
+ * quote.customers.addresses. Returns null when the FK is null or the
+ * lookup misses (e.g. address was deleted after the quote was issued).
  */
-function pickBillingAddress(addresses: QuoteCustomerAddress[] | undefined):
-  QuoteCustomerAddress | null {
-  if (!addresses || addresses.length === 0) return null;
-  return addresses.find((a) => a.default_billing) ?? null;
+function findAddressById(
+  addresses: QuoteCustomerAddress[] | undefined,
+  addressId: string | null | undefined,
+): QuoteCustomerAddress | null {
+  if (!addressId || !addresses || addresses.length === 0) return null;
+  return addresses.find((a) => a.id === addressId) ?? null;
 }
 
 /**
- * Pick the customer's default shipping address. Falls back to the default
- * billing address — explicit product behavior ("ship to where we bill if no
- * ship-to is set"), implemented in exactly one place.
+ * Resolve an embedded customer_contacts row by id. Used for the billing
+ * contact / shipping contact rendered alongside their respective address
+ * blocks. Returns null when the FK is null or the lookup misses.
  */
-function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
-  QuoteCustomerAddress | null {
-  if (!addresses || addresses.length === 0) return null;
-  return (
-    addresses.find((a) => a.default_shipping) ??
-    pickBillingAddress(addresses)
-  );
+function findContactById(
+  contacts: QuoteCustomerContact[] | undefined,
+  contactId: string | null | undefined,
+): QuoteCustomerContact | null {
+  if (!contactId || !contacts || contacts.length === 0) return null;
+  return contacts.find((c) => c.id === contactId) ?? null;
 }
 
 /**
  * Build the printed address lines for either a BILL TO or SHIP TO block.
- * Includes the customer name + contact name as the first lines so each
- * block reads as a self-contained "who/where" pair.
+ * Includes the customer name + the resolved contact's name as the first
+ * lines so each block reads as a self-contained "who/where" pair.
  */
-/**
- * Pick the customer's primary contact (at most one per the
- * customer_contacts_one_primary index). Returns null when none is set.
- */
-function pickPrimaryContact(
-  contacts: NonNullable<QuoteCustomer['customer_contacts']> | undefined,
-) {
-  if (!contacts || contacts.length === 0) return null;
-  return contacts.find((c) => c.is_primary) ?? null;
-}
-
 function buildAddressLines(
   customer: QuoteCustomer | null | undefined,
   address: QuoteCustomerAddress | null,
-  { withContact = true }: { withContact?: boolean } = {},
+  contact: QuoteCustomerContact | null,
+  { withContactInfo = true }: { withContactInfo?: boolean } = {},
 ): string[] {
   if (!customer) return ['(No customer)'];
 
-  const primary = pickPrimaryContact(customer.customer_contacts);
-
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-  if (primary?.name) lines.push(primary.name);
+  if (contact?.name) lines.push(contact.name);
 
   if (address) {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -141,9 +128,9 @@ function buildAddressLines(
     }
   }
 
-  if (withContact) {
-    if (primary?.phone) lines.push(primary.phone);
-    if (primary?.email) lines.push(primary.email);
+  if (withContactInfo && contact) {
+    if (contact.phone) lines.push(contact.phone);
+    if (contact.email) lines.push(contact.email);
   }
   return lines;
 }
@@ -280,20 +267,25 @@ export async function generateQuotePdf(
   const createdByName = quote.created_by_member?.name ?? null;
   const createdByEmail = quote.created_by_member?.email ?? null;
 
-  // Resolve the addresses for this customer. SHIP TO is only rendered as a
-  // separate block when it's a different address from BILL TO — when
-  // they're the same, customers expect a single "BILL TO" block, not a
-  // visually redundant pair.
-  const billingAddress = pickBillingAddress(quote.customers?.addresses);
-  const shippingAddress = pickShippingAddress(quote.customers?.addresses);
+  // Resolve the addresses + contacts from the quote's FKs. These were set
+  // at quote creation (legacy quotes were backfilled in migration
+  // 20260520) so the printed quote always renders what the customer
+  // originally saw, even if the customer's defaults change later.
+  // SHIP TO is only rendered as a separate block when it's a different
+  // address from BILL TO — when they're the same, customers expect a
+  // single "BILL TO" block, not a visually redundant pair.
+  const billingAddress = findAddressById(quote.customers?.addresses, quote.billing_address_id);
+  const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
+  const billingContact = findContactById(quote.customers?.customer_contacts, quote.billing_contact_id);
+  const shippingContact = findContactById(quote.customers?.customer_contacts, quote.shipping_contact_id);
   const shipDiffersFromBill =
     shippingAddress !== null &&
     billingAddress !== null &&
     shippingAddress.id !== billingAddress.id;
 
-  const billToLines = buildAddressLines(quote.customers ?? null, billingAddress);
+  const billToLines = buildAddressLines(quote.customers ?? null, billingAddress, billingContact);
   const shipToLines = shipDiffersFromBill
-    ? buildAddressLines(quote.customers ?? null, shippingAddress, { withContact: false })
+    ? buildAddressLines(quote.customers ?? null, shippingAddress, shippingContact, { withContactInfo: false })
     : [];
 
   // Section labels

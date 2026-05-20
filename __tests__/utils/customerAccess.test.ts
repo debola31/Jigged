@@ -102,7 +102,7 @@ describe('customerAccess utilities', () => {
       // Addresses + primary contact joined so the list page can render
       // both Location and Contact columns without per-row fetches.
       expect(mockQueryBuilder.select).toHaveBeenCalledWith(
-        '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       );
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
       // The result is mapped (primary_contact, addresses, etc) — at minimum the

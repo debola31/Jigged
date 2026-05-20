@@ -69,9 +69,30 @@ export interface CustomerFormData {
 
 export type CustomerFilter = 'all' | 'active' | 'inactive';
 
+/**
+ * Slim contact shape carried alongside customer list/detail rows. The
+ * full CustomerContact type lives in types/customerContact.ts; this slim
+ * shape avoids a cross-module import in pages that only need name/role
+ * for default-picking (QuoteForm) or for rendering the primary chip.
+ */
+export interface CustomerListContact {
+  id: string;
+  name: string;
+  role: import('./customerContact').CustomerContactRole;
+  email: string | null;
+  phone: string | null;
+  is_primary: boolean;
+}
+
 export interface CustomerWithRelations extends Customer {
   addresses: CustomerAddress[];
-  /** Primary contact only — list/detail pages fetch the full list separately. */
+  /**
+   * Full contacts list joined on the customer. Carries role so callers
+   * can drive default-billing/shipping-contact pickers without a second
+   * round trip. Empty array (not null) when the customer has none.
+   */
+  customer_contacts: CustomerListContact[];
+  /** Primary contact only — convenience surface for the customers list. */
   primary_contact: {
     id: string;
     name: string;

@@ -243,13 +243,21 @@ async function getRevenueInRange(
   endIso: string
 ): Promise<number> {
   const supabase = getSupabase();
+  // "Revenue in range" used to filter jobs.shipped_at — but shipped_at is
+  // gone in the dual-status model. Re-anchor on fulfillment_status =
+  // fully_shipped + the new SQL helper job_last_ship_date, which PR 4
+  // wires up to the shipments cascade. PR 3 ships a NULL-returning stub,
+  // so this query returns 0 until shipments exist — that's the truthful
+  // answer because no shipments exist yet.
   const { data, error } = await supabase
     .from('jobs')
-    .select('id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))')
+    .select(
+      'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price)), last_ship_date:job_last_ship_date',
+    )
     .eq('company_id', companyId)
-    .eq('status', 'shipped')
-    .gte('shipped_at', startIso)
-    .lt('shipped_at', endIso);
+    .eq('fulfillment_status', 'fully_shipped')
+    .gte('updated_at', startIso)
+    .lt('updated_at', endIso);
 
   if (error) throw error;
 
@@ -269,11 +277,15 @@ async function getCompletedJobsInRange(
   endIso: string
 ): Promise<number> {
   const supabase = getSupabase();
+  // "Completed" on the dashboard means the FR-18 done predicate
+  // (production = completed/cancelled AND fulfillment = fully_shipped).
+  // Server-side we approximate with the fulfillment half, which is the
+  // tighter constraint — a fully_shipped job is by definition done.
   const { count, error } = await supabase
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
-    .in('status', ['completed', 'shipped'])
+    .eq('fulfillment_status', 'fully_shipped')
     .gte('updated_at', startIso)
     .lt('updated_at', endIso);
 
@@ -289,7 +301,8 @@ async function getOverdueJobs(companyId: string): Promise<number> {
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
-    .in('status', ['not_started', 'in_progress'])
+    .in('production_status', ['not_started', 'in_progress'])
+    .not('fulfillment_status', 'eq', 'fully_shipped')
     .lt('due_date', now);
 
   if (error) throw error;
@@ -317,9 +330,13 @@ async function getMetricValueWithDelta(
     case 'open_quotes':
       return { value: await getCount('quotes', companyId, { status: ['active'] }) };
     case 'not_started_jobs':
-      return { value: await getCount('jobs', companyId, { status: ['not_started'] }) };
+      return {
+        value: await getCount('jobs', companyId, { production_status: ['not_started'] }),
+      };
     case 'in_progress_jobs':
-      return { value: await getCount('jobs', companyId, { status: ['in_progress'] }) };
+      return {
+        value: await getCount('jobs', companyId, { production_status: ['in_progress'] }),
+      };
     case 'overdue_jobs':
       return { value: await getOverdueJobs(companyId) };
     case 'revenue': {

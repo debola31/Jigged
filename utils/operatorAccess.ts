@@ -272,12 +272,12 @@ export async function getOperatorJobs(
 
   const { data: partStatusRows } = await supabase
     .from('job_parts')
-    .select('id, status')
+    .select('id, production_status')
     .in('id', jobPartIds);
-  type PartStatus = { id: string; status: string };
+  type PartStatus = { id: string; production_status: string };
   const statusByPart = new Map<string, string>();
   for (const r of (partStatusRows ?? []) as PartStatus[]) {
-    statusByPart.set(r.id, r.status);
+    statusByPart.set(r.id, r.production_status);
   }
 
   return readyRows.map((row) => {
@@ -290,7 +290,7 @@ export async function getOperatorJobs(
       customer_name: customerByJob.get(row.job_id) ?? null,
       part_name: row.part_name,
       part_quantity: row.part_quantity,
-      status: statusByPart.get(row.job_part_id) ?? 'not_started',
+      production_status: statusByPart.get(row.job_part_id) ?? 'not_started',
       operation_id: row.job_operation_id,
       operation_name: row.operation_name,
       operation_status: row.op_status,
@@ -320,7 +320,7 @@ export async function getOperatorJobPartDetail(
   const { data: part, error: partError } = await supabase
     .from('job_parts')
     .select(`
-      id, job_id, status, quantity,
+      id, job_id, production_status, quantity,
       parts(part_name),
       jobs!inner(id, job_number, customers(name))
     `)
@@ -333,7 +333,7 @@ export async function getOperatorJobPartDetail(
   type PartRow = {
     id: string;
     job_id: string;
-    status: string;
+    production_status: string;
     quantity: number;
     parts: { part_name: string } | { part_name: string }[] | null;
     jobs: { id: string; job_number: string; customers: { name: string } | { name: string }[] | null } | null;
@@ -455,7 +455,7 @@ export async function getOperatorJobPartDetail(
     customer_name: customerJoin?.name ?? null,
     part_name: partsJoin?.part_name ?? null,
     part_quantity: p.quantity,
-    status: p.status,
+    production_status: p.production_status,
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
@@ -492,7 +492,7 @@ export async function getOperatorJobParts(
   const { data: parts } = await supabase
     .from('job_parts')
     .select(`
-      id, job_id, sequence, quantity, status,
+      id, job_id, sequence, quantity, production_status,
       parts(part_name, description)
     `)
     .eq('job_id', jobId)
@@ -503,7 +503,7 @@ export async function getOperatorJobParts(
     job_id: string;
     sequence: number;
     quantity: number;
-    status: string;
+    production_status: string;
     parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
   };
   const partRows = (parts ?? []) as PartRow[];
@@ -562,7 +562,7 @@ export async function getOperatorJobParts(
       part_name: partsJoin?.part_name ?? 'Part',
       part_description: partsJoin?.description ?? null,
       quantity: part.quantity,
-      status: part.status,
+      production_status: part.production_status,
       next_operation_name: nextOp?.operation_name ?? null,
       next_operation_id: nextOp?.id ?? null,
       operations_total: total,
@@ -794,7 +794,7 @@ export async function getJobPartMaterialsForCompletion(
  * Mark the current operation on a job_part complete. Closes the operator
  * session, computes actual run minutes, marks the operation completed, and
  * — if it was the last op on the part — flips the job_part to 'completed'
- * (the database trigger then aggregates that into jobs.status).
+ * (the database trigger then aggregates that into jobs.production_status).
  */
 export async function completeJob(
   jobPartId: string,

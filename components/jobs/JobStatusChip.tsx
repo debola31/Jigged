@@ -1,15 +1,23 @@
 import Chip from '@mui/material/Chip';
-import type { JobStatus } from '@/types/job';
-import { JOB_STATUS_CONFIG } from '@/types/job';
+import type { ProductionStatus, FulfillmentStatus } from '@/types/job';
+import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
-interface JobStatusChipProps {
-  status: JobStatus;
+/**
+ * Production-status badge (Not Started / In Progress / Completed / Cancelled).
+ * Sourced from job.production_status / job_parts.production_status — set by
+ * operator activity and the aggregation trigger.
+ */
+export function ProductionStatusChip({
+  status,
+  size = 'small',
+}: {
+  status: ProductionStatus;
   size?: 'small' | 'medium';
-}
-
-export default function JobStatusChip({ status, size = 'small' }: JobStatusChipProps) {
-  const config = JOB_STATUS_CONFIG[status] || { label: status, color: 'default' as const };
-
+}) {
+  const config = PRODUCTION_STATUS_CONFIG[status] || {
+    label: status,
+    color: 'default' as const,
+  };
   return (
     <Chip
       label={config.label}
@@ -20,3 +28,36 @@ export default function JobStatusChip({ status, size = 'small' }: JobStatusChipP
     />
   );
 }
+
+/**
+ * Fulfillment-status badge (Not Shipped / Partially Shipped / Shipped).
+ * Sourced from job.fulfillment_status / job_parts.fulfillment_status —
+ * derived from shipments in PR 4.
+ */
+export function FulfillmentStatusChip({
+  status,
+  size = 'small',
+}: {
+  status: FulfillmentStatus;
+  size?: 'small' | 'medium';
+}) {
+  const config = FULFILLMENT_STATUS_CONFIG[status] || {
+    label: status,
+    color: 'default' as const,
+  };
+  return (
+    <Chip
+      label={config.label}
+      color={config.color}
+      size={size}
+      variant="outlined"
+      sx={{ fontWeight: 500 }}
+    />
+  );
+}
+
+// Backwards-compatible default export: kept for callers that imported the
+// pre-split JobStatusChip. PR 5 (JobStatusBlock) replaces those call sites
+// with explicit Production/Fulfillment chips, after which this default
+// export can be removed.
+export default ProductionStatusChip;

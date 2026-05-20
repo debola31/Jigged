@@ -41,17 +41,46 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import { JobStatusChip } from '@/components/jobs';
+import { ProductionStatusChip, FulfillmentStatusChip } from '@/components/jobs/JobStatusChip';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import Chip from '@mui/material/Chip';
-import type { JobWithRelations, JobFilters, JobStatus } from '@/types/job';
-import { JOB_STATUS_CONFIG } from '@/types/job';
+import type {
+  JobWithRelations,
+  JobFilters,
+  ProductionStatus,
+  FulfillmentStatus,
+} from '@/types/job';
+import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
-const VALID_JOB_STATUSES: JobStatus[] = ['not_started', 'in_progress', 'completed', 'shipped', 'cancelled'];
+const VALID_PRODUCTION_STATUSES: ProductionStatus[] = [
+  'not_started',
+  'in_progress',
+  'completed',
+  'cancelled',
+];
+const VALID_FULFILLMENT_STATUSES: FulfillmentStatus[] = [
+  'unshipped',
+  'partially_shipped',
+  'fully_shipped',
+];
 
-function parseStatusParam(v: string | null): JobFilters['status'] {
-  if (v && (VALID_JOB_STATUSES as string[]).includes(v)) return v as JobStatus;
-  return 'all';
+// Parse a comma-separated list of statuses from the URL (?production=foo,bar).
+function parseProductionParam(v: string | null): ProductionStatus[] | 'all' | undefined {
+  if (!v) return undefined;
+  if (v === 'all') return 'all';
+  const parts = v.split(',').filter((p) =>
+    (VALID_PRODUCTION_STATUSES as string[]).includes(p),
+  );
+  return parts.length > 0 ? (parts as ProductionStatus[]) : undefined;
+}
+
+function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | undefined {
+  if (!v) return undefined;
+  if (v === 'all') return 'all';
+  const parts = v.split(',').filter((p) =>
+    (VALID_FULFILLMENT_STATUSES as string[]).includes(p),
+  );
+  return parts.length > 0 ? (parts as FulfillmentStatus[]) : undefined;
 }
 
 export default function JobsPage() {
@@ -64,8 +93,16 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>(() =>
-    parseStatusParam(searchParams.get('status'))
+  const [productionFilter, setProductionFilter] = useState<
+    JobFilters['productionStatus']
+  >(() => parseProductionParam(searchParams.get('production')));
+  const [fulfillmentFilter, setFulfillmentFilter] = useState<
+    JobFilters['fulfillmentStatus']
+  >(() => parseFulfillmentParam(searchParams.get('fulfillment')));
+  // FR-19: hide done jobs by default. Surfaced by a "Show done jobs" toggle
+  // that flips excludeDone to false in the access call.
+  const [showDoneJobs, setShowDoneJobs] = useState<boolean>(
+    () => searchParams.get('done') === 'true',
   );
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
@@ -120,18 +157,21 @@ export default function JobsPage() {
     setLoading(true);
     try {
       const filters: JobFilters = {
-        status: statusFilter,
+        productionStatus: productionFilter,
+        fulfillmentStatus: fulfillmentFilter,
         customerId: customerFilter || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
+        excludeDone: !showDoneJobs,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
 
-      // Fetch current operations for active jobs (not started + in progress)
-      const activeStatuses = new Set(['not_started', 'in_progress']);
+      // Fetch current operations for active jobs (not started + in progress
+      // on the production axis — fulfillment is independent).
+      const activeStatuses = new Set<ProductionStatus>(['not_started', 'in_progress']);
       const activeJobIds = data
-        .filter(j => activeStatuses.has(j.status))
-        .map(j => j.id);
+        .filter((j) => activeStatuses.has(j.production_status))
+        .map((j) => j.id);
 
       let currentOpsMap = new Map<string, { operationName: string; readyCount: number }>();
       if (activeJobIds.length > 0) {
@@ -150,7 +190,16 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, statusFilter, customerFilter, searchDebounced, sortModel, overdueOnly]);
+  }, [
+    companyId,
+    productionFilter,
+    fulfillmentFilter,
+    customerFilter,
+    searchDebounced,
+    sortModel,
+    overdueOnly,
+    showDoneJobs,
+  ]);
 
   useEffect(() => {
     fetchJobs();
@@ -162,7 +211,7 @@ export default function JobsPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, statusFilter, customerFilter, overdueOnly]);
+  }, [searchDebounced, productionFilter, fulfillmentFilter, customerFilter, overdueOnly, showDoneJobs]);
 
   const gridHeight = useMemo(() => {
     if (loading || jobs.length === 0) return 600;
@@ -288,10 +337,10 @@ export default function JobsPage() {
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
 
-        const { status, currentOperation } = params.data;
+        const { production_status, currentOperation } = params.data;
 
-        // Completed or shipped jobs show "Done"
-        if (status === 'completed' || status === 'shipped') {
+        // Completed or cancelled production stops the "current op" lane.
+        if (production_status === 'completed' || production_status === 'cancelled') {
           return (
             <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', lineHeight: '52px' }}>
               Done
@@ -333,14 +382,18 @@ export default function JobsPage() {
       },
     },
     {
-      field: 'status',
+      // No corresponding field on the new schema — production and
+      // fulfillment are independent columns; the renderer surfaces both.
+      colId: 'status',
       headerName: 'Status',
-      width: 180,
+      width: 240,
+      sortable: false,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data?.status) return null;
+        if (!params.data) return null;
         return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, height: '100%' }}>
-            <JobStatusChip status={params.data.status} size="small" />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%', flexWrap: 'wrap' }}>
+            <ProductionStatusChip status={params.data.production_status} size="small" />
+            <FulfillmentStatusChip status={params.data.fulfillment_status} size="small" />
             <JobOverdueBadge job={params.data} size="small" />
           </Box>
         );
@@ -360,10 +413,30 @@ export default function JobsPage() {
     },
   ];
 
-  const statusOptions: SelectOption[] = (Object.keys(JOB_STATUS_CONFIG) as JobStatus[]).map((key) => ({
+  const productionStatusOptions: SelectOption[] = (
+    Object.keys(PRODUCTION_STATUS_CONFIG) as ProductionStatus[]
+  ).map((key) => ({
     id: key,
-    label: JOB_STATUS_CONFIG[key].label,
+    label: PRODUCTION_STATUS_CONFIG[key].label,
   }));
+
+  const fulfillmentStatusOptions: SelectOption[] = (
+    Object.keys(FULFILLMENT_STATUS_CONFIG) as FulfillmentStatus[]
+  ).map((key) => ({
+    id: key,
+    label: FULFILLMENT_STATUS_CONFIG[key].label,
+  }));
+
+  /** First value of the filter, or '' when the filter is unset/'all'. The
+   *  SearchableSelect is single-value; multi-select UI lands in PR 6. */
+  const productionFilterValue =
+    productionFilter && productionFilter !== 'all' && productionFilter.length > 0
+      ? productionFilter[0]
+      : '';
+  const fulfillmentFilterValue =
+    fulfillmentFilter && fulfillmentFilter !== 'all' && fulfillmentFilter.length > 0
+      ? fulfillmentFilter[0]
+      : '';
 
   const customerOptions: SelectOption[] = customers.map((c) => ({
     id: c.id,
@@ -401,12 +474,28 @@ export default function JobsPage() {
 
         <Box sx={{ minWidth: 180 }}>
           <SearchableSelect
-            options={statusOptions}
-            value={statusFilter === 'all' ? '' : (statusFilter ?? '')}
-            onChange={(value) => setStatusFilter((value || 'all') as JobFilters['status'])}
-            label="Status"
+            options={productionStatusOptions}
+            value={productionFilterValue}
+            onChange={(value) =>
+              setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined)
+            }
+            label="Production"
             allowNone
-            noneLabel="All Jobs"
+            noneLabel="Any"
+            size="small"
+          />
+        </Box>
+
+        <Box sx={{ minWidth: 180 }}>
+          <SearchableSelect
+            options={fulfillmentStatusOptions}
+            value={fulfillmentFilterValue}
+            onChange={(value) =>
+              setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined)
+            }
+            label="Fulfillment"
+            allowNone
+            noneLabel="Any"
             size="small"
           />
         </Box>
@@ -432,6 +521,18 @@ export default function JobsPage() {
             />
           }
           label="Overdue only"
+          sx={{ ml: 0 }}
+        />
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={showDoneJobs}
+              onChange={(e) => setShowDoneJobs(e.target.checked)}
+              size="small"
+            />
+          }
+          label="Show done jobs"
           sx={{ ml: 0 }}
         />
 
@@ -473,11 +574,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || customerFilter || statusFilter !== 'all' || overdueOnly
+              {searchDebounced || customerFilter || productionFilterValue || fulfillmentFilterValue || overdueOnly
                 ? 'No jobs match your filters.'
                 : 'Create your first job to get started.'}
             </Typography>
-            {!searchDebounced && !customerFilter && statusFilter === 'all' && !overdueOnly && (
+            {!searchDebounced && !customerFilter && !productionFilterValue && !fulfillmentFilterValue && !overdueOnly && (
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}

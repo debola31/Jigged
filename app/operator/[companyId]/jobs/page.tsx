@@ -237,9 +237,9 @@ export default function OperatorJobsPage() {
                     </Typography>
                   </Box>
                   <Chip
-                    label={row.operation_status || row.status}
+                    label={row.operation_status || row.production_status}
                     size="small"
-                    color={getStatusColor(row.operation_status || row.status)}
+                    color={getStatusColor(row.operation_status || row.production_status)}
                   />
                 </Box>
 

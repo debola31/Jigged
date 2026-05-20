@@ -10,7 +10,7 @@ import Divider from '@mui/material/Divider';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 
-import type { Job, JobOperation, JobStatus } from '@/types/job';
+import type { Job, JobOperation, ProductionStatus } from '@/types/job';
 import {
   startJobOperation,
   completeJobOperation,
@@ -67,8 +67,11 @@ export default function OperationsPanel({
     return null;
   })();
 
-  // Check if job is in a disabled state
-  const isJobDisabled = job.status === 'cancelled' || job.status === 'shipped';
+  // Check if job is in a disabled state. Operators stop being able to act
+  // on operations once the job is cancelled (production-side) or fully
+  // shipped (no point continuing work after the order's out the door).
+  const isJobDisabled =
+    job.production_status === 'cancelled' || job.fulfillment_status === 'fully_shipped';
   const isDisabled = disabled || loading || isJobDisabled;
 
   const showSnackbar = (message: string, severity: SnackbarState['severity'] = 'success') => {
@@ -80,8 +83,8 @@ export default function OperationsPanel({
   };
 
   const handleStatusChanges = (
-    jobPartStatus?: JobStatus,
-    jobStatus?: JobStatus,
+    jobPartStatus?: ProductionStatus,
+    jobStatus?: ProductionStatus,
   ) => {
     if (jobStatus === 'completed') {
       showSnackbar('Every part on this job is complete — job marked as completed!', 'success');
@@ -103,8 +106,8 @@ export default function OperationsPanel({
     try {
       const result = await startJobOperation(operationId, job.id);
       handleStatusChanges(
-        result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
-        result.jobStatusChanged ? result.newJobStatus : undefined,
+        result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
+        result.jobStatusChanged ? result.newJobProductionStatus : undefined,
       );
       onOperationUpdate();
     } catch (err) {
@@ -132,8 +135,8 @@ export default function OperationsPanel({
       const result = await completeJobOperation(selectedOperationId, job.id, data);
       if (result.jobStatusChanged || result.jobPartStatusChanged) {
         handleStatusChanges(
-          result.jobPartStatusChanged ? result.newJobPartStatus : undefined,
-          result.jobStatusChanged ? result.newJobStatus : undefined,
+          result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
+          result.jobStatusChanged ? result.newJobProductionStatus : undefined,
         );
       } else {
         showSnackbar('Operation completed', 'success');
@@ -204,7 +207,8 @@ export default function OperationsPanel({
           {/* Disabled State Warning */}
           {isJobDisabled && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              Operations cannot be modified - job is {job.status}.
+              Operations cannot be modified — job is{' '}
+              {job.production_status === 'cancelled' ? 'cancelled' : 'shipped'}.
             </Alert>
           )}
 

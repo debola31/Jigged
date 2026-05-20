@@ -3,13 +3,14 @@ import type {
   Job,
   JobWithRelations,
   JobFilters,
-  JobStatus,
+  ProductionStatus,
   JobOperation,
   JobMaterial,
   CompleteOperationData,
   OperationUpdateResult,
   CurrentOperationInfo,
 } from '@/types/job';
+import { isJobDone } from '@/types/job';
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -49,7 +50,7 @@ export async function getAllJobs(
         customers!left(id, name),
         quotes!jobs_quote_id_fkey(id, quote_number),
         job_parts(
-          id, sequence, quantity, status,
+          id, sequence, quantity, production_status, fulfillment_status,
           parts(id, part_name, description)
         )
       `)
@@ -57,8 +58,11 @@ export async function getAllJobs(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    if (filters.status && filters.status !== 'all') {
-      query = query.eq('status', filters.status);
+    if (filters.productionStatus && filters.productionStatus !== 'all') {
+      query = query.in('production_status', filters.productionStatus);
+    }
+    if (filters.fulfillmentStatus && filters.fulfillmentStatus !== 'all') {
+      query = query.in('fulfillment_status', filters.fulfillmentStatus);
     }
     if (filters.customerId) {
       query = query.eq('customer_id', filters.customerId);
@@ -68,11 +72,16 @@ export async function getAllJobs(
       query = query.or(`job_number.ilike.%${sanitized}%`);
     }
     if (filters.overdue) {
+      // Overdue: due_date past AND not the FR-18 "done" state. Done is
+      // production IN (completed, cancelled) AND fulfillment = fully_shipped.
+      // Encode by excluding rows that satisfy both halves; we approximate
+      // server-side with the production half (cancelled is rare-as-due) and
+      // let isJobOverdue refine client-side.
       const today = new Date().toISOString().slice(0, 10);
       query = query
         .not('due_date', 'is', null)
         .lt('due_date', today)
-        .not('status', 'in', '(completed,shipped,cancelled)');
+        .not('fulfillment_status', 'eq', 'fully_shipped');
     }
 
     const { data, error } = await query;
@@ -84,6 +93,14 @@ export async function getAllJobs(
     allData = [...allData, ...((data || []) as JobWithRelations[])];
     hasMore = (data?.length || 0) === BATCH_SIZE;
     offset += BATCH_SIZE;
+  }
+
+  // FR-19 done-filter is applied client-side here so callers that don't pass
+  // explicit production/fulfillment filters still get the "hide done jobs"
+  // default. Callers that want to see done jobs pass excludeDone=false.
+  const excludeDone = filters.excludeDone ?? true;
+  if (excludeDone) {
+    allData = allData.filter((j) => !isJobDone(j));
   }
 
   return allData;
@@ -233,8 +250,8 @@ export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promi
 }
 
 /**
- * Mark all of a job's parts as cancelled. The status-aggregation trigger on
- * job_parts then flips jobs.status to 'cancelled'.
+ * Mark all of a job's parts as cancelled. The aggregation trigger on
+ * job_parts then flips jobs.production_status to 'cancelled'.
  */
 export async function cancelJob(jobId: string): Promise<Job> {
   const supabase = getSupabase();
@@ -242,7 +259,7 @@ export async function cancelJob(jobId: string): Promise<Job> {
   const { error: partsError } = await supabase
     .from('job_parts')
     .update({
-      status: 'cancelled',
+      production_status: 'cancelled',
       status_changed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -266,61 +283,11 @@ export async function cancelJob(jobId: string): Promise<Job> {
   return data as Job;
 }
 
-/**
- * Mark all of a job's parts as shipped (only valid when every part is
- * already 'completed'). Trigger flips jobs.status to 'shipped'.
- */
-export async function shipJob(jobId: string): Promise<Job> {
-  const supabase = getSupabase();
-
-  const { data: parts, error: readErr } = await supabase
-    .from('job_parts')
-    .select('id, status')
-    .eq('job_id', jobId);
-
-  if (readErr) {
-    console.error('Error reading job parts to ship:', readErr);
-    throw readErr;
-  }
-  type PartRow = { id: string; status: string };
-  const partRows = (parts ?? []) as PartRow[];
-  if (partRows.length === 0) {
-    throw new Error('Cannot ship: job has no parts.');
-  }
-  const notReady = partRows.filter((p) => p.status !== 'completed' && p.status !== 'shipped');
-  if (notReady.length > 0) {
-    throw new Error('Cannot ship: not every part on the job is completed yet.');
-  }
-
-  const nowIso = new Date().toISOString();
-  const { error: shipErr } = await supabase
-    .from('job_parts')
-    .update({
-      status: 'shipped',
-      shipped_at: nowIso,
-      status_changed_at: nowIso,
-      updated_at: nowIso,
-    })
-    .eq('job_id', jobId)
-    .neq('status', 'shipped');
-
-  if (shipErr) {
-    console.error('Error shipping job parts:', shipErr);
-    throw shipErr;
-  }
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('*')
-    .eq('id', jobId)
-    .single();
-
-  if (error) {
-    console.error('Error fetching shipped job:', error);
-    throw error;
-  }
-  return data as Job;
-}
+// shipJob deleted in Shipments v2 PR 3. "Shipping" is no longer a
+// production-status transition — it's the side effect of creating a
+// shipment record against the job's parts. The Mark Shipped button on
+// the job detail page is replaced by a "Create Shipment" CTA that opens
+// the shipment-create modal (PR 4).
 
 // ============== Operations ==============
 
@@ -346,27 +313,28 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
 }
 
 /**
- * Recompute a job_part's status from its operations and persist the change
- * if it differs from the current value. Returns the resolved status and a
- * flag indicating whether it changed. Skips when the part is already in a
- * terminal user-initiated state (cancelled/shipped).
+ * Recompute a job_part's production_status from its operations and persist
+ * the change if it differs. Returns the resolved status and a flag
+ * indicating whether it changed. Skips when the part is already cancelled
+ * (terminal user-initiated state). Fulfillment is independent and not
+ * touched here — it's driven by shipment_line_items in PR 4.
  */
 async function recomputeJobPartStatus(
   jobPartId: string,
-): Promise<{ changed: boolean; newStatus: JobStatus }> {
+): Promise<{ changed: boolean; newStatus: ProductionStatus }> {
   const supabase = getSupabase();
 
   const { data: part, error: partErr } = await supabase
     .from('job_parts')
-    .select('status, started_at, completed_at')
+    .select('production_status, started_at, completed_at')
     .eq('id', jobPartId)
     .single();
   if (partErr || !part) {
     throw partErr || new Error('job_part not found');
   }
 
-  if (part.status === 'cancelled' || part.status === 'shipped') {
-    return { changed: false, newStatus: part.status as JobStatus };
+  if (part.production_status === 'cancelled') {
+    return { changed: false, newStatus: part.production_status as ProductionStatus };
   }
 
   const { data: ops, error: opsErr } = await supabase
@@ -377,24 +345,24 @@ async function recomputeJobPartStatus(
   type OpStatus = { status: string };
   const opRows = (ops ?? []) as OpStatus[];
   if (opRows.length === 0) {
-    return { changed: false, newStatus: part.status as JobStatus };
+    return { changed: false, newStatus: part.production_status as ProductionStatus };
   }
 
   const allDone = opRows.every((o) => o.status === 'completed');
   const anyTouched = opRows.some((o) => o.status !== 'pending');
 
-  let newStatus: JobStatus;
+  let newStatus: ProductionStatus;
   if (allDone) newStatus = 'completed';
   else if (anyTouched) newStatus = 'in_progress';
   else newStatus = 'not_started';
 
-  if (newStatus === part.status) {
+  if (newStatus === part.production_status) {
     return { changed: false, newStatus };
   }
 
   const nowIso = new Date().toISOString();
   const updates: Record<string, unknown> = {
-    status: newStatus,
+    production_status: newStatus,
     status_changed_at: nowIso,
     updated_at: nowIso,
   };
@@ -410,7 +378,7 @@ async function recomputeJobPartStatus(
     .update(updates)
     .eq('id', jobPartId);
   if (updErr) {
-    console.error('Error updating job_part status:', updErr);
+    console.error('Error updating job_part production_status:', updErr);
     throw updErr;
   }
 
@@ -418,40 +386,40 @@ async function recomputeJobPartStatus(
 }
 
 /**
- * Snapshot the parent job's status before/after a job_part update so the
- * caller can react when the aggregation trigger flips it (e.g., to celebrate
- * the entire job finishing).
+ * Snapshot the parent job's production_status before/after a job_part
+ * update so the caller can react when the aggregation trigger flips it
+ * (e.g., to celebrate the entire job finishing).
  */
 async function detectJobStatusChange(
   jobId: string,
-  before: JobStatus,
-): Promise<{ changed: boolean; newStatus?: JobStatus }> {
+  before: ProductionStatus,
+): Promise<{ changed: boolean; newStatus?: ProductionStatus }> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('jobs')
-    .select('status')
+    .select('production_status')
     .eq('id', jobId)
     .single();
   if (error || !data) return { changed: false };
-  const newStatus = data.status as JobStatus;
+  const newStatus = data.production_status as ProductionStatus;
   if (newStatus === before) return { changed: false };
   return { changed: true, newStatus };
 }
 
 async function getJobIdForOperation(
   operationId: string,
-): Promise<{ jobId: string; jobPartId: string; jobStatus: JobStatus }> {
+): Promise<{ jobId: string; jobPartId: string; jobStatus: ProductionStatus }> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('job_operations')
-    .select('job_id, job_part_id, jobs(status)')
+    .select('job_id, job_part_id, jobs(production_status)')
     .eq('id', operationId)
     .single();
   if (error || !data) throw error || new Error('operation not found');
   type OpRow = {
     job_id: string;
     job_part_id: string;
-    jobs?: { status: string } | { status: string }[] | null;
+    jobs?: { production_status: string } | { production_status: string }[] | null;
   };
   const row = data as OpRow;
   const jobsField = row.jobs;
@@ -460,7 +428,7 @@ async function getJobIdForOperation(
   return {
     jobId: row.job_id,
     jobPartId: row.job_part_id,
-    jobStatus: jobsRow.status as JobStatus,
+    jobStatus: jobsRow.production_status as ProductionStatus,
   };
 }
 
@@ -516,9 +484,9 @@ export async function startJobOperation(
   return {
     operation: operation as JobOperation,
     jobPartStatusChanged: partResult.changed,
-    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
+    newJobPartProductionStatus: partResult.changed ? partResult.newStatus : undefined,
     jobStatusChanged: jobResult.changed,
-    newJobStatus: jobResult.newStatus,
+    newJobProductionStatus: jobResult.newStatus,
   };
 }
 
@@ -568,9 +536,9 @@ export async function completeJobOperation(
   return {
     operation: operation as JobOperation,
     jobPartStatusChanged: partResult.changed,
-    newJobPartStatus: partResult.changed ? partResult.newStatus : undefined,
+    newJobPartProductionStatus: partResult.changed ? partResult.newStatus : undefined,
     jobStatusChanged: jobResult.changed,
-    newJobStatus: jobResult.newStatus,
+    newJobProductionStatus: jobResult.newStatus,
   };
 }
 
@@ -637,7 +605,12 @@ export async function getCustomersForSelect(
 // ============== Overdue ==============
 
 /**
- * Count jobs that are past their due date and not yet completed/shipped/cancelled.
+ * Count jobs that are past their due date and not yet at the FR-18 done
+ * state. Done = production_status IN (completed, cancelled) AND
+ * fulfillment_status = fully_shipped. Server-side we approximate by
+ * excluding the fulfillment half (fully_shipped) — cancelled jobs whose
+ * fulfillment isn't fully_shipped are still "live" from the customer's
+ * perspective and remain overdue if past due_date.
  */
 export async function getOverdueJobsCount(companyId: string): Promise<number> {
   const supabase = getSupabase();
@@ -649,7 +622,8 @@ export async function getOverdueJobsCount(companyId: string): Promise<number> {
     .eq('company_id', companyId)
     .not('due_date', 'is', null)
     .lt('due_date', today)
-    .not('status', 'in', '(completed,shipped,cancelled)');
+    .not('fulfillment_status', 'eq', 'fully_shipped')
+    .not('production_status', 'eq', 'cancelled');
 
   if (error) {
     console.error('Error fetching overdue jobs count:', error);
@@ -660,7 +634,9 @@ export async function getOverdueJobsCount(companyId: string): Promise<number> {
 }
 
 /**
- * Fetch overdue jobs for dashboard/list use.
+ * Fetch overdue jobs for dashboard/list use. Same server-side
+ * approximation as getOverdueJobsCount; callers that need the exact
+ * FR-18 predicate refine client-side via isJobOverdue.
  */
 export async function getOverdueJobs(
   companyId: string,
@@ -679,7 +655,8 @@ export async function getOverdueJobs(
     .eq('company_id', companyId)
     .not('due_date', 'is', null)
     .lt('due_date', today)
-    .not('status', 'in', '(completed,shipped,cancelled)')
+    .not('fulfillment_status', 'eq', 'fully_shipped')
+    .not('production_status', 'eq', 'cancelled')
     .order('due_date', { ascending: true })
     .limit(limit);
 

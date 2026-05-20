@@ -321,7 +321,7 @@ export default function JobsPage() {
         if (!params.data) return '';
         const prod = PRODUCTION_STATUS_CONFIG[params.data.production_status];
         const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
-        return `${prod.label} / ${ful.label}`;
+        return `${prod.label} | ${ful.label}`;
       },
     },
     {
@@ -465,6 +465,13 @@ export default function JobsPage() {
               checked={overdueOnly}
               onChange={(e) => setOverdueOnly(e.target.checked)}
               size="small"
+              sx={{
+                // Theme primary is Steel Blue (#4682B4), which blends into
+                // the navy filter strip when checked. Force a high-contrast
+                // outline + filled check that reads on this background.
+                color: 'rgba(255,255,255,0.6)',
+                '&.Mui-checked': { color: 'primary.light' },
+              }}
             />
           }
           label="Overdue only"

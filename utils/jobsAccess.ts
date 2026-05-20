@@ -23,6 +23,23 @@ function sanitizeSearchString(search: string): string {
     .substring(0, 100);
 }
 
+/**
+ * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
+ * client-side isJobOverdue predicate uses local midnight, so the
+ * server-side overdue filter has to agree on what date "today" is —
+ * otherwise a job due 2026-05-19 can show the overdue icon locally
+ * (because the user's local clock has rolled past midnight) while the
+ * server query, anchored on UTC, still considers "today" to be 2026-05-19
+ * and excludes it from the `due_date < today` filter.
+ */
+function todayLocalISODate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ============== Read Queries ==============
 
 /**
@@ -75,12 +92,12 @@ export async function getAllJobs(
       // Overdue: due_date past AND not the FR-18 "done" state. Done is
       // production IN (completed, cancelled) AND fulfillment = fully_shipped.
       // Encode by excluding rows that satisfy both halves; we approximate
-      // server-side with the production half (cancelled is rare-as-due) and
-      // let isJobOverdue refine client-side.
-      const today = new Date().toISOString().slice(0, 10);
+      // server-side with the fulfillment half and let isJobOverdue refine
+      // client-side. Uses local-date today (see todayLocalISODate) so the
+      // server agrees with the client's isJobOverdue check.
       query = query
         .not('due_date', 'is', null)
-        .lt('due_date', today)
+        .lt('due_date', todayLocalISODate())
         .not('fulfillment_status', 'eq', 'fully_shipped');
     }
 
@@ -614,14 +631,13 @@ export async function getCustomersForSelect(
  */
 export async function getOverdueJobsCount(companyId: string): Promise<number> {
   const supabase = getSupabase();
-  const today = new Date().toISOString().slice(0, 10);
 
   const { count, error } = await supabase
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .not('due_date', 'is', null)
-    .lt('due_date', today)
+    .lt('due_date', todayLocalISODate())
     .not('fulfillment_status', 'eq', 'fully_shipped')
     .not('production_status', 'eq', 'cancelled');
 
@@ -643,7 +659,6 @@ export async function getOverdueJobs(
   limit: number = 50,
 ): Promise<JobWithRelations[]> {
   const supabase = getSupabase();
-  const today = new Date().toISOString().slice(0, 10);
 
   const { data, error } = await supabase
     .from('jobs')
@@ -654,7 +669,7 @@ export async function getOverdueJobs(
     `)
     .eq('company_id', companyId)
     .not('due_date', 'is', null)
-    .lt('due_date', today)
+    .lt('due_date', todayLocalISODate())
     .not('fulfillment_status', 'eq', 'fully_shipped')
     .not('production_status', 'eq', 'cancelled')
     .order('due_date', { ascending: true })

@@ -39,11 +39,10 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
+import { getAllJobs, bulkDeleteJobs, getCustomersForSelect } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { isJobOverdue } from '@/types/job';
 import Tooltip from '@mui/material/Tooltip';
-import Chip from '@mui/material/Chip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import type {
   JobWithRelations,
@@ -185,26 +184,7 @@ export default function JobsPage() {
         excludeDone: !fulfillmentIncludesShipped,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
-
-      // Fetch current operations for active jobs (not started + in progress
-      // on the production axis — fulfillment is independent).
-      const activeStatuses = new Set<ProductionStatus>(['not_started', 'in_progress']);
-      const activeJobIds = data
-        .filter((j) => activeStatuses.has(j.production_status))
-        .map((j) => j.id);
-
-      let currentOpsMap = new Map<string, { operationName: string; readyCount: number }>();
-      if (activeJobIds.length > 0) {
-        currentOpsMap = await getReadyOperationsForJobs(activeJobIds);
-      }
-
-      // Merge current operation info into jobs
-      const jobsWithCurrentOp = data.map(job => ({
-        ...job,
-        currentOperation: currentOpsMap.get(job.id) || null,
-      }));
-
-      setJobs(jobsWithCurrentOp);
+      setJobs(data);
     } catch (error) {
       console.error('Error fetching jobs:', error);
     } finally {
@@ -349,65 +329,13 @@ export default function JobsPage() {
       },
     },
     {
-      colId: 'currentOp',
-      headerName: 'Current Op',
-      width: 160,
-      sortable: false,
-      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data) return null;
-
-        const { production_status, currentOperation } = params.data;
-
-        // Completed or cancelled production stops the "current op" lane.
-        if (production_status === 'completed' || production_status === 'cancelled') {
-          return (
-            <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', lineHeight: '52px' }}>
-              Done
-            </Typography>
-          );
-        }
-
-        // Cancelled or no routing → "--"
-        if (status === 'cancelled' || !currentOperation) {
-          return (
-            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: '52px' }}>
-              --
-            </Typography>
-          );
-        }
-
-        // Single ready op
-        if (currentOperation.readyCount <= 1) {
-          return (
-            <Typography variant="body2" sx={{ lineHeight: '52px' }}>
-              {currentOperation.operationName}
-            </Typography>
-          );
-        }
-
-        // Parallel ready ops: show name + "+N" chip
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
-            <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentOperation.operationName}
-            </Typography>
-            <Chip
-              label={`+${currentOperation.readyCount - 1}`}
-              size="small"
-              sx={{ height: 20, fontSize: '0.7rem' }}
-            />
-          </Box>
-        );
-      },
-    },
-    {
-      // Production + fulfillment are independent columns on the schema;
-      // surface both as a two-line text block (production bold + colored,
-      // fulfillment muted secondary) instead of chips. Chips read too
-      // loud for a column that always carries two parallel facts.
+      // Production + fulfillment surfaced inline as "Production / Fulfillment".
+      // Production is bold + state-colored (info/success/error/neutral) and
+      // fulfillment is muted secondary, separated by a slash. Reads as a
+      // single phrase scanning left-to-right rather than two stacked chips.
       colId: 'status',
       headerName: 'Status',
-      width: 200,
+      width: 240,
       sortable: false,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
@@ -415,16 +343,11 @@ export default function JobsPage() {
         const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
         return (
           <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              height: '100%',
-              lineHeight: 1.25,
-            }}
+            sx={{ display: 'flex', alignItems: 'center', height: '100%', gap: 0.5 }}
           >
             <Typography
               variant="body2"
+              component="span"
               sx={{
                 fontWeight: 600,
                 color: productionColor(params.data.production_status),
@@ -432,8 +355,8 @@ export default function JobsPage() {
             >
               {prod.label}
             </Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {ful.label}
+            <Typography variant="body2" component="span" sx={{ color: 'text.secondary' }}>
+              / {ful.label}
             </Typography>
           </Box>
         );
@@ -444,46 +367,37 @@ export default function JobsPage() {
       headerName: 'Due',
       width: 140,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data || !params.value) {
+        const value = params.value;
+        if (!params.data || !value) {
           return (
-            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: '52px' }}>
-              —
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                —
+              </Typography>
+            </Box>
           );
         }
         const overdue = isJobOverdue(params.data);
-        const dueDateStr = formatDate(params.value);
+        const dueDateStr = formatDate(value);
         if (!overdue) {
           return (
-            <Typography variant="body2" sx={{ lineHeight: '52px' }}>
-              {dueDateStr}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+              <Typography variant="body2">{dueDateStr}</Typography>
+            </Box>
           );
         }
         const daysOverdue = Math.max(
           0,
-          Math.floor(
-            (Date.now() - new Date(params.value).getTime()) / (1000 * 60 * 60 * 24),
-          ),
+          Math.floor((Date.now() - new Date(value).getTime()) / (1000 * 60 * 60 * 24)),
         );
         return (
           <Tooltip
             title={`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`}
             arrow
           >
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.5,
-                height: '100%',
-                color: 'error.main',
-              }}
-            >
-              <ScheduleIcon sx={{ fontSize: 16 }} />
-              <Typography variant="body2" sx={{ color: 'inherit', fontWeight: 600 }}>
-                {dueDateStr}
-              </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+              <ScheduleIcon sx={{ fontSize: 16, color: 'error.main' }} />
+              <Typography variant="body2">{dueDateStr}</Typography>
             </Box>
           </Tooltip>
         );

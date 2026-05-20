@@ -20,6 +20,10 @@ import Link from '@mui/material/Link';
 import Tooltip from '@mui/material/Tooltip';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
@@ -306,31 +310,43 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const customerContacts: CustomerListContact[] = selectedCustomer?.customer_contacts ?? [];
 
   /**
-   * Compact line for the dropdown options — first line of the address +
-   * city/state. Mirrors what shows on the customer detail page so the
-   * salesperson recognizes the row at a glance.
+   * Multi-line address display used in both the Select's renderValue
+   * (closed state) and each MenuItem (open state). Surfaces ATTN: when
+   * the address carries an attention_to, then address_line1, optional
+   * address_line2, then city/state/zip on one line.
    */
-  const formatAddressOption = (a: CustomerAddress): string => {
-    const cityState = [a.city, a.state].filter(Boolean).join(', ');
-    const first = [a.address_line1, cityState].filter(Boolean).join(' · ');
-    return first || '(empty address)';
+  const AddressLines = ({ address }: { address: CustomerAddress }) => {
+    const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
+    const cityStateZipFull = [cityStateZip, address.postal_code]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    return (
+      <Box>
+        {address.attention_to && (
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            ATTN: {address.attention_to}
+          </Typography>
+        )}
+        {address.address_line1 && (
+          <Typography variant="body2">{address.address_line1}</Typography>
+        )}
+        {address.address_line2 && (
+          <Typography variant="body2">{address.address_line2}</Typography>
+        )}
+        {cityStateZipFull && (
+          <Typography variant="body2">{cityStateZipFull}</Typography>
+        )}
+      </Box>
+    );
   };
 
-  const formatContactOption = (c: CustomerListContact): string => {
-    const tag =
-      c.role === 'accounts_payable'
-        ? 'AP'
-        : c.role === 'shipping_receiving'
-          ? 'Shipping'
-          : c.role === 'buyer'
-            ? 'Buyer'
-            : c.role === 'engineering'
-              ? 'Engineering'
-              : c.role === 'quality'
-                ? 'Quality'
-                : 'Other';
-    return `${c.name} · ${tag}`;
+  const renderAddressValue = (value: unknown) => {
+    const a = customerAddresses.find((x) => x.id === value);
+    return a ? <AddressLines address={a} /> : '';
   };
+
+  const customerDetailHref = `/dashboard/${companyId}/customers/${formData.customer_id}`;
 
   const addPartBlock = () => {
     setPartBlocks((prev) => [...prev, emptyBlock()]);
@@ -581,9 +597,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
 
-          {/* Customer contact + Shipping address (both render on the
-              quote PDF) and Billing address (captured for invoicing; not
-              rendered on the quote). Hidden until a customer is picked. */}
+          {/* Customer contact + Shipping address + Billing address.
+              Hidden until a customer is picked. */}
           {formData.customer_id && (
             <Box sx={{ mt: 3 }}>
               <Grid container spacing={2}>
@@ -591,47 +606,53 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   <Autocomplete
                     size="small"
                     options={customerContacts}
-                    getOptionLabel={formatContactOption}
+                    getOptionLabel={(c) => c.name}
                     value={
                       customerContacts.find((c) => c.id === formData.contact_id) ?? null
                     }
                     onChange={(_, v) => handleFieldChange('contact_id', v?.id ?? '')}
                     isOptionEqualToValue={(o, v) => o.id === v.id}
                     renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Customer contact"
-                        helperText={
-                          customerContacts.length === 0
-                            ? 'This customer has no saved contacts — add one on the customer page.'
-                            : 'Renders on the quote as the Customer Contact section.'
-                        }
-                      />
+                      <TextField {...params} label="Customer contact" />
                     )}
                   />
+                  <Link
+                    component={NextLink}
+                    href={customerDetailHref}
+                    variant="caption"
+                    sx={{ display: 'inline-block', mt: 0.5 }}
+                  >
+                    + Add contact
+                  </Link>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
-                  <Autocomplete
-                    size="small"
-                    options={customerAddresses}
-                    getOptionLabel={formatAddressOption}
-                    value={
-                      customerAddresses.find((a) => a.id === formData.shipping_address_id) ?? null
-                    }
-                    onChange={(_, v) => handleShippingAddressChange(v?.id ?? '')}
-                    isOptionEqualToValue={(o, v) => o.id === v.id}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Shipping address"
-                        helperText={
-                          customerAddresses.length === 0
-                            ? 'This customer has no saved addresses — add one on the customer page.'
-                            : "Renders on the quote with Attn: from the address's attention_to."
-                        }
-                      />
-                    )}
-                  />
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="shipping-address-label">Shipping address</InputLabel>
+                    <Select
+                      labelId="shipping-address-label"
+                      label="Shipping address"
+                      value={formData.shipping_address_id}
+                      onChange={(e) => handleShippingAddressChange(e.target.value)}
+                      renderValue={renderAddressValue}
+                      sx={{
+                        '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
+                      }}
+                    >
+                      {customerAddresses.map((a) => (
+                        <MenuItem key={a.id} value={a.id} sx={{ whiteSpace: 'normal' }}>
+                          <AddressLines address={a} />
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Link
+                    component={NextLink}
+                    href={customerDetailHref}
+                    variant="caption"
+                    sx={{ display: 'inline-block', mt: 0.5 }}
+                  >
+                    + Add address
+                  </Link>
                 </Grid>
               </Grid>
 
@@ -652,23 +673,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
               {!billingSameAsShipping && (
                 <Box sx={{ mt: 1, pl: 4, opacity: 0.85 }}>
-                  <Autocomplete
-                    size="small"
-                    options={customerAddresses}
-                    getOptionLabel={formatAddressOption}
-                    value={
-                      customerAddresses.find((a) => a.id === formData.billing_address_id) ?? null
-                    }
-                    onChange={(_, v) => handleFieldChange('billing_address_id', v?.id ?? '')}
-                    isOptionEqualToValue={(o, v) => o.id === v.id}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Billing address"
-                        helperText="Captured for invoicing. Not rendered on the quote PDF."
-                      />
-                    )}
-                  />
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="billing-address-label">Billing address</InputLabel>
+                    <Select
+                      labelId="billing-address-label"
+                      label="Billing address"
+                      value={formData.billing_address_id}
+                      onChange={(e) => handleFieldChange('billing_address_id', e.target.value)}
+                      renderValue={renderAddressValue}
+                      sx={{
+                        '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
+                      }}
+                    >
+                      {customerAddresses.map((a) => (
+                        <MenuItem key={a.id} value={a.id} sx={{ whiteSpace: 'normal' }}>
+                          <AddressLines address={a} />
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Box>
               )}
             </Box>

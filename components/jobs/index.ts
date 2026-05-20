@@ -1,4 +1,7 @@
 export { default as JobStatusChip } from "./JobStatusChip";
+export { ProductionStatusChip, FulfillmentStatusChip } from "./JobStatusChip";
+export { default as JobStatusBlock } from "./JobStatusBlock";
+export { default as ShipmentHistoryCard } from "./ShipmentHistoryCard";
 export { default as OperationStatusChip } from "./OperationStatusChip";
 export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";

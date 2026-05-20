@@ -24,6 +24,10 @@ import EmailIcon from '@mui/icons-material/Email';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ToggleOnIcon from '@mui/icons-material/ToggleOn';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Switch from '@mui/material/Switch';
+import Stack from '@mui/material/Stack';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -33,6 +37,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase } from '@/lib/supabase';
+import { KNOWN_FEATURES } from '@/lib/featureFlags';
 
 interface CompanyListItem {
   id: string;
@@ -42,6 +47,7 @@ interface CompanyListItem {
   owner_name: string | null;
   owner_email: string | null;
   member_count: number;
+  features: Record<string, boolean>;
 }
 
 const getAdminApiUrl = () => {
@@ -94,6 +100,13 @@ export default function AdminCompaniesPage() {
   const [deleteCompany, setDeleteCompany] = useState<CompanyListItem | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Feature-flags state
+  const [featuresOpen, setFeaturesOpen] = useState(false);
+  const [featuresCompany, setFeaturesCompany] = useState<CompanyListItem | null>(null);
+  const [featuresDraft, setFeaturesDraft] = useState<Record<string, boolean>>({});
+  const [featuresSaving, setFeaturesSaving] = useState(false);
+  const [featuresError, setFeaturesError] = useState('');
 
   const fetchCompanies = useCallback(async () => {
     try {
@@ -196,6 +209,73 @@ export default function AdminCompaniesPage() {
     }
   };
 
+  const handleFeaturesOpen = useCallback((e: React.MouseEvent, company: CompanyListItem) => {
+    e.stopPropagation();
+    setFeaturesCompany(company);
+    // Seed the draft from the registry so unknown saved flags don't
+    // accidentally survive a save, and unset flags render as off.
+    const seeded: Record<string, boolean> = {};
+    for (const f of KNOWN_FEATURES) {
+      seeded[f.key] = Boolean(company.features?.[f.key]);
+    }
+    setFeaturesDraft(seeded);
+    setFeaturesError('');
+    setFeaturesOpen(true);
+  }, []);
+
+  const handleFeaturesClose = () => {
+    if (featuresSaving) return;
+    setFeaturesOpen(false);
+    setFeaturesCompany(null);
+    setFeaturesDraft({});
+    setFeaturesError('');
+  };
+
+  const handleFeaturesSave = async () => {
+    if (!featuresCompany) return;
+    setFeaturesSaving(true);
+    setFeaturesError('');
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `${getAdminApiUrl()}/${featuresCompany.id}/features`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ features: featuresDraft }),
+        },
+      );
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Failed to update features' }));
+        throw new Error(error.detail || 'Failed to update features');
+      }
+      const data = await response.json();
+      setSnackbar({
+        open: true,
+        message: `Updated features for "${featuresCompany.name}"`,
+        severity: 'success',
+      });
+      setFeaturesOpen(false);
+      setFeaturesCompany(null);
+      setFeaturesDraft({});
+      // Optimistic merge into the row + full refresh so other admins'
+      // changes show up too.
+      setCompanies((prev) =>
+        prev.map((c) =>
+          c.id === featuresCompany.id
+            ? { ...c, features: data.features ?? featuresDraft }
+            : c,
+        ),
+      );
+      fetchCompanies();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update features';
+      setFeaturesError(message);
+    } finally {
+      setFeaturesSaving(false);
+    }
+  };
+
   const handleDeleteOpen = useCallback((e: React.MouseEvent, company: CompanyListItem) => {
     e.stopPropagation();
     setDeleteCompany(company);
@@ -289,9 +369,22 @@ export default function AdminCompaniesPage() {
         },
       },
       {
+        colId: 'features',
+        headerName: 'Features',
+        width: 180,
+        sortable: false,
+        resizable: true,
+        valueGetter: (params) => {
+          if (!params.data) return '';
+          const flags = params.data.features ?? {};
+          const enabled = KNOWN_FEATURES.filter((f) => flags[f.key]).map((f) => f.label);
+          return enabled.length === 0 ? '—' : enabled.join(', ');
+        },
+      },
+      {
         colId: 'actions',
         headerName: '',
-        width: 130,
+        width: 170,
         sortable: false,
         resizable: false,
         pinned: 'right' as const,
@@ -303,6 +396,11 @@ export default function AdminCompaniesPage() {
               <Tooltip title="Visit Dashboard">
                 <IconButton size="small" onClick={(e) => handleVisitDashboard(e, company)}>
                   <OpenInNewIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Feature flags">
+                <IconButton size="small" onClick={(e) => handleFeaturesOpen(e, company)}>
+                  <ToggleOnIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
               <Tooltip title="Edit">
@@ -324,7 +422,7 @@ export default function AdminCompaniesPage() {
         },
       },
     ],
-    [handleVisitDashboard, handleEditOpen, handleDeleteOpen]
+    [handleVisitDashboard, handleEditOpen, handleDeleteOpen, handleFeaturesOpen]
   );
 
   // --- Create form handlers ---
@@ -689,6 +787,92 @@ export default function AdminCompaniesPage() {
             startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
             {deleting ? 'Deleting...' : 'Delete Company'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature Flags Dialog */}
+      <Dialog
+        open={featuresOpen}
+        onClose={handleFeaturesClose}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          {featuresCompany ? `Feature Flags — ${featuresCompany.name}` : 'Feature Flags'}
+          <IconButton
+            onClick={handleFeaturesClose}
+            size="small"
+            disabled={featuresSaving}
+            sx={{ color: 'text.secondary' }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          {featuresError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {featuresError}
+            </Alert>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Toggles flip <code>companies.settings.features</code> for this
+            tenant. UI gates (Create Shipment, Reorder, etc.) read these on
+            mount — refresh the company dashboard after saving to pick up
+            the new state.
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Stack spacing={2}>
+            {KNOWN_FEATURES.map((f) => (
+              <Box key={f.key}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={Boolean(featuresDraft[f.key])}
+                      onChange={(e) =>
+                        setFeaturesDraft((prev) => ({
+                          ...prev,
+                          [f.key]: e.target.checked,
+                        }))
+                      }
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                        {f.label}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {f.description}
+                      </Typography>
+                    </Box>
+                  }
+                  sx={{ alignItems: 'flex-start' }}
+                />
+              </Box>
+            ))}
+            {KNOWN_FEATURES.length === 0 && (
+              <Alert severity="info">No feature flags registered yet.</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={handleFeaturesClose} disabled={featuresSaving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleFeaturesSave}
+            disabled={featuresSaving}
+            startIcon={featuresSaving ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {featuresSaving ? 'Saving…' : 'Save'}
           </Button>
         </DialogActions>
       </Dialog>

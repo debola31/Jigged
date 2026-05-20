@@ -21,6 +21,8 @@ from models.admin_models import (
     CompanyCreateRequest,
     CompanyCreateResponse,
     CompanyDeleteResponse,
+    CompanyFeaturesUpdateRequest,
+    CompanyFeaturesUpdateResponse,
     CompanyListItem,
     CompanyUpdateRequest,
     CompanyUpdateResponse,
@@ -101,7 +103,7 @@ async def list_companies(request: Request):
     try:
         # Single joined query: companies + user_company_access
         result = service_client.table("companies") \
-            .select("id, name, slug, created_at, user_company_access(user_id, name, email, role)") \
+            .select("id, name, slug, created_at, settings, user_company_access(user_id, name, email, role)") \
             .eq("is_demo", False) \
             .order("created_at", desc=True) \
             .execute()
@@ -135,6 +137,10 @@ async def list_companies(request: Request):
                     owner_email = email_map.get(owner_user_id) or record.get("email")
                     break
 
+            settings = company.get("settings") or {}
+            features_raw = settings.get("features") if isinstance(settings, dict) else {}
+            features = _normalize_features(features_raw)
+
             companies.append(CompanyListItem(
                 id=company["id"],
                 name=company["name"],
@@ -143,6 +149,7 @@ async def list_companies(request: Request):
                 owner_name=owner_name,
                 owner_email=owner_email,
                 member_count=member_count,
+                features=features,
             ))
 
         return companies
@@ -374,6 +381,99 @@ async def delete_company(request: Request, company_id: str):
         raise
     except Exception as e:
         logger.error(f"Error deleting company {company_id}: {e}")
+        sentry_sdk.capture_exception(e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _normalize_features(raw) -> dict[str, bool]:
+    """Coerce settings.features to a flat {key: bool} dict.
+
+    Tolerates legacy strings like "true"/"false" the way isShipmentsEnabled
+    in lib/featureFlags.ts does, so the admin UI doesn't double-write
+    those legacy entries silently as `false`.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, bool] = {}
+    for key, value in raw.items():
+        if value is True or value == "true":
+            out[key] = True
+        elif value is False or value == "false":
+            out[key] = False
+        else:
+            # Drop non-bool entries from the response (they won't survive
+            # a save anyway — the request model only accepts dict[str, bool]).
+            continue
+    return out
+
+
+# ============================================================================
+# UPDATE COMPANY FEATURE FLAGS
+# ============================================================================
+
+@router.patch(
+    "/companies/{company_id}/features",
+    response_model=CompanyFeaturesUpdateResponse,
+)
+async def update_company_features(
+    request: Request,
+    company_id: str,
+    body: CompanyFeaturesUpdateRequest,
+):
+    """
+    Replace the feature flags on a company's settings.features block.
+    Other settings sub-keys are preserved.
+    Requires system admin access.
+    """
+    await verify_system_admin(request)
+    service_client = get_supabase_service_role()
+
+    try:
+        existing = (
+            service_client.table("companies")
+            .select("id, name, settings")
+            .eq("id", company_id)
+            .execute()
+        )
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        current_settings = existing.data[0].get("settings") or {}
+        if not isinstance(current_settings, dict):
+            current_settings = {}
+
+        # Replace-style: the supplied features dict is the new state.
+        # Anything not in the request is treated as "not enabled."
+        # Merging into the rest of settings preserves unrelated sub-keys
+        # (packing-slip format, etc. — stored as top-level columns today,
+        # but future settings sub-keys may live here).
+        new_settings = dict(current_settings)
+        new_settings["features"] = {k: bool(v) for k, v in body.features.items()}
+
+        result = (
+            service_client.table("companies")
+            .update({"settings": new_settings})
+            .eq("id", company_id)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update features")
+
+        logger.info(
+            f"Updated company {company_id} features: {new_settings['features']}"
+        )
+
+        return CompanyFeaturesUpdateResponse(
+            success=True,
+            company_id=company_id,
+            features=_normalize_features(new_settings["features"]),
+            message="Features updated successfully",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating features for {company_id}: {e}")
         sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail="Internal server error")
 

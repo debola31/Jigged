@@ -82,3 +82,26 @@ class CompanyListItem(BaseModel):
     owner_name: Optional[str] = None
     owner_email: Optional[str] = None
     member_count: int
+    # Feature flags currently enabled on the company. Sourced from
+    # companies.settings.features (jsonb). Keys mirror the entries in
+    # lib/featureFlags.ts KNOWN_FEATURES so the admin UI can render
+    # toggles without hardcoding the list per call site.
+    features: dict[str, bool] = {}
+
+
+class CompanyFeaturesUpdateRequest(BaseModel):
+    """Request body for replacing a company's feature flags.
+
+    Idiomatic call sets the desired enabled flags as `{ "<key>": true }`.
+    Anything omitted is treated as false (replace-style, not patch-style)
+    so the request is self-describing — the caller sends what they want
+    on, the server stores exactly that under settings.features.
+    """
+    features: dict[str, bool]
+
+
+class CompanyFeaturesUpdateResponse(BaseModel):
+    success: bool
+    company_id: str
+    features: dict[str, bool]
+    message: str

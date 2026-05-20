@@ -52,6 +52,28 @@ import type {
 } from '@/types/job';
 import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
+/**
+ * Human-readable label for the match_source value returned by
+ * search_jobs_by_identifier. Keep in sync with the SQL function's
+ * stable strings (migration 20260525).
+ */
+function matchSourceLabel(source: string): string {
+  switch (source) {
+    case 'job_number':
+      return 'job number';
+    case 'customer_po':
+      return 'customer PO';
+    case 'customer':
+      return 'customer name';
+    case 'part':
+      return 'part number';
+    case 'packing_slip':
+      return 'packing slip';
+    default:
+      return source;
+  }
+}
+
 const VALID_PRODUCTION_STATUSES: ProductionStatus[] = [
   'not_started',
   'in_progress',
@@ -269,6 +291,26 @@ export default function JobsPage() {
     }
   };
 
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-focus the search field on mount so Johnny's "where's my order?"
+  // flow lands keyboard-ready (FR-NEW-1: headline-moment on /jobs).
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
+  // Enter on the search input navigates directly when exactly one job
+  // matches — Johnny's typical 1-shot lookup short-circuits the click.
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== 'Enter') return;
+      if (jobs.length === 1) {
+        router.push(`/dashboard/${companyId}/jobs/${jobs[0].id}`);
+      }
+    },
+    [jobs, router, companyId],
+  );
+
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
     // Parse YYYY-MM-DD as local (not UTC) so the displayed date matches
@@ -286,8 +328,28 @@ export default function JobsPage() {
     {
       field: 'job_number',
       headerName: 'Job #',
-      width: 120,
+      width: 160,
       pinned: 'left' as const,
+      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
+        const ms = params.data?.match_source ?? null;
+        return (
+          <Box sx={{ lineHeight: 1.2, py: 0.5 }}>
+            <Box>{params.value}</Box>
+            {ms && (
+              <Box
+                sx={{
+                  fontSize: '0.7rem',
+                  color: 'text.secondary',
+                  mt: 0.25,
+                  textTransform: 'lowercase',
+                }}
+              >
+                matched {matchSourceLabel(ms)}
+              </Box>
+            )}
+          </Box>
+        );
+      },
     },
     {
       colId: 'customer',
@@ -420,11 +482,13 @@ export default function JobsPage() {
         }}
       >
         <TextField
-          placeholder="Search jobs..."
+          inputRef={searchInputRef}
+          placeholder="Job #, PO, customer, part, packing slip…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={handleSearchKeyDown}
           size="small"
-          sx={{ width: { xs: '100%', sm: 250 } }}
+          sx={{ width: { xs: '100%', sm: 320 } }}
           slotProps={{
             input: {
               startAdornment: (

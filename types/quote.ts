@@ -24,7 +24,6 @@ export interface Quote {
   company_id: string;
   quote_number: string;
   customer_id: string;
-  customer_po_number: string | null;
   billing_address_id: string | null;
   shipping_address_id: string | null;
   contact_id: string | null;
@@ -151,8 +150,8 @@ export interface QuoteFormPartBlock {
  *
  * NOTE: customer_po_number is intentionally NOT on this form. The customer
  * issues the PO after accepting the quote, so it's collected during the
- * quote-to-job conversion (see ConvertToJobOptions in utils/quotesAccess.ts).
- * The Quote interface still carries the column for storage.
+ * quote-to-job conversion (see ConvertToJobOptions in utils/quotesAccess.ts)
+ * and stored on the job, not the quote. See migration 20260526.
  */
 export interface QuoteFormData {
   customer_id: string;

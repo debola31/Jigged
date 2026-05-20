@@ -1,8 +1,14 @@
+import type { ShippingArrangement } from '@/types/shipment';
+
 export interface Customer {
   id: string;
   company_id: string;
   name: string;
   website: string | null;
+  /** Shipping defaults — populated via the customer-detail UI in PR 7. */
+  default_shipping_arrangement: ShippingArrangement | null;
+  default_carrier: string | null;
+  default_coc_text: string | null;
   created_at: string;
   updated_at: string;
 }

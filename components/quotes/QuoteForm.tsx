@@ -80,6 +80,10 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
   isCreateNew: true,
 };
 
+/** Sentinel option IDs for "add new" actions inside the dropdowns. */
+const ADD_NEW_CONTACT_ID = '__add_new_contact__';
+const ADD_NEW_ADDRESS_ID = '__add_new_address__';
+
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -314,6 +318,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * (closed state) and each MenuItem (open state). Surfaces ATTN: when
    * the address carries an attention_to, then address_line1, optional
    * address_line2, then city/state/zip on one line.
+   *
+   * Uses body1 (primary white) so the addresses match the brightness of
+   * the Customer / Contact field values. body2 in the project theme is
+   * a muted grey, which makes the address look secondary even though it
+   * carries primary information.
    */
   const AddressLines = ({ address }: { address: CustomerAddress }) => {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -324,18 +333,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     return (
       <Box>
         {address.attention_to && (
-          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          <Typography variant="body1" sx={{ fontWeight: 500 }}>
             ATTN: {address.attention_to}
           </Typography>
         )}
         {address.address_line1 && (
-          <Typography variant="body2">{address.address_line1}</Typography>
+          <Typography variant="body1">{address.address_line1}</Typography>
         )}
         {address.address_line2 && (
-          <Typography variant="body2">{address.address_line2}</Typography>
+          <Typography variant="body1">{address.address_line2}</Typography>
         )}
         {cityStateZipFull && (
-          <Typography variant="body2">{cityStateZipFull}</Typography>
+          <Typography variant="body1">{cityStateZipFull}</Typography>
         )}
       </Box>
     );
@@ -605,25 +614,36 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 <Grid size={{ xs: 12, md: 6 }}>
                   <Autocomplete
                     size="small"
-                    options={customerContacts}
+                    options={[
+                      ...customerContacts,
+                      // Sentinel "+ Add new contact" appears at the bottom
+                      // of the dropdown. Selecting it navigates to the
+                      // customer detail page instead of setting the FK.
+                      {
+                        id: ADD_NEW_CONTACT_ID,
+                        name: '+ Add new contact',
+                        role: 'other',
+                        email: null,
+                        phone: null,
+                        is_primary: false,
+                      } as CustomerListContact,
+                    ]}
                     getOptionLabel={(c) => c.name}
                     value={
                       customerContacts.find((c) => c.id === formData.contact_id) ?? null
                     }
-                    onChange={(_, v) => handleFieldChange('contact_id', v?.id ?? '')}
+                    onChange={(_, v) => {
+                      if (v?.id === ADD_NEW_CONTACT_ID) {
+                        router.push(customerDetailHref);
+                        return;
+                      }
+                      handleFieldChange('contact_id', v?.id ?? '');
+                    }}
                     isOptionEqualToValue={(o, v) => o.id === v.id}
                     renderInput={(params) => (
-                      <TextField {...params} label="Customer contact" />
+                      <TextField {...params} label="Contact" />
                     )}
                   />
-                  <Link
-                    component={NextLink}
-                    href={customerDetailHref}
-                    variant="caption"
-                    sx={{ display: 'inline-block', mt: 0.5 }}
-                  >
-                    + Add contact
-                  </Link>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
                   <FormControl fullWidth size="small">
@@ -632,7 +652,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       labelId="shipping-address-label"
                       label="Shipping address"
                       value={formData.shipping_address_id}
-                      onChange={(e) => handleShippingAddressChange(e.target.value)}
+                      onChange={(e) => {
+                        if (e.target.value === ADD_NEW_ADDRESS_ID) {
+                          router.push(customerDetailHref);
+                          return;
+                        }
+                        handleShippingAddressChange(e.target.value);
+                      }}
                       renderValue={renderAddressValue}
                       sx={{
                         '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
@@ -643,16 +669,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                           <AddressLines address={a} />
                         </MenuItem>
                       ))}
+                      <MenuItem value={ADD_NEW_ADDRESS_ID}>+ Add new address</MenuItem>
                     </Select>
                   </FormControl>
-                  <Link
-                    component={NextLink}
-                    href={customerDetailHref}
-                    variant="caption"
-                    sx={{ display: 'inline-block', mt: 0.5 }}
-                  >
-                    + Add address
-                  </Link>
                 </Grid>
               </Grid>
 
@@ -672,14 +691,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
 
               {!billingSameAsShipping && (
-                <Box sx={{ mt: 1, pl: 4, opacity: 0.85 }}>
+                <Box sx={{ mt: 1, pl: 4 }}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="billing-address-label">Billing address</InputLabel>
                     <Select
                       labelId="billing-address-label"
                       label="Billing address"
                       value={formData.billing_address_id}
-                      onChange={(e) => handleFieldChange('billing_address_id', e.target.value)}
+                      onChange={(e) => {
+                        if (e.target.value === ADD_NEW_ADDRESS_ID) {
+                          router.push(customerDetailHref);
+                          return;
+                        }
+                        handleFieldChange('billing_address_id', e.target.value);
+                      }}
                       renderValue={renderAddressValue}
                       sx={{
                         '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
@@ -690,6 +715,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                           <AddressLines address={a} />
                         </MenuItem>
                       ))}
+                      <MenuItem value={ADD_NEW_ADDRESS_ID}>+ Add new address</MenuItem>
                     </Select>
                   </FormControl>
                 </Box>

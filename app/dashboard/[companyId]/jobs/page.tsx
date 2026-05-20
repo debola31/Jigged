@@ -74,25 +74,6 @@ function parseProductionParam(v: string | null): ProductionStatus[] | 'all' | un
   return parts.length > 0 ? (parts as ProductionStatus[]) : undefined;
 }
 
-/**
- * Theme-aware text color for a production-status cell. The "happy path"
- * states (in_progress, completed) get info/success; cancelled gets
- * error; not_started stays neutral so a fresh job doesn't shout.
- */
-function productionColor(status: ProductionStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return 'info.main';
-    case 'completed':
-      return 'success.main';
-    case 'cancelled':
-      return 'error.main';
-    case 'not_started':
-    default:
-      return 'text.primary';
-  }
-}
-
 function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | undefined {
   if (!v) return undefined;
   if (v === 'all') return 'all';
@@ -329,37 +310,18 @@ export default function JobsPage() {
       },
     },
     {
-      // Production + fulfillment surfaced inline as "Production / Fulfillment".
-      // Production is bold + state-colored (info/success/error/neutral) and
-      // fulfillment is muted secondary, separated by a slash. Reads as a
-      // single phrase scanning left-to-right rather than two stacked chips.
+      // Status reads as an inline phrase ("In Progress / Not Shipped"). No
+      // weight or color differentiation — matches the cell typography of
+      // the other columns so the row reads as a single horizontal line.
       colId: 'status',
       headerName: 'Status',
       width: 240,
       sortable: false,
-      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data) return null;
+      valueGetter: (params) => {
+        if (!params.data) return '';
         const prod = PRODUCTION_STATUS_CONFIG[params.data.production_status];
         const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
-        return (
-          <Box
-            sx={{ display: 'flex', alignItems: 'center', height: '100%', gap: 0.5 }}
-          >
-            <Typography
-              variant="body2"
-              component="span"
-              sx={{
-                fontWeight: 600,
-                color: productionColor(params.data.production_status),
-              }}
-            >
-              {prod.label}
-            </Typography>
-            <Typography variant="body2" component="span" sx={{ color: 'text.secondary' }}>
-              / {ful.label}
-            </Typography>
-          </Box>
-        );
+        return `${prod.label} / ${ful.label}`;
       },
     },
     {
@@ -368,38 +330,25 @@ export default function JobsPage() {
       width: 140,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         const value = params.value;
-        if (!params.data || !value) {
-          return (
-            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                —
-              </Typography>
-            </Box>
-          );
-        }
-        const overdue = isJobOverdue(params.data);
+        if (!params.data || !value) return '—';
         const dueDateStr = formatDate(value);
-        if (!overdue) {
-          return (
-            <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-              <Typography variant="body2">{dueDateStr}</Typography>
-            </Box>
-          );
-        }
+        if (!isJobOverdue(params.data)) return dueDateStr;
         const daysOverdue = Math.max(
           0,
           Math.floor((Date.now() - new Date(value).getTime()) / (1000 * 60 * 60 * 24)),
         );
+        // Overdue cue: trailing icon in error.main. Date itself keeps the
+        // standard cell color so the column reads consistently with the rest.
         return (
-          <Tooltip
-            title={`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`}
-            arrow
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+            <span>{dueDateStr}</span>
+            <Tooltip
+              title={`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`}
+              arrow
+            >
               <ScheduleIcon sx={{ fontSize: 16, color: 'error.main' }} />
-              <Typography variant="body2">{dueDateStr}</Typography>
-            </Box>
-          </Tooltip>
+            </Tooltip>
+          </Box>
         );
       },
     },

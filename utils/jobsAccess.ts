@@ -59,6 +59,16 @@ export async function getAllJobs(
   let offset = 0;
   let hasMore = true;
 
+  // If the caller passed search text, resolve the matching set + per-job
+  // match_source up-front via the extended search RPC. The main query
+  // restricts to those ids; the result rows get match_source mixed in
+  // so the cell renderer can show "matched packing slip" sub-text.
+  let matchSourceByJobId: Map<string, string> | null = null;
+  if (filters.search?.trim()) {
+    const matches = await searchJobsByIdentifier(companyId, filters.search.trim());
+    matchSourceByJobId = new Map(matches.map((m) => [m.job_id, m.match_source]));
+  }
+
   while (hasMore) {
     let query = supabase
       .from('jobs')
@@ -84,7 +94,17 @@ export async function getAllJobs(
     if (filters.customerId) {
       query = query.eq('customer_id', filters.customerId);
     }
-    if (filters.search?.trim()) {
+    if (matchSourceByJobId !== null) {
+      // search_jobs_by_identifier has already resolved the matching set
+      // (see top of getAllJobs). Restrict the main query to those ids;
+      // an empty set short-circuits to no rows.
+      const ids = Array.from(matchSourceByJobId.keys());
+      if (ids.length === 0) {
+        hasMore = false;
+        break;
+      }
+      query = query.in('id', ids);
+    } else if (filters.search?.trim()) {
       const sanitized = sanitizeSearchString(filters.search.trim());
       query = query.or(`job_number.ilike.%${sanitized}%`);
     }
@@ -120,7 +140,209 @@ export async function getAllJobs(
     allData = allData.filter((j) => !isJobDone(j));
   }
 
+  // Attach per-row match_source for the search-result sub-text.
+  if (matchSourceByJobId !== null) {
+    allData = allData.map((j) => ({
+      ...j,
+      match_source: matchSourceByJobId.get(j.id) ?? null,
+    }));
+  }
+
   return allData;
+}
+
+/**
+ * Create a "reorder" of an existing job. The new job carries the same
+ * customer + line items (job_parts copied with their quantities,
+ * operations regenerated from the part's routing) and a
+ * `related_to_job_id` link back to the original.
+ *
+ * The new job number is `<original>-R<n>` where n counts existing
+ * direct reorders. Two same-customer reorders of the same job in
+ * parallel would race on the count — acceptable for Phase 1 (manual
+ * reorder, low concurrency); add a per-original counter column if it
+ * becomes a real conflict.
+ */
+export async function createReorderJob(
+  originalJobId: string,
+): Promise<{ jobId: string; jobNumber: string }> {
+  const supabase = getSupabase();
+
+  const { data: original, error: origErr } = await supabase
+    .from('jobs')
+    .select(
+      `id, company_id, customer_id, job_number, due_date, lead_time_days,
+       job_parts (id, sequence, quantity, part_id)`,
+    )
+    .eq('id', originalJobId)
+    .single();
+  if (origErr || !original) {
+    console.error('createReorderJob: failed to load original', origErr);
+    throw new Error('Failed to load the original job.');
+  }
+
+  const parts = (original.job_parts ?? []) as Array<{
+    id: string;
+    sequence: number;
+    quantity: number;
+    part_id: string;
+  }>;
+  if (parts.length === 0) {
+    throw new Error('Cannot reorder a job with no parts.');
+  }
+
+  // Pre-flight: every part must still have a routing.
+  const partIds = Array.from(new Set(parts.map((p) => p.part_id)));
+  const { data: routings, error: routingsErr } = await supabase
+    .from('routings')
+    .select('id, part_id')
+    .in('part_id', partIds);
+  if (routingsErr) {
+    throw new Error(`Reorder failed: ${routingsErr.message}`);
+  }
+  const routingByPart = new Map<string, string>();
+  for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
+    routingByPart.set(r.part_id, r.id);
+  }
+  const missing = partIds.filter((id) => !routingByPart.has(id));
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.length} part${missing.length === 1 ? '' : 's'} on the original job no longer have a routing. Create the routing(s) before reordering.`,
+    );
+  }
+
+  const { data: { user }, error: userErr } = await supabase.auth.getUser();
+  if (userErr || !user) {
+    throw new Error('Authentication required.');
+  }
+
+  // Suffix the new job number.
+  const { count, error: countErr } = await supabase
+    .from('jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('related_to_job_id', originalJobId);
+  if (countErr) {
+    throw new Error(`Reorder failed: ${countErr.message}`);
+  }
+  const newNumber = `${original.job_number}-R${(count ?? 0) + 1}`;
+
+  const { data: newJob, error: newJobErr } = await supabase
+    .from('jobs')
+    .insert({
+      company_id: original.company_id,
+      customer_id: original.customer_id,
+      job_number: newNumber,
+      production_status: 'not_started',
+      fulfillment_status: 'unshipped',
+      related_to_job_id: originalJobId,
+      lead_time_days: original.lead_time_days ?? null,
+      created_by: user.id,
+    })
+    .select('id, job_number')
+    .single();
+  if (newJobErr || !newJob) {
+    throw new Error(newJobErr?.message ?? 'Failed to create reorder job.');
+  }
+
+  let sequence = 10;
+  const partsSorted = [...parts].sort((a, b) => a.sequence - b.sequence);
+  for (const p of partsSorted) {
+    const routingId = routingByPart.get(p.part_id);
+    if (!routingId) continue; // pre-flight covered this
+
+    const { data: jp, error: jpErr } = await supabase
+      .from('job_parts')
+      .insert({
+        job_id: newJob.id,
+        company_id: original.company_id,
+        part_id: p.part_id,
+        sequence,
+        quantity: p.quantity,
+        production_status: 'not_started',
+        fulfillment_status: 'unshipped',
+      })
+      .select('id')
+      .single();
+    if (jpErr || !jp) {
+      throw new Error(`Reorder failed creating job_part: ${jpErr?.message ?? 'unknown'}`);
+    }
+
+    const { error: opsErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+      p_job_part_id: jp.id,
+      p_routing_id: routingId,
+    });
+    if (opsErr) {
+      throw new Error(`Reorder created but failed to copy operations: ${opsErr.message}`);
+    }
+
+    sequence += 10;
+  }
+
+  return { jobId: newJob.id, jobNumber: newJob.job_number };
+}
+
+/**
+ * Forward + reverse related jobs. The "forward" link is jobs.related_to_job_id
+ * (this job was reordered from X). The "reverse" link is "other jobs that
+ * were reordered from THIS job."
+ */
+export async function getRelatedJobs(jobId: string): Promise<{
+  reorderedFrom: { id: string; job_number: string } | null;
+  reorders: Array<{ id: string; job_number: string }>;
+}> {
+  const supabase = getSupabase();
+
+  const { data: row, error: rowErr } = await supabase
+    .from('jobs')
+    .select('related_to_job_id')
+    .eq('id', jobId)
+    .single();
+  if (rowErr) {
+    throw new Error(`getRelatedJobs failed: ${rowErr.message}`);
+  }
+
+  let reorderedFrom: { id: string; job_number: string } | null = null;
+  if (row?.related_to_job_id) {
+    const { data: parent } = await supabase
+      .from('jobs')
+      .select('id, job_number')
+      .eq('id', row.related_to_job_id)
+      .single();
+    reorderedFrom = parent ?? null;
+  }
+
+  const { data: children } = await supabase
+    .from('jobs')
+    .select('id, job_number')
+    .eq('related_to_job_id', jobId)
+    .order('created_at', { ascending: false });
+
+  return {
+    reorderedFrom,
+    reorders: (children ?? []) as Array<{ id: string; job_number: string }>,
+  };
+}
+
+/**
+ * Resolve the matching job-ids + per-row match_source for an extended
+ * search query (job_number, customer_po, customer name, part number,
+ * packing slip number). Capped server-side at 100 rows by the RPC.
+ */
+export async function searchJobsByIdentifier(
+  companyId: string,
+  query: string,
+): Promise<Array<{ job_id: string; match_source: string }>> {
+  if (!query.trim()) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('search_jobs_by_identifier', {
+    p_company_id: companyId,
+    p_query: query.trim(),
+  });
+  if (error) {
+    console.error('search_jobs_by_identifier failed:', error);
+    throw new Error(`Search failed: ${error.message}`);
+  }
+  return (data ?? []) as Array<{ job_id: string; match_source: string }>;
 }
 
 /**

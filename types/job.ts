@@ -69,6 +69,8 @@ export interface Job {
   completed_at: string | null;
   due_date: string | null;
   lead_time_days: number | null;
+  /** Forward link to the original job this row was reordered from (PR 6). */
+  related_to_job_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -207,6 +209,13 @@ export interface JobWithRelations extends Job {
   job_parts?: JobPartWithRelations[];
   /** Summary of the most-progressed operation across parts (list view). */
   currentOperation?: CurrentOperationInfo | null;
+  /**
+   * Set only by getAllJobs when a search query matched this row — values
+   * mirror search_jobs_by_identifier's match_source column. Used by the
+   * jobs-list job-number cell renderer to surface "matched packing slip"
+   * sub-text without an extra round-trip.
+   */
+  match_source?: string | null;
 }
 
 /**
@@ -216,6 +225,12 @@ export interface JobFilters {
   productionStatus?: ProductionStatus[] | 'all';
   fulfillmentStatus?: FulfillmentStatus[] | 'all';
   customerId?: string;
+  /**
+   * Search text. When set, getAllJobs routes through the
+   * search_jobs_by_identifier RPC (job_number, customer_po, customer
+   * name, part number, packing slip number) and surfaces the match_source
+   * on the returned rows.
+   */
   search?: string;
   overdue?: boolean;
   /** When true (default), hide jobs that satisfy the FR-18 done predicate. */

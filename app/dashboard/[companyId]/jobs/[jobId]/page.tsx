@@ -1,33 +1,46 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
-import Alert from '@mui/material/Alert';
+import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
-import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import Stack from '@mui/material/Stack';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 
 import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
+import { getCompany, type Company } from '@/utils/companyAccess';
+import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
-import { JobStatusChip, OperationsPanel, JobQRCode } from '@/components/jobs';
+import type { JobPartShipmentSummary } from '@/types/shipment';
+import {
+  ProductionStatusChip,
+  FulfillmentStatusChip,
+} from '@/components/jobs/JobStatusChip';
+import { OperationsPanel, JobQRCode } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
+import JobStatusBlock from '@/components/jobs/JobStatusBlock';
+import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
+import { CreateShipmentModal } from '@/components/shipments';
+import { isShipmentsEnabled } from '@/lib/featureFlags';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -36,29 +49,52 @@ export default function JobDetailPage() {
   const jobId = params.jobId as string;
 
   const [job, setJob] = useState<JobWithRelations | null>(null);
+  const [company, setCompany] = useState<Company | null>(null);
+  const [partSummaries, setPartSummaries] = useState<JobPartShipmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [shipModalOpen, setShipModalOpen] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchJob();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
-  const fetchJob = async () => {
+  const fetchJob = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getJobWithRelations(jobId, companyId);
       setJob(data);
+      // Per-part shipment summary in parallel with the company fetch
+      // below; quietly degrades to [] on failure (the page still renders).
+      try {
+        const summaries = await getJobPartShipmentSummaries(jobId);
+        setPartSummaries(summaries);
+      } catch (err) {
+        console.warn('Job detail: per-part shipment summaries failed', err);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load job');
     } finally {
       setLoading(false);
     }
-  };
+  }, [jobId, companyId]);
+
+  useEffect(() => {
+    fetchJob();
+    (async () => {
+      try {
+        const c = await getCompany(companyId);
+        setCompany(c);
+      } catch (err) {
+        console.warn('Job detail: company fetch failed', err);
+      }
+    })();
+  }, [fetchJob, companyId]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -90,7 +126,7 @@ export default function JobDetailPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  if (loading) {
+  if (loading && !job) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
@@ -107,11 +143,25 @@ export default function JobDetailPage() {
   }
 
   const parts: JobPartWithRelations[] = job.job_parts ?? [];
-  // Cancel button is available until production has terminally ended. The
-  // Mark Shipped button is gone — shipping is no longer a status transition;
-  // PR 5 surfaces a "Create Shipment" CTA in its place.
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
+  const canShip =
+    shipmentsEnabled && job.fulfillment_status !== 'fully_shipped' && parts.length > 0;
+
+  const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
+
+  const handleCreated = async (result: {
+    shipmentId: string;
+    packingSlipNumber: string;
+    pdfError?: Error | null;
+  }) => {
+    setShipModalOpen(false);
+    // Force the history card to refetch + auto-open the preview on the new row.
+    setPendingPreviewShipmentId(result.shipmentId);
+    setHistoryRefreshKey((k) => k + 1);
+    // Re-pull job + per-part summary so status block + parts row reflect the new shipment.
+    await fetchJob();
+  };
 
   return (
     <Box>
@@ -123,26 +173,39 @@ export default function JobDetailPage() {
         Back to Jobs
       </Button>
 
-      {/* Header with Actions */}
       <Box
         sx={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'flex-start',
-          mb: 3,
+          mb: 2,
           flexWrap: 'wrap',
           gap: 2,
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="h4" component="h1" sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
+          <Typography
+            variant="h4"
+            component="h1"
+            sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}
+          >
             {job.job_number}
           </Typography>
-          <JobStatusChip status={job.production_status} size="medium" />
           <JobOverdueBadge job={job} size="medium" />
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          {canShip && (
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<LocalShippingIcon />}
+              onClick={() => setShipModalOpen(true)}
+              disabled={actionLoading}
+            >
+              Create Shipment
+            </Button>
+          )}
           {canCancel && (
             <Button
               variant="outlined"
@@ -154,8 +217,6 @@ export default function JobDetailPage() {
               Cancel
             </Button>
           )}
-
-          <Box sx={{ flex: 1 }} />
 
           <Tooltip title="Delete Job">
             <IconButton
@@ -175,13 +236,14 @@ export default function JobDetailPage() {
         </Box>
       </Box>
 
+      <JobStatusBlock job={job} parts={parts} />
+
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Quote Link Banner */}
       {job.quote_id && job.quotes && (
         <Alert severity="info" sx={{ mb: 3 }}>
           Created from{' '}
@@ -196,7 +258,6 @@ export default function JobDetailPage() {
       )}
 
       <Grid container spacing={3}>
-        {/* Job Details — customer, dates, expandable QR code */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
@@ -204,7 +265,7 @@ export default function JobDetailPage() {
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Stack spacing={2}>
                 <Box>
                   <Typography variant="body2" color="text.secondary">
                     Customer
@@ -218,11 +279,19 @@ export default function JobDetailPage() {
                       {job.customers.name}
                     </MuiLink>
                   ) : (
-                    <Typography variant="body1" color="text.secondary">
-                      —
-                    </Typography>
+                    <Typography variant="body1" color="text.secondary">—</Typography>
                   )}
                 </Box>
+                {job.customer_po_number && (
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">
+                      Customer PO
+                    </Typography>
+                    <Typography variant="body1" fontWeight={500}>
+                      {job.customer_po_number}
+                    </Typography>
+                  </Box>
+                )}
                 <Box>
                   <Typography variant="body2" color="text.secondary">
                     Created
@@ -241,7 +310,7 @@ export default function JobDetailPage() {
                     </Typography>
                   </Box>
                 )}
-              </Box>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
@@ -258,7 +327,6 @@ export default function JobDetailPage() {
           </Card>
         </Grid>
 
-        {/* Parts list — one card per job_part with its own OperationsPanel */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
             <CardContent>
@@ -270,57 +338,103 @@ export default function JobDetailPage() {
                 <Typography color="text.secondary">No parts on this job.</Typography>
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {parts.map((part) => (
-                    <Box key={part.id}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'baseline',
-                          justifyContent: 'space-between',
-                          flexWrap: 'wrap',
-                          gap: 1,
-                          mb: 1,
-                        }}
-                      >
-                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap' }}>
-                          <MuiLink
-                            component={Link}
-                            href={`/dashboard/${companyId}/parts/${part.part_id}`}
-                            sx={{ fontWeight: 600, fontSize: '1.05rem' }}
+                  {parts.map((part) => {
+                    const summary = summariesByPart.get(part.id);
+                    return (
+                      <Box key={part.id}>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'baseline',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: 1,
+                            mb: 1,
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'baseline',
+                              gap: 1.5,
+                              flexWrap: 'wrap',
+                            }}
                           >
-                            {part.parts?.part_name ?? 'Part'}
-                          </MuiLink>
-                          {part.parts?.description && (
-                            <Typography variant="body2" color="text.secondary">
-                              {part.parts.description}
-                            </Typography>
-                          )}
-                          <Chip size="small" label={`Order qty ${part.quantity}`} variant="outlined" />
+                            <MuiLink
+                              component={Link}
+                              href={`/dashboard/${companyId}/parts/${part.part_id}`}
+                              sx={{ fontWeight: 600, fontSize: '1.05rem' }}
+                            >
+                              {part.parts?.part_name ?? 'Part'}
+                            </MuiLink>
+                            {part.parts?.description && (
+                              <Typography variant="body2" color="text.secondary">
+                                {part.parts.description}
+                              </Typography>
+                            )}
+                            <Chip
+                              size="small"
+                              label={`Order qty ${part.quantity}`}
+                              variant="outlined"
+                            />
+                            {shipmentsEnabled && summary && summary.qty_shipped > 0 && (
+                              <Typography variant="body2" color="text.secondary">
+                                {summary.qty_shipped} of {summary.qty_ordered} shipped
+                                {summary.qty_remaining > 0
+                                  ? ` · ${summary.qty_remaining} remaining`
+                                  : ''}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            <ProductionStatusChip
+                              status={part.production_status}
+                              size="small"
+                            />
+                            {shipmentsEnabled && (
+                              <FulfillmentStatusChip
+                                status={part.fulfillment_status}
+                                size="small"
+                              />
+                            )}
+                          </Box>
                         </Box>
-                        <JobStatusChip status={part.production_status} size="small" />
+                        {part.job_operations && part.job_operations.length > 0 ? (
+                          <OperationsPanel
+                            job={job}
+                            operations={part.job_operations}
+                            onOperationUpdate={fetchJob}
+                            disabled={actionLoading}
+                          />
+                        ) : (
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ pl: 1 }}
+                          >
+                            No operations on this part.
+                          </Typography>
+                        )}
                       </Box>
-                      {part.job_operations && part.job_operations.length > 0 ? (
-                        <OperationsPanel
-                          job={job}
-                          operations={part.job_operations}
-                          onOperationUpdate={fetchJob}
-                          disabled={actionLoading}
-                        />
-                      ) : (
-                        <Typography variant="body2" color="text.secondary" sx={{ pl: 1 }}>
-                          No operations on this part.
-                        </Typography>
-                      )}
-                    </Box>
-                  ))}
+                    );
+                  })}
                 </Box>
               )}
             </CardContent>
           </Card>
         </Grid>
+
+        {shipmentsEnabled && (
+          <Grid size={{ xs: 12 }}>
+            <ShipmentHistoryCard
+              jobId={jobId}
+              refreshKey={historyRefreshKey}
+              initialPreviewShipmentId={pendingPreviewShipmentId}
+            />
+          </Grid>
+        )}
       </Grid>
 
-      {/* Cancel Confirmation Dialog */}
       <Dialog open={cancelDialogOpen} onClose={() => setCancelDialogOpen(false)}>
         <DialogTitle>Cancel Job?</DialogTitle>
         <DialogContent>
@@ -341,12 +455,11 @@ export default function JobDetailPage() {
             disabled={actionLoading}
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <CancelIcon />}
           >
-            {actionLoading ? 'Cancelling...' : 'Cancel Job'}
+            {actionLoading ? 'Cancelling…' : 'Cancel Job'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Job?</DialogTitle>
         <DialogContent>
@@ -367,10 +480,20 @@ export default function JobDetailPage() {
             disabled={actionLoading}
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
-            {actionLoading ? 'Deleting...' : 'Delete'}
+            {actionLoading ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      {shipmentsEnabled && (
+        <CreateShipmentModal
+          open={shipModalOpen}
+          jobId={jobId}
+          companyId={companyId}
+          onClose={() => setShipModalOpen(false)}
+          onCreated={handleCreated}
+        />
+      )}
     </Box>
   );
 }

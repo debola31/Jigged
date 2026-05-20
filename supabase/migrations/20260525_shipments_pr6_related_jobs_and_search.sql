@@ -103,44 +103,53 @@ BEGIN
     END IF;
     v_pattern := '%' || replace(replace(replace(trim(p_query), '\', '\\'), '%', '\%'), '_', '\_') || '%';
 
+    -- Each UNION ALL leg emits at most one (job_id, source, priority)
+    -- tuple per matching row. DISTINCT ON (job_id) + ORDER BY priority
+    -- selects the highest-priority source per job. PostgreSQL parses
+    -- UNION ALL with embedded LIMIT poorly inside a LATERAL subquery,
+    -- so this is structured as a flat union with per-leg WHERE filters.
     RETURN QUERY
-        SELECT DISTINCT ON (jobs.id) jobs.id, m.match_source
-          FROM public.jobs
-          JOIN LATERAL (
-              SELECT 'packing_slip'::text AS match_source, 1::int AS priority
-                FROM public.shipments s
-                JOIN public.shipment_line_items sli ON sli.shipment_id = s.id
-                JOIN public.job_parts jp ON jp.id = sli.job_part_id
-               WHERE jp.job_id = jobs.id
+        SELECT DISTINCT ON (m.job_id) m.job_id, m.match_source
+          FROM (
+              SELECT j.id AS job_id, 'packing_slip'::text AS match_source, 1::int AS priority
+                FROM public.jobs j
+                JOIN public.job_parts jp ON jp.job_id = j.id
+                JOIN public.shipment_line_items sli ON sli.job_part_id = jp.id
+                JOIN public.shipments s ON s.id = sli.shipment_id
+               WHERE j.company_id = p_company_id
                  AND s.voided_at IS NULL
                  AND s.packing_slip_number ILIKE v_pattern
-               LIMIT 1
               UNION ALL
-              SELECT 'job_number', 2
-               WHERE jobs.job_number ILIKE v_pattern
+              SELECT j.id, 'job_number'::text, 2
+                FROM public.jobs j
+               WHERE j.company_id = p_company_id
+                 AND j.job_number ILIKE v_pattern
               UNION ALL
-              SELECT 'customer_po', 3
-               WHERE jobs.customer_po_number ILIKE v_pattern
+              SELECT j.id, 'customer_po'::text, 3
+                FROM public.jobs j
+               WHERE j.company_id = p_company_id
+                 AND j.customer_po_number ILIKE v_pattern
               UNION ALL
-              SELECT 'customer_po', 3
-                FROM public.quotes q
-               WHERE q.id = jobs.quote_id
+              SELECT j.id, 'customer_po'::text, 3
+                FROM public.jobs j
+                JOIN public.quotes q ON q.id = j.quote_id
+               WHERE j.company_id = p_company_id
                  AND q.customer_po_number ILIKE v_pattern
               UNION ALL
-              SELECT 'customer', 4
-                FROM public.customers c
-               WHERE c.id = jobs.customer_id
+              SELECT j.id, 'customer'::text, 4
+                FROM public.jobs j
+                JOIN public.customers c ON c.id = j.customer_id
+               WHERE j.company_id = p_company_id
                  AND c.name ILIKE v_pattern
               UNION ALL
-              SELECT 'part', 5
-                FROM public.job_parts jp
+              SELECT j.id, 'part'::text, 5
+                FROM public.jobs j
+                JOIN public.job_parts jp ON jp.job_id = j.id
                 JOIN public.parts p ON p.id = jp.part_id
-               WHERE jp.job_id = jobs.id
+               WHERE j.company_id = p_company_id
                  AND p.part_name ILIKE v_pattern
-               LIMIT 1
-          ) AS m ON TRUE
-         WHERE jobs.company_id = p_company_id
-         ORDER BY jobs.id, m.priority
+          ) AS m
+         ORDER BY m.job_id, m.priority
          LIMIT 100;
 END $$;
 

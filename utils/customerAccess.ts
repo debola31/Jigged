@@ -464,25 +464,25 @@ export async function bulkImportCustomers(
 }
 
 /**
- * Return the address tagged is_billing for the customer. Returns null when
- * none is set.
+ * Return the address tagged default_billing for the customer. Returns null
+ * when none is set.
  */
 export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
-  return customer.addresses.find((a) => a.is_billing) ?? null;
+  return customer.addresses.find((a) => a.default_billing) ?? null;
 }
 
 /**
- * Return the address tagged is_shipping. Falls back to the billing
- * address — documented product behavior: "if no ship-to is set, ship to
- * where we bill". Implemented in exactly one place.
+ * Return the address tagged default_shipping. Falls back to the default
+ * billing address — documented product behavior: "if no ship-to is set,
+ * ship to where we bill". Implemented in exactly one place.
  */
 export function pickShippingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
   return (
-    customer.addresses.find((a) => a.is_shipping) ??
+    customer.addresses.find((a) => a.default_shipping) ??
     pickBillingAddress(customer)
   );
 }

@@ -524,7 +524,7 @@ export default function CustomerDetailPage() {
                         borderRadius: 1,
                         bgcolor: 'background.default',
                         border: 1,
-                        borderColor: a.is_billing || a.is_shipping ? 'primary.main' : 'divider',
+                        borderColor: a.default_billing || a.default_shipping ? 'primary.main' : 'divider',
                       }}
                     >
                       <Box
@@ -545,13 +545,13 @@ export default function CustomerDetailPage() {
                               mb: 0.5,
                             }}
                           >
-                            {a.is_billing && (
+                            {a.default_billing && (
                               <Chip size="small" color="primary" label="Billing" />
                             )}
-                            {a.is_shipping && (
+                            {a.default_shipping && (
                               <Chip size="small" color="primary" label="Shipping" />
                             )}
-                            {!a.is_billing && !a.is_shipping && (
+                            {!a.default_billing && !a.default_shipping && (
                               <Chip size="small" variant="outlined" label="Not assigned" />
                             )}
                           </Box>
@@ -674,13 +674,13 @@ export default function CustomerDetailPage() {
         <DialogContent>
           <Typography>
             Delete this address?
-            {addressBeingDeleted && (addressBeingDeleted.is_billing || addressBeingDeleted.is_shipping) && (
+            {addressBeingDeleted && (addressBeingDeleted.default_billing || addressBeingDeleted.default_shipping) && (
               <>
                 {' '}
-                The customer will be left without a{' '}
-                {addressBeingDeleted.is_billing ? 'billing' : ''}
-                {addressBeingDeleted.is_billing && addressBeingDeleted.is_shipping ? ' and ' : ''}
-                {addressBeingDeleted.is_shipping ? 'shipping' : ''} address until you tag another row.
+                The customer will be left without a default{' '}
+                {addressBeingDeleted.default_billing ? 'billing' : ''}
+                {addressBeingDeleted.default_billing && addressBeingDeleted.default_shipping ? ' and ' : ''}
+                {addressBeingDeleted.default_shipping ? 'shipping' : ''} address until you tag another row.
               </>
             )}
           </Typography>

@@ -297,8 +297,9 @@ describe('quotesAccess utilities', () => {
               state: 'IL',
               postal_code: '62701',
               country: 'USA',
-              is_billing: true,
-              is_shipping: true,
+              default_billing: true,
+              default_shipping: true,
+              attention_to: null,
             },
           ],
         },
@@ -319,7 +320,7 @@ describe('quotesAccess utilities', () => {
       expect(selectCall).toContain('customer_contacts');
       expect(selectCall).toContain('address_line1');
       expect(selectCall).toContain('postal_code');
-      expect(selectCall).toContain('is_billing');
+      expect(selectCall).toContain('default_billing');
       expect(result).not.toBeNull();
     });
   });

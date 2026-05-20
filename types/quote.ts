@@ -78,8 +78,9 @@ export interface QuoteWithRelations extends Quote {
       state: string | null;
       postal_code: string | null;
       country: string | null;
-      is_billing: boolean;
-      is_shipping: boolean;
+      default_billing: boolean;
+      default_shipping: boolean;
+      attention_to: string | null;
     }>;
   } | null;
   // Hydrated line items (ordered by sequence).

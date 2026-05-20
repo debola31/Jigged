@@ -1,12 +1,16 @@
 /**
  * Access functions for customer_addresses.
  *
- * Mirrors utils/customerContactsAccess.ts. The "at most one billing, at most
- * one shipping per customer" invariant is enforced at the DB level by the
- * idx_customer_addresses_one_billing / idx_customer_addresses_one_shipping
- * partial unique indexes. Helpers below clear the relevant role on the
- * existing winner BEFORE flipping a new row to that role, so the UI never
- * trips the constraint.
+ * Mirrors utils/customerContactsAccess.ts. The "at most one default billing,
+ * at most one default shipping per customer" invariant is enforced at the DB
+ * level by the idx_customer_addresses_one_default_billing /
+ * idx_customer_addresses_one_default_shipping partial unique indexes.
+ * Helpers below clear the relevant flag on the existing winner BEFORE
+ * flipping a new row, so the UI never trips the constraint.
+ *
+ * Column-name history: prior to migration 20260519 these flags were named
+ * is_billing / is_shipping. Renamed for clarity — they mark which row is
+ * the DEFAULT, not a type assertion on the address.
  */
 
 import { getSupabase } from '@/lib/supabase';
@@ -16,7 +20,7 @@ import type {
 } from '@/types/customer';
 
 const CUSTOMER_ADDRESS_COLUMNS =
-  'id, customer_id, address_line1, address_line2, city, state, postal_code, country, is_billing, is_shipping, created_at, updated_at';
+  'id, customer_id, address_line1, address_line2, city, state, postal_code, country, default_billing, default_shipping, attention_to, created_at, updated_at';
 
 function formDataToRow(formData: CustomerAddressFormData): Record<string, unknown> {
   const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
@@ -27,8 +31,9 @@ function formDataToRow(formData: CustomerAddressFormData): Record<string, unknow
     state: trimmed(formData.state),
     postal_code: trimmed(formData.postal_code),
     country: formData.country.trim() || 'USA',
-    is_billing: formData.is_billing,
-    is_shipping: formData.is_shipping,
+    default_billing: formData.default_billing,
+    default_shipping: formData.default_shipping,
+    attention_to: trimmed(formData.attention_to),
   };
 }
 
@@ -51,41 +56,41 @@ export async function getAddressesForCustomer(
 }
 
 /**
- * Clear is_billing on every address row for the customer EXCEPT the named
- * one. Used before flipping a new row to is_billing.
+ * Clear default_billing on every address row for the customer EXCEPT the
+ * named one. Used before flipping a new row to default_billing.
  */
-async function clearBillingForCustomer(
+async function clearDefaultBillingForCustomer(
   customerId: string,
   exceptId?: string,
 ): Promise<void> {
   const supabase = getSupabase();
   let query = supabase
     .from('customer_addresses')
-    .update({ is_billing: false })
+    .update({ default_billing: false })
     .eq('customer_id', customerId)
-    .eq('is_billing', true);
+    .eq('default_billing', true);
   if (exceptId) query = query.neq('id', exceptId);
   const { error } = await query;
   if (error) {
-    console.error('Error clearing billing role:', error);
+    console.error('Error clearing default_billing flag:', error);
     throw error;
   }
 }
 
-async function clearShippingForCustomer(
+async function clearDefaultShippingForCustomer(
   customerId: string,
   exceptId?: string,
 ): Promise<void> {
   const supabase = getSupabase();
   let query = supabase
     .from('customer_addresses')
-    .update({ is_shipping: false })
+    .update({ default_shipping: false })
     .eq('customer_id', customerId)
-    .eq('is_shipping', true);
+    .eq('default_shipping', true);
   if (exceptId) query = query.neq('id', exceptId);
   const { error } = await query;
   if (error) {
-    console.error('Error clearing shipping role:', error);
+    console.error('Error clearing default_shipping flag:', error);
     throw error;
   }
 }
@@ -96,8 +101,8 @@ export async function createCustomerAddress(
 ): Promise<CustomerAddress> {
   const supabase = getSupabase();
 
-  if (formData.is_billing) await clearBillingForCustomer(customerId);
-  if (formData.is_shipping) await clearShippingForCustomer(customerId);
+  if (formData.default_billing) await clearDefaultBillingForCustomer(customerId);
+  if (formData.default_shipping) await clearDefaultShippingForCustomer(customerId);
 
   const { data, error } = await supabase
     .from('customer_addresses')
@@ -108,7 +113,7 @@ export async function createCustomerAddress(
   if (error) {
     if (error.code === '23505') {
       throw new Error(
-        'Another address on this customer was just marked billing or shipping. Refresh and try again.',
+        'Another address on this customer was just marked default billing or default shipping. Refresh and try again.',
       );
     }
     console.error('Error creating customer address:', error);
@@ -124,8 +129,8 @@ export async function updateCustomerAddress(
 ): Promise<CustomerAddress> {
   const supabase = getSupabase();
 
-  if (formData.is_billing) await clearBillingForCustomer(customerId, addressId);
-  if (formData.is_shipping) await clearShippingForCustomer(customerId, addressId);
+  if (formData.default_billing) await clearDefaultBillingForCustomer(customerId, addressId);
+  if (formData.default_shipping) await clearDefaultShippingForCustomer(customerId, addressId);
 
   const { data, error } = await supabase
     .from('customer_addresses')
@@ -140,7 +145,7 @@ export async function updateCustomerAddress(
   if (error) {
     if (error.code === '23505') {
       throw new Error(
-        'Another address on this customer was just marked billing or shipping. Refresh and try again.',
+        'Another address on this customer was just marked default billing or default shipping. Refresh and try again.',
       );
     }
     console.error('Error updating customer address:', error);

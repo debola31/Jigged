@@ -9,11 +9,17 @@ export interface Customer {
 
 /**
  * A single address for a customer. A customer can have multiple addresses;
- * at most one is tagged as billing and at most one as shipping (the same
- * row can be both — the common case). See migration
- * 20260515_customer_addresses.sql + the 20260516 relax follow-up.
+ * at most one is the default billing address and at most one is the default
+ * shipping address (the same row can be both — the common case). See
+ * migration 20260515_customer_addresses.sql + the 20260516 relax follow-up,
+ * and 20260519 for the rename from is_billing/is_shipping.
  *
- * Roles are optional — a row with neither flag set is allowed.
+ * Default flags are optional — a row with neither set is allowed (a saved
+ * address that isn't currently the default for anything).
+ *
+ * attention_to is the optional "ATTN:" recipient line that prints above
+ * the address on packing slips. A shipment can override it per-shipment
+ * via shipping_contact_id; see utils/shipmentsAccess.ts resolveAttentionLine.
  */
 export interface CustomerAddress {
   id: string;
@@ -24,8 +30,9 @@ export interface CustomerAddress {
   state: string | null;
   postal_code: string | null;
   country: string | null;
-  is_billing: boolean;
-  is_shipping: boolean;
+  default_billing: boolean;
+  default_shipping: boolean;
+  attention_to: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -43,8 +50,9 @@ export interface CustomerAddressFormData {
   state: string;
   postal_code: string;
   country: string;
-  is_billing: boolean;
-  is_shipping: boolean;
+  default_billing: boolean;
+  default_shipping: boolean;
+  attention_to: string;
 }
 
 /**
@@ -91,8 +99,9 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
   state: '',
   postal_code: '',
   country: 'USA',
-  is_billing: true,
-  is_shipping: true,
+  default_billing: true,
+  default_shipping: true,
+  attention_to: '',
 };
 
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {

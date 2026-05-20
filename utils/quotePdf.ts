@@ -72,26 +72,31 @@ type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
 type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
 
 /**
- * Pick the customer's billing address (at most one exists per the
+ * Pick the customer's default billing address (at most one exists per the
  * unique partial index on customer_addresses). Returns null when none
  * is set.
+ *
+ * NOTE: PR 2 replaces this fallback with explicit quote.billing_address_id /
+ * quote.shipping_address_id FKs that are set at quote creation (legacy
+ * quotes are backfilled in that migration). This local helper is kept for
+ * PR 1 to preserve current behavior across the column rename.
  */
 function pickBillingAddress(addresses: QuoteCustomerAddress[] | undefined):
   QuoteCustomerAddress | null {
   if (!addresses || addresses.length === 0) return null;
-  return addresses.find((a) => a.is_billing) ?? null;
+  return addresses.find((a) => a.default_billing) ?? null;
 }
 
 /**
- * Pick the customer's shipping address. Falls back to the billing
- * address — explicit product behavior ("ship to where we bill if no
+ * Pick the customer's default shipping address. Falls back to the default
+ * billing address — explicit product behavior ("ship to where we bill if no
  * ship-to is set"), implemented in exactly one place.
  */
 function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
   QuoteCustomerAddress | null {
   if (!addresses || addresses.length === 0) return null;
   return (
-    addresses.find((a) => a.is_shipping) ??
+    addresses.find((a) => a.default_shipping) ??
     pickBillingAddress(addresses)
   );
 }

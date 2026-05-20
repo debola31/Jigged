@@ -77,7 +77,7 @@ const QUOTE_DETAIL_SELECT = `
     addresses:customer_addresses(
       id,
       address_line1, address_line2, city, state, postal_code, country,
-      is_billing, is_shipping
+      default_billing, default_shipping, attention_to
     )
   ),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),

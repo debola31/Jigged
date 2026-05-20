@@ -75,7 +75,7 @@ class CustomerFactory:
         }
 
     def to_address_dict(self) -> dict:
-        """Convert to a customer_addresses row, tagged billing+shipping."""
+        """Convert to a customer_addresses row, tagged default billing+shipping."""
         return {
             "customer_id": self.id,
             "address_line1": self.address_line1,
@@ -84,8 +84,8 @@ class CustomerFactory:
             "state": self.state,
             "postal_code": self.postal_code,
             "country": self.country,
-            "is_billing": True,
-            "is_shipping": True,
+            "default_billing": True,
+            "default_shipping": True,
         }
 
     def to_form_data(self) -> dict:

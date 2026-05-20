@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-14T19:11:05Z
+-- Generated: 2026-05-20T11:46:32Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "state" text,
     "postal_code" text,
     "country" text,
+    "packing_slip_number_format" text NOT NULL DEFAULT 'PS-{YYYY}-{seq:0000}'::text,
+    "packing_slip_seq_year" integer,
+    "packing_slip_next_seq" integer NOT NULL DEFAULT 1,
+    "default_coc_text" text,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
 );
@@ -65,6 +69,20 @@ CREATE TABLE IF NOT EXISTS "public"."ai_config"
     CONSTRAINT "ai_config_unique_company_feature" UNIQUE (company_id, feature)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."auth_audit_log"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "actor_user_id" uuid,
+    "target_user_id" uuid,
+    "company_id" uuid,
+    "event_type" text NOT NULL,
+    "outcome" text NOT NULL,
+    "error_detail" text,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "auth_audit_log_pkey" PRIMARY KEY (id),
+    CONSTRAINT "auth_audit_log_outcome_check" CHECK ((outcome = ANY (ARRAY['success'::text, 'forbidden'::text, 'failed'::text])))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."company_custom_units"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -81,19 +99,49 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "company_id" uuid NOT NULL,
     "name" text NOT NULL,
     "website" text,
-    "contact_name" text,
-    "contact_phone" text,
-    "contact_email" text,
+    "created_at" timestamp with time zone DEFAULT now(),
+    "updated_at" timestamp with time zone DEFAULT now(),
+    "default_shipping_arrangement" text,
+    "default_carrier" text,
+    "default_coc_text" text,
+    CONSTRAINT "customers_pkey" PRIMARY KEY (id),
+    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name),
+    CONSTRAINT "customers_default_shipping_arrangement_check" CHECK (((default_shipping_arrangement IS NULL) OR (default_shipping_arrangement = ANY (ARRAY['prepaid_and_add'::text, 'prepaid'::text, 'collect'::text, 'third_party_account'::text, 'customer_pickup'::text, 'customer_arranged_freight'::text, 'other'::text]))))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "customer_id" uuid NOT NULL,
     "address_line1" text,
     "address_line2" text,
     "city" text,
     "state" text,
     "postal_code" text,
     "country" text DEFAULT 'USA'::text,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "customers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
+    "default_billing" boolean NOT NULL DEFAULT false,
+    "default_shipping" boolean NOT NULL DEFAULT false,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "attention_to" text,
+    CONSTRAINT "customer_addresses_pkey" PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."customer_contacts"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "customer_id" uuid NOT NULL,
+    "name" text NOT NULL,
+    "role" text NOT NULL,
+    "role_label" text,
+    "email" text,
+    "phone" text,
+    "is_primary" boolean NOT NULL DEFAULT false,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "customer_contacts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "customer_contacts_role_check" CHECK ((role = ANY (ARRAY['buyer'::text, 'accounts_payable'::text, 'engineering'::text, 'quality'::text, 'shipping_receiving'::text, 'other'::text]))),
+    CONSTRAINT "customer_contacts_role_label_required" CHECK (((role <> 'other'::text) OR ((role_label IS NOT NULL) AND (length(role_label) > 0))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."demo_data_templates"
@@ -165,6 +213,10 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "updated_at" timestamp with time zone DEFAULT now(),
     "lead_time_days" integer,
     "expiration_date" date,
+    "customer_po_number" text,
+    "billing_address_id" uuid,
+    "shipping_address_id" uuid,
+    "contact_id" uuid,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
@@ -177,19 +229,20 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "job_number" text NOT NULL,
     "quote_id" uuid,
     "customer_id" uuid,
-    "status" text NOT NULL DEFAULT 'not_started'::text,
     "status_changed_at" timestamp with time zone,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
-    "shipped_at" timestamp with time zone,
     "created_by" uuid,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "due_date" date,
     "lead_time_days" integer,
+    "production_status" text NOT NULL,
+    "fulfillment_status" text NOT NULL,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
-    CONSTRAINT "jobs_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
+    CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
+    CONSTRAINT "jobs_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."saved_insights"
@@ -376,19 +429,20 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     "source_quote_line_item_id" uuid,
     "sequence" integer NOT NULL,
     "quantity" integer NOT NULL,
-    "status" text NOT NULL DEFAULT 'not_started'::text,
     "status_changed_at" timestamp with time zone,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
-    "shipped_at" timestamp with time zone,
     "current_operation_sequence" integer,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "production_status" text NOT NULL,
+    "fulfillment_status" text NOT NULL,
     CONSTRAINT "job_parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_parts_job_part_unique" UNIQUE (job_id, part_id),
     CONSTRAINT "job_parts_job_sequence_unique" UNIQUE (job_id, sequence),
-    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > 0)),
-    CONSTRAINT "job_parts_status_check" CHECK ((status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'shipped'::text, 'cancelled'::text])))
+    CONSTRAINT "job_parts_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
+    CONSTRAINT "job_parts_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text]))),
+    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > 0))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_materials"
@@ -553,7 +607,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "routing_operation_id" uuid,
     CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_operations_job_part_sequence_key" UNIQUE (job_part_id, sequence),
-    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'skipped'::text])))
+    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
@@ -599,8 +653,11 @@ CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
 -- ============================================================
 ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."auth_audit_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."customer_addresses" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."customer_contacts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."feedback" ENABLE ROW LEVEL SECURITY;
@@ -677,6 +734,12 @@ CREATE POLICY "Users can view their company's AI config"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
+DROP POLICY IF EXISTS "Company admins read auth audit" ON "public"."auth_audit_log";
+CREATE POLICY "Company admins read auth audit"
+    ON "public"."auth_audit_log"
+    FOR SELECT
+    USING (((company_id IS NOT NULL) AND is_company_admin(company_id)));
+
 DROP POLICY IF EXISTS "Admins can update companies" ON "public"."companies";
 CREATE POLICY "Admins can update companies"
     ON "public"."companies"
@@ -719,6 +782,60 @@ CREATE POLICY "Users can view company_custom_units"
     ON "public"."company_custom_units"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Company members manage their customer addresses" ON "public"."customer_addresses";
+CREATE POLICY "Company members manage their customer addresses"
+    ON "public"."customer_addresses"
+    FOR ALL
+    USING ((EXISTS ( SELECT 1
+   FROM (customers c
+     JOIN user_company_access uca ON ((uca.company_id = c.company_id)))
+  WHERE ((c.id = customer_addresses.customer_id) AND (uca.user_id = auth.uid())))))
+    WITH CHECK ((EXISTS ( SELECT 1
+   FROM (customers c
+     JOIN user_company_access uca ON ((uca.company_id = c.company_id)))
+  WHERE ((c.id = customer_addresses.customer_id) AND (uca.user_id = auth.uid())))));
+
+DROP POLICY IF EXISTS "Users can delete customer_contacts" ON "public"."customer_contacts";
+CREATE POLICY "Users can delete customer_contacts"
+    ON "public"."customer_contacts"
+    FOR DELETE
+    USING ((customer_id IN ( SELECT c.id
+   FROM customers c
+  WHERE (c.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can insert customer_contacts" ON "public"."customer_contacts";
+CREATE POLICY "Users can insert customer_contacts"
+    ON "public"."customer_contacts"
+    FOR INSERT
+    WITH CHECK ((customer_id IN ( SELECT c.id
+   FROM customers c
+  WHERE (c.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can update customer_contacts" ON "public"."customer_contacts";
+CREATE POLICY "Users can update customer_contacts"
+    ON "public"."customer_contacts"
+    FOR UPDATE
+    USING ((customer_id IN ( SELECT c.id
+   FROM customers c
+  WHERE (c.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can view customer_contacts" ON "public"."customer_contacts";
+CREATE POLICY "Users can view customer_contacts"
+    ON "public"."customer_contacts"
+    FOR SELECT
+    USING ((customer_id IN ( SELECT c.id
+   FROM customers c
+  WHERE (c.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."customer_contacts";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."customer_contacts"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((customer_id IN ( SELECT c.id
+   FROM customers c
+  WHERE (c.company_id = (current_setting('jigged.company_id'::text, true))::uuid))));
 
 DROP POLICY IF EXISTS "Users can delete customers" ON "public"."customers";
 CREATE POLICY "Users can delete customers"
@@ -1738,11 +1855,26 @@ ALTER TABLE "public"."ai_chat_queries"
 ALTER TABLE "public"."ai_config"
     ADD CONSTRAINT "ai_config_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."auth_audit_log"
+    ADD CONSTRAINT "auth_audit_log_actor_user_id_fkey" FOREIGN KEY (actor_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."auth_audit_log"
+    ADD CONSTRAINT "auth_audit_log_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."auth_audit_log"
+    ADD CONSTRAINT "auth_audit_log_target_user_id_fkey" FOREIGN KEY (target_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+
 ALTER TABLE "public"."companies"
     ADD CONSTRAINT "companies_demo_company_id_fkey" FOREIGN KEY (demo_company_id) REFERENCES companies(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."company_custom_units"
     ADD CONSTRAINT "company_custom_units_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."customer_addresses"
+    ADD CONSTRAINT "customer_addresses_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."customer_contacts"
+    ADD CONSTRAINT "customer_contacts_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."customers"
     ADD CONSTRAINT "customers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -1913,13 +2045,22 @@ ALTER TABLE "public"."quote_operations"
     ADD CONSTRAINT "quote_operations_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
+    ADD CONSTRAINT "quotes_billing_address_id_fkey" FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id);
+
+ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quotes"
+    ADD CONSTRAINT "quotes_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id);
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quotes"
+    ADD CONSTRAINT "quotes_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id);
 
 ALTER TABLE "public"."routing_operations"
     ADD CONSTRAINT "routing_operations_routing_id_fkey" FOREIGN KEY (routing_id) REFERENCES routings(id) ON DELETE CASCADE;
@@ -1976,10 +2117,15 @@ ALTER TABLE "public"."work_centers"
 -- 6. INDEXES
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_ai_chat_queries_rate_limit ON public.ai_chat_queries USING btree (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_actor_created ON public.auth_audit_log USING btree (actor_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_audit_company_created ON public.auth_audit_log USING btree (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_companies_demo_company ON public.companies USING btree (demo_company_id) WHERE (demo_company_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_companies_is_demo ON public.companies USING btree (is_demo) WHERE (is_demo = true);
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_addresses USING btree (customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE is_primary;
+CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS inventory_transactions_company_id_created_at_idx ON public.inventory_transactions USING btree (company_id, created_at DESC);
@@ -2003,11 +2149,12 @@ CREATE INDEX IF NOT EXISTS idx_job_ops_work_center ON public.job_operations USIN
 CREATE INDEX IF NOT EXISTS idx_job_parts_company_id ON public.job_parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_job_id ON public.job_parts USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_part_id ON public.job_parts USING btree (part_id);
-CREATE INDEX IF NOT EXISTS idx_job_parts_status ON public.job_parts USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_job_parts_production_status ON public.job_parts USING btree (production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_fulfillment_status ON public.jobs USING btree (company_id, fulfillment_status);
+CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON public.jobs USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
@@ -2040,6 +2187,7 @@ CREATE INDEX IF NOT EXISTS idx_quote_operations_quote ON public.quote_operations
 CREATE INDEX IF NOT EXISTS idx_quote_operations_quote_part ON public.quote_operations USING btree (quote_id, part_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_customer ON public.quotes USING btree (customer_id);
+CREATE INDEX IF NOT EXISTS idx_quotes_customer_po_number ON public.quotes USING btree (company_id, customer_po_number) WHERE (customer_po_number IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_quotes_number ON public.quotes USING btree (quote_number);
 CREATE INDEX IF NOT EXISTS idx_quotes_status ON public.quotes USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_routing_operations_routing ON public.routing_operations USING btree (routing_id, sequence);
@@ -2104,6 +2252,7 @@ $function$
 CREATE OR REPLACE FUNCTION public.bulk_apply_markup_rate(p_company_id uuid, p_part_ids uuid[], p_rate_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
+ SET statement_timeout TO '120s'
 AS $function$
 DECLARE
     v_rate_breakpoints jsonb;
@@ -2195,7 +2344,7 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.compute_job_status(p_job_id uuid)
+CREATE OR REPLACE FUNCTION public.compute_job_production_status(p_job_id uuid)
  RETURNS text
  LANGUAGE plpgsql
  STABLE
@@ -2203,28 +2352,23 @@ AS $function$
 DECLARE
     v_total int;
     v_cancelled int;
-    v_shipped int;
     v_completed int;
     v_in_progress int;
 BEGIN
-    SELECT
-      count(*),
-      count(*) FILTER (WHERE status = 'cancelled'),
-      count(*) FILTER (WHERE status = 'shipped'),
-      count(*) FILTER (WHERE status = 'completed'),
-      count(*) FILTER (WHERE status = 'in_progress')
-    INTO v_total, v_cancelled, v_shipped, v_completed, v_in_progress
-    FROM job_parts
-    WHERE job_id = p_job_id;
+    SELECT count(*),
+           count(*) FILTER (WHERE production_status = 'cancelled'),
+           count(*) FILTER (WHERE production_status = 'completed'),
+           count(*) FILTER (WHERE production_status = 'in_progress')
+      INTO v_total, v_cancelled, v_completed, v_in_progress
+      FROM public.job_parts WHERE job_id = p_job_id;
 
     IF v_total = 0 THEN RETURN 'not_started'; END IF;
     IF v_cancelled = v_total THEN RETURN 'cancelled'; END IF;
-    IF v_shipped = v_total THEN RETURN 'shipped'; END IF;
-    IF v_completed + v_shipped = v_total THEN RETURN 'completed'; END IF;
-    IF v_in_progress > 0 OR v_completed > 0 OR v_shipped > 0 THEN RETURN 'in_progress'; END IF;
+    -- All non-cancelled parts completed → completed
+    IF v_completed = v_total - v_cancelled THEN RETURN 'completed'; END IF;
+    IF v_in_progress > 0 OR v_completed > 0 THEN RETURN 'in_progress'; END IF;
     RETURN 'not_started';
-END;
-$function$
+END $function$
 
 ;
 
@@ -2235,6 +2379,7 @@ CREATE OR REPLACE FUNCTION public.compute_part_cost_at_qty(p_part_id uuid, p_qty
 AS $function$
 DECLARE
     v_source text;
+    v_preferred_vendor_id uuid;
     v_routing_id uuid;
     v_total numeric := 0;
     v_op RECORD;
@@ -2250,24 +2395,30 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT source INTO v_source FROM public.parts WHERE id = p_part_id;
+    SELECT source, preferred_vendor_id
+      INTO v_source, v_preferred_vendor_id
+      FROM public.parts
+     WHERE id = p_part_id;
     IF v_source IS NULL THEN
         RAISE EXCEPTION 'compute_part_cost_at_qty: part % not found', p_part_id;
     END IF;
 
-    -- ---------- Bought parts: resolve to a procurement tier ----------
+    -- ---------- Bought parts: resolve to a preferred-vendor tier ----------
     IF v_source = 'bought' THEN
+        IF v_preferred_vendor_id IS NULL THEN
+            RETURN NULL;
+        END IF;
         SELECT t.cost_per_unit
           INTO v_tier_cost
           FROM public.part_procurement_tiers t
          WHERE t.part_id = p_part_id
+           AND t.vendor_id = v_preferred_vendor_id
            AND t.min_quantity <= p_qty
            AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
-         ORDER BY (t.vendor_id IS NULL) ASC,
-                  t.cost_per_unit ASC,
+         ORDER BY t.cost_per_unit ASC,
                   t.min_quantity DESC
          LIMIT 1;
-        RETURN v_tier_cost;  -- NULL propagates if no tier matches
+        RETURN v_tier_cost;  -- NULL propagates if no tier matches under preferred vendor
     END IF;
 
     -- ---------- Made parts: own routing + BOM rollup ----------
@@ -2362,8 +2513,8 @@ AS $function$
 DECLARE
     v_missing jsonb;
 BEGIN
-    WITH RECURSIVE tree(part_id, part_name, source, cumulative_qty, depth) AS (
-        SELECT p.id, p.part_name, p.source, p_qty, 0
+    WITH RECURSIVE tree(part_id, part_name, source, preferred_vendor_id, cumulative_qty, depth) AS (
+        SELECT p.id, p.part_name, p.source, p.preferred_vendor_id, p_qty, 0
           FROM public.parts p
          WHERE p.id = p_part_id
 
@@ -2372,6 +2523,7 @@ BEGIN
         SELECT c.id,
                c.part_name,
                c.source,
+               c.preferred_vendor_id,
                t.cumulative_qty *
                    CASE
                        WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
@@ -2395,12 +2547,16 @@ BEGIN
         SELECT tr.part_id, tr.part_name, tr.depth, tr.cumulative_qty AS qty_required
           FROM tree tr
          WHERE tr.source = 'bought'
-           AND NOT EXISTS (
-               SELECT 1
-                 FROM public.part_procurement_tiers t
-                WHERE t.part_id = tr.part_id
-                  AND t.min_quantity <= tr.cumulative_qty
-                  AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+           AND (
+               tr.preferred_vendor_id IS NULL
+               OR NOT EXISTS (
+                   SELECT 1
+                     FROM public.part_procurement_tiers t
+                    WHERE t.part_id = tr.part_id
+                      AND t.vendor_id = tr.preferred_vendor_id
+                      AND t.min_quantity <= tr.cumulative_qty
+                      AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+               )
            )
     )
     SELECT COALESCE(
@@ -2589,6 +2745,43 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.enforce_quote_address_contact_customer()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF NEW.billing_address_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_addresses
+         WHERE id = NEW.billing_address_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'quotes.billing_address_id % does not belong to customer %',
+                NEW.billing_address_id, NEW.customer_id;
+        END IF;
+    END IF;
+    IF NEW.shipping_address_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_addresses
+         WHERE id = NEW.shipping_address_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'quotes.shipping_address_id % does not belong to customer %',
+                NEW.shipping_address_id, NEW.customer_id;
+        END IF;
+    END IF;
+    IF NEW.contact_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_contacts
+         WHERE id = NEW.contact_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'quotes.contact_id % does not belong to customer %',
+                NEW.contact_id, NEW.customer_id;
+        END IF;
+    END IF;
+    RETURN NEW;
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.generate_quote_number(company_uuid uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -2629,20 +2822,26 @@ CREATE OR REPLACE FUNCTION public.get_procurement_cost(p_part_id uuid, p_qty num
  STABLE
 AS $function$
 DECLARE
+    v_preferred_vendor_id uuid;
     v_tier RECORD;
 BEGIN
-    -- Pick the cheapest non-expired tier where min_quantity ≤ p_qty, with
-    -- vendor-specific tiers (vendor_id IS NOT NULL) preferred over NULL-vendor
-    -- tiers (import / internal-estimate rows). NULL-vendor wins only when no
-    -- vendor-specific tier matches the qty.
+    SELECT preferred_vendor_id INTO v_preferred_vendor_id
+      FROM public.parts WHERE id = p_part_id;
+    IF v_preferred_vendor_id IS NULL THEN
+        RETURN; -- no rows, callers treat as NULL cost
+    END IF;
+
+    -- Pick the cheapest non-expired tier under the preferred vendor where
+    -- min_quantity <= p_qty. Cross-vendor and NULL-vendor rows are now
+    -- reference-only; they never drive cost.
     SELECT t.id, t.cost_per_unit, t.vendor_id
       INTO v_tier
       FROM public.part_procurement_tiers t
      WHERE t.part_id = p_part_id
+       AND t.vendor_id = v_preferred_vendor_id
        AND t.min_quantity <= p_qty
        AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
-     ORDER BY (t.vendor_id IS NULL) ASC,
-              t.cost_per_unit ASC,
+     ORDER BY t.cost_per_unit ASC,
               t.min_quantity DESC
      LIMIT 1;
 
@@ -2653,7 +2852,7 @@ BEGIN
         source := 'tier';
         RETURN NEXT;
     END IF;
-    -- No row returned when no tier matches. Callers must treat empty as NULL.
+    -- No row returned when no tier matches under the preferred vendor.
 END;
 $function$
 
@@ -2687,7 +2886,7 @@ BEGIN
               SELECT 1 FROM job_operations prev
               WHERE prev.job_part_id = jo.job_part_id
                 AND prev.sequence < jo.sequence
-                AND prev.status NOT IN ('completed', 'skipped')
+                AND prev.status <> 'completed'
           )
     ),
     ready_agg AS (
@@ -2732,7 +2931,7 @@ BEGIN
                SELECT 1 FROM job_operations prev
                WHERE prev.job_part_id = so.job_part_id
                  AND prev.sequence < so.sequence
-                 AND prev.status NOT IN ('completed', 'skipped')
+                 AND prev.status <> 'completed'
            )
     )
     SELECT
@@ -2788,6 +2987,26 @@ AS $function$
 BEGIN
     RETURN EXISTS (SELECT 1 FROM system_admins WHERE user_id = check_user_id);
 END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.job_last_ship_date(p_job_id uuid)
+ RETURNS date
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT NULL::date  -- PR 4 will replace this body
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.job_part_last_ship_date(p_job_part_id uuid)
+ RETURNS date
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT NULL::date  -- PR 4 will replace this body
 $function$
 
 ;
@@ -3198,61 +3417,58 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.sync_job_status_from_parts()
+CREATE OR REPLACE FUNCTION public.sync_job_production_status_from_parts()
  RETURNS trigger
  LANGUAGE plpgsql
 AS $function$
 DECLARE
     v_job_id uuid;
-    v_new_status text;
+    v_new text;
     v_now timestamptz := now();
 BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
     v_job_id := COALESCE(NEW.job_id, OLD.job_id);
-    v_new_status := compute_job_status(v_job_id);
+    v_new := public.compute_job_production_status(v_job_id);
 
-    UPDATE jobs
-    SET status = v_new_status,
-        status_changed_at = CASE WHEN status IS DISTINCT FROM v_new_status THEN v_now ELSE status_changed_at END,
-        started_at = CASE
-            WHEN started_at IS NULL AND v_new_status IN ('in_progress','completed','shipped')
-              THEN v_now ELSE started_at END,
-        completed_at = CASE
-            WHEN v_new_status IN ('completed','shipped') AND completed_at IS NULL THEN v_now
-            WHEN v_new_status = 'in_progress' THEN NULL
-            ELSE completed_at END,
-        shipped_at = CASE
-            WHEN v_new_status = 'shipped' AND shipped_at IS NULL THEN v_now
-            WHEN v_new_status <> 'shipped' THEN NULL
-            ELSE shipped_at END,
-        updated_at = v_now
-    WHERE id = v_job_id;
+    UPDATE public.jobs
+       SET production_status = v_new,
+           status_changed_at = CASE
+               WHEN production_status IS DISTINCT FROM v_new THEN v_now
+               ELSE status_changed_at
+           END,
+           started_at = CASE
+               WHEN started_at IS NULL AND v_new IN ('in_progress','completed')
+                   THEN v_now
+               ELSE started_at
+           END,
+           completed_at = CASE
+               WHEN v_new = 'completed' AND completed_at IS NULL THEN v_now
+               WHEN v_new = 'in_progress' THEN NULL
+               ELSE completed_at
+           END,
+           updated_at = v_now
+     WHERE id = v_job_id;
 
     RETURN NULL;
-END;
-$function$
+END $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.track_job_status_change()
+CREATE OR REPLACE FUNCTION public.track_job_production_status_change()
  RETURNS trigger
  LANGUAGE plpgsql
 AS $function$
 BEGIN
-  IF OLD.status IS DISTINCT FROM NEW.status THEN
-    NEW.status_changed_at := NOW();
-
-    -- Auto-set timestamps based on status
-    IF NEW.status = 'in_progress' AND NEW.started_at IS NULL THEN
-      NEW.started_at := NOW();
-    ELSIF NEW.status = 'completed' AND NEW.completed_at IS NULL THEN
-      NEW.completed_at := NOW();
-    ELSIF NEW.status = 'shipped' AND NEW.shipped_at IS NULL THEN
-      NEW.shipped_at := NOW();
+    IF OLD.production_status IS DISTINCT FROM NEW.production_status THEN
+        NEW.status_changed_at := now();
+        IF NEW.production_status = 'in_progress' AND NEW.started_at IS NULL THEN
+            NEW.started_at := now();
+        ELSIF NEW.production_status = 'completed' AND NEW.completed_at IS NULL THEN
+            NEW.completed_at := now();
+        END IF;
     END IF;
-  END IF;
-  RETURN NEW;
-END;
-$function$
+    RETURN NEW;
+END $function$
 
 ;
 
@@ -3322,6 +3538,9 @@ CREATE TRIGGER companies_seed_default_markup_rates AFTER INSERT ON public.compan
 DROP TRIGGER IF EXISTS "companies_updated_at" ON "public"."companies";
 CREATE TRIGGER companies_updated_at BEFORE UPDATE ON public.companies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "customer_contacts_updated_at" ON "public"."customer_contacts";
+CREATE TRIGGER customer_contacts_updated_at BEFORE UPDATE ON public.customer_contacts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS "customers_updated_at" ON "public"."customers";
 CREATE TRIGGER customers_updated_at BEFORE UPDATE ON public.customers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -3337,20 +3556,20 @@ CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations 
 DROP TRIGGER IF EXISTS "job_parts_updated_at" ON "public"."job_parts";
 CREATE TRIGGER job_parts_updated_at BEFORE UPDATE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_del" ON "public"."job_parts";
-CREATE TRIGGER trigger_sync_job_status_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_status_from_parts();
+DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_del" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_production_status_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_production_status_from_parts();
 
-DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_ins" ON "public"."job_parts";
-CREATE TRIGGER trigger_sync_job_status_from_parts_ins AFTER INSERT ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_status_from_parts();
+DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_ins" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_production_status_from_parts_ins AFTER INSERT ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_production_status_from_parts();
 
-DROP TRIGGER IF EXISTS "trigger_sync_job_status_from_parts_upd" ON "public"."job_parts";
-CREATE TRIGGER trigger_sync_job_status_from_parts_upd AFTER UPDATE OF status ON public.job_parts FOR EACH ROW WHEN ((old.status IS DISTINCT FROM new.status)) EXECUTE FUNCTION sync_job_status_from_parts();
+DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_upd" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_production_status_from_parts_upd AFTER UPDATE OF production_status ON public.job_parts FOR EACH ROW WHEN ((old.production_status IS DISTINCT FROM new.production_status)) EXECUTE FUNCTION sync_job_production_status_from_parts();
 
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS "trigger_job_status_change" ON "public"."jobs";
-CREATE TRIGGER trigger_job_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_status_change();
+DROP TRIGGER IF EXISTS "trigger_job_production_status_change" ON "public"."jobs";
+CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_production_status_change();
 
 DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
 CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -3372,6 +3591,9 @@ CREATE TRIGGER parts_bom_no_cycles BEFORE INSERT OR UPDATE OF parent_part_id, ch
 
 DROP TRIGGER IF EXISTS "parts_bom_updated_at" ON "public"."parts_bom";
 CREATE TRIGGER parts_bom_updated_at BEFORE UPDATE ON public.parts_bom FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "enforce_quote_address_contact_customer_trg" ON "public"."quotes";
+CREATE TRIGGER enforce_quote_address_contact_customer_trg BEFORE INSERT OR UPDATE OF billing_address_id, shipping_address_id, contact_id, customer_id ON public.quotes FOR EACH ROW EXECUTE FUNCTION enforce_quote_address_contact_customer();
 
 DROP TRIGGER IF EXISTS "quotes_updated_at" ON "public"."quotes";
 CREATE TRIGGER quotes_updated_at BEFORE UPDATE ON public.quotes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -3421,6 +3643,9 @@ COMMENT ON TABLE "public"."companies"
 
 COMMENT ON TABLE "public"."company_custom_units"
     IS 'Custom measurement units defined per company for inventory tracking. Supplements the standard built-in units. Each unit name must be unique within a company.';
+
+COMMENT ON TABLE "public"."customer_contacts"
+    IS 'People at a customer. Replaces the single embedded contact_name/email/phone columns on customers. Each row is one person with a role + optional email/phone. At most one row per customer can have is_primary=true (enforced by the customer_contacts_one_primary partial unique index).';
 
 COMMENT ON TABLE "public"."customers"
     IS 'Customer records for each company. Customers place orders, receive quotes, and have jobs manufactured for them. Linked to parts (customer-specific parts), quotes, and jobs. Cannot be deleted if quotes or jobs exist (RESTRICT).';
@@ -3557,6 +3782,18 @@ COMMENT ON COLUMN "public"."companies"."created_at"
 COMMENT ON COLUMN "public"."companies"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."companies"."packing_slip_number_format"
+    IS 'Template string for generated packing slip numbers. Tokens: {YYYY} = ship year, {seq:0000} = zero-padded sequence (zero count sets width). Default ''PS-{YYYY}-{seq:0000}''. Consumed by public.next_packing_slip_number() (PR 4).';
+
+COMMENT ON COLUMN "public"."companies"."packing_slip_seq_year"
+    IS 'Year of the most recent packing slip number issued. When the current year differs, next_packing_slip_number() resets the sequence to 1. Server-UTC; not customer-local.';
+
+COMMENT ON COLUMN "public"."companies"."packing_slip_next_seq"
+    IS 'Next sequence number to issue for a packing slip. Incremented atomically under a row lock by next_packing_slip_number(). Defaults to 1 for new companies; legacy-data backfill (PR 4) advances this past the synthetic-shipment count.';
+
+COMMENT ON COLUMN "public"."companies"."default_coc_text"
+    IS 'Shop-wide default Certificate of Conformance text. Last step in the cascade (shipment.coc_text → customer.default_coc_text → company.default_coc_text → omit).';
+
 COMMENT ON COLUMN "public"."company_custom_units"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -3568,6 +3805,21 @@ COMMENT ON COLUMN "public"."company_custom_units"."unit_name"
 
 COMMENT ON COLUMN "public"."company_custom_units"."created_at"
     IS 'Timestamp when the custom unit was created. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."customer_addresses"."default_billing"
+    IS 'True when this row is the customer''s default billing address. At most one row per customer can be true (enforced by idx_customer_addresses_one_default_billing). The row''s postal data is still a postal address regardless of this flag.';
+
+COMMENT ON COLUMN "public"."customer_addresses"."default_shipping"
+    IS 'True when this row is the customer''s default shipping address. At most one row per customer can be true (enforced by idx_customer_addresses_one_default_shipping). Falls back to default_billing in product behavior when no row is default_shipping — see utils/customerAccess.ts pickShippingAddress.';
+
+COMMENT ON COLUMN "public"."customer_addresses"."attention_to"
+    IS 'Optional "ATTN:" recipient line that prints above the address on packing slips. The shipment row can override this with shipping_contact_id; see utils/shipmentsAccess.ts resolveAttentionLine.';
+
+COMMENT ON COLUMN "public"."customer_contacts"."role_label"
+    IS 'Free-text label used when role=''other''. Lets the UI render "Other (Production Buyer)" without inventing a new enum value for every customer-specific role.';
+
+COMMENT ON COLUMN "public"."customer_contacts"."is_primary"
+    IS 'True for the contact treated as the customer''s primary point of contact. Surfaced on the customers list page and as a star badge on the customer detail page. Enforced unique-per-customer by the customer_contacts_one_primary partial index.';
 
 COMMENT ON COLUMN "public"."customers"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -3581,38 +3833,20 @@ COMMENT ON COLUMN "public"."customers"."name"
 COMMENT ON COLUMN "public"."customers"."website"
     IS 'Customer website URL. Optional.';
 
-COMMENT ON COLUMN "public"."customers"."contact_name"
-    IS 'Primary contact person name at customer.';
-
-COMMENT ON COLUMN "public"."customers"."contact_phone"
-    IS 'Primary contact phone number.';
-
-COMMENT ON COLUMN "public"."customers"."contact_email"
-    IS 'Primary contact email address.';
-
-COMMENT ON COLUMN "public"."customers"."address_line1"
-    IS 'Street address line 1.';
-
-COMMENT ON COLUMN "public"."customers"."address_line2"
-    IS 'Street address line 2 (suite, unit, etc.).';
-
-COMMENT ON COLUMN "public"."customers"."city"
-    IS 'City name.';
-
-COMMENT ON COLUMN "public"."customers"."state"
-    IS 'State/province code or name.';
-
-COMMENT ON COLUMN "public"."customers"."postal_code"
-    IS 'ZIP/postal code.';
-
-COMMENT ON COLUMN "public"."customers"."country"
-    IS 'Country code or name. Default: "USA"';
-
 COMMENT ON COLUMN "public"."customers"."created_at"
     IS 'Timestamp when customer was created.';
 
 COMMENT ON COLUMN "public"."customers"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
+
+COMMENT ON COLUMN "public"."customers"."default_shipping_arrangement"
+    IS 'Per-customer default shipping arrangement (freight terms). Same enum as shipments.shipping_arrangement. Prefilled onto the Create Shipment form. NULL when no default has been set.';
+
+COMMENT ON COLUMN "public"."customers"."default_carrier"
+    IS 'Per-customer default carrier name (free text — UPS, FedEx, customer''s freight provider, etc.). Prefilled onto the Create Shipment form.';
+
+COMMENT ON COLUMN "public"."customers"."default_coc_text"
+    IS 'Per-customer default Certificate of Conformance text block printed on the packing slip when the shipment does not override it. Cascade order: shipment.coc_text → customer.default_coc_text → company.default_coc_text → omit.';
 
 COMMENT ON COLUMN "public"."demo_data_templates"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -3681,7 +3915,7 @@ COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
     IS 'NULL while session is active. Set when operator stops or completes work.';
 
 COMMENT ON COLUMN "public"."part_procurement_tiers"."vendor_id"
-    IS 'Vendor offering this tier. NULL = "internal estimate" (sketch before sourcing). When set, ON DELETE RESTRICT prevents removing a vendor that still has live tier sheets — drop the tiers first.';
+    IS 'Vendor whose sheet this tier belongs to. Cost resolution restricts to the part''s preferred_vendor_id — sheets under other vendors (and vendor_id=NULL "Internal estimate" rows) are reference-only and never drive cost. To switch which sheet drives cost, change the part''s preferred_vendor_id.';
 
 COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
     IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
@@ -3733,6 +3967,18 @@ COMMENT ON COLUMN "public"."quote_materials"."item_name"
 
 COMMENT ON COLUMN "public"."quote_materials"."part_id"
     IS 'The manufactured part this material consumption belongs to (the line-item part on the quote).';
+
+COMMENT ON COLUMN "public"."quotes"."customer_po_number"
+    IS 'Customer-issued PO number associated with this quote/order. Indexed (partial) per (company_id, customer_po_number) for lookup, and via pg_trgm in PR 4 for the jobs-list search.';
+
+COMMENT ON COLUMN "public"."quotes"."billing_address_id"
+    IS 'Customer address used for BILL TO on the printable quote and downstream shipments. Set at quote creation from the customer''s default_billing row; editable per-quote.';
+
+COMMENT ON COLUMN "public"."quotes"."shipping_address_id"
+    IS 'Customer address used for SHIP TO on the printable quote and downstream shipments. Set at quote creation from the customer''s default_shipping row (falling back to default_billing); editable per-quote.';
+
+COMMENT ON COLUMN "public"."quotes"."contact_id"
+    IS 'Customer contact the quote is addressed to. Renders as the Customer Contact section on the printed quote (name, role, email, phone). Defaults at quote creation to the customer''s primary contact (is_primary=true in customer_contacts); editable per-quote.';
 
 COMMENT ON COLUMN "public"."routing_operations"."sequence"
     IS 'Linear order within the routing. Lower values execute first. Steps of 10 (10, 20, 30...) leave room for inserts.';

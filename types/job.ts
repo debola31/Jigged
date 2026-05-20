@@ -104,6 +104,14 @@ export interface JobPart {
  * shipped — the FR-18 predicate. Cancelled-and-fully-shipped jobs stop
  * the clock; cancelled-and-partially-shipped do too (the customer's
  * remaining order never ships).
+ *
+ * Date comparison: due_date is a YYYY-MM-DD string. JavaScript's
+ * `new Date('YYYY-MM-DD')` parses as UTC midnight, which is the previous
+ * calendar day in negative-UTC timezones — so `new Date('2026-05-19') <
+ * localMidnight(2026-05-19)` is wrongly true in US Pacific, painting a
+ * job-due-today as overdue. We parse the YMD parts directly into a
+ * LOCAL date so the comparison matches both the user's intuition and
+ * the server-side filter (which uses todayLocalISODate in jobsAccess).
  */
 export function isJobOverdue(
   job: Pick<Job, 'due_date' | 'production_status' | 'fulfillment_status'>,
@@ -111,9 +119,12 @@ export function isJobOverdue(
   if (!job.due_date) return false;
   if (isJobDone(job)) return false;
   if (job.production_status === 'cancelled') return false;
+  const [y, m, d] = job.due_date.split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return false;
+  const dueLocal = new Date(y, m - 1, d);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return new Date(job.due_date) < today;
+  return dueLocal < today;
 }
 
 /**

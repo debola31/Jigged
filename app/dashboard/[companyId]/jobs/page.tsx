@@ -271,6 +271,14 @@ export default function JobsPage() {
 
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
+    // Parse YYYY-MM-DD as local (not UTC) so the displayed date matches
+    // the calendar day the user actually picked — see isJobOverdue for
+    // the same UTC-parsing trap.
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return d.toLocaleDateString();
+    }
     return new Date(dateStr).toLocaleDateString();
   };
 
@@ -333,9 +341,18 @@ export default function JobsPage() {
         if (!params.data || !value) return '—';
         const dueDateStr = formatDate(value);
         if (!isJobOverdue(params.data)) return dueDateStr;
+        // Days overdue from local-midnight today to the (local-parsed)
+        // due date. Avoids the UTC-parsing skew for negative-offset users
+        // — see isJobOverdue for the same trap.
+        const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+        const dueLocal = ymd
+          ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+          : new Date(value);
+        const todayMid = new Date();
+        todayMid.setHours(0, 0, 0, 0);
         const daysOverdue = Math.max(
           0,
-          Math.floor((Date.now() - new Date(value).getTime()) / (1000 * 60 * 60 * 24)),
+          Math.floor((todayMid.getTime() - dueLocal.getTime()) / (1000 * 60 * 60 * 24)),
         );
         // Overdue cue: trailing icon in error.main. Date itself keeps the
         // standard cell color so the column reads consistently with the rest.

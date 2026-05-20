@@ -41,9 +41,10 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import { ProductionStatusChip, FulfillmentStatusChip } from '@/components/jobs/JobStatusChip';
-import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
+import { isJobOverdue } from '@/types/job';
+import Tooltip from '@mui/material/Tooltip';
 import Chip from '@mui/material/Chip';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import type {
   JobWithRelations,
   JobFilters,
@@ -74,6 +75,25 @@ function parseProductionParam(v: string | null): ProductionStatus[] | 'all' | un
   return parts.length > 0 ? (parts as ProductionStatus[]) : undefined;
 }
 
+/**
+ * Theme-aware text color for a production-status cell. The "happy path"
+ * states (in_progress, completed) get info/success; cancelled gets
+ * error; not_started stays neutral so a fresh job doesn't shout.
+ */
+function productionColor(status: ProductionStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return 'info.main';
+    case 'completed':
+      return 'success.main';
+    case 'cancelled':
+      return 'error.main';
+    case 'not_started':
+    default:
+      return 'text.primary';
+  }
+}
+
 function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | undefined {
   if (!v) return undefined;
   if (v === 'all') return 'all';
@@ -99,11 +119,6 @@ export default function JobsPage() {
   const [fulfillmentFilter, setFulfillmentFilter] = useState<
     JobFilters['fulfillmentStatus']
   >(() => parseFulfillmentParam(searchParams.get('fulfillment')));
-  // FR-19: hide done jobs by default. Surfaced by a "Show done jobs" toggle
-  // that flips excludeDone to false in the access call.
-  const [showDoneJobs, setShowDoneJobs] = useState<boolean>(
-    () => searchParams.get('done') === 'true',
-  );
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
@@ -156,13 +171,18 @@ export default function JobsPage() {
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
+      // FR-19: hide done jobs by default — unless the user has explicitly
+      // filtered Fulfillment to include "Fully Shipped", in which case
+      // they've asked to see those rows.
+      const fulfillmentIncludesShipped =
+        Array.isArray(fulfillmentFilter) && fulfillmentFilter.includes('fully_shipped');
       const filters: JobFilters = {
         productionStatus: productionFilter,
         fulfillmentStatus: fulfillmentFilter,
         customerId: customerFilter || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
-        excludeDone: !showDoneJobs,
+        excludeDone: !fulfillmentIncludesShipped,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
 
@@ -198,7 +218,6 @@ export default function JobsPage() {
     searchDebounced,
     sortModel,
     overdueOnly,
-    showDoneJobs,
   ]);
 
   useEffect(() => {
@@ -211,7 +230,7 @@ export default function JobsPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, productionFilter, fulfillmentFilter, customerFilter, overdueOnly, showDoneJobs]);
+  }, [searchDebounced, productionFilter, fulfillmentFilter, customerFilter, overdueOnly]);
 
   const gridHeight = useMemo(() => {
     if (loading || jobs.length === 0) return 600;
@@ -382,19 +401,40 @@ export default function JobsPage() {
       },
     },
     {
-      // No corresponding field on the new schema — production and
-      // fulfillment are independent columns; the renderer surfaces both.
+      // Production + fulfillment are independent columns on the schema;
+      // surface both as a two-line text block (production bold + colored,
+      // fulfillment muted secondary) instead of chips. Chips read too
+      // loud for a column that always carries two parallel facts.
       colId: 'status',
       headerName: 'Status',
-      width: 240,
+      width: 200,
       sortable: false,
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
+        const prod = PRODUCTION_STATUS_CONFIG[params.data.production_status];
+        const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
         return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%', flexWrap: 'wrap' }}>
-            <ProductionStatusChip status={params.data.production_status} size="small" />
-            <FulfillmentStatusChip status={params.data.fulfillment_status} size="small" />
-            <JobOverdueBadge job={params.data} size="small" />
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              height: '100%',
+              lineHeight: 1.25,
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 600,
+                color: productionColor(params.data.production_status),
+              }}
+            >
+              {prod.label}
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {ful.label}
+            </Typography>
           </Box>
         );
       },
@@ -402,8 +442,52 @@ export default function JobsPage() {
     {
       field: 'due_date',
       headerName: 'Due',
-      width: 110,
-      valueFormatter: (params) => (params.value ? formatDate(params.value) : '—'),
+      width: 140,
+      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
+        if (!params.data || !params.value) {
+          return (
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: '52px' }}>
+              —
+            </Typography>
+          );
+        }
+        const overdue = isJobOverdue(params.data);
+        const dueDateStr = formatDate(params.value);
+        if (!overdue) {
+          return (
+            <Typography variant="body2" sx={{ lineHeight: '52px' }}>
+              {dueDateStr}
+            </Typography>
+          );
+        }
+        const daysOverdue = Math.max(
+          0,
+          Math.floor(
+            (Date.now() - new Date(params.value).getTime()) / (1000 * 60 * 60 * 24),
+          ),
+        );
+        return (
+          <Tooltip
+            title={`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`}
+            arrow
+          >
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                height: '100%',
+                color: 'error.main',
+              }}
+            >
+              <ScheduleIcon sx={{ fontSize: 16 }} />
+              <Typography variant="body2" sx={{ color: 'inherit', fontWeight: 600 }}>
+                {dueDateStr}
+              </Typography>
+            </Box>
+          </Tooltip>
+        );
+      },
     },
     {
       field: 'created_at',
@@ -479,7 +563,7 @@ export default function JobsPage() {
             onChange={(value) =>
               setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined)
             }
-            label="Production"
+            label="Production Status"
             allowNone
             noneLabel="Any"
             size="small"
@@ -493,7 +577,7 @@ export default function JobsPage() {
             onChange={(value) =>
               setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined)
             }
-            label="Fulfillment"
+            label="Fulfillment Status"
             allowNone
             noneLabel="Any"
             size="small"
@@ -521,18 +605,6 @@ export default function JobsPage() {
             />
           }
           label="Overdue only"
-          sx={{ ml: 0 }}
-        />
-
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={showDoneJobs}
-              onChange={(e) => setShowDoneJobs(e.target.checked)}
-              size="small"
-            />
-          }
-          label="Show done jobs"
           sx={{ ml: 0 }}
         />
 

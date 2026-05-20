@@ -63,7 +63,6 @@ interface JobContext {
 interface PartRowState {
   job_part_id: string;
   part_name: string;
-  part_number: string | null;
   qty_ordered: number;
   qty_shipped_prior: number;
   qty_remaining: number;
@@ -139,7 +138,7 @@ export default function CreateShipmentModal({
              ),
              job_parts (
                id, sequence, quantity,
-               parts (id, part_name, part_number)
+               parts (id, part_name)
              )`,
           )
           .eq('id', jobId)
@@ -167,7 +166,7 @@ export default function CreateShipmentModal({
             id: string;
             sequence: number;
             quantity: number;
-            parts: { id: string; part_name: string; part_number: string | null } | null;
+            parts: { id: string; part_name: string } | null;
           }>;
         };
         setJobCtx(ctx);
@@ -199,7 +198,6 @@ export default function CreateShipmentModal({
             return {
               job_part_id: jp.id,
               part_name: jp.parts?.part_name ?? 'Part',
-              part_number: jp.parts?.part_number ?? null,
               qty_ordered: Number(jp.quantity),
               qty_shipped_prior: prior,
               qty_remaining: remaining,
@@ -492,13 +490,8 @@ export default function CreateShipmentModal({
                       <TableRow key={row.job_part_id}>
                         <TableCell>
                           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {row.part_number || row.part_name}
+                            {row.part_name}
                           </Typography>
-                          {row.part_number && row.part_name !== row.part_number ? (
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                              {row.part_name}
-                            </Typography>
-                          ) : null}
                         </TableCell>
                         <TableCell align="right">{row.qty_ordered}</TableCell>
                         <TableCell align="right">{row.qty_shipped_prior}</TableCell>

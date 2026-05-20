@@ -45,7 +45,7 @@
 -- Indexes introduced:
 --   - shipments / shipment_line_items / job_fulfillment_audit B-trees
 --   - pg_trgm GIN indexes on jobs.job_number, quotes.customer_po_number,
---     customers.name, parts.part_number, shipments.packing_slip_number
+--     customers.name, parts.part_name, shipments.packing_slip_number
 --     (consumed by the extended jobs-list search in PR 6)
 --
 -- Synthetic-shipment backfill. Every job_part that PR 3 marked
@@ -858,8 +858,8 @@ CREATE INDEX IF NOT EXISTS idx_quotes_customer_po_number_trgm
     ON public.quotes USING gin (customer_po_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_customers_name_trgm
     ON public.customers USING gin (name gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_parts_part_number_trgm
-    ON public.parts USING gin (part_number gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_parts_part_name_trgm
+    ON public.parts USING gin (part_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_shipments_packing_slip_trgm
     ON public.shipments USING gin (packing_slip_number gin_trgm_ops);
 

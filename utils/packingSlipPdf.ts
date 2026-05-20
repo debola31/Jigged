@@ -337,8 +337,8 @@ export async function generatePackingSlipPdf(
     const ja = a.job_part?.job?.job_number ?? '';
     const jb = b.job_part?.job?.job_number ?? '';
     if (ja !== jb) return ja.localeCompare(jb);
-    const pa = a.job_part?.part?.part_number ?? a.job_part?.part?.part_name ?? '';
-    const pb = b.job_part?.part?.part_number ?? b.job_part?.part?.part_name ?? '';
+    const pa = a.job_part?.part?.part_name ?? '';
+    const pb = b.job_part?.part?.part_name ?? '';
     return pa.localeCompare(pb);
   });
 
@@ -354,19 +354,19 @@ export async function generatePackingSlipPdf(
   const showRemaining = remainingByLine.some((r) => r > 0);
 
   const head = showRemaining
-    ? [['Customer PO', 'Part #', 'Description', 'Qty Shipped', 'Qty Remaining']]
-    : [['Customer PO', 'Part #', 'Description', 'Qty Shipped']];
+    ? [['Customer PO', 'Part', 'Description', 'Qty Shipped', 'Qty Remaining']]
+    : [['Customer PO', 'Part', 'Description', 'Qty Shipped']];
 
   const body = lineItems.map((li, idx) => {
     const part = li.job_part?.part;
     const po = li.job_part?.job?.customer_po_number ?? '';
-    const partNumber = part?.part_number ?? part?.part_name ?? '—';
+    const partName = part?.part_name ?? '—';
     const description = part?.description?.trim() ?? '';
     const qtyShipped = formatNumber(Number(li.quantity));
     const remaining = remainingByLine[idx];
     const row = [
       po || '—',
-      partNumber,
+      partName,
       description,
       qtyShipped,
     ];

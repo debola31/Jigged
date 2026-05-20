@@ -13,7 +13,7 @@
 --
 --   2. `search_jobs_by_identifier(p_company_id, p_query)` — the
 --      jobs-list search RPC. ILIKE-joins job_number, quotes.customer_po_number,
---      jobs.customer_po_number, customers.name, parts.part_number (via
+--      jobs.customer_po_number, customers.name, parts.part_name (via
 --      job_parts), and shipments.packing_slip_number (via shipment_line_items
 --      → job_parts → jobs). Returns one row per matching job with a
 --      match_source label so the UI can render "matched packing slip"
@@ -136,7 +136,7 @@ BEGIN
                 FROM public.job_parts jp
                 JOIN public.parts p ON p.id = jp.part_id
                WHERE jp.job_id = jobs.id
-                 AND (p.part_number ILIKE v_pattern OR p.part_name ILIKE v_pattern)
+                 AND p.part_name ILIKE v_pattern
                LIMIT 1
           ) AS m ON TRUE
          WHERE jobs.company_id = p_company_id
@@ -145,7 +145,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION public.search_jobs_by_identifier(uuid, text) IS
-    'Extended jobs-list search across job_number, customer_po (jobs + quotes), customers.name, parts.part_number/part_name, shipments.packing_slip_number. Returns one row per matching job with the highest-priority match_source. Capped at 100 rows.';
+    'Extended jobs-list search across job_number, customer_po (jobs + quotes), customers.name, parts.part_name, shipments.packing_slip_number. Returns one row per matching job with the highest-priority match_source. Capped at 100 rows.';
 
 REVOKE ALL ON FUNCTION public.search_jobs_by_identifier(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.search_jobs_by_identifier(uuid, text) TO authenticated;

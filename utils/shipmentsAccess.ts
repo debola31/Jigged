@@ -114,7 +114,7 @@ export async function getShipmentById(
          id, shipment_id, job_part_id, quantity, created_at,
          job_part:job_parts (
            id, job_id, quantity,
-           part:parts (id, part_name, part_number, description),
+           part:parts (id, part_name, description),
            job:jobs (id, job_number, customer_po_number, quote_id)
          )
        )`,
@@ -154,7 +154,7 @@ export async function getShipmentsForJob(
          id, shipment_id, job_part_id, quantity, created_at,
          job_part:job_parts!inner (
            id, job_id, quantity,
-           part:parts (id, part_name, part_number, description),
+           part:parts (id, part_name, description),
            job:jobs (id, job_number, customer_po_number, quote_id)
          )
        )`,

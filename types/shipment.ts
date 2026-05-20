@@ -73,7 +73,6 @@ export interface ShipmentWithRelations extends Shipment {
       part?: {
         id: string;
         part_name: string;
-        part_number: string | null;
         description: string | null;
       } | null;
       job?: {

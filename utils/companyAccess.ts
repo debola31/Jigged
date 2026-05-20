@@ -246,7 +246,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, packing_slip_number_format, default_coc_text'
     )
     .eq('id', companyId)
     .single();

@@ -640,6 +640,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       handleFieldChange('contact_id', v?.id ?? '');
                     }}
                     isOptionEqualToValue={(o, v) => o.id === v.id}
+                    renderOption={(props, option) => (
+                      <li
+                        {...props}
+                        style={
+                          option.id === ADD_NEW_CONTACT_ID
+                            ? { fontStyle: 'italic' }
+                            : undefined
+                        }
+                      >
+                        {option.name}
+                      </li>
+                    )}
                     renderInput={(params) => (
                       <TextField {...params} label="Contact" />
                     )}
@@ -669,7 +681,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                           <AddressLines address={a} />
                         </MenuItem>
                       ))}
-                      <MenuItem value={ADD_NEW_ADDRESS_ID}>+ Add new address</MenuItem>
+                      <MenuItem value={ADD_NEW_ADDRESS_ID} sx={{ fontStyle: 'italic' }}>
+                        + Add new address
+                      </MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
@@ -715,7 +729,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                           <AddressLines address={a} />
                         </MenuItem>
                       ))}
-                      <MenuItem value={ADD_NEW_ADDRESS_ID}>+ Add new address</MenuItem>
+                      <MenuItem value={ADD_NEW_ADDRESS_ID} sx={{ fontStyle: 'italic' }}>
+                        + Add new address
+                      </MenuItem>
                     </Select>
                   </FormControl>
                 </Box>

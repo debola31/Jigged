@@ -142,10 +142,14 @@ export interface QuoteFormPartBlock {
  * Supabase create/update layer translates '' to NULL. Defaults are loaded
  * from the customer when the customer is first selected (only when the
  * field is empty, so edit mode doesn't clobber the original FK).
+ *
+ * NOTE: customer_po_number is intentionally NOT on this form. The customer
+ * issues the PO after accepting the quote, so it's collected during the
+ * quote-to-job conversion (see ConvertToJobOptions in utils/quotesAccess.ts).
+ * The Quote interface still carries the column for storage.
  */
 export interface QuoteFormData {
   customer_id: string;
-  customer_po_number: string;
   billing_address_id: string;
   shipping_address_id: string;
   billing_contact_id: string;
@@ -191,7 +195,6 @@ function defaultExpirationDate(): string {
 
 export const EMPTY_QUOTE_FORM: QuoteFormData = {
   customer_id: '',
-  customer_po_number: '',
   billing_address_id: '',
   shipping_address_id: '',
   billing_contact_id: '',
@@ -217,7 +220,6 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
   }
   return {
     customer_id: quote.customer_id,
-    customer_po_number: quote.customer_po_number ?? '',
     billing_address_id: quote.billing_address_id ?? '',
     shipping_address_id: quote.shipping_address_id ?? '',
     billing_contact_id: quote.billing_contact_id ?? '',

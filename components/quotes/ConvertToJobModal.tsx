@@ -54,6 +54,13 @@ export default function ConvertToJobModal({
   const [dueDateInput, setDueDateInput] = useState<string>(
     defaultDueDateISO(quote.lead_time_days),
   );
+  // Customer PO is captured at conversion (when the customer has accepted
+  // and issued a PO), not at quote-creation. Pre-fills with any value
+  // already on the quote (e.g. a previous conversion attempt that errored
+  // mid-flight); blank when the quote has none.
+  const [customerPoInput, setCustomerPoInput] = useState<string>(
+    quote.customer_po_number ?? '',
+  );
 
   const lineItems = useMemo(
     () => [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence),
@@ -63,8 +70,9 @@ export default function ConvertToJobModal({
   useEffect(() => {
     if (!open) return;
     setDueDateInput(defaultDueDateISO(quote.lead_time_days));
+    setCustomerPoInput(quote.customer_po_number ?? '');
     setError(null);
-  }, [open, quote.lead_time_days]);
+  }, [open, quote.lead_time_days, quote.customer_po_number]);
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
 
@@ -76,6 +84,7 @@ export default function ConvertToJobModal({
     try {
       const result = await convertQuoteToJob(quote.id, {
         dueDate: dueDateInput || null,
+        customerPoNumber: customerPoInput,
       });
       onConverted(result.job.id);
     } catch (err) {
@@ -164,6 +173,15 @@ export default function ConvertToJobModal({
               slotProps={{
                 inputLabel: { shrink: true },
               }}
+            />
+            <TextField
+              label="Customer PO #"
+              size="small"
+              fullWidth
+              value={customerPoInput}
+              onChange={(e) => setCustomerPoInput(e.target.value)}
+              disabled={loading}
+              helperText="The PO number the customer referenced when accepting this quote. Optional."
             />
           </Box>
         </Box>

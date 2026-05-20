@@ -16,6 +16,11 @@ export interface Company {
   country?: string | null;
   is_demo?: boolean;
   demo_company_id?: string | null;
+  // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
+  settings?: Record<string, unknown> | null;
+  // Packing-slip number generation (set by PR1; consumed by the RPC in PR4).
+  packing_slip_number_format?: string | null;
+  default_coc_text?: string | null;
 }
 
 export type CompanyProfilePatch = Pick<

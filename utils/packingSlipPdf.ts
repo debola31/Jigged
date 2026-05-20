@@ -1,0 +1,557 @@
+/**
+ * Generate a printable packing slip PDF for a shipment.
+ *
+ * Modeled on utils/quotePdf.ts. jsPDF + jspdf-autotable, same letter
+ * format and margins. The PDF is generated client-side from a hydrated
+ * shipment + the customer's billing address + the company profile.
+ *
+ * Layout (FR-8):
+ *   - Header: company logo (top-left when present), company return
+ *     address, PACKING SLIP title + PS# + ship date (top-right).
+ *   - Bill-to (left) + Ship-to (right) blocks. Ship-to surfaces ATTN:
+ *     from customer_addresses.attention_to via resolveAttentionLine.
+ *   - Line items table: Customer PO / Part # / Description / Qty
+ *     Shipped / Qty Remaining (last column omitted when nothing
+ *     remains across the entire shipment).
+ *   - Shipment details block: carrier, tracking #, arrangement label
+ *     (+ free-text "Other" override), weight, package count + type, notes.
+ *   - CoC block when text is non-empty after the cascade (shipment →
+ *     customer → company → omit).
+ *   - Signature lines at the bottom: Received By / Date / Signature.
+ *
+ * Voided shipments render the same content with a "VOIDED" watermark
+ * banner — Phase 3 surfaces this; Phase 1 never reaches the void path.
+ */
+
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import type { Company } from '@/utils/companyAccess';
+import type { CustomerAddress } from '@/types/customer';
+import { SHIPPING_ARRANGEMENT_LABELS, type ShipmentWithRelations } from '@/types/shipment';
+import { resolveAttentionLine } from '@/utils/shipmentsAccess';
+
+const MARGIN = 40;
+const ADDRESS_COMBINE_MAX_CHARS = 50;
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  // ship_date is stored as a date scalar (YYYY-MM-DD). Parse the parts
+  // directly so US-Pacific viewers don't see "1 day earlier" because of
+  // UTC-midnight reinterpretation.
+  const ymd = /^\d{4}-\d{2}-\d{2}$/.exec(value);
+  if (ymd) {
+    const [y, m, d] = value.split('-').map((n) => parseInt(n, 10));
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+  return new Date(value).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function formatNumber(value: number | null | undefined, fractionDigits = 2): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return Number(value).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: fractionDigits,
+  });
+}
+
+function buildShopHeaderLines(company: Company): string[] {
+  const lines: string[] = [];
+  const a1 = company.address_line1?.trim();
+  const a2 = company.address_line2?.trim();
+  if (a1 && a2) {
+    const combined = `${a1}, ${a2}`;
+    if (combined.length <= ADDRESS_COMBINE_MAX_CHARS) {
+      lines.push(combined);
+    } else {
+      lines.push(a1);
+      lines.push(a2);
+    }
+  } else if (a1) {
+    lines.push(a1);
+  } else if (a2) {
+    lines.push(a2);
+  }
+
+  const cityStateZip = [company.city, company.state].filter(Boolean).join(', ');
+  const cityStateZipFull = [cityStateZip, company.postal_code]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  if (cityStateZipFull) lines.push(cityStateZipFull);
+  if (company.country && company.country.toUpperCase() !== 'USA') {
+    lines.push(company.country);
+  }
+  if (company.phone) lines.push(company.phone);
+
+  return lines;
+}
+
+function buildAddressBlockLines(
+  customerName: string | null | undefined,
+  address: CustomerAddress | null,
+  attentionText: string | null,
+): string[] {
+  const lines: string[] = [];
+  if (customerName) lines.push(customerName);
+  if (attentionText) lines.push(`Attn: ${attentionText}`);
+  if (address) {
+    if (address.address_line1) lines.push(address.address_line1);
+    if (address.address_line2) lines.push(address.address_line2);
+    const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
+    const cityStateZipFull = [cityStateZip, address.postal_code]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    if (cityStateZipFull) lines.push(cityStateZipFull);
+    if (address.country && address.country.toUpperCase() !== 'USA') {
+      lines.push(address.country);
+    }
+  }
+  if (lines.length === 0) lines.push('(No address on file)');
+  return lines;
+}
+
+/**
+ * Filename used both when downloading and when surfacing in dialogs.
+ */
+export function packingSlipPdfFilename(shipment: Pick<ShipmentWithRelations, 'packing_slip_number'>): string {
+  return `PackingSlip-${shipment.packing_slip_number}.pdf`;
+}
+
+/**
+ * Pull the company logo as a base64 image so jsPDF can embed it. Skips
+ * silently on any failure — the layout falls back to the company name
+ * in plain bold text (mirrors the quote PDF).
+ */
+async function loadLogoAsDataUrl(
+  logoPath: string | null | undefined,
+  supabaseClient: SupabaseLike | null,
+): Promise<string | null> {
+  if (!logoPath || !supabaseClient) return null;
+  try {
+    const { data, error } = await supabaseClient.storage
+      .from('logos')
+      .createSignedUrl(logoPath, 60);
+    if (error || !data?.signedUrl) return null;
+    const resp = await fetch(data.signedUrl);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) ?? null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+interface SupabaseLike {
+  storage: {
+    from: (bucket: string) => {
+      createSignedUrl: (path: string, expiresIn: number) => Promise<{
+        data: { signedUrl: string } | null;
+        error: { message: string } | null;
+      }>;
+    };
+  };
+}
+
+export interface PackingSlipPdfContext {
+  shipment: ShipmentWithRelations;
+  company: Company;
+  /** Customer's default_billing address — for the BILL TO column. */
+  billingAddress: CustomerAddress | null;
+  /** Customer-level default CoC. Step 2 of the cascade. */
+  customerDefaultCocText: string | null;
+  /** Optional Supabase client to resolve the logo signed URL. */
+  supabase?: SupabaseLike | null;
+}
+
+/**
+ * Build the jsPDF document for a shipment and return it without writing
+ * to disk. Caller chooses how to consume:
+ *   - doc.save(filename)              → download
+ *   - doc.output('bloburl') as string → preview iframe src
+ *   - doc.output('blob')              → Blob for upload
+ */
+export async function generatePackingSlipPdf(
+  ctx: PackingSlipPdfContext,
+): Promise<jsPDF> {
+  const { shipment, company, billingAddress } = ctx;
+
+  const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  // ---------- Header ----------
+  const headerTop = MARGIN;
+  let logoBottom = headerTop;
+
+  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  if (logoDataUrl) {
+    try {
+      const logoSize = 56;
+      doc.addImage(logoDataUrl, 'PNG', MARGIN, headerTop, logoSize, logoSize, undefined, 'FAST');
+      logoBottom = headerTop + logoSize;
+    } catch {
+      logoBottom = headerTop;
+    }
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(30);
+  const shopNameX = logoDataUrl ? MARGIN + 70 : MARGIN;
+  doc.text(company.name, shopNameX, headerTop + 14);
+
+  const shopLines = buildShopHeaderLines(company);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(80);
+  shopLines.forEach((line, i) => {
+    doc.text(line, shopNameX, headerTop + 30 + i * 12);
+  });
+  const shopBlockBottom = Math.max(
+    logoBottom,
+    headerTop + 30 + shopLines.length * 12,
+  );
+
+  // Top-right title + meta
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(26);
+  doc.setTextColor(30);
+  doc.text('PACKING SLIP', pageWidth - MARGIN, headerTop + 20, { align: 'right' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(80);
+  doc.text(
+    `Packing Slip #: ${shipment.packing_slip_number}`,
+    pageWidth - MARGIN,
+    headerTop + 40,
+    { align: 'right' },
+  );
+  doc.text(
+    `Ship Date: ${formatDate(shipment.ship_date)}`,
+    pageWidth - MARGIN,
+    headerTop + 54,
+    { align: 'right' },
+  );
+
+  // Surface job # context — packing slip rolls up by job_part, so list
+  // distinct job numbers in the meta block to keep receiving anchored.
+  const jobNumbers = Array.from(
+    new Set(
+      (shipment.shipment_line_items ?? [])
+        .map((li) => li.job_part?.job?.job_number)
+        .filter((n): n is string => Boolean(n)),
+    ),
+  );
+  if (jobNumbers.length > 0) {
+    doc.text(
+      `Job${jobNumbers.length > 1 ? 's' : ''}: ${jobNumbers.join(', ')}`,
+      pageWidth - MARGIN,
+      headerTop + 68,
+      { align: 'right' },
+    );
+  }
+  const metaBlockBottom = headerTop + 68 + (jobNumbers.length > 0 ? 0 : -14);
+
+  let cursorY = Math.max(shopBlockBottom, metaBlockBottom) + 18;
+
+  // ---------- VOIDED banner ----------
+  if (shipment.voided_at) {
+    const bandHeight = 26;
+    doc.setFillColor(250, 230, 230);
+    doc.rect(MARGIN, cursorY, pageWidth - MARGIN * 2, bandHeight, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(180, 40, 40);
+    doc.text(
+      `VOIDED ${formatDate(shipment.voided_at)} — KEEP FOR RECORDS`,
+      pageWidth / 2,
+      cursorY + bandHeight / 2 + 4,
+      { align: 'center' },
+    );
+    cursorY += bandHeight + 8;
+  }
+
+  // ---------- Divider ----------
+  doc.setDrawColor(210);
+  doc.setLineWidth(0.75);
+  doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
+  cursorY += 20;
+
+  // ---------- BILL TO (left) + SHIP TO (right) ----------
+  const colWidth = (pageWidth - MARGIN * 2) / 2;
+  const leftX = MARGIN;
+  const rightX = MARGIN + colWidth + 8;
+
+  const attention = resolveAttentionLine(shipment);
+  const shipToAddress = shipment.shipping_address ?? null;
+
+  const billLines = buildAddressBlockLines(
+    shipment.customer?.name ?? null,
+    billingAddress,
+    null,
+  );
+  const shipLines = buildAddressBlockLines(
+    shipment.customer?.name ?? null,
+    shipToAddress,
+    attention.text,
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text('BILL TO', leftX, cursorY);
+  doc.text('SHIP TO', rightX, cursorY);
+
+  doc.setFontSize(11);
+  doc.setTextColor(40);
+  billLines.forEach((line, i) => {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.text(line, leftX, cursorY + 16 + i * 13);
+  });
+  shipLines.forEach((line, i) => {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.text(line, rightX, cursorY + 16 + i * 13);
+  });
+
+  const blockLines = Math.max(billLines.length, shipLines.length);
+  cursorY = cursorY + 16 + blockLines * 13 + 18;
+
+  // ---------- Line items table ----------
+  const lineItems = [...(shipment.shipment_line_items ?? [])];
+  lineItems.sort((a, b) => {
+    const ja = a.job_part?.job?.job_number ?? '';
+    const jb = b.job_part?.job?.job_number ?? '';
+    if (ja !== jb) return ja.localeCompare(jb);
+    const pa = a.job_part?.part?.part_number ?? a.job_part?.part?.part_name ?? '';
+    const pb = b.job_part?.part?.part_number ?? b.job_part?.part?.part_name ?? '';
+    return pa.localeCompare(pb);
+  });
+
+  // Determine whether to render the Qty Remaining column. If every
+  // line ships its full ordered quantity, the column is empty everywhere
+  // — drop it. Otherwise show it on every row so receiving sees the
+  // open backlog at a glance.
+  const remainingByLine = lineItems.map((li) => {
+    const ordered = Number(li.job_part?.quantity ?? 0);
+    const shipped = Number(li.quantity);
+    return Math.max(0, ordered - shipped);
+  });
+  const showRemaining = remainingByLine.some((r) => r > 0);
+
+  const head = showRemaining
+    ? [['Customer PO', 'Part #', 'Description', 'Qty Shipped', 'Qty Remaining']]
+    : [['Customer PO', 'Part #', 'Description', 'Qty Shipped']];
+
+  const body = lineItems.map((li, idx) => {
+    const part = li.job_part?.part;
+    const po = li.job_part?.job?.customer_po_number ?? '';
+    const partNumber = part?.part_number ?? part?.part_name ?? '—';
+    const description = part?.description?.trim() ?? '';
+    const qtyShipped = formatNumber(Number(li.quantity));
+    const remaining = remainingByLine[idx];
+    const row = [
+      po || '—',
+      partNumber,
+      description,
+      qtyShipped,
+    ];
+    if (showRemaining) row.push(remaining > 0 ? formatNumber(remaining) : '—');
+    return row;
+  });
+
+  if (body.length === 0) {
+    body.push(showRemaining ? ['—', '—', '', '—', '—'] : ['—', '—', '', '—']);
+  }
+
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: MARGIN, right: MARGIN },
+    head,
+    body,
+    styles: {
+      font: 'helvetica',
+      fontSize: 10,
+      cellPadding: 7,
+      textColor: [40, 40, 40],
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [30, 30, 30],
+      fontStyle: 'bold',
+      lineColor: [200, 200, 200],
+      lineWidth: 0.5,
+    },
+    columnStyles: showRemaining
+      ? {
+          0: { cellWidth: 90 },
+          1: { cellWidth: 100, fontStyle: 'bold' },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 70, halign: 'right' },
+          4: { cellWidth: 80, halign: 'right' },
+        }
+      : {
+          0: { cellWidth: 100 },
+          1: { cellWidth: 120, fontStyle: 'bold' },
+          2: { cellWidth: 'auto' },
+          3: { cellWidth: 80, halign: 'right' },
+        },
+    theme: 'grid',
+  });
+
+  cursorY =
+    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+    cursorY + 60;
+  cursorY += 18;
+
+  // ---------- Shipment details ----------
+  const arrangementLabel = shipment.shipping_arrangement
+    ? shipment.shipping_arrangement === 'other'
+      ? `Other — ${shipment.shipping_arrangement_other ?? ''}`.trim()
+      : SHIPPING_ARRANGEMENT_LABELS[shipment.shipping_arrangement]
+    : null;
+
+  const details: Array<[string, string]> = [];
+  if (shipment.carrier) details.push(['Carrier', shipment.carrier]);
+  if (shipment.tracking_number) details.push(['Tracking #', shipment.tracking_number]);
+  if (arrangementLabel) details.push(['Shipping Arrangement', arrangementLabel]);
+  if (shipment.weight_lbs !== null && shipment.weight_lbs !== undefined) {
+    details.push(['Weight', `${formatNumber(shipment.weight_lbs, 2)} lbs`]);
+  }
+  if (shipment.package_count !== null && shipment.package_count !== undefined) {
+    const type = shipment.package_type ? ` ${shipment.package_type}` : '';
+    details.push(['Packages', `${shipment.package_count}${type}`]);
+  } else if (shipment.package_type) {
+    details.push(['Package Type', shipment.package_type]);
+  }
+
+  if (details.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('SHIPMENT DETAILS', MARGIN, cursorY);
+    cursorY += 14;
+
+    doc.setFontSize(11);
+    details.forEach(([label, value]) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120);
+      doc.text(`${label}:`, MARGIN, cursorY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(40);
+      const wrapped = doc.splitTextToSize(value, pageWidth - MARGIN * 2 - 130);
+      doc.text(wrapped, MARGIN + 130, cursorY);
+      cursorY += Math.max(14, wrapped.length * 13);
+    });
+    cursorY += 6;
+  }
+
+  // ---------- Notes ----------
+  if (shipment.notes && shipment.notes.trim()) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('NOTES', MARGIN, cursorY);
+    cursorY += 14;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(60);
+    const wrapped = doc.splitTextToSize(shipment.notes.trim(), pageWidth - MARGIN * 2);
+    doc.text(wrapped, MARGIN, cursorY);
+    cursorY += wrapped.length * 12 + 10;
+  }
+
+  // ---------- CoC cascade ----------
+  // shipment → customer → company → omit
+  const cocText =
+    shipment.coc_text?.trim() ||
+    ctx.customerDefaultCocText?.trim() ||
+    company.default_coc_text?.trim() ||
+    '';
+  if (cocText) {
+    // Page-break if the CoC + signature block would run off the page.
+    const footerReserve = 90;
+    if (cursorY + 80 > pageHeight - footerReserve) {
+      doc.addPage();
+      cursorY = MARGIN;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('CERTIFICATE OF CONFORMANCE', MARGIN, cursorY);
+    cursorY += 14;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(60);
+    const wrapped = doc.splitTextToSize(cocText, pageWidth - MARGIN * 2);
+    doc.text(wrapped, MARGIN, cursorY);
+    cursorY += wrapped.length * 12 + 14;
+  }
+
+  // ---------- Signature lines ----------
+  const sigBlockHeight = 56;
+  if (cursorY + sigBlockHeight > pageHeight - MARGIN - 30) {
+    doc.addPage();
+    cursorY = MARGIN;
+  } else {
+    cursorY += 10;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text('RECEIVED BY', MARGIN, cursorY);
+  cursorY += 28;
+
+  doc.setDrawColor(160);
+  doc.setLineWidth(0.5);
+  const sigLineY = cursorY + 8;
+  doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
+  doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
+  doc.line(MARGIN + 460, sigLineY, pageWidth - MARGIN, sigLineY);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text('Signature', MARGIN, sigLineY + 11);
+  doc.text('Print Name', MARGIN + 270, sigLineY + 11);
+  doc.text('Date', MARGIN + 460, sigLineY + 11);
+
+  // ---------- Footer (every page) ----------
+  const pageCount = doc.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    const footerY = pageHeight - MARGIN;
+    doc.setDrawColor(230);
+    doc.setLineWidth(0.5);
+    doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(130);
+    doc.text(
+      `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
+      MARGIN,
+      footerY,
+    );
+    doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
+  }
+
+  return doc;
+}

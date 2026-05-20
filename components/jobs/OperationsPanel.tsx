@@ -208,7 +208,7 @@ export default function OperationsPanel({
           {isJobDisabled && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               Operations cannot be modified — job is{' '}
-              {job.production_status === 'cancelled' ? 'cancelled' : 'shipped'}.
+              {job.production_status === 'cancelled' ? 'cancelled' : 'fully shipped'}.
             </Alert>
           )}
 

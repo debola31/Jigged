@@ -658,16 +658,13 @@ export async function startJob(
   await supabase
     .from('job_parts')
     .update({
-      status: 'in_progress',
+      production_status: 'in_progress',
       status_changed_at: now,
       started_at: now, // started_at is set only the first time per the trigger logic
       updated_at: now,
     })
     .eq('id', jobPartId)
-    .neq('status', 'in_progress')
-    .neq('status', 'completed')
-    .neq('status', 'shipped')
-    .neq('status', 'cancelled');
+    .not('production_status', 'in', '("in_progress","completed","cancelled")');
 
   return {
     id: session.id,
@@ -871,27 +868,26 @@ export async function completeJob(
     await supabase
       .from('job_parts')
       .update({
-        status: 'completed',
+        production_status: 'completed',
         completed_at: now,
         status_changed_at: now,
         updated_at: now,
       })
       .eq('id', jobPartId)
-      .neq('status', 'shipped')
-      .neq('status', 'cancelled');
+      .not('production_status', 'in', '("cancelled")');
   }
 
   // 5. After the part flips, check if EVERY part on the job is done — for the
   // "job_completed" return flag. The DB trigger has already cascaded the
-  // status; we just read it back.
+  // production_status; we just read it back.
   let jobCompleted = false;
   if (partCompleted) {
     const { data: jobRow } = await supabase
       .from('jobs')
-      .select('status')
+      .select('production_status')
       .eq('id', part.job_id)
       .single();
-    jobCompleted = jobRow?.status === 'completed';
+    jobCompleted = jobRow?.production_status === 'completed';
   }
 
   // 6. Deplete inventory at part-completion time. Each part owns its own

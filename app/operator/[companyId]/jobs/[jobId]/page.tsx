@@ -117,7 +117,7 @@ export default function OperatorJobPartsHubPage() {
             part.operations_total > 0
               ? (part.operations_completed / part.operations_total) * 100
               : 0;
-          const done = part.production_status === 'completed' || part.production_status === 'shipped';
+          const done = part.production_status === 'completed';
           return (
             <Card
               key={part.id}
@@ -162,7 +162,7 @@ export default function OperatorJobPartsHubPage() {
                       color={
                         part.production_status === 'in_progress'
                           ? 'primary'
-                          : part.production_status === 'completed' || part.production_status === 'shipped'
+                          : part.production_status === 'completed'
                             ? 'success'
                             : 'default'
                       }

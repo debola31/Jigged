@@ -776,7 +776,8 @@ export async function convertQuoteToJob(
       quote_id: quoteId,
       customer_id: quote.customer_id,
       job_number: jobNumber,
-      status: 'not_started',
+      production_status: 'not_started',
+      fulfillment_status: 'unshipped',
       due_date: dueDate,
       lead_time_days: promisedLeadTime,
       created_by: user.id,
@@ -808,7 +809,8 @@ export async function convertQuoteToJob(
         source_quote_line_item_id: li.id,
         sequence,
         quantity: li.quantity,
-        status: 'not_started',
+        production_status: 'not_started',
+        fulfillment_status: 'unshipped',
       })
       .select('id, part_id')
       .single();

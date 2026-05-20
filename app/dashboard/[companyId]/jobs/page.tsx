@@ -39,19 +39,48 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllJobs, bulkDeleteJobs, getCustomersForSelect, getReadyOperationsForJobs } from '@/utils/jobsAccess';
+import { getAllJobs, bulkDeleteJobs, getCustomersForSelect } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import { JobStatusChip } from '@/components/jobs';
-import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
-import Chip from '@mui/material/Chip';
-import type { JobWithRelations, JobFilters, JobStatus } from '@/types/job';
-import { JOB_STATUS_CONFIG } from '@/types/job';
+import { isJobOverdue } from '@/types/job';
+import Tooltip from '@mui/material/Tooltip';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import type {
+  JobWithRelations,
+  JobFilters,
+  ProductionStatus,
+  FulfillmentStatus,
+} from '@/types/job';
+import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
-const VALID_JOB_STATUSES: JobStatus[] = ['not_started', 'in_progress', 'completed', 'shipped', 'cancelled'];
+const VALID_PRODUCTION_STATUSES: ProductionStatus[] = [
+  'not_started',
+  'in_progress',
+  'completed',
+  'cancelled',
+];
+const VALID_FULFILLMENT_STATUSES: FulfillmentStatus[] = [
+  'unshipped',
+  'partially_shipped',
+  'fully_shipped',
+];
 
-function parseStatusParam(v: string | null): JobFilters['status'] {
-  if (v && (VALID_JOB_STATUSES as string[]).includes(v)) return v as JobStatus;
-  return 'all';
+// Parse a comma-separated list of statuses from the URL (?production=foo,bar).
+function parseProductionParam(v: string | null): ProductionStatus[] | 'all' | undefined {
+  if (!v) return undefined;
+  if (v === 'all') return 'all';
+  const parts = v.split(',').filter((p) =>
+    (VALID_PRODUCTION_STATUSES as string[]).includes(p),
+  );
+  return parts.length > 0 ? (parts as ProductionStatus[]) : undefined;
+}
+
+function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | undefined {
+  if (!v) return undefined;
+  if (v === 'all') return 'all';
+  const parts = v.split(',').filter((p) =>
+    (VALID_FULFILLMENT_STATUSES as string[]).includes(p),
+  );
+  return parts.length > 0 ? (parts as FulfillmentStatus[]) : undefined;
 }
 
 export default function JobsPage() {
@@ -64,9 +93,12 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<JobFilters['status']>(() =>
-    parseStatusParam(searchParams.get('status'))
-  );
+  const [productionFilter, setProductionFilter] = useState<
+    JobFilters['productionStatus']
+  >(() => parseProductionParam(searchParams.get('production')));
+  const [fulfillmentFilter, setFulfillmentFilter] = useState<
+    JobFilters['fulfillmentStatus']
+  >(() => parseFulfillmentParam(searchParams.get('fulfillment')));
   const [customerFilter, setCustomerFilter] = useState<string>('');
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
@@ -119,38 +151,35 @@ export default function JobsPage() {
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
+      // FR-19: hide done jobs by default — unless the user has explicitly
+      // filtered Fulfillment to include "Fully Shipped", in which case
+      // they've asked to see those rows.
+      const fulfillmentIncludesShipped =
+        Array.isArray(fulfillmentFilter) && fulfillmentFilter.includes('fully_shipped');
       const filters: JobFilters = {
-        status: statusFilter,
+        productionStatus: productionFilter,
+        fulfillmentStatus: fulfillmentFilter,
         customerId: customerFilter || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
+        excludeDone: !fulfillmentIncludesShipped,
       };
       const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
-
-      // Fetch current operations for active jobs (not started + in progress)
-      const activeStatuses = new Set(['not_started', 'in_progress']);
-      const activeJobIds = data
-        .filter(j => activeStatuses.has(j.status))
-        .map(j => j.id);
-
-      let currentOpsMap = new Map<string, { operationName: string; readyCount: number }>();
-      if (activeJobIds.length > 0) {
-        currentOpsMap = await getReadyOperationsForJobs(activeJobIds);
-      }
-
-      // Merge current operation info into jobs
-      const jobsWithCurrentOp = data.map(job => ({
-        ...job,
-        currentOperation: currentOpsMap.get(job.id) || null,
-      }));
-
-      setJobs(jobsWithCurrentOp);
+      setJobs(data);
     } catch (error) {
       console.error('Error fetching jobs:', error);
     } finally {
       setLoading(false);
     }
-  }, [companyId, statusFilter, customerFilter, searchDebounced, sortModel, overdueOnly]);
+  }, [
+    companyId,
+    productionFilter,
+    fulfillmentFilter,
+    customerFilter,
+    searchDebounced,
+    sortModel,
+    overdueOnly,
+  ]);
 
   useEffect(() => {
     fetchJobs();
@@ -162,7 +191,7 @@ export default function JobsPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, statusFilter, customerFilter, overdueOnly]);
+  }, [searchDebounced, productionFilter, fulfillmentFilter, customerFilter, overdueOnly]);
 
   const gridHeight = useMemo(() => {
     if (loading || jobs.length === 0) return 600;
@@ -242,6 +271,14 @@ export default function JobsPage() {
 
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
+    // Parse YYYY-MM-DD as local (not UTC) so the displayed date matches
+    // the calendar day the user actually picked — see isJobOverdue for
+    // the same UTC-parsing trap.
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return d.toLocaleDateString();
+    }
     return new Date(dateStr).toLocaleDateString();
   };
 
@@ -281,76 +318,56 @@ export default function JobsPage() {
       },
     },
     {
-      colId: 'currentOp',
-      headerName: 'Current Op',
-      width: 160,
-      sortable: false,
-      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data) return null;
-
-        const { status, currentOperation } = params.data;
-
-        // Completed or shipped jobs show "Done"
-        if (status === 'completed' || status === 'shipped') {
-          return (
-            <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary', lineHeight: '52px' }}>
-              Done
-            </Typography>
-          );
-        }
-
-        // Cancelled or no routing → "--"
-        if (status === 'cancelled' || !currentOperation) {
-          return (
-            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: '52px' }}>
-              --
-            </Typography>
-          );
-        }
-
-        // Single ready op
-        if (currentOperation.readyCount <= 1) {
-          return (
-            <Typography variant="body2" sx={{ lineHeight: '52px' }}>
-              {currentOperation.operationName}
-            </Typography>
-          );
-        }
-
-        // Parallel ready ops: show name + "+N" chip
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
-            <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentOperation.operationName}
-            </Typography>
-            <Chip
-              label={`+${currentOperation.readyCount - 1}`}
-              size="small"
-              sx={{ height: 20, fontSize: '0.7rem' }}
-            />
-          </Box>
-        );
-      },
-    },
-    {
-      field: 'status',
+      // Status reads as an inline phrase ("In Progress / Not Shipped"). No
+      // weight or color differentiation — matches the cell typography of
+      // the other columns so the row reads as a single horizontal line.
+      colId: 'status',
       headerName: 'Status',
-      width: 180,
-      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
-        if (!params.data?.status) return null;
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, height: '100%' }}>
-            <JobStatusChip status={params.data.status} size="small" />
-            <JobOverdueBadge job={params.data} size="small" />
-          </Box>
-        );
+      width: 240,
+      sortable: false,
+      valueGetter: (params) => {
+        if (!params.data) return '';
+        const prod = PRODUCTION_STATUS_CONFIG[params.data.production_status];
+        const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
+        return `${prod.label} | ${ful.label}`;
       },
     },
     {
       field: 'due_date',
       headerName: 'Due',
-      width: 110,
-      valueFormatter: (params) => (params.value ? formatDate(params.value) : '—'),
+      width: 140,
+      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
+        const value = params.value;
+        if (!params.data || !value) return '—';
+        const dueDateStr = formatDate(value);
+        if (!isJobOverdue(params.data)) return dueDateStr;
+        // Days overdue from local-midnight today to the (local-parsed)
+        // due date. Avoids the UTC-parsing skew for negative-offset users
+        // — see isJobOverdue for the same trap.
+        const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+        const dueLocal = ymd
+          ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+          : new Date(value);
+        const todayMid = new Date();
+        todayMid.setHours(0, 0, 0, 0);
+        const daysOverdue = Math.max(
+          0,
+          Math.floor((todayMid.getTime() - dueLocal.getTime()) / (1000 * 60 * 60 * 24)),
+        );
+        // Overdue cue: trailing icon in error.main. Date itself keeps the
+        // standard cell color so the column reads consistently with the rest.
+        return (
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+            <span>{dueDateStr}</span>
+            <Tooltip
+              title={`Overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}`}
+              arrow
+            >
+              <ScheduleIcon sx={{ fontSize: 16, color: 'error.main' }} />
+            </Tooltip>
+          </Box>
+        );
+      },
     },
     {
       field: 'created_at',
@@ -360,10 +377,30 @@ export default function JobsPage() {
     },
   ];
 
-  const statusOptions: SelectOption[] = (Object.keys(JOB_STATUS_CONFIG) as JobStatus[]).map((key) => ({
+  const productionStatusOptions: SelectOption[] = (
+    Object.keys(PRODUCTION_STATUS_CONFIG) as ProductionStatus[]
+  ).map((key) => ({
     id: key,
-    label: JOB_STATUS_CONFIG[key].label,
+    label: PRODUCTION_STATUS_CONFIG[key].label,
   }));
+
+  const fulfillmentStatusOptions: SelectOption[] = (
+    Object.keys(FULFILLMENT_STATUS_CONFIG) as FulfillmentStatus[]
+  ).map((key) => ({
+    id: key,
+    label: FULFILLMENT_STATUS_CONFIG[key].label,
+  }));
+
+  /** First value of the filter, or '' when the filter is unset/'all'. The
+   *  SearchableSelect is single-value; multi-select UI lands in PR 6. */
+  const productionFilterValue =
+    productionFilter && productionFilter !== 'all' && productionFilter.length > 0
+      ? productionFilter[0]
+      : '';
+  const fulfillmentFilterValue =
+    fulfillmentFilter && fulfillmentFilter !== 'all' && fulfillmentFilter.length > 0
+      ? fulfillmentFilter[0]
+      : '';
 
   const customerOptions: SelectOption[] = customers.map((c) => ({
     id: c.id,
@@ -401,12 +438,28 @@ export default function JobsPage() {
 
         <Box sx={{ minWidth: 180 }}>
           <SearchableSelect
-            options={statusOptions}
-            value={statusFilter === 'all' ? '' : (statusFilter ?? '')}
-            onChange={(value) => setStatusFilter((value || 'all') as JobFilters['status'])}
-            label="Status"
+            options={productionStatusOptions}
+            value={productionFilterValue}
+            onChange={(value) =>
+              setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined)
+            }
+            label="Production Status"
             allowNone
-            noneLabel="All Jobs"
+            noneLabel="Any"
+            size="small"
+          />
+        </Box>
+
+        <Box sx={{ minWidth: 180 }}>
+          <SearchableSelect
+            options={fulfillmentStatusOptions}
+            value={fulfillmentFilterValue}
+            onChange={(value) =>
+              setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined)
+            }
+            label="Fulfillment Status"
+            allowNone
+            noneLabel="Any"
             size="small"
           />
         </Box>
@@ -429,6 +482,13 @@ export default function JobsPage() {
               checked={overdueOnly}
               onChange={(e) => setOverdueOnly(e.target.checked)}
               size="small"
+              sx={{
+                // Theme primary is Steel Blue (#4682B4), which blends into
+                // the navy filter strip when checked. Force a high-contrast
+                // outline + filled check that reads on this background.
+                color: 'rgba(255,255,255,0.6)',
+                '&.Mui-checked': { color: 'primary.light' },
+              }}
             />
           }
           label="Overdue only"
@@ -473,11 +533,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || customerFilter || statusFilter !== 'all' || overdueOnly
+              {searchDebounced || customerFilter || productionFilterValue || fulfillmentFilterValue || overdueOnly
                 ? 'No jobs match your filters.'
                 : 'Create your first job to get started.'}
             </Typography>
-            {!searchDebounced && !customerFilter && statusFilter === 'all' && !overdueOnly && (
+            {!searchDebounced && !customerFilter && !productionFilterValue && !fulfillmentFilterValue && !overdueOnly && (
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}

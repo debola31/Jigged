@@ -1,9 +1,17 @@
 /**
- * Job status values. Applied at the job (project header) level — derived from
- * the aggregate of its job_parts via a Postgres trigger — and at the
- * job_part level — owned by the operator workflow.
+ * Production-status values. Owned by operator activity — set on job_parts
+ * by recomputeJobPartStatus, aggregated to the parent job via the
+ * sync_job_production_status_from_parts trigger.
  */
-export type JobStatus = 'not_started' | 'in_progress' | 'completed' | 'shipped' | 'cancelled';
+export type ProductionStatus = 'not_started' | 'in_progress' | 'completed' | 'cancelled';
+
+/**
+ * Fulfillment-status values. Owned by shipment activity — set on job_parts
+ * by compute_job_part_fulfillment_status from shipment_line_items, aggregated
+ * to the parent job by the sync trigger family (PR 4). All rows are
+ * 'unshipped' until PR 4 wires up the cascade.
+ */
+export type FulfillmentStatus = 'unshipped' | 'partially_shipped' | 'fully_shipped';
 
 /**
  * Job operation record. Each operation belongs to one job_part — multi-part
@@ -38,9 +46,14 @@ export interface JobOperation {
 }
 
 /**
- * Job (project header). Owns the customer, due date, source quote, and an
- * aggregate status mirrored from job_parts. The actual part-level routing,
- * status, and timestamps live on JobPart.
+ * Job (project header). Owns the customer, due date, source quote, and
+ * dual aggregate statuses mirrored from job_parts. The actual part-level
+ * routing, status, and timestamps live on JobPart.
+ *
+ * `shipped_at` is no longer a stored column — the last ship date for a
+ * job is computed by the SQL helper `public.job_last_ship_date(job_id)`,
+ * which sums non-voided shipments in PR 4. The TS access layer wraps
+ * this as `getJobLastShipDate(jobId)` in utils/jobsAccess.ts.
  */
 export interface Job {
   id: string;
@@ -48,11 +61,12 @@ export interface Job {
   job_number: string;
   quote_id: string | null;
   customer_id: string;
-  status: JobStatus;
+  customer_po_number: string | null;
+  production_status: ProductionStatus;
+  fulfillment_status: FulfillmentStatus;
   status_changed_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  shipped_at: string | null;
   due_date: string | null;
   lead_time_days: number | null;
   created_by: string | null;
@@ -61,8 +75,10 @@ export interface Job {
 }
 
 /**
- * One physical part / workpiece-group inside a job. Each job_part has its own
- * routing-derived operations + materials, status, and timestamps.
+ * One physical part / workpiece-group inside a job. Each job_part has its
+ * own routing-derived operations + materials and its own production +
+ * fulfillment statuses. Production is set by operator activity; fulfillment
+ * is set by shipment_line_items (PR 4).
  */
 export interface JobPart {
   id: string;
@@ -72,28 +88,58 @@ export interface JobPart {
   source_quote_line_item_id: string | null;
   sequence: number;
   quantity: number;
-  status: JobStatus;
+  production_status: ProductionStatus;
+  fulfillment_status: FulfillmentStatus;
   status_changed_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  shipped_at: string | null;
   current_operation_sequence: number | null;
   created_at: string;
   updated_at: string;
 }
 
 /**
- * True when a job's due date has passed and it isn't done yet.
- * Cancelled/completed/shipped jobs are never "overdue" — the clock stops.
+ * True when a job's due date has passed and it isn't done yet. A job is
+ * "done" only when it's both produced (completed/cancelled) AND fully
+ * shipped — the FR-18 predicate. Cancelled-and-fully-shipped jobs stop
+ * the clock; cancelled-and-partially-shipped do too (the customer's
+ * remaining order never ships).
+ *
+ * Date comparison: due_date is a YYYY-MM-DD string. JavaScript's
+ * `new Date('YYYY-MM-DD')` parses as UTC midnight, which is the previous
+ * calendar day in negative-UTC timezones — so `new Date('2026-05-19') <
+ * localMidnight(2026-05-19)` is wrongly true in US Pacific, painting a
+ * job-due-today as overdue. We parse the YMD parts directly into a
+ * LOCAL date so the comparison matches both the user's intuition and
+ * the server-side filter (which uses todayLocalISODate in jobsAccess).
  */
-export function isJobOverdue(job: Pick<Job, 'due_date' | 'status'>): boolean {
+export function isJobOverdue(
+  job: Pick<Job, 'due_date' | 'production_status' | 'fulfillment_status'>,
+): boolean {
   if (!job.due_date) return false;
-  if (job.status === 'completed' || job.status === 'shipped' || job.status === 'cancelled') {
-    return false;
-  }
+  if (isJobDone(job)) return false;
+  if (job.production_status === 'cancelled') return false;
+  const [y, m, d] = job.due_date.split('-').map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return false;
+  const dueLocal = new Date(y, m - 1, d);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return new Date(job.due_date) < today;
+  return dueLocal < today;
+}
+
+/**
+ * FR-18 "done" predicate. A job is done when production has ended
+ * (completed or cancelled) AND every part is fully shipped. Used by the
+ * jobs-list default filter (hide done), the dashboard active-jobs count,
+ * and the overdue check above.
+ */
+export function isJobDone(
+  job: Pick<Job, 'production_status' | 'fulfillment_status'>,
+): boolean {
+  return (
+    (job.production_status === 'completed' || job.production_status === 'cancelled') &&
+    job.fulfillment_status === 'fully_shipped'
+  );
 }
 
 /**
@@ -167,24 +213,38 @@ export interface JobWithRelations extends Job {
  * Filters for the jobs list.
  */
 export interface JobFilters {
-  status?: JobStatus | 'all';
+  productionStatus?: ProductionStatus[] | 'all';
+  fulfillmentStatus?: FulfillmentStatus[] | 'all';
   customerId?: string;
   search?: string;
   overdue?: boolean;
+  /** When true (default), hide jobs that satisfy the FR-18 done predicate. */
+  excludeDone?: boolean;
 }
 
 /**
- * Status display configuration.
+ * Production-status display configuration.
  */
-export const JOB_STATUS_CONFIG: Record<
-  JobStatus,
+export const PRODUCTION_STATUS_CONFIG: Record<
+  ProductionStatus,
   { label: string; color: 'default' | 'info' | 'success' | 'error' }
 > = {
   not_started: { label: 'Not Started', color: 'default' },
   in_progress: { label: 'In Progress', color: 'info' },
   completed: { label: 'Completed', color: 'success' },
-  shipped: { label: 'Shipped', color: 'success' },
   cancelled: { label: 'Cancelled', color: 'error' },
+};
+
+/**
+ * Fulfillment-status display configuration.
+ */
+export const FULFILLMENT_STATUS_CONFIG: Record<
+  FulfillmentStatus,
+  { label: string; color: 'default' | 'info' | 'success' }
+> = {
+  unshipped: { label: 'Not Shipped', color: 'default' },
+  partially_shipped: { label: 'Partially Shipped', color: 'info' },
+  fully_shipped: { label: 'Shipped', color: 'success' },
 };
 
 // ============== Operation Types ==============
@@ -223,8 +283,8 @@ export interface OperationUpdateResult {
   operation: JobOperation;
   /** True when this operation finished the parent job_part (job_part flipped to completed). */
   jobPartStatusChanged: boolean;
-  newJobPartStatus?: JobStatus;
+  newJobPartProductionStatus?: ProductionStatus;
   /** True when the parent job's aggregate status changed as a side effect. */
   jobStatusChanged: boolean;
-  newJobStatus?: JobStatus;
+  newJobProductionStatus?: ProductionStatus;
 }

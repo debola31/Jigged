@@ -44,19 +44,20 @@ function addressToFormData(addr: CustomerAddress): CustomerAddressFormData {
     state: addr.state ?? '',
     postal_code: addr.postal_code ?? '',
     country: addr.country ?? 'USA',
-    is_billing: addr.is_billing,
-    is_shipping: addr.is_shipping,
+    default_billing: addr.default_billing,
+    default_shipping: addr.default_shipping,
+    attention_to: addr.attention_to ?? '',
   };
 }
 
 /**
  * Add / edit modal for a single customer address.
  *
- * Billing / Shipping are checkboxes here (not radios) because in the modal
- * we're editing one row in isolation — there's no list to single-select
- * across. The access layer clears the same role on any other row when this
- * row claims it, mirroring the cross-clear that the form UI used to do
- * inline.
+ * Default Billing / Default Shipping are checkboxes here (not radios) because
+ * in the modal we're editing one row in isolation — there's no list to
+ * single-select across. The access layer clears the same flag on any other
+ * row when this row claims it, mirroring the cross-clear that the form UI
+ * used to do inline.
  */
 export default function CustomerAddressModal({
   open,
@@ -172,16 +173,27 @@ export default function CustomerAddressModal({
             />
           </Grid>
           <Grid size={{ xs: 12 }}>
+            <TextField
+              fullWidth
+              label="Attention To"
+              placeholder="e.g. Receiving Dept, John Doe"
+              helperText="Prints above the address on packing slips. Leave blank when no specific recipient is needed."
+              value={formData.attention_to}
+              onChange={handleChange('attention_to')}
+              disabled={loading}
+            />
+          </Grid>
+          <Grid size={{ xs: 12 }}>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                Used for:
+                Default for:
               </Typography>
               <FormControlLabel
                 control={
                   <Checkbox
-                    checked={formData.is_billing}
+                    checked={formData.default_billing}
                     onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, is_billing: e.target.checked }))
+                      setFormData((prev) => ({ ...prev, default_billing: e.target.checked }))
                     }
                     disabled={loading}
                   />
@@ -191,9 +203,9 @@ export default function CustomerAddressModal({
               <FormControlLabel
                 control={
                   <Checkbox
-                    checked={formData.is_shipping}
+                    checked={formData.default_shipping}
                     onChange={(e) =>
-                      setFormData((prev) => ({ ...prev, is_shipping: e.target.checked }))
+                      setFormData((prev) => ({ ...prev, default_shipping: e.target.checked }))
                     }
                     disabled={loading}
                   />
@@ -202,8 +214,9 @@ export default function CustomerAddressModal({
               />
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Each customer can have at most one billing and one shipping address —
-              saving with a role checked will clear it on any other address.
+              Each customer can have at most one default billing and one default
+              shipping address — saving with a default checked will clear it on
+              any other address.
             </Typography>
           </Grid>
         </Grid>

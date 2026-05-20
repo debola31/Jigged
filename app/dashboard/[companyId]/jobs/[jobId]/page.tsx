@@ -14,7 +14,6 @@ import Grid from '@mui/material/Grid';
 import Chip from '@mui/material/Chip';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -25,12 +24,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 
-import {
-  getJobWithRelations,
-  deleteJob,
-  shipJob,
-  cancelJob,
-} from '@/utils/jobsAccess';
+import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import { JobStatusChip, OperationsPanel, JobQRCode } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
@@ -63,19 +57,6 @@ export default function JobDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load job');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleAction = async (action: () => Promise<unknown>) => {
-    setActionLoading(true);
-    setError(null);
-    try {
-      await action();
-      await fetchJob();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Action failed');
-    } finally {
-      setActionLoading(false);
     }
   };
 
@@ -126,8 +107,11 @@ export default function JobDetailPage() {
   }
 
   const parts: JobPartWithRelations[] = job.job_parts ?? [];
-  const canShip = job.status === 'completed';
-  const canCancel = job.status !== 'shipped' && job.status !== 'cancelled';
+  // Cancel button is available until production has terminally ended. The
+  // Mark Shipped button is gone — shipping is no longer a status transition;
+  // PR 5 surfaces a "Create Shipment" CTA in its place.
+  const canCancel =
+    job.production_status !== 'completed' && job.production_status !== 'cancelled';
 
   return (
     <Box>
@@ -154,23 +138,11 @@ export default function JobDetailPage() {
           <Typography variant="h4" component="h1" sx={{ fontSize: { xs: '1.5rem', md: '2.125rem' } }}>
             {job.job_number}
           </Typography>
-          <JobStatusChip status={job.status} size="medium" />
+          <JobStatusChip status={job.production_status} size="medium" />
           <JobOverdueBadge job={job} size="medium" />
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {canShip && (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<LocalShippingIcon />}
-              onClick={() => handleAction(() => shipJob(jobId))}
-              disabled={actionLoading}
-            >
-              Mark Shipped
-            </Button>
-          )}
-
           {canCancel && (
             <Button
               variant="outlined"
@@ -325,7 +297,7 @@ export default function JobDetailPage() {
                           )}
                           <Chip size="small" label={`Order qty ${part.quantity}`} variant="outlined" />
                         </Box>
-                        <JobStatusChip status={part.status} size="small" />
+                        <JobStatusChip status={part.production_status} size="small" />
                       </Box>
                       {part.job_operations && part.job_operations.length > 0 ? (
                         <OperationsPanel

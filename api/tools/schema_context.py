@@ -28,16 +28,17 @@ SCHEMA_CONTEXT = """
 - contact_name: TEXT, contact_phone: TEXT, contact_email: TEXT
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: Address fields are stored on a separate customer_addresses table,
-  one row per address tagged with is_billing/is_shipping flags.
+  one row per address tagged with default_billing/default_shipping flags.
 
 ### customer_addresses
 - id: UUID (PK)
 - customer_id: UUID (FK -> customers.id) -- join via customer.id
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT (default 'USA')
-- is_billing: BOOLEAN (at most one per customer — unique partial index)
-- is_shipping: BOOLEAN (at most one per customer — unique partial index)
-- Both roles can be unset; the row stays on file as a reference.
+- default_billing: BOOLEAN (at most one per customer — unique partial index)
+- default_shipping: BOOLEAN (at most one per customer — unique partial index)
+- Both flags can be unset; the row stays on file as a reference.
+- attention_to: TEXT (optional "ATTN:" recipient line for packing slips)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ### vendors (suppliers and outside-process providers)
@@ -172,12 +173,19 @@ SCHEMA_CONTEXT = """
 - job_number: TEXT (unique per company, e.g. 'J-001')
 - quote_id: UUID (FK -> quotes.id, nullable)
 - customer_id: UUID (FK -> customers.id, nullable)
-- status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'shipped', 'cancelled'
+- customer_po_number: TEXT (set during quote-to-job conversion)
+- production_status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'cancelled'
+  (operator-driven; aggregated from job_parts.production_status)
+- fulfillment_status: TEXT -- one of: 'unshipped', 'partially_shipped', 'fully_shipped'
+  (shipment-driven; aggregated from job_parts.fulfillment_status, populated in PR 4)
 - status_changed_at: TIMESTAMPTZ
-- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ, shipped_at: TIMESTAMPTZ
+- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
 - due_date: DATE, lead_time_days: INTEGER
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: jobs no longer carry part_id. A job ships one or more parts via job_parts.
+- NOTE: shipped_at column was dropped. Use the SQL helper
+  public.job_last_ship_date(job_id) for the last ship date — it sums
+  non-voided shipments.
 
 ### job_parts (intermediate between jobs and parts; lets one job ship multiple parts)
 - id: UUID (PK)
@@ -187,11 +195,14 @@ SCHEMA_CONTEXT = """
 - source_quote_line_item_id: UUID (FK -> quote_line_items.id, nullable)
 - sequence: INTEGER (unique per job)
 - quantity: INTEGER (>0)
-- status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'shipped', 'cancelled'
+- production_status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'cancelled'
+- fulfillment_status: TEXT -- one of: 'unshipped', 'partially_shipped', 'fully_shipped'
 - status_changed_at: TIMESTAMPTZ
-- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ, shipped_at: TIMESTAMPTZ
+- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
 - current_operation_sequence: INTEGER
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: shipped_at column was dropped. Use public.job_part_last_ship_date(job_part_id)
+  for the part's last ship date.
 
 ### job_operations (steps within a job — NO company_id, join via jobs)
 - id: UUID (PK)
@@ -317,7 +328,10 @@ SCHEMA_CONTEXT = """
 - Tables WITHOUT company_id: job_operations, job_materials, routing_operations,
   parts_bom, parts_unit_conversions. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
-- A "started" job means started_at IS NOT NULL or status = 'in_progress'.
+- A "started" job means started_at IS NOT NULL or production_status = 'in_progress'.
+- A "shipped" job means fulfillment_status = 'fully_shipped'. The last ship
+  date comes from public.job_last_ship_date(job_id), which sums non-voided
+  shipments. There is no jobs.shipped_at column anymore.
 - Revenue per quote = SUM(quote_line_items.total_price) WHERE quote_id = ?.
 - Revenue per shipped job = SUM through job_parts → quote_line_items
   (each job_part links to the quote_line_item it was created from).
@@ -342,17 +356,19 @@ WHERE company_id = $1
   AND started_at >= DATE_TRUNC('week', NOW()) - INTERVAL '1 week'
   AND started_at <  DATE_TRUNC('week', NOW());
 
--- Revenue by month (last 6 months) — sum quote_line_items via job_parts
-SELECT DATE_TRUNC('month', j.shipped_at) AS month,
+-- Revenue by month (last 6 months) — sum quote_line_items via job_parts.
+-- Uses the public.job_last_ship_date(jobs.id) helper instead of the dropped
+-- shipped_at column.
+SELECT DATE_TRUNC('month', public.job_last_ship_date(j.id)::timestamptz) AS month,
        SUM(qli.total_price)              AS revenue,
        COUNT(DISTINCT j.id)              AS job_count
 FROM jobs j
 JOIN job_parts jp        ON jp.job_id = j.id
 JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
 WHERE j.company_id = $1
-  AND j.status = 'shipped'
-  AND j.shipped_at >= NOW() - INTERVAL '6 months'
-GROUP BY DATE_TRUNC('month', j.shipped_at)
+  AND j.fulfillment_status = 'fully_shipped'
+  AND public.job_last_ship_date(j.id) >= (CURRENT_DATE - INTERVAL '6 months')
+GROUP BY DATE_TRUNC('month', public.job_last_ship_date(j.id)::timestamptz)
 ORDER BY month;
 
 -- Top 5 customers by revenue
@@ -363,7 +379,7 @@ FROM jobs j
 JOIN customers c          ON c.id = j.customer_id
 JOIN job_parts jp         ON jp.job_id = j.id
 JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
-WHERE j.company_id = $1 AND j.status = 'shipped'
+WHERE j.company_id = $1 AND j.fulfillment_status = 'fully_shipped'
 GROUP BY c.name
 ORDER BY revenue DESC
 LIMIT 5;

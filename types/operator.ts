@@ -66,6 +66,10 @@ export interface ActiveSession {
  * selected station — so a multi-part job that has the station's operation
  * ready on N parts produces N rows. The `id` is the job_part_id so the
  * row can navigate directly into the per-part work view.
+ *
+ * `production_status` carries job_parts.production_status (the operator
+ * workflow's lifecycle). Fulfillment is intentionally not surfaced —
+ * operators don't act on it.
  */
 export interface OperatorJob {
   /** job_part_id — primary navigation key on this row. */
@@ -76,8 +80,8 @@ export interface OperatorJob {
   customer_name: string | null;
   part_name: string | null;
   part_quantity: number;
-  /** job_parts.status. */
-  status: string;
+  /** job_parts.production_status. */
+  production_status: string;
   // Current operation for this station on this part
   operation_id: string | null;
   operation_name: string | null;
@@ -101,8 +105,8 @@ export interface OperatorJobDetail {
   customer_name: string | null;
   part_name: string | null;
   part_quantity: number;
-  /** job_parts.status. */
-  status: string;
+  /** job_parts.production_status. */
+  production_status: string;
   // Operation details (the one current operation on this part)
   operation_id: string | null;
   operation_name: string | null;
@@ -130,7 +134,8 @@ export interface OperatorJobPartSummary {
   part_name: string;
   part_description: string | null;
   quantity: number;
-  status: string;
+  /** job_parts.production_status. */
+  production_status: string;
   /** Next ready operation on this part, when one exists. */
   next_operation_name: string | null;
   next_operation_id: string | null;

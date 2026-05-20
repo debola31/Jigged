@@ -7,7 +7,7 @@ import { isJobOverdue } from '@/types/job';
 import type { Job } from '@/types/job';
 
 interface JobOverdueBadgeProps {
-  job: Pick<Job, 'due_date' | 'status'>;
+  job: Pick<Job, 'due_date' | 'production_status' | 'fulfillment_status'>;
   size?: 'small' | 'medium';
 }
 

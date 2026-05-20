@@ -134,16 +134,19 @@ def get_revenue_by_period(
 
     # Quotes no longer carry total_price; sum each quote's line items via the
     # quote_line_items join. One job → one quote → many line items.
+    # shipped_at is gone from the jobs table — the last ship date now comes
+    # from public.job_last_ship_date(jobs.id), which PR 4 fills in from
+    # non-voided shipments. PR 3 ships a NULL-returning stub, so this query
+    # returns no rows until shipments exist. Reanchored on
+    # fulfillment_status = 'fully_shipped' to scope to delivered orders.
     response = (
         supabase.table("jobs")
         .select(
-            "id, shipped_at, "
+            "id, last_ship_date:job_last_ship_date, "
             "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
         )
         .eq("company_id", company_id)
-        .eq("status", "shipped")
-        .gte("shipped_at", start_date)
-        .lt("shipped_at", end_date)
+        .eq("fulfillment_status", "fully_shipped")
         .execute()
     )
 
@@ -158,13 +161,14 @@ def get_revenue_by_period(
         line_items = quote.get("quote_line_items") or []
         return sum(float(li.get("total_price", 0) or 0) for li in line_items)
 
-    # Bucket jobs into periods
+    # Bucket jobs into periods using the computed last_ship_date helper.
     result = []
     total_revenue = 0.0
     for period in periods:
         period_revenue = 0.0
         for job in jobs:
-            if job.get("shipped_at") and period["start"] <= job["shipped_at"] < period["end"]:
+            last_ship = job.get("last_ship_date")
+            if last_ship and period["start"] <= last_ship < period["end"]:
                 period_revenue += _job_revenue(job)
         total_revenue += period_revenue
         result.append({
@@ -181,22 +185,28 @@ def get_revenue_by_period(
 
 
 def get_job_status_distribution(company_id: str) -> dict:
-    """Get the count of jobs in each status category."""
+    """Get the count of jobs in each production-status category.
+
+    Returns the breakdown over production_status (not_started, in_progress,
+    completed, cancelled). Fulfillment is a separate lifecycle and is not
+    surfaced in this metric; PR 4 may add a parallel fulfillment-distribution
+    insight if Shane asks for one.
+    """
     supabase = _get_supabase_service_role()
 
     response = (
         supabase.table("jobs")
-        .select("status")
+        .select("production_status")
         .eq("company_id", company_id)
         .execute()
     )
 
     jobs = response.data or []
 
-    # Count by status
+    # Count by production_status
     status_counts: dict[str, int] = {}
     for job in jobs:
-        status = job.get("status", "unknown")
+        status = job.get("production_status", "unknown")
         status_counts[status] = status_counts.get(status, 0) + 1
 
     distribution = [
@@ -283,15 +293,15 @@ def get_job_cycle_times(
     start_date = periods[0]["start"]
     end_date = periods[-1]["end"]
 
-    # Get shipped jobs in the date range (by shipped_at)
+    # Get fully-shipped jobs in the date range, using the SQL helper
+    # job_last_ship_date(job_id) in place of the old shipped_at column.
+    # PR 4 fills the helper body; PR 3 ships a NULL stub so this returns
+    # no rows until shipments exist.
     response = (
         supabase.table("jobs")
-        .select("id, created_at, shipped_at")
+        .select("id, created_at, last_ship_date:job_last_ship_date")
         .eq("company_id", company_id)
-        .eq("status", "shipped")
-        .not_.is_("shipped_at", "null")
-        .gte("shipped_at", start_date)
-        .lt("shipped_at", end_date)
+        .eq("fulfillment_status", "fully_shipped")
         .execute()
     )
 
@@ -299,17 +309,20 @@ def get_job_cycle_times(
 
     result = []
     for period in periods:
-        # Jobs shipped in this period
+        # Jobs shipped in this period. last_ship_date is a date (YYYY-MM-DD)
+        # from job_last_ship_date(); the period bounds are date-like strings,
+        # so string comparison is correct.
         period_jobs = [
             j for j in jobs
-            if j.get("shipped_at") and period["start"] <= j["shipped_at"] < period["end"]
+            if j.get("last_ship_date") and period["start"] <= j["last_ship_date"] < period["end"]
         ]
 
         cycle_times = []
         for job in period_jobs:
-            if job.get("created_at") and job.get("shipped_at"):
+            if job.get("created_at") and job.get("last_ship_date"):
                 created = datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
-                shipped = datetime.fromisoformat(job["shipped_at"].replace("Z", "+00:00"))
+                # last_ship_date is a date-only string; treat as UTC midnight.
+                shipped = datetime.fromisoformat(job["last_ship_date"] + "T00:00:00+00:00")
                 days = (shipped - created).total_seconds() / 86400
                 cycle_times.append(days)
 
@@ -342,17 +355,17 @@ def get_customer_revenue_breakdown(
     end_date = periods[-1]["end"]
 
     # Quotes no longer carry total_price; sum each quote's line items.
+    # shipped_at replaced with the job_last_ship_date helper (NULL stub
+    # in PR 3, populated by PR 4).
     response = (
         supabase.table("jobs")
         .select(
-            "id, customer_id, shipped_at, "
+            "id, customer_id, last_ship_date:job_last_ship_date, "
             "customers!left(name), "
             "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
         )
         .eq("company_id", company_id)
-        .eq("status", "shipped")
-        .gte("shipped_at", start_date)
-        .lt("shipped_at", end_date)
+        .eq("fulfillment_status", "fully_shipped")
         .execute()
     )
 
@@ -441,7 +454,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
             "external_setup_cost)))"
         )
         .eq("company_id", company_id)
-        .eq("status", "shipped")
+        .eq("fulfillment_status", "fully_shipped")
         .execute()
     )
 

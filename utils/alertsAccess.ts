@@ -5,7 +5,8 @@ export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low';
 export interface AtRiskJob {
   job_number: string;
   customer_name: string;
-  status: string;
+  /** jobs.production_status — operator workflow status. */
+  production_status: string;
   pct_complete: number;
   pct_time_elapsed: number;
   risk_gap: number;
@@ -38,7 +39,7 @@ interface JobPartRow {
 interface JobRow {
   id: string;
   job_number: string | null;
-  status: string;
+  production_status: string;
   created_at: string | null;
   customers: { name: string | null } | null;
   job_parts: JobPartRow[] | null;
@@ -59,7 +60,7 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
     .from('jobs')
     .select(
       `
-      id, job_number, status, created_at,
+      id, job_number, production_status, created_at,
       customers!left(name),
       job_parts(
         quantity,
@@ -68,7 +69,7 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
       `
     )
     .eq('company_id', companyId)
-    .in('status', ['not_started', 'in_progress']);
+    .in('production_status', ['not_started', 'in_progress']);
 
   if (error) throw error;
 
@@ -114,7 +115,7 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
     atRisk.push({
       job_number: job.job_number ?? 'Unknown',
       customer_name: job.customers?.name ?? 'Unknown',
-      status: job.status,
+      production_status: job.production_status,
       pct_complete: round1(pctComplete),
       pct_time_elapsed: round1(pctTimeElapsed),
       risk_gap: round1(riskGap),

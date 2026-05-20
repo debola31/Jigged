@@ -299,7 +299,7 @@ export default function OperatorJobPartDetailPage() {
               </Typography>
             </Box>
             <Chip
-              label={job.operation_status || job.status}
+              label={job.operation_status || job.production_status}
               color={job.operation_status === 'in_progress' ? 'primary' : 'default'}
             />
           </Box>

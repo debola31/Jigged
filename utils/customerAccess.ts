@@ -11,6 +11,7 @@ import type {
 import type {
   CustomerContact,
   CustomerContactFormData,
+  CustomerContactRole,
 } from '@/types/customerContact';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
 
@@ -32,6 +33,7 @@ type CustomerWithPrimaryContactRow = Customer & {
   customer_contacts?: Array<{
     id: string;
     name: string;
+    role: CustomerContactRole;
     email: string | null;
     phone: string | null;
     is_primary: boolean;
@@ -71,7 +73,7 @@ export async function getCustomers(
   let query = supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       { count: 'exact' },
     )
     .eq('company_id', companyId)
@@ -92,6 +94,7 @@ export async function getCustomers(
   const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
     ...r,
     addresses: r.addresses ?? [],
+    customer_contacts: r.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(r),
     quotes_count: 0,
     jobs_count: 0,
@@ -120,7 +123,7 @@ export async function getAllCustomers(
     let query = supabase
       .from('customers')
       .select(
-        '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       )
       .eq('company_id', companyId)
       .order(sortField, { ascending: sortDirection === 'asc' })
@@ -140,6 +143,7 @@ export async function getAllCustomers(
     const batch = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
       ...r,
       addresses: r.addresses ?? [],
+      customer_contacts: r.customer_contacts ?? [],
       primary_contact: extractPrimaryContact(r),
       quotes_count: 0,
       jobs_count: 0,
@@ -195,7 +199,7 @@ export async function getCustomerWithRelations(
   const { data: customer, error: customerError } = await supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
     )
     .eq('id', customerId)
     .single();
@@ -234,6 +238,7 @@ export async function getCustomerWithRelations(
   return {
     ...typedCustomer,
     addresses: typedCustomer.addresses ?? [],
+    customer_contacts: typedCustomer.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(typedCustomer),
     quotes_count: quotesCount || 0,
     jobs_count: jobsCount || 0,
@@ -464,27 +469,44 @@ export async function bulkImportCustomers(
 }
 
 /**
- * Return the address tagged is_billing for the customer. Returns null when
- * none is set.
+ * Return the address tagged default_billing for the customer. Returns null
+ * when none is set.
+ *
+ * Used by QuoteForm at quote-creation time to pre-populate
+ * quotes.billing_address_id. After PR 2 the printed quote reads the FK
+ * directly off the quote row, not the customer's current default.
  */
 export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
-  return customer.addresses.find((a) => a.is_billing) ?? null;
+  return customer.addresses.find((a) => a.default_billing) ?? null;
 }
 
 /**
- * Return the address tagged is_shipping. Falls back to the billing
- * address — documented product behavior: "if no ship-to is set, ship to
- * where we bill". Implemented in exactly one place.
+ * Return the address tagged default_shipping. Falls back to the default
+ * billing address — documented product behavior: "if no ship-to is set,
+ * ship to where we bill". Implemented in exactly one place.
  */
 export function pickShippingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
   return (
-    customer.addresses.find((a) => a.is_shipping) ??
+    customer.addresses.find((a) => a.default_shipping) ??
     pickBillingAddress(customer)
   );
+}
+
+/**
+ * Pick the customer's primary contact (is_primary=true on customer_contacts,
+ * unique per customer via the customer_contacts_one_primary partial index).
+ * Returns null when none is set. Used by QuoteForm at quote-creation time
+ * to pre-populate quotes.contact_id.
+ */
+export function pickPrimaryContact<T extends { id: string; is_primary: boolean }>(
+  contacts: T[] | undefined,
+): T | null {
+  if (!contacts || contacts.length === 0) return null;
+  return contacts.find((c) => c.is_primary) ?? null;
 }
 
 // Helper re-exports so older callers that imported types from this file

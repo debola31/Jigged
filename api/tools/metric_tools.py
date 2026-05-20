@@ -10,7 +10,7 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_revenue_by_period",
         "description": (
             "Get revenue from shipped jobs grouped by time period. "
-            "Revenue is derived from linked quote total_price for jobs with status='shipped'. "
+            "Revenue is derived from linked quote total_price for jobs with fulfillment_status='fully_shipped'. "
             "Returns data suitable for an area or bar chart."
         ),
         "input_schema": {
@@ -33,9 +33,11 @@ METRIC_TOOLS: list[dict] = [
     {
         "name": "get_job_status_distribution",
         "description": (
-            "Get the count of jobs in each status category "
-            "(not_started, in_progress, completed, shipped, cancelled). "
-            "Returns data suitable for a pie/donut chart."
+            "Get the count of jobs in each production_status category "
+            "(not_started, in_progress, completed, cancelled). "
+            "Note: 'shipped' is no longer a production status — see the "
+            "separate fulfillment_status enum (unshipped, partially_shipped, "
+            "fully_shipped). Returns data suitable for a pie/donut chart."
         ),
         "input_schema": {
             "type": "object",
@@ -70,8 +72,10 @@ METRIC_TOOLS: list[dict] = [
     {
         "name": "get_job_cycle_times",
         "description": (
-            "Get average job cycle times (creation to shipment) grouped by period. "
-            "Only considers jobs with status='shipped' that have a shipped_at timestamp. "
+            "Get average job cycle times (creation to last shipment) grouped by period. "
+            "Only considers jobs with fulfillment_status='fully_shipped'. "
+            "Last ship date comes from the SQL helper public.job_last_ship_date(job_id), "
+            "which sums non-voided shipments. "
             "Returns average days per period, suitable for a line/area chart."
         ),
         "input_schema": {
@@ -190,8 +194,8 @@ CHAT_TOOLS: list[dict] = [
                     "type": "string",
                     "description": (
                         "A single SELECT statement. Use $1 as the company_id placeholder. "
-                        "Example: SELECT status, COUNT(*) as count FROM jobs "
-                        "WHERE company_id = $1 GROUP BY status"
+                        "Example: SELECT production_status, COUNT(*) as count FROM jobs "
+                        "WHERE company_id = $1 GROUP BY production_status"
                     ),
                 },
                 "description": {

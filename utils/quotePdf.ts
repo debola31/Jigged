@@ -70,60 +70,72 @@ function buildShopHeaderLines(company: Company): string[] {
 
 type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
 type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
+type QuoteCustomerContact = NonNullable<QuoteCustomer['customer_contacts']>[number];
 
 /**
- * Pick the customer's billing address (at most one exists per the
- * unique partial index on customer_addresses). Returns null when none
- * is set.
+ * Resolve an embedded customer_addresses row by id. The quote carries
+ * shipping_address_id (rendered on the PDF) and billing_address_id (stored
+ * for downstream invoicing, not rendered) — both point at the address rows
+ * joined under quote.customers.addresses. Returns null when the FK is null
+ * or the lookup misses (e.g. address was deleted after the quote was issued).
  */
-function pickBillingAddress(addresses: QuoteCustomerAddress[] | undefined):
-  QuoteCustomerAddress | null {
-  if (!addresses || addresses.length === 0) return null;
-  return addresses.find((a) => a.is_billing) ?? null;
+function findAddressById(
+  addresses: QuoteCustomerAddress[] | undefined,
+  addressId: string | null | undefined,
+): QuoteCustomerAddress | null {
+  if (!addressId || !addresses || addresses.length === 0) return null;
+  return addresses.find((a) => a.id === addressId) ?? null;
 }
 
 /**
- * Pick the customer's shipping address. Falls back to the billing
- * address — explicit product behavior ("ship to where we bill if no
- * ship-to is set"), implemented in exactly one place.
+ * Resolve an embedded customer_contacts row by id. Used for the Customer
+ * Contact section rendered below the metadata block. Returns null when
+ * the FK is null or the lookup misses.
  */
-function pickShippingAddress(addresses: QuoteCustomerAddress[] | undefined):
-  QuoteCustomerAddress | null {
-  if (!addresses || addresses.length === 0) return null;
-  return (
-    addresses.find((a) => a.is_shipping) ??
-    pickBillingAddress(addresses)
-  );
+function findContactById(
+  contacts: QuoteCustomerContact[] | undefined,
+  contactId: string | null | undefined,
+): QuoteCustomerContact | null {
+  if (!contactId || !contacts || contacts.length === 0) return null;
+  return contacts.find((c) => c.id === contactId) ?? null;
 }
 
 /**
- * Build the printed address lines for either a BILL TO or SHIP TO block.
- * Includes the customer name + contact name as the first lines so each
- * block reads as a self-contained "who/where" pair.
+ * Human-readable label for a contact role. Single source of truth shared
+ * with the quote form's option label so the form and the PDF can't drift.
  */
-/**
- * Pick the customer's primary contact (at most one per the
- * customer_contacts_one_primary index). Returns null when none is set.
- */
-function pickPrimaryContact(
-  contacts: NonNullable<QuoteCustomer['customer_contacts']> | undefined,
-) {
-  if (!contacts || contacts.length === 0) return null;
-  return contacts.find((c) => c.is_primary) ?? null;
+function formatContactRoleLabel(role: string): string {
+  switch (role) {
+    case 'accounts_payable':
+      return 'Accounts Payable';
+    case 'shipping_receiving':
+      return 'Shipping & Receiving';
+    case 'buyer':
+      return 'Buyer';
+    case 'engineering':
+      return 'Engineering';
+    case 'quality':
+      return 'Quality';
+    default:
+      return 'Other';
+  }
 }
 
-function buildAddressLines(
+/**
+ * Build the printed address lines for the Shipping Address block.
+ * Surfaces ATTN: from customer_addresses.attention_to when set. No
+ * contact lines or contact info — the Customer Contact has its own
+ * section below the metadata block.
+ */
+function buildShippingAddressLines(
   customer: QuoteCustomer | null | undefined,
   address: QuoteCustomerAddress | null,
-  { withContact = true }: { withContact?: boolean } = {},
 ): string[] {
   if (!customer) return ['(No customer)'];
 
-  const primary = pickPrimaryContact(customer.customer_contacts);
-
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-  if (primary?.name) lines.push(primary.name);
+  if (address?.attention_to) lines.push(`Attn: ${address.attention_to}`);
 
   if (address) {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -136,10 +148,6 @@ function buildAddressLines(
     }
   }
 
-  if (withContact) {
-    if (primary?.phone) lines.push(primary.phone);
-    if (primary?.email) lines.push(primary.email);
-  }
   return lines;
 }
 
@@ -275,30 +283,25 @@ export async function generateQuotePdf(
   const createdByName = quote.created_by_member?.name ?? null;
   const createdByEmail = quote.created_by_member?.email ?? null;
 
-  // Resolve the addresses for this customer. SHIP TO is only rendered as a
-  // separate block when it's a different address from BILL TO — when
-  // they're the same, customers expect a single "BILL TO" block, not a
-  // visually redundant pair.
-  const billingAddress = pickBillingAddress(quote.customers?.addresses);
-  const shippingAddress = pickShippingAddress(quote.customers?.addresses);
-  const shipDiffersFromBill =
-    shippingAddress !== null &&
-    billingAddress !== null &&
-    shippingAddress.id !== billingAddress.id;
+  // Resolve the shipping address + customer contact from the quote's FKs.
+  // These are set at quote creation (legacy quotes were backfilled in
+  // migrations 20260520 + 20260522) so the printed quote always renders
+  // what the customer originally saw, even if the customer's defaults
+  // change later. The billing address is captured on the quote for the
+  // future invoicing flow but is NOT rendered on the quote document.
+  const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
+  const contact = findContactById(quote.customers?.customer_contacts, quote.contact_id);
 
-  const billToLines = buildAddressLines(quote.customers ?? null, billingAddress);
-  const shipToLines = shipDiffersFromBill
-    ? buildAddressLines(quote.customers ?? null, shippingAddress, { withContact: false })
-    : [];
+  const shippingLines = buildShippingAddressLines(quote.customers ?? null, shippingAddress);
 
-  // Section labels
+  // Section labels — left: CREATED BY, right: SHIPPING ADDRESS.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
   if (createdByName || createdByEmail) {
     doc.text('CREATED BY', leftX, cursorY);
   }
-  doc.text('BILL TO', rightX, cursorY);
+  doc.text('SHIPPING ADDRESS', rightX, cursorY);
 
   // Left column: Created by name + email
   doc.setFontSize(11);
@@ -315,37 +318,52 @@ export async function generateQuotePdf(
     leftLineCount += 1;
   }
 
-  // Right column: Bill To
-  billToLines.forEach((line, i) => {
+  // Right column: Shipping address. First line is the customer name
+  // (bold); subsequent lines (Attn:, address, city/state/zip, country)
+  // render plain.
+  shippingLines.forEach((line: string, i: number) => {
     doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
     doc.setFontSize(11);
     doc.setTextColor(40);
     doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  let rightBlockHeight = 16 + billToLines.length * 13;
+  const rightBlockLines = shippingLines.length;
+  const blockLines = Math.max(leftLineCount, rightBlockLines);
+  cursorY = cursorY + 16 + blockLines * 13 + 16;
 
-  // Stacked SHIP TO underneath BILL TO when the addresses diverge.
-  if (shipToLines.length > 0) {
-    const shipLabelY = cursorY + rightBlockHeight + 6;
+  // ---------- Customer Contact section ----------
+  // Sourced from quotes.contact_id. Defaults at quote creation to the
+  // customer's primary contact (see migration 20260522). Renders name,
+  // role, email, phone — only the fields the contact actually has.
+  if (contact) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(120);
-    doc.text('SHIP TO', rightX, shipLabelY);
+    doc.text('CUSTOMER CONTACT', MARGIN, cursorY);
+    cursorY += 14;
 
-    shipToLines.forEach((line, i) => {
-      doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(40);
-      doc.text(line, rightX, shipLabelY + 16 + i * 13);
-    });
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.setFont('helvetica', 'bold');
+    doc.text(contact.name, MARGIN, cursorY);
+    cursorY += 13;
 
-    rightBlockHeight = rightBlockHeight + 6 + 16 + shipToLines.length * 13;
+    doc.setFont('helvetica', 'normal');
+    doc.text(formatContactRoleLabel(contact.role), MARGIN, cursorY);
+    cursorY += 13;
+
+    if (contact.email) {
+      doc.text(contact.email, MARGIN, cursorY);
+      cursorY += 13;
+    }
+    if (contact.phone) {
+      doc.text(contact.phone, MARGIN, cursorY);
+      cursorY += 13;
+    }
+
+    cursorY += 6;
   }
-
-  const rightLineEquivalent = rightBlockHeight / 13;
-  const blockLines = Math.max(leftLineCount, rightLineEquivalent);
-  cursorY = cursorY + 16 + blockLines * 13 + 16;
 
   // ---------- Line items ----------
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);

@@ -246,10 +246,10 @@ export default function CustomersPage() {
       valueGetter: (params) => {
         if (!params.data) return '—';
         const addresses = params.data.addresses ?? [];
-        // Surface the billing address's city/state in the list — matches
-        // what the quote PDF shows as BILL TO.
+        // Surface the default billing address's city/state in the list —
+        // matches what the quote PDF shows as BILL TO.
         const primary =
-          addresses.find((a: { is_billing: boolean }) => a.is_billing) ??
+          addresses.find((a: { default_billing: boolean }) => a.default_billing) ??
           addresses[0];
         if (!primary) return '—';
         const parts = [primary.city, primary.state].filter(Boolean);

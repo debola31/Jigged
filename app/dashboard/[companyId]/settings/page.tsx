@@ -18,6 +18,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
+import CompanyShippingSettingsCard from '@/components/settings/CompanyShippingSettingsCard';
 
 export default function SettingsPage() {
   const params = useParams();
@@ -44,6 +45,9 @@ export default function SettingsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
+
+      {/* Packing-slip number format + default CoC text */}
+      <CompanyShippingSettingsCard companyId={companyId} />
 
       {/* Demo Mode Section */}
       <Card elevation={2}>

@@ -342,6 +342,36 @@ export async function updateCustomer(
   return data;
 }
 
+/**
+ * Update the per-customer shipping defaults surfaced in PR 7's
+ * CustomerShippingDefaultsCard. Empty strings are stored as NULL so
+ * the CoC cascade (shipment → customer → company → omit) and the
+ * shipping-arrangement CHECK constraint behave predictably.
+ */
+export async function updateCustomerShippingDefaults(
+  customerId: string,
+  patch: {
+    default_shipping_arrangement: import('@/types/shipment').ShippingArrangement | null;
+    default_carrier: string | null;
+    default_coc_text: string | null;
+  },
+): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      default_shipping_arrangement: patch.default_shipping_arrangement,
+      default_carrier: patch.default_carrier?.trim() ? patch.default_carrier.trim() : null,
+      default_coc_text: patch.default_coc_text?.trim() ? patch.default_coc_text.trim() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', customerId);
+  if (error) {
+    console.error('Error updating customer shipping defaults:', error);
+    throw new Error(`Failed to update shipping defaults: ${error.message}`);
+  }
+}
+
 export async function softDeleteCustomer(customerId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase

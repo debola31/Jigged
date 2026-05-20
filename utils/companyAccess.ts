@@ -280,6 +280,45 @@ export async function updateCompanyLogo(
   }
 }
 
+export interface CompanyShippingSettingsPatch {
+  packing_slip_number_format: string;
+  default_coc_text: string | null;
+}
+
+/**
+ * Update the company-wide shipping defaults: packing-slip number format
+ * and the bottom-step CoC text in the cascade. Validates the format
+ * contains a {seq} or {seq:0...0} token before saving so the next
+ * call to next_packing_slip_number() doesn't return an unsubstituted
+ * placeholder.
+ */
+export async function updateCompanyShippingSettings(
+  companyId: string,
+  patch: CompanyShippingSettingsPatch,
+): Promise<void> {
+  const format = patch.packing_slip_number_format.trim();
+  if (!format) {
+    throw new Error('Packing-slip number format is required.');
+  }
+  if (!/\{seq(:0+)?\}/.test(format)) {
+    throw new Error('Packing-slip number format must include a {seq} or {seq:0000} token.');
+  }
+
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('companies')
+    .update({
+      packing_slip_number_format: format,
+      default_coc_text: patch.default_coc_text?.trim() ? patch.default_coc_text.trim() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating company shipping settings:', error);
+    throw new Error(`Failed to save shipping settings: ${error.message}`);
+  }
+}
+
 /**
  * Update the company's shop-contact profile (address, phone, email, website).
  * These fields power the "FROM" block on printable quote PDFs. Any field

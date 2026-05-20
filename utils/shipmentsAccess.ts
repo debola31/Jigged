@@ -129,7 +129,37 @@ export async function getShipmentById(
     );
   }
 
-  return data as unknown as ShipmentWithRelations;
+  const shipment = data as unknown as ShipmentWithRelations;
+  shipment.created_by_member = await fetchCreatorMember(
+    shipment.company_id,
+    shipment.created_by,
+  );
+  return shipment;
+}
+
+/**
+ * Look up the salesperson/shipper who created the row. Lives in
+ * user_company_access (same shape quotePdf uses). Returns null when
+ * created_by is unset (legacy migrations) or the member has since
+ * been removed from the company.
+ */
+async function fetchCreatorMember(
+  companyId: string,
+  userId: string | null,
+): Promise<{ user_id: string; name: string | null; email: string | null } | null> {
+  if (!userId) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('user_company_access')
+    .select('user_id, name, email')
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) {
+    console.warn('fetchCreatorMember failed:', error);
+    return null;
+  }
+  return (data as { user_id: string; name: string | null; email: string | null } | null) ?? null;
 }
 
 /**
@@ -168,7 +198,35 @@ export async function getShipmentsForJob(
     throw new Error(`Failed to load shipments: ${error.message}`);
   }
 
-  return (data ?? []) as unknown as ShipmentWithRelations[];
+  const rows = (data ?? []) as unknown as ShipmentWithRelations[];
+  if (rows.length > 0) {
+    // Batch-resolve created_by members in one round trip rather than N+1.
+    const userIds = Array.from(
+      new Set(rows.map((r) => r.created_by).filter((u): u is string => Boolean(u))),
+    );
+    const companyId = rows[0].company_id;
+    if (userIds.length > 0) {
+      const { data: members } = await supabase
+        .from('user_company_access')
+        .select('user_id, name, email')
+        .eq('company_id', companyId)
+        .in('user_id', userIds);
+      const byUserId = new Map<string, { user_id: string; name: string | null; email: string | null }>();
+      for (const m of (members ?? []) as Array<{
+        user_id: string;
+        name: string | null;
+        email: string | null;
+      }>) {
+        byUserId.set(m.user_id, m);
+      }
+      for (const r of rows) {
+        r.created_by_member = r.created_by ? byUserId.get(r.created_by) ?? null : null;
+      }
+    } else {
+      for (const r of rows) r.created_by_member = null;
+    }
+  }
+  return rows;
 }
 
 /**

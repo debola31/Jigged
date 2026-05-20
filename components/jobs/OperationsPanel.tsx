@@ -67,11 +67,12 @@ export default function OperationsPanel({
     return null;
   })();
 
-  // Check if job is in a disabled state. Operators stop being able to act
-  // on operations once the job is cancelled (production-side) or fully
-  // shipped (no point continuing work after the order's out the door).
-  const isJobDisabled =
-    job.production_status === 'cancelled' || job.fulfillment_status === 'fully_shipped';
+  // Production and fulfillment are independent lifecycles (PRD §0/§7) —
+  // a fully-shipped job can still have outstanding work that operators
+  // need to record (rework, last operation completed after the box went
+  // out the door, etc.). Only the production-side terminal state stops
+  // operations from being editable.
+  const isJobDisabled = job.production_status === 'cancelled';
   const isDisabled = disabled || loading || isJobDisabled;
 
   const showSnackbar = (message: string, severity: SnackbarState['severity'] = 'success') => {
@@ -207,8 +208,7 @@ export default function OperationsPanel({
           {/* Disabled State Warning */}
           {isJobDisabled && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              Operations cannot be modified — job is{' '}
-              {job.production_status === 'cancelled' ? 'cancelled' : 'fully shipped'}.
+              Operations cannot be modified — job is cancelled.
             </Alert>
           )}
 

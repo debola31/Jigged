@@ -169,8 +169,6 @@ interface SupabaseLike {
 export interface PackingSlipPdfContext {
   shipment: ShipmentWithRelations;
   company: Company;
-  /** Customer's default_billing address — for the BILL TO column. */
-  billingAddress: CustomerAddress | null;
   /** Customer-level default CoC. Step 2 of the cascade. */
   customerDefaultCocText: string | null;
   /** Optional Supabase client to resolve the logo signed URL. */
@@ -187,7 +185,7 @@ export interface PackingSlipPdfContext {
 export async function generatePackingSlipPdf(
   ctx: PackingSlipPdfContext,
 ): Promise<jsPDF> {
-  const { shipment, company, billingAddress } = ctx;
+  const { shipment, company } = ctx;
 
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -292,43 +290,60 @@ export async function generatePackingSlipPdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- BILL TO (left) + SHIP TO (right) ----------
+  // ---------- CREATED BY (left) + SHIP TO (right) ----------
+  // Mirrors the quote PDF's metadata layout. Left column is the
+  // shipper/salesperson identity (resolved from shipments.created_by
+  // via user_company_access). The billing address is intentionally
+  // not on the packing slip — invoicing carries that on its own
+  // document.
   const colWidth = (pageWidth - MARGIN * 2) / 2;
   const leftX = MARGIN;
   const rightX = MARGIN + colWidth + 8;
 
   const attention = resolveAttentionLine(shipment);
   const shipToAddress = shipment.shipping_address ?? null;
-
-  const billLines = buildAddressBlockLines(
-    shipment.customer?.name ?? null,
-    billingAddress,
-    null,
-  );
   const shipLines = buildAddressBlockLines(
     shipment.customer?.name ?? null,
     shipToAddress,
     attention.text,
   );
 
+  const createdByName = shipment.created_by_member?.name ?? null;
+  const createdByEmail = shipment.created_by_member?.email ?? null;
+  const hasCreatedBy = Boolean(createdByName || createdByEmail);
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  doc.text('BILL TO', leftX, cursorY);
+  if (hasCreatedBy) {
+    doc.text('CREATED BY', leftX, cursorY);
+  }
   doc.text('SHIP TO', rightX, cursorY);
 
+  // Left: name (bold) + email (regular).
   doc.setFontSize(11);
   doc.setTextColor(40);
-  billLines.forEach((line, i) => {
-    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-    doc.text(line, leftX, cursorY + 16 + i * 13);
-  });
+  let leftLineCount = 0;
+  if (createdByName) {
+    doc.setFont('helvetica', 'bold');
+    doc.text(createdByName, leftX, cursorY + 16 + leftLineCount * 13);
+    leftLineCount += 1;
+  }
+  if (createdByEmail) {
+    doc.setFont('helvetica', 'normal');
+    doc.text(createdByEmail, leftX, cursorY + 16 + leftLineCount * 13);
+    leftLineCount += 1;
+  }
+
+  // Right: ship-to address.
   shipLines.forEach((line, i) => {
     doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(40);
     doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  const blockLines = Math.max(billLines.length, shipLines.length);
+  const blockLines = Math.max(leftLineCount, shipLines.length);
   cursorY = cursorY + 16 + blockLines * 13 + 18;
 
   // ---------- Line items table ----------

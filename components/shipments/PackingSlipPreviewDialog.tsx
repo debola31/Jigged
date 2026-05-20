@@ -17,7 +17,6 @@ import PrintIcon from '@mui/icons-material/Print';
 import type { jsPDF } from 'jspdf';
 import { getSupabase } from '@/lib/supabase';
 import type { Company } from '@/utils/companyAccess';
-import type { CustomerAddress } from '@/types/customer';
 import {
   generatePackingSlipPdf,
   packingSlipPdfFilename,
@@ -70,34 +69,24 @@ export default function PackingSlipPreviewDialog({
           throw new Error(companyErr?.message ?? 'Failed to load company.');
         }
 
-        // Need the customer's default_billing address + default_coc_text.
+        // CoC cascade step 2 — pull the customer's default text. The
+        // packing slip's other customer surface (ship-to address +
+        // ATTN line) already comes from the shipment row itself, so
+        // this is the only field still worth reading.
         const { data: customerRow, error: customerErr } = await supabase
           .from('customers')
-          .select(
-            `id, name, default_coc_text,
-             addresses:customer_addresses (
-               id, customer_id, address_line1, address_line2, city, state,
-               postal_code, country, default_billing, default_shipping, attention_to
-             )`,
-          )
+          .select('id, default_coc_text')
           .eq('id', shipment.customer_id)
           .single();
         if (customerErr || !customerRow) {
           throw new Error(customerErr?.message ?? 'Failed to load customer.');
         }
 
-        const customer = customerRow as unknown as {
-          default_coc_text: string | null;
-          addresses: CustomerAddress[];
-        };
-        const billingAddress =
-          customer.addresses.find((a) => a.default_billing) ?? null;
-
         const ctx: PackingSlipPdfContext = {
           shipment,
           company: companyRow as unknown as Company,
-          billingAddress,
-          customerDefaultCocText: customer.default_coc_text ?? null,
+          customerDefaultCocText:
+            (customerRow as { default_coc_text: string | null }).default_coc_text ?? null,
           supabase,
         };
 

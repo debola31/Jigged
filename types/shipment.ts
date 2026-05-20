@@ -65,6 +65,12 @@ export interface ShipmentWithRelations extends Shipment {
     name: string;
   } | null;
   shipping_address?: CustomerAddress | null;
+  /** Salesperson / shipper who created the row. Resolved post-fetch in shipmentsAccess. */
+  created_by_member?: {
+    user_id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
   shipment_line_items?: Array<ShipmentLineItem & {
     job_part?: {
       id: string;

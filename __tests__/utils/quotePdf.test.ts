@@ -68,8 +68,7 @@ const baseQuote: QuoteWithRelations = {
   customer_po_number: 'CUST-PO-555',
   billing_address_id: 'addr-1',
   shipping_address_id: 'addr-1',
-  billing_contact_id: 'contact-1',
-  shipping_contact_id: 'contact-1',
+  contact_id: 'contact-1',
   lead_time_days: 14,
   expiration_date: '2099-12-31',
   status: 'active',
@@ -327,7 +326,9 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered).not.toContain('FROM');
-    expect(rendered).toContain('BILL TO');
+    // BILL TO is no longer rendered — quote PDF shows SHIPPING ADDRESS only.
+    expect(rendered).not.toContain('BILL TO');
+    expect(rendered).toContain('SHIPPING ADDRESS');
   });
 
   it('renders the static ACCEPTANCE block (signature, PO#)', async () => {
@@ -344,7 +345,7 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('Date');
   });
 
-  it('renders a CREATED BY block (left of BILL TO) when creator is known', async () => {
+  it('renders a CREATED BY block (left of SHIPPING ADDRESS) when creator is known', async () => {
     const quoteWithCreator: QuoteWithRelations = {
       ...baseQuote,
       created_by: 'user-1',
@@ -372,8 +373,8 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered).not.toContain('CREATED BY');
-    // BILL TO is still rendered.
-    expect(rendered).toContain('BILL TO');
+    // SHIPPING ADDRESS is still rendered.
+    expect(rendered).toContain('SHIPPING ADDRESS');
   });
 
   it('renders a separate Pricing Tiers section for multi-tier parts', async () => {

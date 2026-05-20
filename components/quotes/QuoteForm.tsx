@@ -30,8 +30,7 @@ import {
   getAllCustomers,
   pickBillingAddress,
   pickShippingAddress,
-  pickDefaultBillingContact,
-  pickDefaultShippingContact,
+  pickPrimaryContact,
 } from '@/utils/customerAccess';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
@@ -126,13 +125,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [customersById, setCustomersById] = useState<Map<string, CustomerWithRelations>>(
     () => new Map(),
   );
-  // Default to "Ship to same as billing." On customer change we recompute
-  // from the customer's defaults; in edit mode we infer it from whether
-  // the initial billing/shipping FK pair matches.
-  const [shipToSameAsBilling, setShipToSameAsBilling] = useState<boolean>(
-    () =>
-      initialData.shipping_address_id === initialData.billing_address_id &&
-      initialData.shipping_contact_id === initialData.billing_contact_id,
+  // Shipping address is the primary section because it's what the quote
+  // PDF actually renders. Billing address is captured for the future
+  // invoicing flow but de-emphasized into a disclosure that opens when
+  // billing differs from shipping. Initial state: ON when billing address
+  // equals shipping address (Customer Contact is independent of either).
+  const [billingSameAsShipping, setBillingSameAsShipping] = useState<boolean>(
+    () => initialData.billing_address_id === initialData.shipping_address_id,
   );
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -226,25 +225,26 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   /**
    * Customer change clears the previous customer's address/contact FKs
    * (they belong to a different customer and would be rejected by the
-   * integrity trigger) and pre-populates the four defaults from the
-   * newly-selected customer.
+   * integrity trigger) and pre-populates defaults from the new customer:
+   *   - contact_id          → primary contact
+   *   - shipping_address_id → default_shipping (falls back to default_billing)
+   *   - billing_address_id  → default_billing
    *
-   * The "ship-to same as billing" toggle is recomputed: it goes ON when
-   * the customer's resolved shipping equals their resolved billing for
-   * BOTH address and contact, and OFF when they diverge. That matches
-   * what the customer-defaults card on the customer page actually says.
+   * "Billing same as shipping" goes ON when the resolved billing equals
+   * the resolved shipping address. Common case (single default address)
+   * → ON, disclosure hidden. Customers with separate billing/shipping
+   * defaults → OFF, billing disclosure visible.
    */
   const handleCustomerChange = (customerId: string) => {
     if (!customerId) {
       setFormData((prev) => ({
         ...prev,
         customer_id: '',
+        contact_id: '',
         billing_address_id: '',
         shipping_address_id: '',
-        billing_contact_id: '',
-        shipping_contact_id: '',
       }));
-      setShipToSameAsBilling(true);
+      setBillingSameAsShipping(true);
       return;
     }
     if (customerId === formData.customer_id) return;
@@ -252,65 +252,48 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     const customer = customersById.get(customerId);
     const billing = customer ? pickBillingAddress(customer) : null;
     const shipping = customer ? pickShippingAddress(customer) : null;
-    const billingContact = customer
-      ? pickDefaultBillingContact(customer.customer_contacts)
-      : null;
-    const shippingContact = customer
-      ? pickDefaultShippingContact(customer.customer_contacts)
-      : null;
+    const primary = customer ? pickPrimaryContact(customer.customer_contacts) : null;
 
     const billingId = billing?.id ?? '';
     const shippingId = shipping?.id ?? '';
-    const billingContactId = billingContact?.id ?? '';
-    const shippingContactId = shippingContact?.id ?? '';
+    const contactId = primary?.id ?? '';
 
-    const sameAsBilling =
-      shippingId === billingId && shippingContactId === billingContactId;
+    const sameAsShipping = billingId === shippingId;
 
-    setShipToSameAsBilling(sameAsBilling);
+    setBillingSameAsShipping(sameAsShipping);
     setFormData((prev) => ({
       ...prev,
       customer_id: customerId,
-      billing_address_id: billingId,
-      shipping_address_id: sameAsBilling ? billingId : shippingId,
-      billing_contact_id: billingContactId,
-      shipping_contact_id: sameAsBilling ? billingContactId : shippingContactId,
+      contact_id: contactId,
+      shipping_address_id: shippingId,
+      billing_address_id: sameAsShipping ? shippingId : billingId,
     }));
   };
 
   /**
-   * When the user changes the billing address/contact while the "same as
-   * billing" toggle is on, mirror the change to the shipping side so the
-   * two stay in sync without the user having to touch the hidden fields.
+   * When the user changes the shipping address while "billing same as
+   * shipping" is on, mirror the change into the hidden billing FK so
+   * the two stay in sync without the user touching the disclosure.
    */
-  const handleBillingAddressChange = (newId: string) => {
+  const handleShippingAddressChange = (newId: string) => {
     setFormData((prev) => ({
       ...prev,
-      billing_address_id: newId,
-      ...(shipToSameAsBilling ? { shipping_address_id: newId } : {}),
-    }));
-  };
-
-  const handleBillingContactChange = (newId: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      billing_contact_id: newId,
-      ...(shipToSameAsBilling ? { shipping_contact_id: newId } : {}),
+      shipping_address_id: newId,
+      ...(billingSameAsShipping ? { billing_address_id: newId } : {}),
     }));
   };
 
   /**
-   * Toggling the "same as billing" checkbox.
-   * ON  → sync shipping → billing immediately.
-   * OFF → leave shipping where it is; user will pick.
+   * Toggling "billing same as shipping".
+   * ON  → sync billing_address_id → shipping_address_id immediately.
+   * OFF → leave billing where it is; user opens the disclosure to pick.
    */
-  const handleShipToSameToggle = (next: boolean) => {
-    setShipToSameAsBilling(next);
+  const handleBillingSameToggle = (next: boolean) => {
+    setBillingSameAsShipping(next);
     if (next) {
       setFormData((prev) => ({
         ...prev,
-        shipping_address_id: prev.billing_address_id,
-        shipping_contact_id: prev.billing_contact_id,
+        billing_address_id: prev.shipping_address_id,
       }));
     }
   };
@@ -598,33 +581,30 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
 
-          {/* Bill-to + Ship-to selectors. Hidden until a customer is picked
-              because the address/contact dropdowns have nothing to show
-              otherwise. */}
+          {/* Customer contact + Shipping address (both render on the
+              quote PDF) and Billing address (captured for invoicing; not
+              rendered on the quote). Hidden until a customer is picked. */}
           {formData.customer_id && (
             <Box sx={{ mt: 3 }}>
-              <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                Bill to
-              </Typography>
               <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 6 }}>
                   <Autocomplete
                     size="small"
-                    options={customerAddresses}
-                    getOptionLabel={formatAddressOption}
+                    options={customerContacts}
+                    getOptionLabel={formatContactOption}
                     value={
-                      customerAddresses.find((a) => a.id === formData.billing_address_id) ?? null
+                      customerContacts.find((c) => c.id === formData.contact_id) ?? null
                     }
-                    onChange={(_, v) => handleBillingAddressChange(v?.id ?? '')}
+                    onChange={(_, v) => handleFieldChange('contact_id', v?.id ?? '')}
                     isOptionEqualToValue={(o, v) => o.id === v.id}
                     renderInput={(params) => (
                       <TextField
                         {...params}
-                        label="Bill to address"
+                        label="Customer contact"
                         helperText={
-                          customerAddresses.length === 0
-                            ? 'This customer has no saved addresses — add one on the customer page.'
-                            : ' '
+                          customerContacts.length === 0
+                            ? 'This customer has no saved contacts — add one on the customer page.'
+                            : 'Renders on the quote as the Customer Contact section.'
                         }
                       />
                     )}
@@ -633,21 +613,21 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 <Grid size={{ xs: 12, md: 6 }}>
                   <Autocomplete
                     size="small"
-                    options={customerContacts}
-                    getOptionLabel={formatContactOption}
+                    options={customerAddresses}
+                    getOptionLabel={formatAddressOption}
                     value={
-                      customerContacts.find((c) => c.id === formData.billing_contact_id) ?? null
+                      customerAddresses.find((a) => a.id === formData.shipping_address_id) ?? null
                     }
-                    onChange={(_, v) => handleBillingContactChange(v?.id ?? '')}
+                    onChange={(_, v) => handleShippingAddressChange(v?.id ?? '')}
                     isOptionEqualToValue={(o, v) => o.id === v.id}
                     renderInput={(params) => (
                       <TextField
                         {...params}
-                        label="Bill to contact"
+                        label="Shipping address"
                         helperText={
-                          customerContacts.length === 0
-                            ? 'This customer has no saved contacts — add one on the customer page.'
-                            : ' '
+                          customerAddresses.length === 0
+                            ? 'This customer has no saved addresses — add one on the customer page.'
+                            : "Renders on the quote with Attn: from the address's attention_to."
                         }
                       />
                     )}
@@ -656,62 +636,40 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Grid>
 
               <FormControlLabel
-                sx={{ mt: 2, mb: shipToSameAsBilling ? 0 : 1 }}
+                sx={{ mt: 2, mb: 0 }}
                 control={
                   <Checkbox
-                    checked={shipToSameAsBilling}
-                    onChange={(e) => handleShipToSameToggle(e.target.checked)}
+                    checked={billingSameAsShipping}
+                    onChange={(e) => handleBillingSameToggle(e.target.checked)}
                   />
                 }
-                label="Ship to same as bill to"
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Billing address same as shipping
+                  </Typography>
+                }
               />
 
-              {!shipToSameAsBilling && (
-                <>
-                  <Typography
-                    variant="overline"
-                    color="text.secondary"
-                    sx={{ display: 'block', mb: 1 }}
-                  >
-                    Ship to
-                  </Typography>
-                  <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, md: 6 }}>
-                      <Autocomplete
-                        size="small"
-                        options={customerAddresses}
-                        getOptionLabel={formatAddressOption}
-                        value={
-                          customerAddresses.find(
-                            (a) => a.id === formData.shipping_address_id,
-                          ) ?? null
-                        }
-                        onChange={(_, v) => handleFieldChange('shipping_address_id', v?.id ?? '')}
-                        isOptionEqualToValue={(o, v) => o.id === v.id}
-                        renderInput={(params) => (
-                          <TextField {...params} label="Ship to address" helperText=" " />
-                        )}
+              {!billingSameAsShipping && (
+                <Box sx={{ mt: 1, pl: 4, opacity: 0.85 }}>
+                  <Autocomplete
+                    size="small"
+                    options={customerAddresses}
+                    getOptionLabel={formatAddressOption}
+                    value={
+                      customerAddresses.find((a) => a.id === formData.billing_address_id) ?? null
+                    }
+                    onChange={(_, v) => handleFieldChange('billing_address_id', v?.id ?? '')}
+                    isOptionEqualToValue={(o, v) => o.id === v.id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Billing address"
+                        helperText="Captured for invoicing. Not rendered on the quote PDF."
                       />
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 6 }}>
-                      <Autocomplete
-                        size="small"
-                        options={customerContacts}
-                        getOptionLabel={formatContactOption}
-                        value={
-                          customerContacts.find(
-                            (c) => c.id === formData.shipping_contact_id,
-                          ) ?? null
-                        }
-                        onChange={(_, v) => handleFieldChange('shipping_contact_id', v?.id ?? '')}
-                        isOptionEqualToValue={(o, v) => o.id === v.id}
-                        renderInput={(params) => (
-                          <TextField {...params} label="Ship to contact" helperText=" " />
-                        )}
-                      />
-                    </Grid>
-                  </Grid>
-                </>
+                    )}
+                  />
+                </Box>
               )}
             </Box>
           )}

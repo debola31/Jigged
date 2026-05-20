@@ -18,8 +18,8 @@ export interface Customer {
  * address that isn't currently the default for anything).
  *
  * attention_to is the optional "ATTN:" recipient line that prints above
- * the address on packing slips. A shipment can override it per-shipment
- * via shipping_contact_id; see utils/shipmentsAccess.ts resolveAttentionLine.
+ * the address on packing slips and on the quote PDF's Shipping Address
+ * block. One column → one rendered line, no fallback chain.
  */
 export interface CustomerAddress {
   id: string;

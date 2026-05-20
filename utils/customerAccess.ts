@@ -496,45 +496,17 @@ export function pickShippingAddress(
   );
 }
 
-/** Shape just the contact-by-role pickers need. */
-type ContactPickShape = { id: string; role: CustomerContactRole };
-
-function pickContactByRole<T extends ContactPickShape>(
+/**
+ * Pick the customer's primary contact (is_primary=true on customer_contacts,
+ * unique per customer via the customer_contacts_one_primary partial index).
+ * Returns null when none is set. Used by QuoteForm at quote-creation time
+ * to pre-populate quotes.contact_id.
+ */
+export function pickPrimaryContact<T extends { id: string; is_primary: boolean }>(
   contacts: T[] | undefined,
-  primary: CustomerContactRole,
-  fallback?: CustomerContactRole,
 ): T | null {
   if (!contacts || contacts.length === 0) return null;
-  const matched = contacts.find((c) => c.role === primary);
-  if (matched) return matched;
-  if (fallback) return contacts.find((c) => c.role === fallback) ?? null;
-  return null;
-}
-
-/**
- * Pick the customer contact treated as the billing recipient. Resolves
- * role accounts_payable first, falling back to buyer. Returns null when
- * neither role exists. Used by QuoteForm at quote-creation time to
- * pre-populate quotes.billing_contact_id; mirrored in the shipments
- * RPC backfill in PR 2's migration.
- */
-export function pickDefaultBillingContact<T extends ContactPickShape>(
-  contacts: T[] | undefined,
-): T | null {
-  return pickContactByRole(contacts, 'accounts_payable', 'buyer');
-}
-
-/**
- * Pick the customer contact treated as the shipping recipient. Resolves
- * role shipping_receiving first, falling back to buyer. Returns null
- * when neither role exists. Used by QuoteForm at quote-creation time to
- * pre-populate quotes.shipping_contact_id; mirrored by the shipment-form
- * default in PR 4.
- */
-export function pickDefaultShippingContact<T extends ContactPickShape>(
-  contacts: T[] | undefined,
-): T | null {
-  return pickContactByRole(contacts, 'shipping_receiving', 'buyer');
+  return contacts.find((c) => c.is_primary) ?? null;
 }
 
 // Helper re-exports so older callers that imported types from this file

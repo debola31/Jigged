@@ -6,11 +6,18 @@ export type QuoteStatus = 'active' | 'expired';
 /**
  * Quote header record. Part/quantity/pricing lives on quote_line_items.
  *
- * The four address/contact FKs (billing_address_id, shipping_address_id,
- * billing_contact_id, shipping_contact_id) are set at quote creation from
- * the customer's defaults and stay fixed after that — even if the customer's
- * defaults change later, the printed quote reflects what the customer
- * originally saw. See migration 20260520_shipments_pr2_quote_addresses.
+ * Three relational FKs are set at quote creation from the customer's
+ * defaults and stay fixed after that — even if the customer's defaults
+ * change later, the printed quote reflects what the customer originally
+ * saw:
+ *   - contact_id        — primary customer contact (renders in the
+ *                         Customer Contact section of the quote PDF)
+ *   - shipping_address_id — the address rendered on the quote PDF
+ *   - billing_address_id  — captured for downstream invoicing; not
+ *                           rendered on the quote document
+ *
+ * See migrations 20260520_shipments_pr2_quote_addresses and
+ * 20260522_shipments_pr2_unify_quote_contact.
  */
 export interface Quote {
   id: string;
@@ -20,8 +27,7 @@ export interface Quote {
   customer_po_number: string | null;
   billing_address_id: string | null;
   shipping_address_id: string | null;
-  billing_contact_id: string | null;
-  shipping_contact_id: string | null;
+  contact_id: string | null;
   lead_time_days: number | null;
   expiration_date: string | null;
   status: QuoteStatus;
@@ -68,11 +74,11 @@ export interface QuoteLineItem {
  */
 export interface QuoteWithRelations extends Quote {
   // Joined customer data + their addresses + their contacts. The quote PDF
-  // resolves BILL TO / SHIP TO by looking up addresses by id against the
-  // quote's billing_address_id / shipping_address_id FKs (set at quote
-  // creation). Contacts are resolved the same way against billing_contact_id /
-  // shipping_contact_id. The customer_contacts join also surfaces the
-  // is_primary flag so customer-detail pages can render the primary chip.
+  // resolves SHIPPING ADDRESS by looking up the address by id against
+  // quotes.shipping_address_id (set at quote creation), and the Customer
+  // Contact section by looking up customer_contacts against quotes.contact_id.
+  // billing_address_id is captured for downstream invoicing and isn't
+  // rendered on the quote document.
   customers?: {
     id: string;
     name: string;
@@ -150,10 +156,9 @@ export interface QuoteFormPartBlock {
  */
 export interface QuoteFormData {
   customer_id: string;
+  contact_id: string;
   billing_address_id: string;
   shipping_address_id: string;
-  billing_contact_id: string;
-  shipping_contact_id: string;
   parts: QuoteFormPartBlock[];
   lead_time_days: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
@@ -195,10 +200,9 @@ function defaultExpirationDate(): string {
 
 export const EMPTY_QUOTE_FORM: QuoteFormData = {
   customer_id: '',
+  contact_id: '',
   billing_address_id: '',
   shipping_address_id: '',
-  billing_contact_id: '',
-  shipping_contact_id: '',
   parts: [],
   lead_time_days: '',
   expiration_date: defaultExpirationDate(),
@@ -220,10 +224,9 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
   }
   return {
     customer_id: quote.customer_id,
+    contact_id: quote.contact_id ?? '',
     billing_address_id: quote.billing_address_id ?? '',
     shipping_address_id: quote.shipping_address_id ?? '',
-    billing_contact_id: quote.billing_contact_id ?? '',
-    shipping_contact_id: quote.shipping_contact_id ?? '',
     parts: Array.from(byPart.values()).map((li) => ({
       part_id: li.part_id,
       order_quantity: li.quantity,

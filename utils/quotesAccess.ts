@@ -341,10 +341,9 @@ export async function createQuote(
     .insert({
       company_id: companyId,
       customer_id: formData.customer_id,
+      contact_id: nullIfEmpty(formData.contact_id),
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
-      billing_contact_id: nullIfEmpty(formData.billing_contact_id),
-      shipping_contact_id: nullIfEmpty(formData.shipping_contact_id),
       lead_time_days: leadTimeDays,
       expiration_date: expirationDate,
       status: 'active',
@@ -428,10 +427,9 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     .from('quotes')
     .update({
       customer_id: formData.customer_id,
+      contact_id: nullIfEmpty(formData.contact_id),
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
-      billing_contact_id: nullIfEmpty(formData.billing_contact_id),
-      shipping_contact_id: nullIfEmpty(formData.shipping_contact_id),
       lead_time_days: leadTimeDays,
       expiration_date: formData.expiration_date || null,
       updated_at: new Date().toISOString(),

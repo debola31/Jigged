@@ -331,8 +331,8 @@ export async function createQuote(
   // common case is that all four arrive populated. NULL is allowed for
   // backwards compatibility with legacy edit paths that didn't have the
   // selectors — the integrity trigger only validates non-null FKs.
-  // customer_po_number is NOT set here — the customer hasn't issued the
-  // PO yet at quote-creation time; convertQuoteToJob captures it.
+  // The customer PO is captured at convertQuoteToJob time and lives on
+  // jobs.customer_po_number — never on the quote (migration 20260526).
   const nullIfEmpty = (s: string | null | undefined) =>
     s && s.trim() !== '' ? s : null;
 
@@ -417,9 +417,9 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw new Error('Lead time must be between 0 and 3,650 days');
   }
 
-  // customer_po_number is not touched in updateQuote either — the convert
-  // flow owns it. Leaving it in place lets a converted quote keep the PO
-  // even if the salesperson edits the address selections later.
+  // customer_po_number is not on the quote — it lives on jobs and is
+  // captured during convertQuoteToJob (migration 20260526). updateQuote
+  // therefore can't touch it.
   const nullIfEmpty = (s: string | null | undefined) =>
     s && s.trim() !== '' ? s : null;
 
@@ -658,9 +658,9 @@ export interface ConvertToJobOptions {
   /**
    * Customer-issued PO number, captured at conversion time. The customer
    * doesn't typically have a PO at quote creation — it's issued when they
-   * accept and turn the quote into an order. Written to quotes.customer_po_number
-   * (the historical record of what PO this order ran against). NULL/empty
-   * is allowed for shops that don't track customer POs.
+   * accept and turn the quote into an order. Written to jobs.customer_po_number
+   * (migration 20260526 — PO lives on the work order, not the quote).
+   * NULL/empty is allowed for shops that don't track customer POs.
    */
   customerPoNumber?: string | null;
 }
@@ -769,6 +769,12 @@ export async function convertQuoteToJob(
   // not supported, so this is unique by construction.
   const jobNumber = quote.quote_number.replace(/^Q-/, 'J-');
 
+  // Capture the customer PO at conversion time. Trim and treat empty as
+  // NULL so the column stays nullable for shops that don't track POs.
+  // PO lives on the job, not the quote — see migration 20260526.
+  const poTrimmed = options.customerPoNumber?.trim();
+  const customerPoNumber = poTrimmed && poTrimmed !== '' ? poTrimmed : null;
+
   const { data: job, error: jobError } = await supabase
     .from('jobs')
     .insert({
@@ -780,6 +786,7 @@ export async function convertQuoteToJob(
       fulfillment_status: 'unshipped',
       due_date: dueDate,
       lead_time_days: promisedLeadTime,
+      customer_po_number: customerPoNumber,
       created_by: user.id,
     })
     .select('id, job_number')
@@ -838,17 +845,11 @@ export async function convertQuoteToJob(
     sequence += 10;
   }
 
-  // Capture the customer PO at conversion time. Trim and treat empty as
-  // NULL so the column stays nullable for shops that don't track POs.
-  const poTrimmed = options.customerPoNumber?.trim();
-  const customerPoNumber = poTrimmed && poTrimmed !== '' ? poTrimmed : null;
-
   const { data: updatedQuote, error: updateError } = await supabase
     .from('quotes')
     .update({
       converted_at: new Date().toISOString(),
       status_changed_at: new Date().toISOString(),
-      customer_po_number: customerPoNumber,
       updated_at: new Date().toISOString(),
     })
     .eq('id', quoteId)

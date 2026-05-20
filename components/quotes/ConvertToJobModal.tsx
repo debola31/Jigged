@@ -55,12 +55,10 @@ export default function ConvertToJobModal({
     defaultDueDateISO(quote.lead_time_days),
   );
   // Customer PO is captured at conversion (when the customer has accepted
-  // and issued a PO), not at quote-creation. Pre-fills with any value
-  // already on the quote (e.g. a previous conversion attempt that errored
-  // mid-flight); blank when the quote has none.
-  const [customerPoInput, setCustomerPoInput] = useState<string>(
-    quote.customer_po_number ?? '',
-  );
+  // and issued a PO), not at quote-creation. Stored on jobs.customer_po_number
+  // (migration 20260526), so the modal always starts empty — the quote
+  // never carries one.
+  const [customerPoInput, setCustomerPoInput] = useState<string>('');
 
   const lineItems = useMemo(
     () => [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence),
@@ -70,9 +68,9 @@ export default function ConvertToJobModal({
   useEffect(() => {
     if (!open) return;
     setDueDateInput(defaultDueDateISO(quote.lead_time_days));
-    setCustomerPoInput(quote.customer_po_number ?? '');
+    setCustomerPoInput('');
     setError(null);
-  }, [open, quote.lead_time_days, quote.customer_po_number]);
+  }, [open, quote.lead_time_days]);
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
 

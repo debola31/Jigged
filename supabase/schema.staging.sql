@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-20T11:46:36Z
+-- Generated: 2026-05-21T00:18:09Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -213,7 +213,6 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "updated_at" timestamp with time zone DEFAULT now(),
     "lead_time_days" integer,
     "expiration_date" date,
-    "customer_po_number" text,
     "billing_address_id" uuid,
     "shipping_address_id" uuid,
     "contact_id" uuid,
@@ -239,6 +238,8 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "lead_time_days" integer,
     "production_status" text NOT NULL,
     "fulfillment_status" text NOT NULL,
+    "related_to_job_id" uuid,
+    "customer_po_number" text,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -255,6 +256,48 @@ CREATE TABLE IF NOT EXISTS "public"."saved_insights"
     "chart_config" jsonb,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "saved_insights_pkey" PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."shipments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "customer_id" uuid NOT NULL,
+    "shipping_address_id" uuid,
+    "one_time_address" jsonb,
+    "packing_slip_number" text NOT NULL,
+    "ship_date" date NOT NULL DEFAULT CURRENT_DATE,
+    "carrier" text,
+    "tracking_number" text,
+    "shipping_arrangement" text,
+    "shipping_arrangement_other" text,
+    "weight_lbs" numeric(10,2),
+    "package_count" integer,
+    "package_type" text,
+    "notes" text,
+    "coc_text" text,
+    "created_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "voided_at" timestamp with time zone,
+    "voided_by" uuid,
+    CONSTRAINT "shipments_pkey" PRIMARY KEY (id),
+    CONSTRAINT "shipments_packing_slip_company_unique" UNIQUE (company_id, packing_slip_number),
+    CONSTRAINT "shipments_arrangement_other_text" CHECK (((shipping_arrangement IS DISTINCT FROM 'other'::text) OR (shipping_arrangement_other IS NOT NULL))),
+    CONSTRAINT "shipments_one_address_source" CHECK ((((shipping_address_id IS NOT NULL) AND (one_time_address IS NULL)) OR ((shipping_address_id IS NULL) AND (one_time_address IS NOT NULL)))),
+    CONSTRAINT "shipments_shipping_arrangement_check" CHECK (((shipping_arrangement IS NULL) OR (shipping_arrangement = ANY (ARRAY['prepaid_and_add'::text, 'prepaid'::text, 'collect'::text, 'third_party_account'::text, 'customer_pickup'::text, 'customer_arranged_freight'::text, 'other'::text]))))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_fulfillment_audit"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "job_id" uuid NOT NULL,
+    "company_id" uuid NOT NULL,
+    "from_status" text,
+    "to_status" text NOT NULL,
+    "triggering_shipment_id" uuid,
+    "triggering_user_id" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_fulfillment_audit_pkey" PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."system_admins"
@@ -514,6 +557,17 @@ CREATE TABLE IF NOT EXISTS "public"."routings"
     CONSTRAINT "routings_part_id_unique" UNIQUE (part_id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."shipment_line_items"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "shipment_id" uuid NOT NULL,
+    "job_part_id" uuid NOT NULL,
+    "quantity" numeric(12,2) NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "shipment_line_items_pkey" PRIMARY KEY (id),
+    CONSTRAINT "shipment_line_items_quantity_positive" CHECK ((quantity > (0)::numeric))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."vendor_contacts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -663,6 +717,7 @@ ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."feedback" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_fulfillment_audit" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
@@ -681,6 +736,8 @@ ALTER TABLE "public"."quotes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routing_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."routings" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."saved_insights" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."shipment_line_items" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."shipments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."system_admins" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_company_access" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
@@ -934,6 +991,19 @@ CREATE POLICY "Users can read invitations for their email"
     USING (((email)::text = (( SELECT users.email
    FROM auth.users
   WHERE (users.id = auth.uid())))::text));
+
+DROP POLICY IF EXISTS "Users can view job_fulfillment_audit" ON "public"."job_fulfillment_audit";
+CREATE POLICY "Users can view job_fulfillment_audit"
+    ON "public"."job_fulfillment_audit"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."job_fulfillment_audit";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."job_fulfillment_audit"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
 DROP POLICY IF EXISTS "Users can delete job_materials" ON "public"."job_materials";
 CREATE POLICY "Users can delete job_materials"
@@ -1605,6 +1675,78 @@ CREATE POLICY "Users can read own saved insights"
     FOR SELECT
     USING ((user_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users can delete shipment_line_items" ON "public"."shipment_line_items";
+CREATE POLICY "Users can delete shipment_line_items"
+    ON "public"."shipment_line_items"
+    FOR DELETE
+    USING ((shipment_id IN ( SELECT s.id
+   FROM shipments s
+  WHERE (s.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can insert shipment_line_items" ON "public"."shipment_line_items";
+CREATE POLICY "Users can insert shipment_line_items"
+    ON "public"."shipment_line_items"
+    FOR INSERT
+    WITH CHECK ((shipment_id IN ( SELECT s.id
+   FROM shipments s
+  WHERE (s.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can update shipment_line_items" ON "public"."shipment_line_items";
+CREATE POLICY "Users can update shipment_line_items"
+    ON "public"."shipment_line_items"
+    FOR UPDATE
+    USING ((shipment_id IN ( SELECT s.id
+   FROM shipments s
+  WHERE (s.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "Users can view shipment_line_items" ON "public"."shipment_line_items";
+CREATE POLICY "Users can view shipment_line_items"
+    ON "public"."shipment_line_items"
+    FOR SELECT
+    USING ((shipment_id IN ( SELECT s.id
+   FROM shipments s
+  WHERE (s.company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."shipment_line_items";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."shipment_line_items"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((EXISTS ( SELECT 1
+   FROM shipments s
+  WHERE ((s.id = shipment_line_items.shipment_id) AND (s.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Users can delete shipments" ON "public"."shipments";
+CREATE POLICY "Users can delete shipments"
+    ON "public"."shipments"
+    FOR DELETE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can insert shipments" ON "public"."shipments";
+CREATE POLICY "Users can insert shipments"
+    ON "public"."shipments"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can update shipments" ON "public"."shipments";
+CREATE POLICY "Users can update shipments"
+    ON "public"."shipments"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view shipments" ON "public"."shipments";
+CREATE POLICY "Users can view shipments"
+    ON "public"."shipments"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."shipments";
+CREATE POLICY "ai_readonly_select"
+    ON "public"."shipments"
+    FOR SELECT
+    TO jigged_ai_readonly
+    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
 DROP POLICY IF EXISTS "System admins can insert system_admins" ON "public"."system_admins";
 CREATE POLICY "System admins can insert system_admins"
     ON "public"."system_admins"
@@ -1909,6 +2051,18 @@ ALTER TABLE "public"."invitations"
 ALTER TABLE "public"."invitations"
     ADD CONSTRAINT "invitations_invited_by_fkey" FOREIGN KEY (invited_by) REFERENCES auth.users(id);
 
+ALTER TABLE "public"."job_fulfillment_audit"
+    ADD CONSTRAINT "job_fulfillment_audit_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_fulfillment_audit"
+    ADD CONSTRAINT "job_fulfillment_audit_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_fulfillment_audit"
+    ADD CONSTRAINT "job_fulfillment_audit_triggering_shipment_id_fkey" FOREIGN KEY (triggering_shipment_id) REFERENCES shipments(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."job_fulfillment_audit"
+    ADD CONSTRAINT "job_fulfillment_audit_triggering_user_id_fkey" FOREIGN KEY (triggering_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
+
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_consumed_by_fkey" FOREIGN KEY (consumed_by) REFERENCES auth.users(id) ON DELETE SET NULL;
 
@@ -1965,6 +2119,9 @@ ALTER TABLE "public"."jobs"
 
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."jobs"
+    ADD CONSTRAINT "jobs_related_to_job_id_fkey" FOREIGN KEY (related_to_job_id) REFERENCES jobs(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2083,6 +2240,27 @@ ALTER TABLE "public"."saved_insights"
 ALTER TABLE "public"."saved_insights"
     ADD CONSTRAINT "saved_insights_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."shipment_line_items"
+    ADD CONSTRAINT "shipment_line_items_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id);
+
+ALTER TABLE "public"."shipment_line_items"
+    ADD CONSTRAINT "shipment_line_items_shipment_id_fkey" FOREIGN KEY (shipment_id) REFERENCES shipments(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id);
+
+ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id);
+
+ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id);
+
+ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_voided_by_fkey" FOREIGN KEY (voided_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+
 ALTER TABLE "public"."system_admins"
     ADD CONSTRAINT "system_admins_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
 
@@ -2128,6 +2306,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.custom
 CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
+CREATE INDEX IF NOT EXISTS idx_customers_name_trgm ON public.customers USING gin (name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS inventory_transactions_company_id_created_at_idx ON public.inventory_transactions USING btree (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_transactions_discrepancy_idx ON public.inventory_transactions USING btree (company_id, created_at DESC) WHERE (has_discrepancy = true);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_id_idx ON public.inventory_transactions USING btree (job_id) WHERE (job_id IS NOT NULL);
@@ -2136,6 +2315,8 @@ CREATE INDEX IF NOT EXISTS inventory_transactions_part_id_created_at_idx ON publ
 CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON public.invitations USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON public.invitations USING btree (email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email_company ON public.invitations USING btree (email, company_id) WHERE ((status)::text = 'pending'::text);
+CREATE INDEX IF NOT EXISTS idx_job_fulfillment_audit_company ON public.job_fulfillment_audit USING btree (company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_fulfillment_audit_job ON public.job_fulfillment_audit USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_job_part_id ON public.job_materials USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_material_part ON public.job_materials USING btree (material_part_id);
@@ -2152,9 +2333,13 @@ CREATE INDEX IF NOT EXISTS idx_job_parts_part_id ON public.job_parts USING btree
 CREATE INDEX IF NOT EXISTS idx_job_parts_production_status ON public.job_parts USING btree (production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_customer_po_number ON public.jobs USING btree (company_id, customer_po_number) WHERE (customer_po_number IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_jobs_customer_po_number_trgm ON public.jobs USING gin (customer_po_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_fulfillment_status ON public.jobs USING btree (company_id, fulfillment_status);
+CREATE INDEX IF NOT EXISTS idx_jobs_job_number_trgm ON public.jobs USING gin (job_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_related_to_job_id ON public.jobs USING btree (related_to_job_id) WHERE (related_to_job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
@@ -2172,6 +2357,7 @@ CREATE INDEX IF NOT EXISTS idx_parts_company_made ON public.parts USING btree (c
 CREATE INDEX IF NOT EXISTS idx_parts_company_stocked ON public.parts USING btree (company_id) WHERE is_stocked;
 CREATE INDEX IF NOT EXISTS idx_parts_markup_rate_id ON public.parts USING btree (markup_rate_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
+CREATE INDEX IF NOT EXISTS idx_parts_part_name_trgm ON public.parts USING gin (part_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btree (preferred_vendor_id) WHERE (preferred_vendor_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_child ON public.parts_bom USING btree (child_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_parent ON public.parts_bom USING btree (parent_part_id);
@@ -2187,7 +2373,6 @@ CREATE INDEX IF NOT EXISTS idx_quote_operations_quote ON public.quote_operations
 CREATE INDEX IF NOT EXISTS idx_quote_operations_quote_part ON public.quote_operations USING btree (quote_id, part_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_company ON public.quotes USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quotes_customer ON public.quotes USING btree (customer_id);
-CREATE INDEX IF NOT EXISTS idx_quotes_customer_po_number ON public.quotes USING btree (company_id, customer_po_number) WHERE (customer_po_number IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_quotes_number ON public.quotes USING btree (quote_number);
 CREATE INDEX IF NOT EXISTS idx_quotes_status ON public.quotes USING btree (company_id, status);
 CREATE INDEX IF NOT EXISTS idx_routing_operations_routing ON public.routing_operations USING btree (routing_id, sequence);
@@ -2195,6 +2380,13 @@ CREATE INDEX IF NOT EXISTS idx_routing_operations_work_center ON public.routing_
 CREATE INDEX IF NOT EXISTS idx_routings_company ON public.routings USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_routings_part ON public.routings USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_saved_insights_user_company ON public.saved_insights USING btree (user_id, company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shipment_line_items_job_part ON public.shipment_line_items USING btree (job_part_id);
+CREATE INDEX IF NOT EXISTS idx_shipment_line_items_shipment ON public.shipment_line_items USING btree (shipment_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_company ON public.shipments USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_customer ON public.shipments USING btree (customer_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_packing_slip ON public.shipments USING btree (company_id, packing_slip_number);
+CREATE INDEX IF NOT EXISTS idx_shipments_packing_slip_trgm ON public.shipments USING gin (packing_slip_number gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_shipments_ship_date ON public.shipments USING btree (company_id, ship_date DESC);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_company_id ON public.user_company_access USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_name ON public.user_company_access USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_user_company_access_user_id ON public.user_company_access USING btree (user_id);
@@ -2211,6 +2403,84 @@ CREATE INDEX IF NOT EXISTS idx_work_centers_vendor ON public.work_centers USING 
 -- ============================================================
 -- 7. FUNCTIONS
 -- ============================================================
+CREATE OR REPLACE FUNCTION public._migrate_legacy_shipment_for_job(p_job_id uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_job record;
+    v_shipment_id uuid;
+    v_ps text;
+    v_address_id uuid;
+    v_format text;
+    v_year int;
+    v_current_year int;
+    v_current_seq int;
+BEGIN
+    SELECT j.id, j.company_id, j.customer_id,
+           COALESCE(j.completed_at::date, j.updated_at::date, current_date) AS ship_date
+      INTO v_job
+      FROM public.jobs j WHERE j.id = p_job_id;
+
+    -- Address resolution: default_shipping → default_billing → sentinel.
+    SELECT COALESCE(
+        (SELECT a.id FROM public.customer_addresses a
+          WHERE a.customer_id = v_job.customer_id AND a.default_shipping = true LIMIT 1),
+        (SELECT a.id FROM public.customer_addresses a
+          WHERE a.customer_id = v_job.customer_id AND a.default_billing = true LIMIT 1)
+    ) INTO v_address_id;
+
+    -- Mint the PS#. This function is invoked at migration time as the
+    -- migration role (superuser/postgres), so the SECURITY DEFINER
+    -- company-access guard inside next_packing_slip_number would block
+    -- it. Inline a copy of the increment logic here — equivalent
+    -- arithmetic, no auth check.
+    v_year := EXTRACT(year FROM v_job.ship_date)::int;
+    UPDATE public.companies
+       SET packing_slip_next_seq = CASE
+               WHEN packing_slip_seq_year = v_year THEN packing_slip_next_seq + 1
+               ELSE 2
+           END,
+           packing_slip_seq_year = v_year,
+           updated_at = now()
+     WHERE id = v_job.company_id
+    RETURNING packing_slip_seq_year, packing_slip_next_seq, packing_slip_number_format
+        INTO v_current_year, v_current_seq, v_format;
+    v_ps := public.format_packing_slip_number(v_format, v_year, v_current_seq - 1);
+
+    INSERT INTO public.shipments (
+        company_id, customer_id, shipping_address_id, one_time_address,
+        packing_slip_number, ship_date, notes,
+        created_by, created_at
+    ) VALUES (
+        v_job.company_id, v_job.customer_id,
+        v_address_id,
+        CASE WHEN v_address_id IS NULL
+             THEN jsonb_build_object(
+                'legacy', true,
+                'note', 'Address unknown at migration time'
+             )
+             ELSE NULL END,
+        v_ps, v_job.ship_date,
+        'Legacy migration: historical shipment imported on schema migration',
+        NULL, v_job.ship_date::timestamptz
+    ) RETURNING id INTO v_shipment_id;
+
+    INSERT INTO public.shipment_line_items (shipment_id, job_part_id, quantity)
+    SELECT v_shipment_id, jp.id, jp.quantity
+      FROM public.job_parts jp
+     WHERE jp.job_id = p_job_id
+       AND jp.fulfillment_status = 'fully_shipped'
+       AND NOT EXISTS (
+           SELECT 1 FROM public.shipment_line_items sli WHERE sli.job_part_id = jp.id
+       );
+
+    RETURN v_shipment_id;
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.accept_invitation(p_invitation_id uuid, p_user_id uuid)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -2341,6 +2611,65 @@ BEGIN
     );
 END;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_fulfillment_status(p_job_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_total int;
+    v_full int;
+    v_partial int;
+BEGIN
+    SELECT count(*),
+           count(*) FILTER (WHERE fulfillment_status = 'fully_shipped'),
+           count(*) FILTER (WHERE fulfillment_status = 'partially_shipped')
+      INTO v_total, v_full, v_partial
+      FROM public.job_parts WHERE job_id = p_job_id;
+
+    IF v_total = 0 THEN RETURN 'unshipped'; END IF;
+    IF v_full = v_total THEN RETURN 'fully_shipped'; END IF;
+    IF v_full > 0 OR v_partial > 0 THEN RETURN 'partially_shipped'; END IF;
+    RETURN 'unshipped';
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_part_fulfillment_status(p_job_part_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_qty_ordered numeric;
+    v_qty_shipped numeric;
+BEGIN
+    SELECT jp.quantity INTO v_qty_ordered
+      FROM public.job_parts jp
+     WHERE jp.id = p_job_part_id;
+    IF v_qty_ordered IS NULL THEN
+        RETURN 'unshipped';
+    END IF;
+
+    SELECT COALESCE(SUM(sli.quantity), 0) INTO v_qty_shipped
+      FROM public.shipment_line_items sli
+      JOIN public.shipments s ON s.id = sli.shipment_id
+     WHERE sli.job_part_id = p_job_part_id
+       AND s.voided_at IS NULL;
+
+    IF v_qty_shipped <= 0 THEN
+        RETURN 'unshipped';
+    END IF;
+    IF v_qty_shipped >= v_qty_ordered THEN
+        RETURN 'fully_shipped';
+    END IF;
+    RETURN 'partially_shipped';
+END $function$
 
 ;
 
@@ -2715,6 +3044,138 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.create_shipment_with_line_items(p_company_id uuid, p_customer_id uuid, p_shipping_address_id uuid, p_one_time_address jsonb, p_ship_date date, p_carrier text, p_tracking_number text, p_shipping_arrangement text, p_shipping_arrangement_other text, p_weight_lbs numeric, p_package_count integer, p_package_type text, p_notes text, p_coc_text text, p_line_items jsonb)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_packing_slip text;
+    v_shipment_id uuid;
+    v_user_id uuid := auth.uid();
+    v_item jsonb;
+    v_pre_status jsonb := '{}'::jsonb;
+    v_job_id uuid;
+    r record;
+BEGIN
+    IF NOT (p_company_id IN (SELECT get_user_company_ids())) THEN
+        RAISE EXCEPTION 'create_shipment_with_line_items: caller does not have access to company %',
+            p_company_id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- 1. Acquire per-job advisory locks in sorted order to prevent
+    --    deadlock between concurrent RPCs touching the same job set.
+    --    pg_advisory_xact_lock is released at COMMIT/ROLLBACK.
+    FOR v_job_id IN
+        SELECT DISTINCT jp.job_id
+          FROM public.job_parts jp
+         WHERE jp.id IN (
+            SELECT (item->>'job_part_id')::uuid
+              FROM jsonb_array_elements(p_line_items) AS item
+         )
+         ORDER BY jp.job_id
+    LOOP
+        PERFORM pg_advisory_xact_lock(hashtext('job:' || v_job_id::text));
+    END LOOP;
+
+    -- 2. Snapshot pre-cascade fulfillment_status.
+    SELECT COALESCE(jsonb_object_agg(j.id::text, j.fulfillment_status), '{}'::jsonb)
+      INTO v_pre_status
+      FROM public.jobs j
+     WHERE j.id IN (
+        SELECT DISTINCT jp.job_id FROM public.job_parts jp
+         WHERE jp.id IN (
+            SELECT (item->>'job_part_id')::uuid
+              FROM jsonb_array_elements(p_line_items) AS item
+         )
+     );
+
+    -- 3. Mint packing slip number.
+    v_packing_slip := public.next_packing_slip_number(p_company_id);
+
+    -- 4. Insert shipment + line items. Triggers A → C cascade automatically.
+    INSERT INTO public.shipments (
+        company_id, customer_id, shipping_address_id, one_time_address,
+        packing_slip_number, ship_date, carrier, tracking_number,
+        shipping_arrangement, shipping_arrangement_other,
+        weight_lbs, package_count, package_type, notes, coc_text,
+        created_by
+    ) VALUES (
+        p_company_id, p_customer_id, p_shipping_address_id, p_one_time_address,
+        v_packing_slip, COALESCE(p_ship_date, current_date), p_carrier, p_tracking_number,
+        p_shipping_arrangement, p_shipping_arrangement_other,
+        p_weight_lbs, p_package_count, p_package_type, p_notes, p_coc_text,
+        v_user_id
+    ) RETURNING id INTO v_shipment_id;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_line_items) LOOP
+        INSERT INTO public.shipment_line_items (shipment_id, job_part_id, quantity)
+        VALUES (
+            v_shipment_id,
+            (v_item->>'job_part_id')::uuid,
+            (v_item->>'quantity')::numeric
+        );
+    END LOOP;
+
+    -- 5. For each touched job, write an audit row IFF it crossed
+    --    forward into fully_shipped. v_pre_status defaults to '{}' so the
+    --    loop no-ops when p_line_items is empty.
+    FOR r IN
+        SELECT j.id AS job_id, j.fulfillment_status AS new_status,
+               v_pre_status->>(j.id::text) AS old_status
+          FROM public.jobs j
+         WHERE j.id::text IN (SELECT jsonb_object_keys(v_pre_status))
+    LOOP
+        IF r.new_status = 'fully_shipped'
+           AND r.old_status IS DISTINCT FROM 'fully_shipped' THEN
+            INSERT INTO public.job_fulfillment_audit (
+                job_id, company_id, from_status, to_status,
+                triggering_shipment_id, triggering_user_id
+            ) VALUES (
+                r.job_id, p_company_id, r.old_status, r.new_status,
+                v_shipment_id, v_user_id
+            );
+        END IF;
+    END LOOP;
+
+    RETURN v_shipment_id;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enforce_jobs_related_to_same_company()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_related_company uuid;
+BEGIN
+    IF NEW.related_to_job_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.related_to_job_id = NEW.id THEN
+        RAISE EXCEPTION 'jobs.related_to_job_id cannot reference itself (job %)', NEW.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT company_id INTO v_related_company
+      FROM public.jobs WHERE id = NEW.related_to_job_id;
+    IF v_related_company IS NULL THEN
+        RAISE EXCEPTION 'related_to_job_id % does not exist', NEW.related_to_job_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    IF v_related_company <> NEW.company_id THEN
+        RAISE EXCEPTION 'related_to_job_id % belongs to a different company',
+            NEW.related_to_job_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.enforce_no_bom_cycles()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -2778,6 +3239,113 @@ BEGIN
         END IF;
     END IF;
     RETURN NEW;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enforce_shipment_address_contact_customer()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF NEW.shipping_address_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_addresses
+         WHERE id = NEW.shipping_address_id
+           AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'shipping_address_id % does not belong to customer %',
+                NEW.shipping_address_id, NEW.customer_id
+                USING ERRCODE = 'foreign_key_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enforce_shipment_customer_id_immutable()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
+        RAISE EXCEPTION
+            'shipments.customer_id is immutable after insert '
+            '(attempted to change shipment % from customer % to %)',
+            OLD.id, OLD.customer_id, NEW.customer_id
+            USING ERRCODE = 'check_violation',
+                  HINT = 'Void and recreate the shipment for the correct customer.';
+    END IF;
+    RETURN NEW;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enforce_shipment_line_item_customer_consistency()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    v_shipment_customer_id uuid;
+    v_line_customer_id uuid;
+BEGIN
+    SELECT customer_id INTO v_shipment_customer_id
+      FROM public.shipments
+     WHERE id = NEW.shipment_id;
+
+    IF v_shipment_customer_id IS NULL THEN
+        -- Parent shipment vanished (or wasn't visible) between row
+        -- staging and the BEFORE-row firing. The FK on shipment_id with
+        -- ON DELETE CASCADE handles the visible cases; raise here to
+        -- surface anything weirder.
+        RAISE EXCEPTION 'shipment_line_items.shipment_id % has no parent shipment',
+            NEW.shipment_id USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    SELECT j.customer_id INTO v_line_customer_id
+      FROM public.job_parts jp
+      JOIN public.jobs j ON j.id = jp.job_id
+     WHERE jp.id = NEW.job_part_id;
+
+    IF v_line_customer_id IS NULL THEN
+        RAISE EXCEPTION 'shipment_line_items.job_part_id % does not resolve to a job/customer',
+            NEW.job_part_id USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    IF v_line_customer_id IS DISTINCT FROM v_shipment_customer_id THEN
+        RAISE EXCEPTION
+            'shipment_line_items.job_part_id % belongs to customer %, '
+            'but parent shipment % is for customer %',
+            NEW.job_part_id, v_line_customer_id,
+            NEW.shipment_id, v_shipment_customer_id
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.format_packing_slip_number(p_format text, p_year integer, p_seq integer)
+ RETURNS text
+ LANGUAGE plpgsql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_result text := p_format;
+    v_pad_match text;
+    v_width int;
+BEGIN
+    v_result := replace(v_result, '{YYYY}', p_year::text);
+    v_pad_match := substring(v_result FROM '\{seq:(0+)\}');
+    IF v_pad_match IS NOT NULL THEN
+        v_width := length(v_pad_match);
+        v_result := regexp_replace(v_result, '\{seq:0+\}', lpad(p_seq::text, v_width, '0'));
+    ELSE
+        v_result := replace(v_result, '{seq}', p_seq::text);
+    END IF;
+    RETURN v_result;
 END $function$
 
 ;
@@ -2963,6 +3531,126 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.gin_extract_query_trgm(text, internal, smallint, internal, internal, internal, internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gin_extract_query_trgm$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gin_extract_value_trgm(text, internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gin_extract_value_trgm$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gin_trgm_consistent(internal, smallint, text, integer, internal, internal, internal, internal)
+ RETURNS boolean
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gin_trgm_consistent$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gin_trgm_triconsistent(internal, smallint, text, integer, internal, internal, internal)
+ RETURNS "char"
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gin_trgm_triconsistent$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_compress(internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_compress$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_consistent(internal, text, smallint, oid, internal)
+ RETURNS boolean
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_consistent$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_decompress(internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_decompress$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_distance(internal, text, smallint, oid, internal)
+ RETURNS double precision
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_distance$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_in(cstring)
+ RETURNS gtrgm
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_in$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_options(internal)
+ RETURNS void
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE
+AS '$libdir/pg_trgm', $function$gtrgm_options$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_out(gtrgm)
+ RETURNS cstring
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_out$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_penalty(internal, internal, internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_penalty$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_picksplit(internal, internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_picksplit$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_same(gtrgm, gtrgm, internal)
+ RETURNS internal
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_same$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.gtrgm_union(internal, internal)
+ RETURNS gtrgm
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$gtrgm_union$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.is_company_admin(check_company_id uuid)
  RETURNS boolean
  LANGUAGE sql
@@ -2995,8 +3683,14 @@ CREATE OR REPLACE FUNCTION public.job_last_ship_date(p_job_id uuid)
  RETURNS date
  LANGUAGE sql
  STABLE
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
-    SELECT NULL::date  -- PR 4 will replace this body
+    SELECT MAX(s.ship_date)
+      FROM public.shipments s
+      JOIN public.shipment_line_items sli ON sli.shipment_id = s.id
+      JOIN public.job_parts jp ON jp.id = sli.job_part_id
+     WHERE s.voided_at IS NULL
+       AND jp.job_id = p_job_id;
 $function$
 
 ;
@@ -3005,9 +3699,114 @@ CREATE OR REPLACE FUNCTION public.job_part_last_ship_date(p_job_part_id uuid)
  RETURNS date
  LANGUAGE sql
  STABLE
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
-    SELECT NULL::date  -- PR 4 will replace this body
+    SELECT MAX(s.ship_date)
+      FROM public.shipments s
+      JOIN public.shipment_line_items sli ON sli.shipment_id = s.id
+     WHERE s.voided_at IS NULL
+       AND sli.job_part_id = p_job_part_id;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.next_packing_slip_number(p_company_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_year int := EXTRACT(year FROM current_date)::int;
+    v_format text;
+    v_current_year int;
+    v_current_seq int;
+    v_seq int;
+BEGIN
+    -- Defensive: a caller without company access must not be able to
+    -- advance another company's counter, even though SECURITY DEFINER
+    -- bypasses RLS.
+    IF NOT (p_company_id IN (SELECT get_user_company_ids())) THEN
+        RAISE EXCEPTION 'next_packing_slip_number: caller does not have access to company %', p_company_id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    UPDATE public.companies
+       SET packing_slip_next_seq = CASE
+               WHEN packing_slip_seq_year = v_year THEN packing_slip_next_seq + 1
+               ELSE 2  -- next caller gets 2; this caller consumes seq 1
+           END,
+           packing_slip_seq_year = v_year,
+           updated_at = now()
+     WHERE id = p_company_id
+    RETURNING packing_slip_seq_year, packing_slip_next_seq, packing_slip_number_format
+        INTO v_current_year, v_current_seq, v_format;
+
+    IF v_current_year IS NULL THEN
+        RAISE EXCEPTION 'next_packing_slip_number: company % not found', p_company_id;
+    END IF;
+
+    v_seq := v_current_seq - 1;
+    RETURN public.format_packing_slip_number(v_format, v_year, v_seq);
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_part_fulfillment_from_line()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_jp_id uuid;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    v_jp_id := COALESCE(NEW.job_part_id, OLD.job_part_id);
+    v_new := public.compute_job_part_fulfillment_status(v_jp_id);
+    SELECT fulfillment_status INTO v_old
+      FROM public.job_parts WHERE id = v_jp_id;
+    IF v_new IS DISTINCT FROM v_old THEN
+        UPDATE public.job_parts
+           SET fulfillment_status = v_new,
+               updated_at = now()
+         WHERE id = v_jp_id;
+    END IF;
+    RETURN NULL;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_part_fulfillment_from_void()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    r record;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    IF NEW.voided_at IS NOT DISTINCT FROM OLD.voided_at THEN RETURN NULL; END IF;
+    FOR r IN
+        SELECT DISTINCT sli.job_part_id
+          FROM public.shipment_line_items sli
+         WHERE sli.shipment_id = NEW.id
+    LOOP
+        v_new := public.compute_job_part_fulfillment_status(r.job_part_id);
+        SELECT fulfillment_status INTO v_old
+          FROM public.job_parts WHERE id = r.job_part_id;
+        IF v_new IS DISTINCT FROM v_old THEN
+            UPDATE public.job_parts
+               SET fulfillment_status = v_new,
+                   updated_at = now()
+             WHERE id = r.job_part_id;
+        END IF;
+    END LOOP;
+    RETURN NULL;
+END $function$
 
 ;
 
@@ -3123,6 +3922,61 @@ BEGIN
   END LOOP;
 END;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.search_jobs_by_identifier(p_company_id uuid, p_query text)
+ RETURNS TABLE(job_id uuid, match_source text)
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_pattern text;
+BEGIN
+    IF p_query IS NULL OR length(trim(p_query)) = 0 THEN
+        RETURN;
+    END IF;
+    v_pattern := '%' || replace(replace(replace(trim(p_query), '\', '\\'), '%', '\%'), '_', '\_') || '%';
+
+    RETURN QUERY
+        SELECT DISTINCT ON (m.job_id) m.job_id, m.match_source
+          FROM (
+              SELECT j.id AS job_id, 'packing_slip'::text AS match_source, 1::int AS priority
+                FROM public.jobs j
+                JOIN public.job_parts jp ON jp.job_id = j.id
+                JOIN public.shipment_line_items sli ON sli.job_part_id = jp.id
+                JOIN public.shipments s ON s.id = sli.shipment_id
+               WHERE j.company_id = p_company_id
+                 AND s.voided_at IS NULL
+                 AND s.packing_slip_number ILIKE v_pattern
+              UNION ALL
+              SELECT j.id, 'job_number'::text, 2
+                FROM public.jobs j
+               WHERE j.company_id = p_company_id
+                 AND j.job_number ILIKE v_pattern
+              UNION ALL
+              SELECT j.id, 'customer_po'::text, 3
+                FROM public.jobs j
+               WHERE j.company_id = p_company_id
+                 AND j.customer_po_number ILIKE v_pattern
+              UNION ALL
+              SELECT j.id, 'customer'::text, 4
+                FROM public.jobs j
+                JOIN public.customers c ON c.id = j.customer_id
+               WHERE j.company_id = p_company_id
+                 AND c.name ILIKE v_pattern
+              UNION ALL
+              SELECT j.id, 'part'::text, 5
+                FROM public.jobs j
+                JOIN public.job_parts jp ON jp.job_id = j.id
+                JOIN public.parts p ON p.id = jp.part_id
+               WHERE j.company_id = p_company_id
+                 AND p.part_name ILIKE v_pattern
+          ) AS m
+         ORDER BY m.job_id, m.priority
+         LIMIT 100;
+END $function$
 
 ;
 
@@ -3405,6 +4259,14 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.set_limit(real)
+ RETURNS real
+ LANGUAGE c
+ STRICT
+AS '$libdir/pg_trgm', $function$set_limit$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.set_quote_number()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -3416,6 +4278,86 @@ BEGIN
   RETURN NEW;
 END;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.show_limit()
+ RETURNS real
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$show_limit$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.show_trgm(text)
+ RETURNS text[]
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$show_trgm$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.similarity(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$similarity$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.similarity_dist(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$similarity_dist$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.similarity_op(text, text)
+ RETURNS boolean
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$similarity_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.strict_word_similarity(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$strict_word_similarity$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.strict_word_similarity_commutator_op(text, text)
+ RETURNS boolean
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$strict_word_similarity_commutator_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.strict_word_similarity_dist_commutator_op(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$strict_word_similarity_dist_commutator_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.strict_word_similarity_dist_op(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$strict_word_similarity_dist_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.strict_word_similarity_op(text, text)
+ RETURNS boolean
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$strict_word_similarity_op$function$
 
 ;
 
@@ -3446,6 +4388,32 @@ BEGIN
       AND demo_uca.role != source_uca.role;
 END;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.sync_job_fulfillment_status_from_parts()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_job_id uuid;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    v_job_id := COALESCE(NEW.job_id, OLD.job_id);
+    v_new := public.compute_job_fulfillment_status(v_job_id);
+    SELECT fulfillment_status INTO v_old
+      FROM public.jobs WHERE id = v_job_id;
+    IF v_new IS DISTINCT FROM v_old THEN
+        UPDATE public.jobs
+           SET fulfillment_status = v_new,
+               updated_at = now()
+         WHERE id = v_job_id;
+    END IF;
+    RETURN NULL;
+END $function$
 
 ;
 
@@ -3558,6 +4526,46 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.word_similarity(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$word_similarity$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.word_similarity_commutator_op(text, text)
+ RETURNS boolean
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$word_similarity_commutator_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.word_similarity_dist_commutator_op(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$word_similarity_dist_commutator_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.word_similarity_dist_op(text, text)
+ RETURNS real
+ LANGUAGE c
+ IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$word_similarity_dist_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.word_similarity_op(text, text)
+ RETURNS boolean
+ LANGUAGE c
+ STABLE PARALLEL SAFE STRICT
+AS '$libdir/pg_trgm', $function$word_similarity_op$function$
+
+;
+
 -- ============================================================
 -- 8. TRIGGERS
 -- ============================================================
@@ -3591,6 +4599,15 @@ CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations 
 DROP TRIGGER IF EXISTS "job_parts_updated_at" ON "public"."job_parts";
 CREATE TRIGGER job_parts_updated_at BEFORE UPDATE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_del" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_ins" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_ins AFTER INSERT ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_upd" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_upd AFTER UPDATE OF fulfillment_status ON public.job_parts FOR EACH ROW WHEN ((old.fulfillment_status IS DISTINCT FROM new.fulfillment_status)) EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
+
 DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_del" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_production_status_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_production_status_from_parts();
 
@@ -3599,6 +4616,9 @@ CREATE TRIGGER trigger_sync_job_production_status_from_parts_ins AFTER INSERT ON
 
 DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_upd" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_production_status_from_parts_upd AFTER UPDATE OF production_status ON public.job_parts FOR EACH ROW WHEN ((old.production_status IS DISTINCT FROM new.production_status)) EXECUTE FUNCTION sync_job_production_status_from_parts();
+
+DROP TRIGGER IF EXISTS "enforce_jobs_related_to_same_company_trg" ON "public"."jobs";
+CREATE TRIGGER enforce_jobs_related_to_same_company_trg BEFORE INSERT OR UPDATE OF related_to_job_id ON public.jobs FOR EACH ROW EXECUTE FUNCTION enforce_jobs_related_to_same_company();
 
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -3644,6 +4664,27 @@ CREATE TRIGGER routing_operations_updated_at BEFORE UPDATE ON public.routing_ope
 
 DROP TRIGGER IF EXISTS "routings_updated_at" ON "public"."routings";
 CREATE TRIGGER routings_updated_at BEFORE UPDATE ON public.routings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "enforce_shipment_line_item_customer_consistency_trg" ON "public"."shipment_line_items";
+CREATE TRIGGER enforce_shipment_line_item_customer_consistency_trg BEFORE INSERT OR UPDATE OF shipment_id, job_part_id ON public.shipment_line_items FOR EACH ROW EXECUTE FUNCTION enforce_shipment_line_item_customer_consistency();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_line_del" ON "public"."shipment_line_items";
+CREATE TRIGGER trigger_recompute_jp_fulfillment_on_line_del AFTER DELETE ON public.shipment_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_fulfillment_from_line();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_line_ins" ON "public"."shipment_line_items";
+CREATE TRIGGER trigger_recompute_jp_fulfillment_on_line_ins AFTER INSERT ON public.shipment_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_fulfillment_from_line();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_line_upd" ON "public"."shipment_line_items";
+CREATE TRIGGER trigger_recompute_jp_fulfillment_on_line_upd AFTER UPDATE OF quantity, job_part_id, shipment_id ON public.shipment_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_fulfillment_from_line();
+
+DROP TRIGGER IF EXISTS "enforce_shipment_address_contact_customer_trg" ON "public"."shipments";
+CREATE TRIGGER enforce_shipment_address_contact_customer_trg BEFORE INSERT OR UPDATE OF shipping_address_id, customer_id ON public.shipments FOR EACH ROW EXECUTE FUNCTION enforce_shipment_address_contact_customer();
+
+DROP TRIGGER IF EXISTS "enforce_shipment_customer_id_immutable_trg" ON "public"."shipments";
+CREATE TRIGGER enforce_shipment_customer_id_immutable_trg BEFORE UPDATE OF customer_id ON public.shipments FOR EACH ROW EXECUTE FUNCTION enforce_shipment_customer_id_immutable();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_void" ON "public"."shipments";
+CREATE TRIGGER trigger_recompute_jp_fulfillment_on_void AFTER UPDATE OF voided_at ON public.shipments FOR EACH ROW EXECUTE FUNCTION recompute_job_part_fulfillment_from_void();
 
 DROP TRIGGER IF EXISTS "user_company_access_fill_email_trg" ON "public"."user_company_access";
 CREATE TRIGGER user_company_access_fill_email_trg BEFORE INSERT ON public.user_company_access FOR EACH ROW EXECUTE FUNCTION user_company_access_fill_email();
@@ -3694,6 +4735,9 @@ COMMENT ON TABLE "public"."feedback"
 COMMENT ON TABLE "public"."inventory_transactions"
     IS 'Append-only ledger of inventory changes (addition / depletion / adjustment). Notes are the only mutable column post-insert (enforced by trigger).';
 
+COMMENT ON TABLE "public"."job_fulfillment_audit"
+    IS 'Forward-transition log into fully_shipped. Written from create_shipment_with_line_items; never from a trigger (no incidental-ordering ambiguity for triggering_shipment_id). Reverse transitions are captured on shipments.voided_at/voided_by.';
+
 COMMENT ON TABLE "public"."markup_rates"
     IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
 
@@ -3717,6 +4761,12 @@ COMMENT ON TABLE "public"."routing_operations"
 
 COMMENT ON TABLE "public"."saved_insights"
     IS 'User-saved AI chat Q&A pairs. When a user finds an AI-generated insight valuable, they can save it for future reference. Includes the original question, answer text, and any chart configuration.';
+
+COMMENT ON TABLE "public"."shipment_line_items"
+    IS 'Single source of truth for "what shipped per job_part". Drives compute_job_part_fulfillment_status via trigger A. Voided shipments contribute zero (filtered by shipments.voided_at IS NULL).';
+
+COMMENT ON TABLE "public"."shipments"
+    IS 'One shipment per packing slip. Drives jobs.fulfillment_status via shipment_line_items + the recompute_job_part_fulfillment trigger family. voided_at + voided_by support the Phase-3 void action; the cascade reverses fulfillment when set.';
 
 COMMENT ON TABLE "public"."system_admins"
     IS 'Platform-level administrator access. Users in this table have system-wide admin privileges that span across all companies. Separate from company-level roles in user_company_access.';
@@ -3937,6 +4987,12 @@ COMMENT ON COLUMN "public"."job_operations"."work_center_id"
 COMMENT ON COLUMN "public"."job_operations"."routing_operation_id"
     IS 'FK to the routing_operation this row was snapshotted from at job creation (renamed from routing_node_id).';
 
+COMMENT ON COLUMN "public"."jobs"."related_to_job_id"
+    IS 'Forward link to the job this row was reordered from. Same-company enforced by enforce_jobs_related_to_same_company_trg. Reverse lookups use the partial index above.';
+
+COMMENT ON COLUMN "public"."jobs"."customer_po_number"
+    IS 'Customer-issued PO number for this job. Captured at convertQuoteToJob time (or by reorder when applicable). Indexed via the partial unique-per-company index and via pg_trgm for the jobs-list search RPC.';
+
 COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
     IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';
 
@@ -4003,9 +5059,6 @@ COMMENT ON COLUMN "public"."quote_materials"."item_name"
 COMMENT ON COLUMN "public"."quote_materials"."part_id"
     IS 'The manufactured part this material consumption belongs to (the line-item part on the quote).';
 
-COMMENT ON COLUMN "public"."quotes"."customer_po_number"
-    IS 'Customer-issued PO number associated with this quote/order. Indexed (partial) per (company_id, customer_po_number) for lookup, and via pg_trgm in PR 4 for the jobs-list search.';
-
 COMMENT ON COLUMN "public"."quotes"."billing_address_id"
     IS 'Customer address used for BILL TO on the printable quote and downstream shipments. Set at quote creation from the customer''s default_billing row; editable per-quote.';
 
@@ -4053,6 +5106,12 @@ COMMENT ON COLUMN "public"."saved_insights"."chart_config"
 
 COMMENT ON COLUMN "public"."saved_insights"."created_at"
     IS 'Timestamp when the insight was saved. Auto-set on insert.';
+
+COMMENT ON COLUMN "public"."shipments"."one_time_address"
+    IS 'Reserved for Phase 3 ad-hoc shipping. Either shipping_address_id OR one_time_address must be set (XOR shipments_one_address_source).';
+
+COMMENT ON COLUMN "public"."shipments"."shipping_arrangement"
+    IS 'Enum-via-CHECK. ''other'' requires shipping_arrangement_other (shipments_arrangement_other_text).';
 
 COMMENT ON COLUMN "public"."system_admins"."id"
     IS 'Primary key. UUID auto-generated.';

@@ -17,9 +17,12 @@ import type {
   CreateShipmentPayload,
   JobPartShipmentSummary,
   JobShipmentSummary,
+  OpenJobPartFilter,
+  OpenJobPartRow,
   ResolvedAttention,
   Shipment,
   ShipmentFilters,
+  ShipmentListRow,
   ShipmentWithRelations,
 } from '@/types/shipment';
 
@@ -270,6 +273,101 @@ export async function listShipmentsForCompany(
 }
 
 /**
+ * List shipments for a company with job-number chips, line-item count,
+ * and resolved created-by member. Powers the top-level Shipments list
+ * page (Phase 1.5 / FR-NEW-4). Done in two round trips: one PostgREST
+ * fetch with a nested join through line items → job_parts → jobs, then
+ * a batched user_company_access read for the created_by display name.
+ *
+ * Default ordering is most-recent ship_date first.
+ */
+export async function listShipmentsForCompanyWithJobs(
+  companyId: string,
+  filters: ShipmentFilters = {},
+): Promise<ShipmentListRow[]> {
+  const supabase = getSupabase();
+
+  let query = supabase
+    .from('shipments')
+    .select(
+      `*,
+       customer:customers (id, name),
+       shipment_line_items (
+         job_part:job_parts (
+           job:jobs (job_number)
+         )
+       )`,
+    )
+    .eq('company_id', companyId)
+    .order('ship_date', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (filters.customerId) query = query.eq('customer_id', filters.customerId);
+  if (filters.startDate) query = query.gte('ship_date', filters.startDate);
+  if (filters.endDate) query = query.lte('ship_date', filters.endDate);
+  if (filters.voided === false) query = query.is('voided_at', null);
+  else if (filters.voided === true) query = query.not('voided_at', 'is', null);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('listShipmentsForCompanyWithJobs failed:', error);
+    throw new Error(`Failed to list shipments: ${error.message}`);
+  }
+
+  type RawRow = Shipment & {
+    customer: { id: string; name: string } | null;
+    shipment_line_items: Array<{
+      job_part: { job: { job_number: string } | null } | null;
+    }> | null;
+  };
+  const rows = (data ?? []) as unknown as RawRow[];
+  if (rows.length === 0) return [];
+
+  // Batch-resolve created_by members.
+  const userIds = Array.from(
+    new Set(rows.map((r) => r.created_by).filter((u): u is string => Boolean(u))),
+  );
+  const memberByUser = new Map<
+    string,
+    { user_id: string; name: string | null; email: string | null }
+  >();
+  if (userIds.length > 0) {
+    const { data: members } = await supabase
+      .from('user_company_access')
+      .select('user_id, name, email')
+      .eq('company_id', companyId)
+      .in('user_id', userIds);
+    for (const m of (members ?? []) as Array<{
+      user_id: string;
+      name: string | null;
+      email: string | null;
+    }>) {
+      memberByUser.set(m.user_id, m);
+    }
+  }
+
+  return rows.map((row) => {
+    const jobNumbers = Array.from(
+      new Set(
+        (row.shipment_line_items ?? [])
+          .map((li) => li.job_part?.job?.job_number)
+          .filter((n): n is string => Boolean(n)),
+      ),
+    ).sort();
+    const { customer, shipment_line_items, ...rest } = row;
+    return {
+      ...(rest as Shipment),
+      customer_name: customer?.name ?? null,
+      job_numbers: jobNumbers,
+      line_item_count: (shipment_line_items ?? []).length,
+      created_by_member: rest.created_by
+        ? memberByUser.get(rest.created_by) ?? null
+        : null,
+    };
+  });
+}
+
+/**
  * Per-job_part shipped summary. Used by the CreateShipmentModal to
  * prefill remaining-to-ship and by the job-detail per-part breakdown.
  *
@@ -393,6 +491,138 @@ export async function getJobShipmentSummary(
     latest_packing_slip_number: latest?.packing_slip_number ?? null,
     shipment_count: uniqueIds.size,
   };
+}
+
+/**
+ * All open job_parts for a customer across every job they have in this
+ * company, with shipped/remaining quantities computed and clamped.
+ *
+ * Powers the top-level /shipments/new wizard's line picker (Phase 1.5 /
+ * FR-NEW-5). Pulls the customer's job_parts via a nested PostgREST
+ * filter, then sums non-voided shipment_line_items for those parts in
+ * one batched query — same two-round-trip shape as
+ * getJobPartShipmentSummaries, just joined on customer_id instead of
+ * job_id.
+ *
+ * The filter defaults match the wizard's case: exclude lines whose
+ * production is cancelled and lines already fully shipped. Future
+ * surfaces (e.g., a "ship anything anywhere" admin tool, or reporting
+ * over historical shipments) can override either flag.
+ *
+ * qty_remaining is clamped to zero. An over-shipment (qty_shipped >
+ * qty_ordered) yields qty_remaining = 0, not a negative — the picker
+ * disables the checkbox in that case rather than showing nonsense math.
+ *
+ * Sorted by job_number then part_name for stable grouping in the UI.
+ */
+export async function getOpenJobPartsForCustomer(
+  companyId: string,
+  customerId: string,
+  filter: OpenJobPartFilter = {},
+): Promise<OpenJobPartRow[]> {
+  const supabase = getSupabase();
+  const excludeFullyShipped = filter.excludeFullyShipped ?? true;
+  const excludeCancelled = filter.excludeCancelled ?? true;
+
+  // Inner-join through jobs so we can filter on jobs.customer_id /
+  // jobs.company_id while still returning the job_part row shape.
+  let query = supabase
+    .from('job_parts')
+    .select(
+      `id, quantity, production_status, fulfillment_status,
+       part:parts (id, part_name, description),
+       job:jobs!inner (id, job_number, customer_po_number, customer_id, company_id)`,
+    )
+    .eq('job.customer_id', customerId)
+    .eq('job.company_id', companyId);
+
+  if (excludeCancelled) {
+    query = query.neq('production_status', 'cancelled');
+  }
+  if (excludeFullyShipped) {
+    query = query.neq('fulfillment_status', 'fully_shipped');
+  }
+
+  const { data: rawParts, error: partsErr } = await query;
+  if (partsErr) {
+    console.error('getOpenJobPartsForCustomer: parts fetch failed:', partsErr);
+    throw new Error('Failed to load open lines.');
+  }
+
+  type Row = {
+    id: string;
+    quantity: number;
+    production_status: 'not_started' | 'in_progress' | 'completed' | 'cancelled';
+    fulfillment_status: 'unshipped' | 'partially_shipped' | 'fully_shipped';
+    part: { id: string; part_name: string; description: string | null } | null;
+    job: {
+      id: string;
+      job_number: string;
+      customer_po_number: string | null;
+      customer_id: string;
+      company_id: string;
+    } | null;
+  };
+  const parts = (rawParts ?? []) as unknown as Row[];
+  if (parts.length === 0) return [];
+
+  const partIds = parts.map((p) => p.id);
+  const { data: shipped, error: shippedErr } = await supabase
+    .from('shipment_line_items')
+    .select('job_part_id, quantity, shipment:shipments!inner (voided_at)')
+    .in('job_part_id', partIds);
+
+  if (shippedErr) {
+    console.error('getOpenJobPartsForCustomer: shipped fetch failed:', shippedErr);
+    throw new Error('Failed to load shipped quantities.');
+  }
+
+  type ShippedRow = {
+    job_part_id: string;
+    quantity: number;
+    shipment: { voided_at: string | null } | null;
+  };
+  const shippedByPart = new Map<string, number>();
+  for (const row of (shipped ?? []) as unknown as ShippedRow[]) {
+    if (!row.shipment || row.shipment.voided_at !== null) continue;
+    shippedByPart.set(
+      row.job_part_id,
+      (shippedByPart.get(row.job_part_id) ?? 0) + Number(row.quantity),
+    );
+  }
+
+  return parts
+    .filter((p) => p.part !== null && p.job !== null)
+    .map((p) => {
+      const qtyOrdered = Number(p.quantity);
+      const qtyShipped = shippedByPart.get(p.id) ?? 0;
+      return {
+        job_part_id: p.id,
+        job_id: p.job!.id,
+        job_number: p.job!.job_number,
+        customer_po_number: p.job!.customer_po_number,
+        part_id: p.part!.id,
+        part_name: p.part!.part_name,
+        description: p.part!.description,
+        qty_ordered: qtyOrdered,
+        qty_shipped: qtyShipped,
+        qty_remaining: Math.max(0, qtyOrdered - qtyShipped),
+        production_status: p.production_status,
+        fulfillment_status: p.fulfillment_status,
+      };
+    })
+    .sort((a, b) => {
+      if (a.job_number !== b.job_number) {
+        return a.job_number.localeCompare(b.job_number, undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        });
+      }
+      return a.part_name.localeCompare(b.part_name, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
 }
 
 /**

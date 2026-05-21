@@ -160,6 +160,63 @@ export interface ShipmentFilters {
 }
 
 /**
+ * Row shape for the top-level Shipments list page (Phase 1.5 / FR-NEW-4).
+ * Adds the distinct list of job numbers covered by the shipment, a
+ * line-item count, and the resolved created_by member to the bare
+ * Shipment row.
+ */
+export interface ShipmentListRow extends Shipment {
+  customer_name: string | null;
+  job_numbers: string[];
+  line_item_count: number;
+  created_by_member: {
+    user_id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+}
+
+export type ProductionStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled';
+
+export type FulfillmentStatus =
+  | 'unshipped'
+  | 'partially_shipped'
+  | 'fully_shipped';
+
+/**
+ * Row shape returned by getOpenJobPartsForCustomer (Phase 1.5 / FR-NEW-5).
+ * One row per job_part across all of the customer's jobs that match the
+ * filter. qty_remaining is clamped to zero — never negative — so the
+ * line picker can do non-negative math even when an over-shipment was
+ * confirmed via the FR-4 soft warning.
+ */
+export interface OpenJobPartRow {
+  job_part_id: string;
+  job_id: string;
+  job_number: string;
+  customer_po_number: string | null;
+  part_id: string;
+  part_name: string;
+  description: string | null;
+  qty_ordered: number;
+  qty_shipped: number;
+  qty_remaining: number;
+  production_status: ProductionStatus;
+  fulfillment_status: FulfillmentStatus;
+}
+
+export interface OpenJobPartFilter {
+  /** Default true. Drops lines already at fulfillment_status = 'fully_shipped'. */
+  excludeFullyShipped?: boolean;
+  /** Default true. Drops lines at production_status = 'cancelled'. */
+  excludeCancelled?: boolean;
+}
+
+/**
  * Display config for shipping_arrangement values. Single source of truth
  * for the human-readable label — both CreateShipmentModal and
  * CustomerShippingDefaultsCard (PR 7) and the packing-slip PDF read from

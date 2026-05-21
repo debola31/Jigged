@@ -1,8 +1,8 @@
-# PRD: Shipments (v2)
+# PRD: Shipments (v2.1)
 
-**Status:** Draft v2 — restructured around Inspired / Build / SVPG frameworks. For review before Friday's Contour visit.
+**Status:** v2.1 — Phase 1 shipped (PRs 1–7, commits `45edada`…`31c3086`); this revision pulls Flow D (multi-job shipments) into active scope as Phase 1.5, drops the customer-detail-page entry point in favor of a new top-level `/shipments` page, and reconciles drift between the original v2 text and what was actually merged.
 **Author:** Debola Akeredolu
-**Last updated:** May 18, 2026
+**Last updated:** May 20, 2026
 **Related GitHub issues:** #228 (packing slip generation), #229 (auto-close on full shipment), #230 (shipment tracking visible on job detail)
 **Related milestone:** Shipping & Order Fulfillment
 
@@ -278,7 +278,7 @@ Shipment
   └── has a CoC text block (default per customer, editable per shipment, optional)
 ```
 
-The full schema sketch is in Appendix A. Other modeling decisions:
+The full schema sketch is in Appendix A. **Note:** Appendix A is illustrative and was written before Phase 1 shipped. The canonical schema lives in `supabase/migrations/` (PRs 1–7 plus the upcoming Phase 1.5 customer-consistency migration). Two notable on-the-ground deviations from the sketch: customer addresses use `default_billing` / `default_shipping` boolean flags (not a `type` enum with `is_default`), and `customer_po_number` lives on `jobs` (not as a per-line value on the shipment). Other modeling decisions:
 
 - One shipment can span multiple jobs (same customer) because shops box mixed parts.
 - Partial shipments are line-item-level, not job-level, because a job can have multiple parts shipping on different schedules.
@@ -316,7 +316,7 @@ What has to be true for this flow to work:
 3. Form opens, pre-filled with: today's date, customer's default ship-to, all open line items at full remaining quantity, default carrier (if set on customer), default shipping arrangement (if set on customer), default CoC text (if set on customer or company).
 4. Bri confirms or edits, clicks "Create Shipment & Print."
 5. System generates packing slip number, saves shipment, opens PDF.
-6. Bri prints. `fulfillment_status` updates to `fully_shipped` (all line items now fully shipped). Status block on the job page updates visibly. Job disappears from the default jobs-list view (now considered "done" per FR-18).
+6. Bri prints. `fulfillment_status` updates to `fully_shipped` (all line items now fully shipped). Status block on the job page updates visibly. Job disappears from the default jobs-list view (now considered "done" per FR-18). The operations panel on the job stays editable — only `production_status = 'cancelled'` disables it. Production and fulfillment are orthogonal lifecycles per §7, so a job that ships partially with remaining production work still allows operators to log time.
 
 Three clicks: Create Shipment → confirm → Print. This is the bar.
 
@@ -330,13 +330,14 @@ Three clicks: Create Shipment → confirm → Print. This is the bar.
 
 ### Flow D: Bri ships mixed parts from one customer across two jobs
 
-1. Bri opens the customer detail page or a "Ready to Ship" queue filtered by customer.
-2. She clicks "Create Shipment" at the customer level.
-3. Form shows all open job line items for that customer, with checkboxes. She picks the lines she's actually boxing, sets quantities.
-4. One packing slip is generated covering both jobs.
-5. Each job's `fulfillment_status` updates via trigger; either or both may reach `fully_shipped`.
+1. Bri (or Johnny) opens the top-level Shipments page from the sidebar.
+2. Clicks "New Shipment."
+3. Picks a customer (searchable typeahead).
+4. Sees every open line for that customer, grouped by job. Default view applies the line-level "Ready to Ship" filter (`job_parts.production_status = 'completed'` only). Search input filters by part / job / customer PO. Each line is a checkbox with editable qty pre-filled at `qty_remaining` (clamped to zero for over-shipped lines, which render with a disabled checkbox and an "already shipped in full" indicator).
+5. Bri checks the lines she's actually boxing across one or more jobs, confirms, saves.
+6. One packing slip is generated covering the selected lines. Each affected job's `fulfillment_status` updates via trigger; either or both may reach `fully_shipped`.
 
-Less common but worth supporting because the alternative (separate slips for one physical box) is what shops complain about. Deferred to Phase 4. Not in the Friday demo.
+Less common than Flow B but worth supporting because the alternative (separate slips for one physical box) is what shops complain about. Pulled into active scope as part of Phase 1.5 (was deferred to Phase 4 in v2.0).
 
 ### Flow E: Shane reviews fulfillment health
 
@@ -349,7 +350,7 @@ Reports view (charts, on-time rates) is deferred to v1.1.
 
 ### Flow F: Reopening a closed job
 
-The customer calls and orders 5 more of the same part. The salesperson creates a new job with a "related to" link to the original. The original job's shipments remain intact. New job gets its own line items, its own shipments, its own status arc.
+The customer calls and orders 5 more of the same part. The salesperson creates a new job with a "related to" link to the original via `jobs.related_to_job_id` (implemented in migration `20260525_shipments_pr6_related_jobs_and_search.sql`). The original job's shipments remain intact. New job gets its own line items, its own shipments, its own status arc.
 
 Recommendation locked: new job, not reopened. Cleaner reporting and avoids "which shipments fulfilled which order quantity" confusion. Validate with Shane in the post-Friday conversation; if he disagrees, swap to reopen.
 
@@ -377,13 +378,19 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 - `[FR-18]` A job is considered "done" when `production_status IN ('completed', 'cancelled')` AND `fulfillment_status = 'fully_shipped'`. This is computed in queries, not stored.
 - `[FR-19]` Jobs list hides "done" jobs by default (FR-18 predicate). Toggle to show.
 - `[FR-20]` Audit log entry written when `jobs.fulfillment_status` transitions to `fully_shipped`. Includes triggering shipment, user, timestamp.
-- `[FR-21]` Closed jobs cannot be reopened. New work for the same part creates a new job. Reorders are a salesperson workflow, not a status flip.
+- `[FR-21]` Closed jobs cannot be reopened. New work for the same part creates a new job. Reorders are a salesperson workflow, not a status flip. Implemented via `jobs.related_to_job_id` (FK back to the original job, same-company enforced by trigger) and a "Reorder" affordance on closed job detail pages — see migration `20260525_shipments_pr6_related_jobs_and_search.sql`.
 
 ### Shipment creation
 
 - `[FR-1]` User can create a shipment from a job detail page; line items pre-fill at remaining quantity.
-- `[FR-2]` User can create a shipment from a customer detail page that spans multiple jobs for that customer. Phase 4.
-- `[FR-3]` Shipment form fields: ship date (default today), ship-to address (default customer's default ship-to, with dropdown to other customer addresses or "add new"), carrier (dropdown), tracking number (optional), shipping arrangement (default from customer, editable), weight (optional), package count (optional), notes (optional), CoC text (default from customer settings, editable, can be removed).
+- `[FR-2]` User can create a shipment from a top-level Shipments page that spans multiple jobs for one customer. Entry point is the global "New Shipment" button on `/dashboard/{companyId}/shipments`. The customer detail page is not a shipment-creation surface.
+- `[FR-NEW-3]` Top-level Shipments nav entry and route `/dashboard/{companyId}/shipments`, gated by the company `shipments_enabled` feature flag.
+- `[FR-NEW-4]` Shipments list view: paginated table with packing slip #, ship date, customer, jobs covered (one chip per distinct `job_number`), carrier, tracking number, line-item count, created-by. Searchable by packing slip #, customer name, tracking number. Sortable by ship date (newest first by default).
+- `[FR-NEW-5]` "New Shipment" entry from the list: customer-first picker, then a per-job_part picker grouped by job, showing every line with `qty_remaining > 0` and `production_status != 'cancelled'` for that customer. The picker has a default-on "Ready to Ship" filter chip and a search input over part name / job number / customer PO. The "Ready to Ship" filter operates at the **line level** (`job_parts.production_status = 'completed'`), not the job level — a job with mixed completion states surfaces only its completed parts. This matches the operations/fulfillment orthogonality §7 commits to: Bri ships what's done, regardless of whether sibling parts on the same job are still in production. Lines already fully shipped render visibly with a disabled checkbox and an "already shipped in full" indicator. Same downstream form fields and the same `create_shipment_with_line_items` RPC as Flow B.
+- `[FR-NEW-6]` Database integrity for multi-job shipments, enforced by trigger (not just RPC) so the invariant holds for any future insert path:
+  - Every `shipment_line_items.job_part_id` must reference a `job_part` whose `job.customer_id` equals the parent `shipments.customer_id`.
+  - `shipments.customer_id` is immutable after insert. Any `UPDATE` that changes `customer_id` raises — voiding and recreating is the right path for that case. Without this pair, flipping the parent shipment's customer would leave existing line items pointing at the old customer's jobs and the line-item trigger wouldn't fire (no rows on that table changed).
+- `[FR-3]` Shipment form fields: ship date (default today), ship-to address (default customer's default ship-to, with dropdown to other customer addresses or "add new"), carrier (dropdown), tracking number (optional), shipping arrangement (default from customer, editable), weight (optional), package count (optional), notes (optional), CoC text (default from customer settings, editable, can be removed). Customer PO is **not** entered on the shipment form — it lives on `jobs.customer_po_number` (set at quote-to-job conversion) and is read off each job at packing-slip render time.
 - `[FR-4]` System refuses over-shipment with a soft warning that can be confirmed.
 - `[FR-5]` System refuses zero-quantity shipments.
 - `[FR-6]` Packing slip number is auto-generated, unique per company, sequential. Format configurable per company in settings. Default `PS-{YYYY}-{0000}`.
@@ -391,7 +398,7 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 
 ### Packing slip PDF
 
-- `[FR-8]` PDF includes: company logo, shop's return address, packing slip number, ship date, customer name, ship-to address, bill-to address, customer PO number per line, part number + description per line, quantity shipped per line, quantity remaining per line (only shown if > 0), carrier, tracking number, shipping arrangement, weight/package count, notes, CoC text (if present), signature line for shipper.
+- `[FR-8]` PDF includes: company logo, shop's return address, packing slip number, ship date, customer name, ship-to address, **Created By (member name)** — the salesperson/shipper identity, replacing the bill-to block — carrier, tracking number, shipping arrangement, weight/package count, notes, CoC text (if present), signature line for shipper. Line items table with columns: `Job Number | Customer PO | Part # | Description | Qty Shipped | Qty Remaining`. The Qty Remaining **column** appears in the table when at least one line on the slip has `qty_remaining > 0`; otherwise the column is hidden entirely. When the column is present, every **cell** in it shows the numeric value (including 0 for lines that are fully shipped) — cells are not blanked. Multi-job slips use the same single table; Job Number and Customer PO are per-row, which makes single-job slips mildly redundant on those two columns and multi-job slips immediately legible without restructuring the renderer.
 - `[FR-9]` PDF is printable on standard letter paper at a $200 shop laser printer.
 - `[FR-10]` PDF is regeneratable from a shipment at any time.
 - `[FR-11]` PDF is downloadable.
@@ -400,7 +407,7 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 
 - `[FR-30]` Customer detail page has an Addresses tab. CRUD on addresses, with type (ship_to / bill_to / both) and is_default per type.
 - `[FR-31]` New customers default to a single "use same as billing" address.
-- `[FR-32]` Shipment form allows entering a one-time address. Phase 4.
+- `[FR-32]` Shipment form allows entering a one-time address. Phase 3.
 
 ### Settings
 
@@ -510,6 +517,17 @@ The full vertical slice with the architecture done right. Bri sees this on Frida
 - A colleague who has never used Jigged completes Flow B in under five minutes, cold.
 - The pre-Friday checklist in §13 passes.
 
+### Phase 1.5: Top-level Shipments page + Flow D (post-Friday, before Phase 2 polish)
+
+Phase 1 covered single-job shipments via the per-job "Create Shipment" button. Phase 1.5 adds the company-wide audit surface and the multi-job creation path. Flow D was originally Phase 4 (deferred); pulled forward because the schema and RPC already support multi-job shipments and the top-level page is the natural home for both shipment history and the cross-job create flow.
+
+- Top-level Shipments nav entry, gated by the company `shipments_enabled` feature flag, with a Skeleton placeholder during company-data load (no late flash).
+- Shipments list page at `/dashboard/{companyId}/shipments` (FR-NEW-4).
+- Customer-first new-shipment wizard with multi-job line picker (FR-NEW-5).
+- Customer-consistency triggers on `shipment_line_items` and `shipments.customer_id` immutability (FR-NEW-6).
+- Refactor `CreateShipmentModal` so the same inner form body serves both `jobId` (Flow B) and `customerId` (Flow D) entry modes.
+- Per-job "Create Shipment" button remains as the shortcut for the common single-job case.
+
 ### Phase 2: Whatever Bri tells us is missing (target: week after Friday)
 
 Driven by Friday observation. No commitments in advance. Examples of things that might land here, none decided now:
@@ -521,9 +539,9 @@ Driven by Friday observation. No commitments in advance. Examples of things that
 
 Acceptance: Bri uses Jigged for shipping on at least three real shipments in the week, without falling back to Tangle.
 
-### Phase 3: Multi-job, one-time addresses, edit/void
+### Phase 3: One-time addresses, edit/void
 
-Only built if Phase 2 succeeds. Post-pilot.
+Only built if Phase 2 succeeds. Post-pilot. Multi-job (Flow D) moved up to Phase 1.5.
 
 ### Phase 4: Reporting and dashboards
 
@@ -622,15 +640,17 @@ After Phase 1 plan is reviewed and approved, repeat for Phase 2, etc.
 
 ## Appendix A: Schema sketch
 
-```sql
--- New tables
+> **Status:** This appendix is the original v2 design sketch. Phase 1 shipped with a few deviations — most visibly, `customer_addresses` uses `default_billing` / `default_shipping` boolean flags rather than the `type` enum + `is_default` pattern below. The canonical schema lives in [supabase/migrations/](../../supabase/migrations/). Keep this section as historical context; consult the migrations for the authoritative shape.
 
-CREATE TABLE addresses (
+```sql
+-- New tables (as-shipped in supabase/migrations/20260519_shipments_pr1_customer_addresses.sql)
+
+CREATE TABLE customer_addresses (
   id UUID PRIMARY KEY,
   company_id UUID NOT NULL REFERENCES companies(id),
   customer_id UUID NOT NULL REFERENCES customers(id),
-  type TEXT NOT NULL CHECK (type IN ('ship_to', 'bill_to', 'both')),
-  is_default BOOLEAN NOT NULL DEFAULT false,
+  default_billing BOOLEAN NOT NULL DEFAULT false,
+  default_shipping BOOLEAN NOT NULL DEFAULT false,
   attention_to TEXT,
   line1 TEXT NOT NULL,
   line2 TEXT,
@@ -795,7 +815,7 @@ Claude Code's Phase 1 plan will produce the actual trigger function bodies. The 
 | # | Decision | Source |
 |---|----------|--------|
 | 1 | Shipment is a first-class entity; PDF is a render | First-principles analysis |
-| 2 | One shipment can span multiple jobs (same customer) | Research: shops box mixed parts |
+| 2 | One shipment can span multiple jobs (same customer). Entry point is the top-level `/shipments/new` page with a customer-first picker — not the customer detail page | Research: shops box mixed parts |
 | 3 | Partial shipments are line-item-level | A job can have multiple parts shipping on different schedules |
 | 4 | Auto-close on full shipment, computed via trigger | Johnny: "I don't know why Tangle doesn't do that" |
 | 5 | No role-gated shipping visibility | Johnny's complaint at Contour |
@@ -816,8 +836,12 @@ Claude Code's Phase 1 plan will produce the actual trigger function bodies. The 
 | 20 | **Old `jobs.status` enum is replaced**, not extended, in Phase 1 | Avoids temporary state; backfill is trivial because no shipments exist yet |
 | 21 | **"Done" is a derived predicate**, not a stored status | Auto-close becomes a query, not a state transition; eliminates a class of drift bugs |
 | 22 | **Phase 1 bundles all foundation work** (formerly v1 Phases 1 + 2) | Architectural correctness from the start; no temporary decisions to unwind |
+| 23 | **Customer detail page is not a shipment-creation surface.** It manages customer attributes (contacts, addresses, defaults). Shipment creation lives at `/shipments/new` with a customer picker as the first step. Two entry points: (1) the per-job "Create Shipment" button for the common single-job case, (2) the `/shipments/new` flow for multi-job shipments. Adding a third entry point on the customer detail page would muddle the surface's purpose | Surface-scope discipline; avoids three-way fork on the same creation path |
+| 24 | **Bill-to address removed from packing slip; replaced with "Created By"** (shipper/salesperson identity) | Invoicing is a separate document; packing slip identifies who packed the box, not who pays for it (commit `31c3086`) |
+| 25 | **Flow D (multi-job shipments) moved into active scope as Phase 1.5** (was Phase 4) | Schema and RPC already support it; only the UI was missing |
+| 26 | **`shipments.customer_id` is immutable after insert** | A shipment changing customers post-creation is incoherent; pairs with the line-item customer-consistency trigger to close a silent inconsistency window |
 
-Bold rows are new in v2.
+Bold rows are new in v2 (rows 14–22 in v2.0; rows 23–26 added in v2.1 with the Flow D / top-level Shipments page scope).
 
 ---
 

@@ -63,6 +63,13 @@ export interface ShipmentWithRelations extends Shipment {
   customer?: {
     id: string;
     name: string;
+    /**
+     * All customer_addresses for this customer. The packing slip PDF
+     * picks the row with default_billing = true to render the Bill To
+     * block. Optional because not every reader needs it; getShipmentById
+     * and getShipmentsForJob populate it for the PDF surface.
+     */
+    addresses?: CustomerAddress[];
   } | null;
   shipping_address?: CustomerAddress | null;
   /** Salesperson / shipper who created the row. Resolved post-fetch in shipmentsAccess. */

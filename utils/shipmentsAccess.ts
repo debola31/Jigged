@@ -108,7 +108,13 @@ export async function getShipmentById(
     .from('shipments')
     .select(
       `*,
-       customer:customers (id, name),
+       customer:customers (
+         id, name,
+         addresses:customer_addresses (
+           id, customer_id, address_line1, address_line2, city, state,
+           postal_code, country, default_billing, default_shipping, attention_to
+         )
+       ),
        shipping_address:customer_addresses!shipping_address_id (
          id, customer_id, address_line1, address_line2, city, state,
          postal_code, country, default_billing, default_shipping, attention_to
@@ -178,7 +184,13 @@ export async function getShipmentsForJob(
     .from('shipments')
     .select(
       `*,
-       customer:customers (id, name),
+       customer:customers (
+         id, name,
+         addresses:customer_addresses (
+           id, customer_id, address_line1, address_line2, city, state,
+           postal_code, country, default_billing, default_shipping, attention_to
+         )
+       ),
        shipping_address:customer_addresses!shipping_address_id (
          id, customer_id, address_line1, address_line2, city, state,
          postal_code, country, default_billing, default_shipping, attention_to

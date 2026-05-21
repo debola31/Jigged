@@ -157,6 +157,11 @@ export default function ShipmentsListPage() {
       headerName: 'Jobs',
       minWidth: 220,
       sortable: false,
+      // String value for AG Grid's internal text paths (filter quick-search,
+      // CSV export, accessibility); the cellRenderer still draws chips.
+      // Without this, AG Grid logs warning #48 for object-typed columns.
+      valueFormatter: (p) =>
+        Array.isArray(p.value) && p.value.length > 0 ? (p.value as string[]).join(', ') : '—',
       cellRenderer: (params: ICellRendererParams<ShipmentListRow>) => {
         const jobs = (params.value ?? []) as string[];
         if (jobs.length === 0) return <Typography variant="body2" sx={{ color: 'text.secondary' }}>—</Typography>;

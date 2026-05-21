@@ -8,10 +8,10 @@
  * Layout (FR-8, PRD v2.1):
  *   - Header: company logo (top-left when present), company return
  *     address, PACKING SLIP title + PS# + ship date (top-right).
- *   - Created-By (left) + Ship-to (right) blocks. Ship-to surfaces
+ *   - Bill-to (left) + Ship-to (right) blocks. Bill-to is resolved
+ *     from the customer's default-billing address at render time; ship-to
+ *     is the shipment.shipping_address_id snapshot. Ship-to surfaces
  *     ATTN: from customer_addresses.attention_to via resolveAttentionLine.
- *     Bill-to is intentionally not on the packing slip — invoicing
- *     carries that on its own document (PRD §A.5 / commit 31c3086).
  *   - Line items table (JobBOSS pattern): Job # / Customer PO / Part /
  *     Description / Qty Shipped / Qty Remaining. The Qty Remaining
  *     *column* appears only when at least one line on the slip has
@@ -296,12 +296,10 @@ export async function generatePackingSlipPdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- CREATED BY (left) + SHIP TO (right) ----------
-  // Mirrors the quote PDF's metadata layout. Left column is the
-  // shipper/salesperson identity (resolved from shipments.created_by
-  // via user_company_access). The billing address is intentionally
-  // not on the packing slip — invoicing carries that on its own
-  // document.
+  // ---------- BILL TO (left) + SHIP TO (right) ----------
+  // Bill-to resolves to the customer's default-billing customer_addresses
+  // row at render time. Ship-to is the shipment.shipping_address_id
+  // snapshot. ATTN: on the ship-to side surfaces from the address row.
   const colWidth = (pageWidth - MARGIN * 2) / 2;
   const leftX = MARGIN;
   const rightX = MARGIN + colWidth + 8;
@@ -314,32 +312,28 @@ export async function generatePackingSlipPdf(
     attention.text,
   );
 
-  const createdByName = shipment.created_by_member?.name ?? null;
-  const createdByEmail = shipment.created_by_member?.email ?? null;
-  const hasCreatedBy = Boolean(createdByName || createdByEmail);
+  const billToAddress =
+    shipment.customer?.addresses?.find((a) => a.default_billing) ?? null;
+  const billLines = buildAddressBlockLines(
+    shipment.customer?.name ?? null,
+    billToAddress,
+    null,
+  );
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  if (hasCreatedBy) {
-    doc.text('CREATED BY', leftX, cursorY);
-  }
+  doc.text('BILL TO', leftX, cursorY);
   doc.text('SHIP TO', rightX, cursorY);
 
-  // Left: name (bold) + email (regular).
-  doc.setFontSize(11);
-  doc.setTextColor(40);
-  let leftLineCount = 0;
-  if (createdByName) {
-    doc.setFont('helvetica', 'bold');
-    doc.text(createdByName, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
-  }
-  if (createdByEmail) {
-    doc.setFont('helvetica', 'normal');
-    doc.text(createdByEmail, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
-  }
+  // Left: bill-to address (same renderer as ship-to so the two columns
+  // visually balance).
+  billLines.forEach((line, i) => {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.text(line, leftX, cursorY + 16 + i * 13);
+  });
 
   // Right: ship-to address.
   shipLines.forEach((line, i) => {
@@ -349,7 +343,7 @@ export async function generatePackingSlipPdf(
     doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  const blockLines = Math.max(leftLineCount, shipLines.length);
+  const blockLines = Math.max(billLines.length, shipLines.length);
   cursorY = cursorY + 16 + blockLines * 13 + 18;
 
   // ---------- Line items table ----------

@@ -25,10 +25,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import ReplayIcon from '@mui/icons-material/Replay';
 
-import { getJobWithRelations, deleteJob, cancelJob, createReorderJob, getRelatedJobs } from '@/utils/jobsAccess';
-import { isJobDone } from '@/types/job';
+import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
@@ -62,11 +60,6 @@ export default function JobDetailPage() {
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
-  const [reorderLoading, setReorderLoading] = useState(false);
-  const [related, setRelated] = useState<{
-    reorderedFrom: { id: string; job_number: string } | null;
-    reorders: Array<{ id: string; job_number: string }>;
-  } | null>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -75,21 +68,11 @@ export default function JobDetailPage() {
       setLoading(true);
       const data = await getJobWithRelations(jobId, companyId);
       setJob(data);
-      // Per-part shipment summary + related-jobs in parallel; both
-      // degrade quietly so the page still renders if either fails.
-      const [summariesResult, relatedResult] = await Promise.allSettled([
-        getJobPartShipmentSummaries(jobId),
-        getRelatedJobs(jobId),
-      ]);
-      if (summariesResult.status === 'fulfilled') {
-        setPartSummaries(summariesResult.value);
-      } else {
-        console.warn('Job detail: per-part shipment summaries failed', summariesResult.reason);
-      }
-      if (relatedResult.status === 'fulfilled') {
-        setRelated(relatedResult.value);
-      } else {
-        console.warn('Job detail: related-jobs fetch failed', relatedResult.reason);
+      try {
+        const summaries = await getJobPartShipmentSummaries(jobId);
+        setPartSummaries(summaries);
+      } catch (err) {
+        console.warn('Job detail: per-part shipment summaries failed', err);
       }
       setError(null);
     } catch (err) {
@@ -120,18 +103,6 @@ export default function JobDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to delete job');
       setActionLoading(false);
       setDeleteDialogOpen(false);
-    }
-  };
-
-  const handleReorder = async () => {
-    if (!job) return;
-    setReorderLoading(true);
-    try {
-      const result = await createReorderJob(job.id);
-      router.push(`/dashboard/${companyId}/jobs/${result.jobId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create reorder.');
-      setReorderLoading(false);
     }
   };
 
@@ -174,10 +145,6 @@ export default function JobDetailPage() {
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canShip =
     shipmentsEnabled && job.fulfillment_status !== 'fully_shipped' && parts.length > 0;
-  // Reorder action surfaces once the job is closed (FR-18 done) — at
-  // that point the customer has the parts and might come back asking
-  // for more. Cancelled-but-fully-shipped also counts as done.
-  const canReorder = isJobDone(job) && parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
 
@@ -235,17 +202,6 @@ export default function JobDetailPage() {
               disabled={actionLoading}
             >
               Create Shipment
-            </Button>
-          )}
-          {canReorder && (
-            <Button
-              variant="outlined"
-              color="primary"
-              startIcon={reorderLoading ? <CircularProgress size={16} color="inherit" /> : <ReplayIcon />}
-              onClick={handleReorder}
-              disabled={actionLoading || reorderLoading}
-            >
-              {reorderLoading ? 'Creating reorder…' : 'Create Reorder'}
             </Button>
           )}
           {canCancel && (
@@ -350,46 +306,6 @@ export default function JobDetailPage() {
                     <Typography variant="body1" fontWeight={500}>
                       {formatDate(job.due_date)}
                     </Typography>
-                  </Box>
-                )}
-                {related && (related.reorderedFrom || related.reorders.length > 0) && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Related Jobs
-                    </Typography>
-                    <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-                      {related.reorderedFrom && (
-                        <Typography variant="body2">
-                          Reordered from{' '}
-                          <MuiLink
-                            component={Link}
-                            href={`/dashboard/${companyId}/jobs/${related.reorderedFrom.id}`}
-                            sx={{ fontWeight: 500 }}
-                          >
-                            {related.reorderedFrom.job_number}
-                          </MuiLink>
-                        </Typography>
-                      )}
-                      {related.reorders.length > 0 && (
-                        <Box>
-                          <Typography variant="body2">
-                            Reorders:{' '}
-                            {related.reorders.map((r, i) => (
-                              <span key={r.id}>
-                                <MuiLink
-                                  component={Link}
-                                  href={`/dashboard/${companyId}/jobs/${r.id}`}
-                                  sx={{ fontWeight: 500 }}
-                                >
-                                  {r.job_number}
-                                </MuiLink>
-                                {i < related.reorders.length - 1 ? ', ' : ''}
-                              </span>
-                            ))}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Stack>
                   </Box>
                 )}
               </Stack>

@@ -1,6 +1,6 @@
-# PRD: Shipments (v2.1)
+# PRD: Shipments (v2.2)
 
-**Status:** v2.1 — Phase 1 shipped (PRs 1–7, commits `45edada`…`31c3086`); this revision pulls Flow D (multi-job shipments) into active scope as Phase 1.5, drops the customer-detail-page entry point in favor of a new top-level `/shipments` page, and reconciles drift between the original v2 text and what was actually merged.
+**Status:** v2.2 — corrections on top of v2.1: restores the Bill To block alongside Ship To on the packing slip (Created By is not on the slip), and drops the "Create Reorder" surface added in PR 6 along with its `jobs.related_to_job_id` data model. Flow F (reopening a closed job) is removed; FR-21 simplified accordingly.
 **Author:** Debola Akeredolu
 **Last updated:** May 20, 2026
 **Related GitHub issues:** #228 (packing slip generation), #229 (auto-close on full shipment), #230 (shipment tracking visible on job detail)
@@ -348,12 +348,6 @@ Less common than Flow B but worth supporting because the alternative (separate s
 
 Reports view (charts, on-time rates) is deferred to v1.1.
 
-### Flow F: Reopening a closed job
-
-The customer calls and orders 5 more of the same part. The salesperson creates a new job with a "related to" link to the original via `jobs.related_to_job_id` (implemented in migration `20260525_shipments_pr6_related_jobs_and_search.sql`). The original job's shipments remain intact. New job gets its own line items, its own shipments, its own status arc.
-
-Recommendation locked: new job, not reopened. Cleaner reporting and avoids "which shipments fulfilled which order quantity" confusion. Validate with Shane in the post-Friday conversation; if he disagrees, swap to reopen.
-
 ---
 
 ## 9. Functional requirements
@@ -378,7 +372,7 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 - `[FR-18]` A job is considered "done" when `production_status IN ('completed', 'cancelled')` AND `fulfillment_status = 'fully_shipped'`. This is computed in queries, not stored.
 - `[FR-19]` Jobs list hides "done" jobs by default (FR-18 predicate). Toggle to show.
 - `[FR-20]` Audit log entry written when `jobs.fulfillment_status` transitions to `fully_shipped`. Includes triggering shipment, user, timestamp.
-- `[FR-21]` Closed jobs cannot be reopened. New work for the same part creates a new job. Reorders are a salesperson workflow, not a status flip. Implemented via `jobs.related_to_job_id` (FK back to the original job, same-company enforced by trigger) and a "Reorder" affordance on closed job detail pages — see migration `20260525_shipments_pr6_related_jobs_and_search.sql`.
+- `[FR-21]` Closed jobs cannot be reopened. New work for the same part creates a new job.
 
 ### Shipment creation
 
@@ -398,7 +392,7 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 
 ### Packing slip PDF
 
-- `[FR-8]` PDF includes: company logo, shop's return address, packing slip number, ship date, customer name, ship-to address, **Created By (member name)** — the salesperson/shipper identity, replacing the bill-to block — carrier, tracking number, shipping arrangement, weight/package count, notes, CoC text (if present), signature line for shipper. Line items table with columns: `Job Number | Customer PO | Part # | Description | Qty Shipped | Qty Remaining`. The Qty Remaining **column** appears in the table when at least one line on the slip has `qty_remaining > 0`; otherwise the column is hidden entirely. When the column is present, every **cell** in it shows the numeric value (including 0 for lines that are fully shipped) — cells are not blanked. Multi-job slips use the same single table; Job Number and Customer PO are per-row, which makes single-job slips mildly redundant on those two columns and multi-job slips immediately legible without restructuring the renderer.
+- `[FR-8]` PDF includes: company logo, shop's return address, packing slip number, ship date, customer name, **Bill To** (left, resolved from the customer's `default_billing` address at render time) and **Ship To** (right, from the shipment's `shipping_address_id`), carrier, tracking number, shipping arrangement, weight/package count, notes, CoC text (if present), signature line for shipper. Line items table with columns: `Job Number | Customer PO | Part # | Description | Qty Shipped | Qty Remaining`. The Qty Remaining **column** appears in the table when at least one line on the slip has `qty_remaining > 0`; otherwise the column is hidden entirely. When the column is present, every **cell** in it shows the numeric value (including 0 for lines that are fully shipped) — cells are not blanked. Multi-job slips use the same single table; Job Number and Customer PO are per-row, which makes single-job slips mildly redundant on those two columns and multi-job slips immediately legible without restructuring the renderer.
 - `[FR-9]` PDF is printable on standard letter paper at a $200 shop laser printer.
 - `[FR-10]` PDF is regeneratable from a shipment at any time.
 - `[FR-11]` PDF is downloadable.
@@ -823,25 +817,24 @@ Claude Code's Phase 1 plan will produce the actual trigger function bodies. The 
 | 7 | No BOL in v1 | LTL is minority of small-shop volume |
 | 8 | CoC as embedded packing-slip text | Industry pragmatic pattern |
 | 9 | Shipping arrangement is metadata, not behavior | v1 captures it; reporting comes later |
-| 10 | Reorders create new jobs with a "related to" link | Cleaner reporting |
-| 11 | Shipments voidable but not deletable | Audit integrity |
-| 12 | Default packing slip number format `PS-{YYYY}-{0000}` | Configurable per company |
-| 13 | No "Powered by Jigged" on slip | Shop's brand is the headline |
-| 14 | **Beta-as-prototype** in production with feature flag for Contour-only | Cost calculus has changed; user is unreachable remotely |
-| 15 | **Bri is the primary user**, Johnny is the buyer-proxy, Shane is the budget owner | Cagan: name your primary user |
-| 16 | **Job detail status block renders first** | Headline-moment design implication |
-| 17 | **Phasing is experience-slice, not engineering-layer** | Fadell: ship the whole experience |
-| 18 | **Friday is the gating event** for Phase 2 and Shane conversation | Pilot validation precedes scale |
-| 19 | **Production and fulfillment are orthogonal lifecycles**, stored as separate fields | Shop-floor reality; every reference ERP separates them; existing conflation breaks once real shipments exist |
-| 20 | **Old `jobs.status` enum is replaced**, not extended, in Phase 1 | Avoids temporary state; backfill is trivial because no shipments exist yet |
-| 21 | **"Done" is a derived predicate**, not a stored status | Auto-close becomes a query, not a state transition; eliminates a class of drift bugs |
-| 22 | **Phase 1 bundles all foundation work** (formerly v1 Phases 1 + 2) | Architectural correctness from the start; no temporary decisions to unwind |
-| 23 | **Customer detail page is not a shipment-creation surface.** It manages customer attributes (contacts, addresses, defaults). Shipment creation lives at `/shipments/new` with a customer picker as the first step. Two entry points: (1) the per-job "Create Shipment" button for the common single-job case, (2) the `/shipments/new` flow for multi-job shipments. Adding a third entry point on the customer detail page would muddle the surface's purpose | Surface-scope discipline; avoids three-way fork on the same creation path |
-| 24 | **Bill-to address removed from packing slip; replaced with "Created By"** (shipper/salesperson identity) | Invoicing is a separate document; packing slip identifies who packed the box, not who pays for it (commit `31c3086`) |
-| 25 | **Flow D (multi-job shipments) moved into active scope as Phase 1.5** (was Phase 4) | Schema and RPC already support it; only the UI was missing |
-| 26 | **`shipments.customer_id` is immutable after insert** | A shipment changing customers post-creation is incoherent; pairs with the line-item customer-consistency trigger to close a silent inconsistency window |
+| 10 | Shipments voidable but not deletable | Audit integrity |
+| 11 | Default packing slip number format `PS-{YYYY}-{0000}` | Configurable per company |
+| 12 | No "Powered by Jigged" on slip | Shop's brand is the headline |
+| 13 | **Beta-as-prototype** in production with feature flag for Contour-only | Cost calculus has changed; user is unreachable remotely |
+| 14 | **Bri is the primary user**, Johnny is the buyer-proxy, Shane is the budget owner | Cagan: name your primary user |
+| 15 | **Job detail status block renders first** | Headline-moment design implication |
+| 16 | **Phasing is experience-slice, not engineering-layer** | Fadell: ship the whole experience |
+| 17 | **Friday is the gating event** for Phase 2 and Shane conversation | Pilot validation precedes scale |
+| 18 | **Production and fulfillment are orthogonal lifecycles**, stored as separate fields | Shop-floor reality; every reference ERP separates them; existing conflation breaks once real shipments exist |
+| 19 | **Old `jobs.status` enum is replaced**, not extended, in Phase 1 | Avoids temporary state; backfill is trivial because no shipments exist yet |
+| 20 | **"Done" is a derived predicate**, not a stored status | Auto-close becomes a query, not a state transition; eliminates a class of drift bugs |
+| 21 | **Phase 1 bundles all foundation work** (formerly v1 Phases 1 + 2) | Architectural correctness from the start; no temporary decisions to unwind |
+| 22 | **Customer detail page is not a shipment-creation surface.** It manages customer attributes (contacts, addresses, defaults). Shipment creation lives at `/shipments/new` with a customer picker as the first step. Two entry points: (1) the per-job "Create Shipment" button for the common single-job case, (2) the `/shipments/new` flow for multi-job shipments. Adding a third entry point on the customer detail page would muddle the surface's purpose | Surface-scope discipline; avoids three-way fork on the same creation path |
+| 23 | **Packing slip renders Bill To (left) + Ship To (right); "Created By" is not on the slip.** Bill-to resolves to the customer's `default_billing` address at render time. | The two addresses receiving needs both for reconciliation. Commit `31c3086` had temporarily swapped Bill To for Created By; v2.2 reverts that. |
+| 24 | **Flow D (multi-job shipments) moved into active scope as Phase 1.5** (was Phase 4) | Schema and RPC already support it; only the UI was missing |
+| 25 | **`shipments.customer_id` is immutable after insert** | A shipment changing customers post-creation is incoherent; pairs with the line-item customer-consistency trigger to close a silent inconsistency window |
 
-Bold rows are new in v2 (rows 14–22 in v2.0; rows 23–26 added in v2.1 with the Flow D / top-level Shipments page scope).
+Bold rows are new in v2 (rows 13–21 in v2.0; rows 22–25 added in v2.1/v2.2). Earlier numbering retained a no-longer-relevant "Reorders create new jobs with a 'related to' link" row that was dropped in v2.2 along with the reorder feature itself.
 
 ---
 

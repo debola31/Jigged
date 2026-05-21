@@ -125,6 +125,12 @@ function getPageTitle(pathname: string): string {
     return 'Team';
   }
 
+  // Check for shipments routes
+  if (segments.includes('shipments')) {
+    if (segments.includes('new')) return 'New Shipment';
+    return 'Shipments';
+  }
+
   // Map other route segments to display titles
   const titleMap: Record<string, string> = {};
 

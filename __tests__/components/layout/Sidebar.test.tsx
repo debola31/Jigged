@@ -8,6 +8,14 @@ vi.mock('@/hooks/useUserRole', () => ({
   useUserRole: () => mockUseUserRole(),
 }));
 
+// Mock useCompanyFeatures — without it, the hook calls getCompany() which
+// transitively creates a Supabase client and fails when env vars aren't
+// set in the test runner. We only want to verify rendering logic here.
+const mockUseCompanyFeatures = vi.fn();
+vi.mock('@/hooks/useCompanyFeatures', () => ({
+  useCompanyFeatures: () => mockUseCompanyFeatures(),
+}));
+
 // Mock CompanySwitcher to avoid its own dependencies
 vi.mock('@/components/layout/CompanySwitcher', () => ({
   default: () => <div data-testid="company-switcher">CompanySwitcher</div>,
@@ -17,6 +25,12 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseUserRole.mockReset();
+    // Default: features finished loading, nothing enabled. Individual
+    // tests override to flip the Shipments flag on/off.
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: false },
+      loading: false,
+    });
   });
 
   it('renders all menu items for admin', () => {
@@ -61,5 +75,44 @@ describe('Sidebar', () => {
     for (const item of alwaysVisible) {
       expect(screen.getByText(item)).toBeInTheDocument();
     }
+  });
+
+  it('hides Shipments by default (feature flag off)', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: false },
+      loading: false,
+    });
+
+    render(<Sidebar />);
+
+    expect(screen.queryByText('Shipments')).not.toBeInTheDocument();
+  });
+
+  it('shows Shipments when the feature flag is enabled', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: true },
+      loading: false,
+    });
+
+    render(<Sidebar />);
+
+    expect(screen.getByText('Shipments')).toBeInTheDocument();
+  });
+
+  it('renders a skeleton placeholder for flag-gated items while features load', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: false },
+      loading: true,
+    });
+
+    render(<Sidebar />);
+
+    // Shipments text should not appear yet (we don't know whether to show it).
+    expect(screen.queryByText('Shipments')).not.toBeInTheDocument();
+    // But other items are still rendered alongside the placeholder.
+    expect(screen.getByText('Jobs')).toBeInTheDocument();
   });
 });

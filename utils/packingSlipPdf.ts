@@ -5,14 +5,20 @@
  * format and margins. The PDF is generated client-side from a hydrated
  * shipment + the customer's billing address + the company profile.
  *
- * Layout (FR-8):
+ * Layout (FR-8, PRD v2.1):
  *   - Header: company logo (top-left when present), company return
  *     address, PACKING SLIP title + PS# + ship date (top-right).
- *   - Bill-to (left) + Ship-to (right) blocks. Ship-to surfaces ATTN:
- *     from customer_addresses.attention_to via resolveAttentionLine.
- *   - Line items table: Customer PO / Part # / Description / Qty
- *     Shipped / Qty Remaining (last column omitted when nothing
- *     remains across the entire shipment).
+ *   - Bill-to (left) + Ship-to (right) blocks. Bill-to is resolved
+ *     from the customer's default-billing address at render time; ship-to
+ *     is the shipment.shipping_address_id snapshot. Ship-to surfaces
+ *     ATTN: from customer_addresses.attention_to via resolveAttentionLine.
+ *   - Line items table (JobBOSS pattern): Job # / Customer PO / Part /
+ *     Description / Qty Shipped / Qty Remaining. The Qty Remaining
+ *     *column* appears only when at least one line on the slip has
+ *     qty_remaining > 0; when present, every cell shows the numeric
+ *     value (0 for fully-shipped lines, not blanked). Same table for
+ *     single-job and multi-job slips — multi-job legibility comes from
+ *     the per-row Job # / PO, not from section headers.
  *   - Shipment details block: carrier, tracking #, arrangement label
  *     (+ free-text "Other" override), weight, package count + type, notes.
  *   - CoC block when text is non-empty after the cascade (shipment →
@@ -290,12 +296,10 @@ export async function generatePackingSlipPdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- CREATED BY (left) + SHIP TO (right) ----------
-  // Mirrors the quote PDF's metadata layout. Left column is the
-  // shipper/salesperson identity (resolved from shipments.created_by
-  // via user_company_access). The billing address is intentionally
-  // not on the packing slip — invoicing carries that on its own
-  // document.
+  // ---------- BILL TO (left) + SHIP TO (right) ----------
+  // Bill-to resolves to the customer's default-billing customer_addresses
+  // row at render time. Ship-to is the shipment.shipping_address_id
+  // snapshot. ATTN: on the ship-to side surfaces from the address row.
   const colWidth = (pageWidth - MARGIN * 2) / 2;
   const leftX = MARGIN;
   const rightX = MARGIN + colWidth + 8;
@@ -308,32 +312,28 @@ export async function generatePackingSlipPdf(
     attention.text,
   );
 
-  const createdByName = shipment.created_by_member?.name ?? null;
-  const createdByEmail = shipment.created_by_member?.email ?? null;
-  const hasCreatedBy = Boolean(createdByName || createdByEmail);
+  const billToAddress =
+    shipment.customer?.addresses?.find((a) => a.default_billing) ?? null;
+  const billLines = buildAddressBlockLines(
+    shipment.customer?.name ?? null,
+    billToAddress,
+    null,
+  );
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  if (hasCreatedBy) {
-    doc.text('CREATED BY', leftX, cursorY);
-  }
+  doc.text('BILL TO', leftX, cursorY);
   doc.text('SHIP TO', rightX, cursorY);
 
-  // Left: name (bold) + email (regular).
-  doc.setFontSize(11);
-  doc.setTextColor(40);
-  let leftLineCount = 0;
-  if (createdByName) {
-    doc.setFont('helvetica', 'bold');
-    doc.text(createdByName, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
-  }
-  if (createdByEmail) {
-    doc.setFont('helvetica', 'normal');
-    doc.text(createdByEmail, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
-  }
+  // Left: bill-to address (same renderer as ship-to so the two columns
+  // visually balance).
+  billLines.forEach((line, i) => {
+    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.text(line, leftX, cursorY + 16 + i * 13);
+  });
 
   // Right: ship-to address.
   shipLines.forEach((line, i) => {
@@ -343,7 +343,7 @@ export async function generatePackingSlipPdf(
     doc.text(line, rightX, cursorY + 16 + i * 13);
   });
 
-  const blockLines = Math.max(leftLineCount, shipLines.length);
+  const blockLines = Math.max(billLines.length, shipLines.length);
   cursorY = cursorY + 16 + blockLines * 13 + 18;
 
   // ---------- Line items table ----------
@@ -357,40 +357,59 @@ export async function generatePackingSlipPdf(
     return pa.localeCompare(pb);
   });
 
-  // Determine whether to render the Qty Remaining column. If every
-  // line ships its full ordered quantity, the column is empty everywhere
-  // — drop it. Otherwise show it on every row so receiving sees the
-  // open backlog at a glance.
+  // Per-line remaining = qty_ordered minus this shipment's quantity.
+  // Single-document number (not running total) so receiving can
+  // reconcile against the PO. Clamped to zero — the FR-4 soft warning
+  // already covered over-shipment confirmation upstream.
   const remainingByLine = lineItems.map((li) => {
     const ordered = Number(li.job_part?.quantity ?? 0);
     const shipped = Number(li.quantity);
     return Math.max(0, ordered - shipped);
   });
+  // Show the Qty Remaining *column* whenever at least one line on the
+  // slip has open backlog. When the column is hidden the whole slip is
+  // a clean "everything ordered, everything shipped" document.
   const showRemaining = remainingByLine.some((r) => r > 0);
 
-  const head = showRemaining
-    ? [['Customer PO', 'Part', 'Description', 'Qty Shipped', 'Qty Remaining']]
-    : [['Customer PO', 'Part', 'Description', 'Qty Shipped']];
+  // JobBOSS pattern: per-row Job # + Customer PO so a multi-job packing
+  // slip is legible without restructuring into sections. Single-job
+  // slips have the same value on every row — mildly redundant but
+  // consistent with the multi-job case.
+  const headRow = [
+    'Job #',
+    'Customer PO',
+    'Part',
+    'Description',
+    'Qty Shipped',
+  ];
+  if (showRemaining) headRow.push('Qty Remaining');
+  const head = [headRow];
 
   const body = lineItems.map((li, idx) => {
     const part = li.job_part?.part;
+    const jobNumber = li.job_part?.job?.job_number ?? '';
     const po = li.job_part?.job?.customer_po_number ?? '';
     const partName = part?.part_name ?? '—';
     const description = part?.description?.trim() ?? '';
     const qtyShipped = formatNumber(Number(li.quantity));
     const remaining = remainingByLine[idx];
     const row = [
+      jobNumber || '—',
       po || '—',
       partName,
       description,
       qtyShipped,
     ];
-    if (showRemaining) row.push(remaining > 0 ? formatNumber(remaining) : '—');
+    // PRD v2.1 / FR-8: when the column is present, every cell shows
+    // the numeric value including 0 — cells are not blanked.
+    if (showRemaining) row.push(formatNumber(remaining));
     return row;
   });
 
   if (body.length === 0) {
-    body.push(showRemaining ? ['—', '—', '', '—', '—'] : ['—', '—', '', '—']);
+    const emptyRow = ['—', '—', '—', '', '—'];
+    if (showRemaining) emptyRow.push('—');
+    body.push(emptyRow);
   }
 
   autoTable(doc, {
@@ -413,17 +432,19 @@ export async function generatePackingSlipPdf(
     },
     columnStyles: showRemaining
       ? {
-          0: { cellWidth: 90 },
-          1: { cellWidth: 100, fontStyle: 'bold' },
-          2: { cellWidth: 'auto' },
-          3: { cellWidth: 70, halign: 'right' },
-          4: { cellWidth: 80, halign: 'right' },
+          0: { cellWidth: 70 },
+          1: { cellWidth: 80 },
+          2: { cellWidth: 90, fontStyle: 'bold' },
+          3: { cellWidth: 'auto' },
+          4: { cellWidth: 70, halign: 'right' },
+          5: { cellWidth: 80, halign: 'right' },
         }
       : {
-          0: { cellWidth: 100 },
-          1: { cellWidth: 120, fontStyle: 'bold' },
-          2: { cellWidth: 'auto' },
-          3: { cellWidth: 80, halign: 'right' },
+          0: { cellWidth: 80 },
+          1: { cellWidth: 90 },
+          2: { cellWidth: 110, fontStyle: 'bold' },
+          3: { cellWidth: 'auto' },
+          4: { cellWidth: 80, halign: 'right' },
         },
     theme: 'grid',
   });

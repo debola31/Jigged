@@ -55,16 +55,19 @@ test.describe('Quote to Job workflow', () => {
       .first()
       .click();
 
-    // Pick the first quantity tier — QuoteForm replaced the free-form
-    // Quantity input with tier checkboxes (one per pricing tier on the part).
-    // The label is "Qty <n> · $<price> / unit"; we match the leading "Qty N"
-    // pattern. If the test part has no pricing tiers, skip.
-    const firstTier = page.getByRole('checkbox', { name: /Qty \d+/i }).first();
-    const hasTiers = await firstTier.isVisible({ timeout: 10_000 }).catch(() => false);
-    if (!hasTiers) {
-      test.skip(true, 'Test part has no pricing tiers');
-    }
-    await firstTier.check();
+    // Type an order quantity — QuoteForm auto-resolves the matching pricing
+    // tier from `part_pricing_tiers` and renders the unit price inline. The
+    // global-setup seed creates two tiers on the MFG part (qty 1 @ $200,
+    // qty 10 @ $150), so an order quantity of 1 will resolve to the lowest
+    // tier deterministically.
+    const orderQty = page.getByRole('textbox', { name: /Order quantity/i });
+    await orderQty.fill('1');
+    // Confirm the tier resolved — the form renders "Tier 1 ea · $200.00 / unit"
+    // when the match succeeds. If this assertion fails, the seed didn't
+    // populate part_pricing_tiers (check e2e/global-setup.ts).
+    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)
     await page.getByRole('button', { name: /Create Quote/i }).click();
@@ -87,17 +90,11 @@ test.describe('Quote to Job workflow', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/Convert to Job/i)).toBeVisible();
 
-    // Wait for routing check to complete
-    // Either "Routing found with N operations" (success) or "No routing defined" (warning)
-    await expect(
-      dialog.getByText(/Routing found|No routing defined/i).first()
-    ).toBeVisible({ timeout: 15_000 });
-
-    // If no routing, we can't proceed — skip the rest
-    const hasRouting = await dialog.getByText(/Routing found/i).isVisible().catch(() => false);
-    if (!hasRouting) {
-      test.skip(true, 'Test part has no routing — cannot convert to job');
-    }
+    // The seed (ensureRouting in e2e/global-setup.ts) creates a one-op
+    // routing on the MFG part, so this assertion is now deterministic.
+    await expect(dialog.getByText(/Routing found/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     // Click "Create Job"
     await dialog.getByRole('button', { name: /Create Job/i }).click();

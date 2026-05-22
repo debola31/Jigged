@@ -337,10 +337,10 @@ and trains everyone to ignore the result.
 
 Anti-patterns to skip:
 
-- **Running the full E2E suite before every PR.** Most specs runtime-skip
-  without seed/env (csv-import, quote-to-job), `next build` already
+- **Running the full E2E suite before every PR.** `next build` already
   covers what's deterministic, and the failures you'd find are usually
-  env drift you can't fix from this side.
+  env drift you can't fix from this side. The `csv-import` spec also
+  needs the FastAPI backend running locally — see E2E gotchas below.
 - **Re-running tsc / lint for doc-only PRs.** The build catches them
   anyway, and the runs add nothing.
 - **Treating "local pass + CI fail" as a code bug.** That's expected env
@@ -383,15 +383,16 @@ already running.
   for AI column analysis — without it, the spec fails with
   `Failed to fetch (localhost:8000)`. Filter with
   `--grep-invert "CSV Import"` if you don't want to run it.
-- **`quote-to-job` runtime-skips** when the test part has no pricing
-  tiers. The seed doesn't create tiers, so it skips by default. To
-  exercise the full convert-to-job flow, add `part_pricing_tiers` rows
-  in `e2e/global-setup.ts`.
 - **CI mirror locally:** `pnpm exec playwright test --grep-invert "CSV Import"`
-  reproduces the CI-equivalent outcome (4 passed + 1 runtime-skip).
+  reproduces the CI-equivalent outcome (5 passing).
 - Don't pass `CI=1` to simulate CI locally — `playwright.config.ts`
   disables the auto-launched dev server in CI mode, so nothing serves
   on `localhost:3000`.
+- **Seed contract:** any new spec that depends on a particular data
+  shape (pricing tiers, routings, BOM rows, addresses, …) should
+  extend `e2e/global-setup.ts` rather than runtime-skipping. Skips
+  hide real regressions — see the `jobs.status` prod incident
+  (May 2026) where a runtime-skipped spec masked a broken SELECT.
 
 ### Where the detailed docs live
 

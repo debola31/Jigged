@@ -111,7 +111,6 @@ export interface QuoteWithRelations extends Quote {
   jobs?: Array<{
     id: string;
     job_number: string;
-    status: string;
   }>;
   // Resolved creator profile from user_company_access (populated client-side
   // via a second query — keeps the main PostgREST query simple).

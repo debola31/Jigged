@@ -21,6 +21,21 @@ Jigged is a web-based ERP system designed for small-scale precision manufacturin
 
 **Do NOT create new FastAPI endpoints for standard CRUD.** See `docs/architecture.md` Section 8 for the full standard and decision checklist.
 
+### Typed Supabase client (incremental adoption)
+
+`lib/supabase.ts` exposes two getters that share one singleton:
+
+- `getSupabase()` — untyped. Existing `utils/*Access.ts` files use this. Schema mistakes compile silently (this is how the May 2026 `jobs.status` regression shipped).
+- `getTypedSupabase()` — `<Database>`-generic. Every `.from('table').select('...')` chain is checked against [`types/database.ts`](types/database.ts), generated from the linked Supabase project.
+
+**Use `getTypedSupabase()` for any new access function.** When converting an existing file, expect `tsc` to surface real bugs (column drift, narrow-enum mismatches, missing NOT-NULL columns on inserts) — fix them rather than papering over with `as any`. The [`schemaEmbedCheck`](scripts/schemaEmbedCheck.ts) test catches the embed-string class of drift today; typed mode catches everything else.
+
+Regenerate types after every migration that changes columns:
+
+```bash
+pnpm gen:db-types  # wraps: supabase gen types typescript --linked
+```
+
 ---
 
 ## Engineering principles

@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr';
 import { redirectToSessionExpiry } from '@/lib/supabaseErrors';
+import type { Database } from '@/types/database';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -37,7 +38,7 @@ async function deduplicatedRefresh(): Promise<string | null> {
 }
 
 export function createClient() {
-  return createBrowserClient(supabaseUrl, supabaseAnonKey, {
+  return createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
     global: {
       fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
         const response = await fetch(input, init);
@@ -80,17 +81,55 @@ export function createClient() {
   });
 }
 
-// Singleton instance for client-side usage
-let supabaseInstance: ReturnType<typeof createBrowserClient> | null = null;
+// Typed shape of the client when the `Database` generic is honored —
+// `createClient()` builds with this generic, but the runtime instance is
+// the same regardless of which getter returns it.
+export type TypedSupabaseClient = ReturnType<typeof createClient>;
 
-export function getSupabase() {
+// Untyped shape — what every existing access file currently consumes via
+// `getSupabase()`. Cast at the boundary so adoption of typed mode can roll
+// out per-file without forcing a 250-error refactor up front.
+type UntypedSupabaseClient = ReturnType<typeof createBrowserClient>;
+
+let supabaseInstance: TypedSupabaseClient | null = null;
+
+/**
+ * Returns the untyped Supabase client — preserves the legacy behavior
+ * every `utils/*Access.ts` file currently relies on. Calls compile
+ * regardless of whether the embed string matches the schema.
+ *
+ * Prefer `getTypedSupabase()` for new code. Per-file conversion to the
+ * typed getter is the incremental adoption path — see comment above
+ * `getTypedSupabase` for the contract and the May 2026 ADR in
+ * docs/architecture.md for context.
+ */
+export function getSupabase(): UntypedSupabaseClient {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient();
+  }
+  return supabaseInstance as unknown as UntypedSupabaseClient;
+}
+
+/**
+ * Returns the Supabase client with the `Database` generic applied, so
+ * every `.from('quotes').select('...')` chain is validated against
+ * supabase/schema.prod.sql at compile time. This is the path that
+ * would have caught the May 2026 jobs.status incident.
+ *
+ * Use for any new access function or while converting an existing one.
+ * When you switch a file from `getSupabase()` to `getTypedSupabase()`,
+ * expect `tsc` to surface real bugs — fix them in that PR, don't paper
+ * over with `as any`.
+ */
+export function getTypedSupabase(): TypedSupabaseClient {
   if (!supabaseInstance) {
     supabaseInstance = createClient();
   }
   return supabaseInstance;
 }
 
-// Export a convenience alias
+// Export a convenience alias. Stays untyped for back-compat with existing
+// `import { supabase } from '@/lib/supabase'` consumers.
 export const supabase = typeof window !== 'undefined' ? getSupabase() : null;
 
 /**

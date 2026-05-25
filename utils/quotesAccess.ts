@@ -66,7 +66,7 @@ const QUOTE_LIST_SELECT = `
   *,
   customers!left(id, name),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
-  jobs!left(id, job_number, status)
+  jobs!left(id, job_number)
 `;
 
 const QUOTE_DETAIL_SELECT = `
@@ -81,7 +81,7 @@ const QUOTE_DETAIL_SELECT = `
     )
   ),
   line_items:quote_line_items!left(${QUOTE_LINE_ITEM_FIELDS}),
-  jobs!left(id, job_number, status)
+  jobs!left(id, job_number)
 `;
 
 /**

@@ -360,6 +360,44 @@ async function ensureRouting(
 }
 
 /**
+ * Find-or-insert one pricing tier for a part at the given sequence. The spec
+ * exercises the tier-resolution path inside QuoteForm, which requires
+ * `part_pricing_tiers` rows on the manufacturable test part — without them
+ * the form shows "no pricing tiers yet" and the quote-to-job spec is forced
+ * to runtime-skip. UNIQUE(part_id, sequence) keeps this idempotent.
+ */
+async function ensurePricingTier(
+  supabase: SupabaseClient,
+  companyId: string,
+  partId: string,
+  sequence: number,
+  quantity: number,
+  unitPrice: number,
+  markupPercent: number,
+): Promise<void> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('part_pricing_tiers')
+    .select('id')
+    .eq('part_id', partId)
+    .eq('sequence', sequence)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`pricing tier lookup failed: ${lookupErr.message}`);
+  if (existing) return;
+
+  const { error } = await supabase
+    .from('part_pricing_tiers')
+    .insert({
+      part_id: partId,
+      company_id: companyId,
+      sequence,
+      quantity,
+      unit_price: unitPrice,
+      markup_percent: markupPercent,
+    });
+  if (error) throw new Error(`pricing tier insert failed: ${error.message}`);
+}
+
+/**
  * Ensure a single BOM edge between two parts. UNIQUE(parent, child) keeps
  * this idempotent.
  */
@@ -445,6 +483,12 @@ export default async function globalSetup(): Promise<void> {
 
   await ensureRouting(supabase, env.companyId, mfgPartId, wcInternalId);
   await ensureBomEdge(supabase, mfgPartId, subPartId);
+  // Two pricing tiers so the QuoteForm has a real tier to resolve against
+  // when the spec types an order quantity. sequence is the UI ordering; the
+  // tier-resolver matches by quantity, picking the highest tier with
+  // tier_qty <= order_qty.
+  await ensurePricingTier(supabase, env.companyId, mfgPartId, 1, 1, 200, 50);
+  await ensurePricingTier(supabase, env.companyId, mfgPartId, 2, 10, 150, 40);
 
   // eslint-disable-next-line no-console
   console.log('[e2e/global-setup] Done.');

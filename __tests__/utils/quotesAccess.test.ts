@@ -84,7 +84,6 @@ import {
   deleteQuote,
   bulkDeleteQuotes,
   convertQuoteToJob,
-  getPartWithCostInfo,
 } from '@/utils/quotesAccess';
 
 describe('quotesAccess utilities', () => {
@@ -773,35 +772,6 @@ describe('quotesAccess utilities', () => {
       await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'This quote has already been converted to a job'
       );
-    });
-  });
-
-  // ============== Helper Function Tests ==============
-
-  describe('getPartWithCostInfo', () => {
-    it('returns part with cost info and category', async () => {
-      const mockPart = {
-        id: 'part-1',
-        part_name: 'PART001',
-        description: 'Test Part',
-        category_id: 'cat-1',
-        part_categories: { id: 'cat-1', name: 'Machined', default_markup_percent: 35 },
-      };
-      mockQueryBuilder.data = mockPart;
-      mockQueryBuilder.error = null;
-
-      const result = await getPartWithCostInfo('part-1');
-
-      expect(result).toEqual(mockPart);
-    });
-
-    it('returns null when part not found', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { code: 'PGRST116', message: 'Not found' };
-
-      const result = await getPartWithCostInfo('nonexistent');
-
-      expect(result).toBeNull();
     });
   });
 

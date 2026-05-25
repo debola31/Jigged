@@ -1,4 +1,6 @@
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 10 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
 
 export interface Company {
@@ -14,7 +16,10 @@ export interface Company {
   state?: string | null;
   postal_code?: string | null;
   country?: string | null;
-  is_demo?: boolean;
+  // boolean | null mirrors the DB (column has no DEFAULT or NOT NULL).
+  // All consumers treat is_demo via truthy checks, so null behaves like
+  // false — no consumer changes needed.
+  is_demo?: boolean | null;
   demo_company_id?: string | null;
   // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
   settings?: Record<string, unknown> | null;
@@ -256,7 +261,12 @@ export async function getCompany(companyId: string): Promise<Company | null> {
     return null;
   }
 
-  return data;
+  // companies.settings is jsonb in the DB → generated type is Json
+  // (string | number | boolean | object | array). The app treats it as
+  // a config object (e.g. `settings.features` in app/admin/page.tsx),
+  // so we narrow here. If a primitive ever lands in this column it
+  // would be a write-side bug; reads stay strongly typed.
+  return data as Company | null;
 }
 
 /**

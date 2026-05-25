@@ -1,5 +1,7 @@
 import * as Sentry from '@sentry/nextjs';
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 8 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 // ============== Types ==============
 
@@ -199,7 +201,16 @@ export async function setMetricTimePeriod(key: MetricKey, period: MetricTimePeri
 
 // ============== Metric Value Queries ==============
 
-async function getCount(table: string, companyId: string, filters?: Record<string, string[]>): Promise<number> {
+// The typed client needs a literal table name to resolve column types,
+// so this helper is constrained to the tables it actually counts over.
+// Add to the union if a new caller needs a different table.
+type CountableTable = 'quotes' | 'jobs';
+
+async function getCount(
+  table: CountableTable,
+  companyId: string,
+  filters?: Record<string, string[]>,
+): Promise<number> {
   const supabase = getSupabase();
   let query = supabase.from(table).select('*', { count: 'exact', head: true }).eq('company_id', companyId);
 

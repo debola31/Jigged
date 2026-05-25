@@ -79,6 +79,24 @@ Always create a new feature branch before modifying code, schema, or configurati
 
 ---
 
+### Creating new database migrations
+
+Always create migration files with `supabase migration new <slug>` (NOT by writing files into `supabase/migrations/` directly). The CLI generates a unique 14-digit timestamp (`YYYYMMDDHHMMSS`); writing files by hand with date-only prefixes can collide with same-day migrations and break `schema_migrations` tracking.
+
+**Why:** the CLI tracks migrations by `(version, name)` in `supabase_migrations.schema_migrations`. Two files sharing a version collapse to one row, leaving the rest invisible to the tracker — `db push` then sees them as pending and tries to re-run them. We hit exactly this when legacy 8-digit date-prefixed files (`20260313_…`) accumulated multiple migrations per date.
+
+**How to apply (workflow per change):**
+1. `supabase migration new <slug>` — creates the file with a fresh 14-digit timestamp.
+2. Write the SQL into the new file.
+3. Confirm the linked project is staging before pushing — `supabase projects list` (the `●` marks the linked one; the staging project's name contains "Staging"). Relink with `supabase link --project-ref <ref>` if needed; never push without verifying.
+4. `supabase db push` to apply to the linked staging project, then verify the change works in the app.
+5. **Prod pushes are owned by the human, not Claude.** Stop after staging and hand off — surface the new migration filename and ask the user to push to prod themselves. Do not run `supabase link` to prod or `supabase db push` against prod from a Claude session.
+6. After the human confirms prod is updated, `python scripts/export_schema.py` to refresh `supabase/schema.staging.sql` and `supabase/schema.prod.sql`.
+
+The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_anon_waitlist.sql`) are grandfathered — leave them alone. Never reuse the 8-digit pattern for new files.
+
+---
+
 ## Design System: Jigged Manufacturing ERP (Material-UI)
 
 > **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.

@@ -1,4 +1,18 @@
-import { getSupabase } from '@/lib/supabase';
+// Adopt the typed Supabase client so every .from('jobs').select(...) chain
+// is validated against types/database.ts at compile time. Aliased to
+// getSupabase so the dozens of call sites below don't need renaming —
+// this also keeps the diff small for review. See CLAUDE.md "Typed
+// Supabase client (incremental adoption)" for the rollout contract.
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+// Update payloads for tables this file mutates conditionally. The typed
+// `.update(...)` call rejects bare Record<string, unknown> because it
+// can't verify the keys against the table schema; using the generated
+// Update types preserves the column-name check.
+type JobPartUpdate = Database['public']['Tables']['job_parts']['Update'];
+type JobMaterialUpdate = Database['public']['Tables']['job_materials']['Update'];
+type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
 import type {
   Job,
   JobWithRelations,
@@ -239,7 +253,7 @@ export async function updateJobMaterial(
 ): Promise<JobMaterial> {
   const supabase = getSupabase();
 
-  const patch: Record<string, unknown> = {
+  const patch: JobMaterialUpdate = {
     ...updates,
     updated_at: new Date().toISOString(),
   };
@@ -428,7 +442,7 @@ async function recomputeJobPartStatus(
   }
 
   const nowIso = new Date().toISOString();
-  const updates: Record<string, unknown> = {
+  const updates: JobPartUpdate = {
     production_status: newStatus,
     status_changed_at: nowIso,
     updated_at: nowIso,
@@ -572,7 +586,7 @@ export async function completeJobOperation(
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const updateData: Record<string, unknown> = {
+  const updateData: JobOperationUpdate = {
     status: 'completed',
     completed_at: new Date().toISOString(),
     completed_by: user?.id || null,

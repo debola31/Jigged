@@ -13,7 +13,9 @@ interface QuickActionsProps {
 }
 
 /**
- * Quick action buttons for creating new quotes and jobs.
+ * Quick action buttons. Jobs are created exclusively by converting an
+ * accepted quote (see utils/quotesAccess#convertQuoteToJob), so there's
+ * no "New Job" CTA here — the quote flow is the entry point.
  */
 export default function QuickActions({ companyId }: QuickActionsProps) {
   return (
@@ -42,19 +44,6 @@ export default function QuickActions({ companyId }: QuickActionsProps) {
             }}
           >
             New Quote
-          </Button>
-          <Button
-            component={Link}
-            href={`/dashboard/${companyId}/jobs/new`}
-            variant="outlined"
-            color="primary"
-            startIcon={<AddIcon />}
-            sx={{
-              flex: { sm: 1 },
-              py: 1.5,
-            }}
-          >
-            New Job
           </Button>
         </Box>
       </CardContent>

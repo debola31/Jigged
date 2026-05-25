@@ -17,16 +17,23 @@
  * because the UI is single-user-per-customer at any given moment.
  */
 
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
 import type {
   CustomerContact,
   CustomerContactFormData,
 } from '@/types/customerContact';
 
+// Narrow the form-derived insert so the typed .insert() can validate
+// column names. customer_id is added at the call site.
+type CustomerContactInsert = Database['public']['Tables']['customer_contacts']['Insert'];
+
 const CUSTOMER_CONTACT_COLUMNS =
   'id, customer_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
 
-function formDataToInsert(formData: CustomerContactFormData): Record<string, unknown> {
+function formDataToInsert(
+  formData: CustomerContactFormData,
+): Omit<CustomerContactInsert, 'customer_id'> {
   const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
   return {
     name: formData.name.trim(),

@@ -13,7 +13,7 @@
  * the DEFAULT, not a type assertion on the address.
  */
 
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   CustomerAddress,
   CustomerAddressFormData,

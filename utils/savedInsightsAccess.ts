@@ -1,4 +1,5 @@
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Json } from '@/types/database';
 import type { ChartConfig, SavedInsight } from '@/utils/insightsAccess';
 
 // ============================================================
@@ -69,7 +70,10 @@ export async function saveInsight(
       company_id: companyId,
       question,
       answer,
-      chart_config,
+      // chart_config is jsonb in the DB → cast required. ChartConfig is
+      // a structured app type; the runtime serialization is correct
+      // (JSON.stringify under the hood).
+      chart_config: chart_config as unknown as Json,
     })
     .select('id, question, answer, chart_config, created_at')
     .single();

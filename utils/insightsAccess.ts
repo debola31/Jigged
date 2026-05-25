@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '@/lib/api';
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 // ============================================================
 // Types

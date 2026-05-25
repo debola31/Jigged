@@ -57,11 +57,11 @@ vi.mock('@/utils/partsAccess', () => ({
   getComputedPartCost: (...args: [string, number]) => mockGetComputedPartCost(...args),
   getPartCostExplain: (...args: [string, number]) => mockGetPartCostExplain(...args),
 }));
-vi.mock('@/lib/supabase', () => ({
+vi.mock('@/lib/supabase', () => {
   // Only invoked when a BOM line uses a unit different from the child's
   // primary_unit; tests stay on same-unit rows by default and this returns
   // an empty conversion list.
-  getSupabase: () => ({
+  const makeClient = () => ({
     from: () => ({
       select: () => ({
         in: () => ({
@@ -69,8 +69,13 @@ vi.mock('@/lib/supabase', () => ({
         }),
       }),
     }),
-  }),
-}));
+  });
+  return {
+    getSupabase: makeClient,
+    // typed-client rollout: same singleton at runtime.
+    getTypedSupabase: makeClient,
+  };
+});
 
 import { calculateRoutingCost, calculateTierPricing } from '@/utils/routingCostCalculation';
 

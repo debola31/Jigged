@@ -20,7 +20,6 @@ import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import SearchIcon from '@mui/icons-material/Search';
-import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import WorkIcon from '@mui/icons-material/Work';
 
@@ -578,17 +577,12 @@ export default function JobsPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
-
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/jobs/new`)}
-        >
-          New Job
-        </Button>
       </Box>
 
-      {/* Data Grid or Empty State */}
+      {/* Data Grid or Empty State. Jobs are created exclusively by
+          converting an accepted quote (utils/quotesAccess#convertQuoteToJob),
+          so there's no standalone "New Job" CTA — the empty state points
+          the user at the quotes flow instead. */}
       {!loading && jobs.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
@@ -599,15 +593,14 @@ export default function JobsPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {searchDebounced || customerFilter || productionFilterValue || fulfillmentFilterValue || overdueOnly
                 ? 'No jobs match your filters.'
-                : 'Create your first job to get started.'}
+                : 'Jobs are created by converting an accepted quote. Create a quote first, then convert it from the quote detail page.'}
             </Typography>
             {!searchDebounced && !customerFilter && !productionFilterValue && !fulfillmentFilterValue && !overdueOnly && (
               <Button
                 variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => router.push(`/dashboard/${companyId}/jobs/new`)}
+                onClick={() => router.push(`/dashboard/${companyId}/quotes`)}
               >
-                Create Job
+                Go to Quotes
               </Button>
             )}
           </CardContent>

@@ -14,8 +14,16 @@
  * ready on THAT part. Start/Stop/Complete operate within a single job_part.
  */
 
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 19 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
 import { calculateActualRunMinutes } from '@/utils/sessionDuration';
+
+// Update payload type for user_company_access. Used where the patch
+// object is built conditionally and would otherwise be inferred as
+// Record<string, unknown>, which the typed .update(...) rejects.
+type UserCompanyAccessUpdate = Database['public']['Tables']['user_company_access']['Update'];
 import type {
   OperatorJob,
   OperatorJobDetail,
@@ -31,14 +39,18 @@ import type {
 } from '@/types/operator';
 import { removePartStockGraceful } from '@/utils/partsAccess';
 
-// Operator type from user_company_access
+// Operator type from user_company_access. role and created_at are
+// nullable in the DB schema (text DEFAULT 'operator'; timestamptz
+// DEFAULT now()) but never null at read time because of the defaults.
+// Mirroring the DB shape here keeps the typed select returns happy
+// without papering the gap with per-site casts.
 interface OperatorAccess {
   id: string;
   user_id: string;
   company_id: string;
-  role: string;
+  role: string | null;
   name: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 // ============================================================================
@@ -77,7 +89,7 @@ export async function updateOperator(
 ): Promise<OperatorAccess> {
   const supabase = getSupabase();
 
-  const updates: Record<string, unknown> = {};
+  const updates: UserCompanyAccessUpdate = {};
   if (request.name !== undefined) updates.name = request.name;
 
   const { data, error } = await supabase
@@ -718,7 +730,11 @@ export async function stopJob(
     })
     .eq('id', session.id);
 
-  const started = new Date(session.started_at);
+  // operator_sessions.started_at has DEFAULT now() in the schema, so
+  // every inserted row is non-null in practice. The generated type still
+  // sees `string | null` (DEFAULT without NOT NULL), so we assert.
+  const startedAt = session.started_at ?? now;
+  const started = new Date(startedAt);
   const ended = new Date(now);
   const durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
 
@@ -728,7 +744,7 @@ export async function stopJob(
     job_id: part.job_id,
     job_operation_id: session.job_operation_id,
     operation_type_id: session.work_center_id,
-    started_at: session.started_at,
+    started_at: startedAt,
     ended_at: now,
     notes: request?.notes || null,
     duration_seconds: durationSeconds,
@@ -931,7 +947,9 @@ export async function completeJob(
     }
   }
 
-  const started = new Date(session.started_at);
+  // DB DEFAULT now() on started_at; never null at read time. See note
+  // in stopSession() above.
+  const started = new Date(session.started_at ?? now);
   const ended = new Date(now);
   const durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
 
@@ -980,7 +998,9 @@ export async function getActiveSession(
     job_operation_id: session.job_operation_id,
     operation_name: opJoin?.operation_name ?? null,
     operation_type_id: session.work_center_id,
-    started_at: session.started_at,
+    // DB DEFAULT now() — non-null in practice; fall back to '' for the
+    // theoretical case where a row was inserted with explicit NULL.
+    started_at: session.started_at ?? '',
     notes: session.notes,
   };
 }
@@ -1011,7 +1031,10 @@ export async function getOperatorSessions(
     job_id: string;
     job_operation_id: string | null;
     work_center_id: string;
-    started_at: string;
+    // Schema has DEFAULT now() but no NOT NULL constraint; mirror that
+    // here so the typed select's row shape lines up. Consumers below
+    // fall back to '' for the theoretical NULL case.
+    started_at: string | null;
     ended_at: string | null;
     notes: string | null;
     jobs: { job_number: string } | { job_number: string }[] | null;
@@ -1020,7 +1043,7 @@ export async function getOperatorSessions(
 
   return (data || []).map((s: SessionRow) => {
     let durationSeconds: number | undefined;
-    if (s.ended_at) {
+    if (s.ended_at && s.started_at) {
       const started = new Date(s.started_at);
       const ended = new Date(s.ended_at);
       durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
@@ -1034,7 +1057,7 @@ export async function getOperatorSessions(
       job_id: s.job_id,
       job_operation_id: s.job_operation_id,
       operation_type_id: s.work_center_id,
-      started_at: s.started_at,
+      started_at: s.started_at ?? '',
       ended_at: s.ended_at,
       notes: s.notes,
       duration_seconds: durationSeconds,

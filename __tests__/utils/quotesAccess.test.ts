@@ -62,9 +62,12 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
   return { mockQueryBuilder: builder, mockSupabase: supabase, mockStorageHelpers: storageHelpers };
 });
 
-// Mock the supabase module
+// Mock the supabase module. quotesAccess.ts adopted getTypedSupabase
+// (typed-client rollout); include it here returning the same chainable
+// mock so the existing tests keep working without rewriting fixtures.
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
+  getTypedSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));

@@ -1,5 +1,9 @@
 import * as Sentry from '@sentry/nextjs';
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client — every .from('quotes').select(...) chain in this
+// file is now validated against types/database.ts at compile time. Aliased
+// to getSupabase so the existing call sites don't need touching. See
+// CLAUDE.md "Typed Supabase client (incremental adoption)".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   Quote,
   QuoteWithRelations,
@@ -17,6 +21,16 @@ import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { getTiersForPart } from '@/utils/partPricingTiersAccess';
 import { insertLineItemForPart, getLineItemsForQuote } from '@/utils/quoteLineItemsAccess';
+
+/**
+ * Cast a DB row to Quote. The DB stores `status` as text with a CHECK
+ * constraint pinning it to QuoteStatus values (see schema.prod.sql line
+ * ~221); the generated Database type only sees `string`. Centralized
+ * here so the assertion is documented once instead of scattered.
+ */
+function asQuote(row: Record<string, unknown> & { status: string }): Quote {
+  return row as unknown as Quote;
+}
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -244,7 +258,7 @@ export async function getQuote(quoteId: string, companyId: string): Promise<Quot
     console.error('Error fetching quote:', error);
     throw error;
   }
-  return data;
+  return data ? asQuote(data) : null;
 }
 
 /**
@@ -340,6 +354,12 @@ export async function createQuote(
     .from('quotes')
     .insert({
       company_id: companyId,
+      // quote_number is NOT NULL but the set_quote_number trigger
+      // (supabase/schema.prod.sql ~line 4202) fills it from
+      // generate_quote_number() when the value is '' or NULL. Sending ''
+      // explicitly satisfies the typed Insert signature without lying
+      // about runtime behavior.
+      quote_number: '',
       customer_id: formData.customer_id,
       contact_id: nullIfEmpty(formData.contact_id),
       billing_address_id: nullIfEmpty(formData.billing_address_id),
@@ -387,7 +407,7 @@ export async function createQuote(
     }
   }
 
-  return { quote };
+  return { quote: asQuote(quote) };
 }
 
 /**
@@ -443,7 +463,7 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw error;
   }
 
-  return data;
+  return asQuote(data);
 }
 
 /**
@@ -641,7 +661,7 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
     console.error('Error expiring quote:', error);
     throw error;
   }
-  return data;
+  return asQuote(data);
 }
 
 // ============== Convert to Job ==============
@@ -862,7 +882,7 @@ export async function convertQuoteToJob(
   }
 
   return {
-    quote: updatedQuote,
+    quote: asQuote(updatedQuote),
     job: {
       id: job.id,
       job_number: job.job_number,

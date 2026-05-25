@@ -74,7 +74,6 @@ const baseQuote: QuoteWithRelations = {
   status: 'active',
   status_changed_at: null,
   converted_at: null,
-  legacy_quote_number: null,
   created_by: null,
   created_at: '2026-04-16T10:00:00Z',
   updated_at: '2026-04-16T10:00:00Z',

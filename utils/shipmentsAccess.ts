@@ -12,7 +12,9 @@
  * Reads use plain PostgREST joins. Voids are scaffolded but throw — Phase 3.
  */
 
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 10 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   CreateShipmentPayload,
   JobPartShipmentSummary,
@@ -46,25 +48,35 @@ export async function createShipment(
 
   const supabase = getSupabase();
 
+  // The SQL function (create_shipment_with_line_items, schema.prod.sql
+  // line ~3042) accepts NULL for every optional shipping field — its body
+  // does `COALESCE(p_ship_date, current_date)` and similar fallbacks.
+  // The typed RPC signature reflects only the parameter type (e.g. text)
+  // without DEFAULT NULL, so the generated client type rejects null
+  // arguments. The right long-term fix is a migration that declares
+  // DEFAULT NULL on the optional params; until then we cast at the call
+  // site with this note.
+  const rpcArgs = {
+    p_company_id: companyId,
+    p_customer_id: payload.customer_id,
+    p_shipping_address_id: payload.shipping_address_id,
+    p_one_time_address: payload.one_time_address ?? null,
+    p_ship_date: payload.ship_date,
+    p_carrier: payload.carrier ?? null,
+    p_tracking_number: payload.tracking_number ?? null,
+    p_shipping_arrangement: payload.shipping_arrangement ?? null,
+    p_shipping_arrangement_other: payload.shipping_arrangement_other ?? null,
+    p_weight_lbs: payload.weight_lbs ?? null,
+    p_package_count: payload.package_count ?? null,
+    p_package_type: payload.package_type ?? null,
+    p_notes: payload.notes ?? null,
+    p_coc_text: payload.coc_text ?? null,
+    p_line_items: payload.line_items,
+  };
   const { data: shipmentId, error } = await supabase.rpc(
     'create_shipment_with_line_items',
-    {
-      p_company_id: companyId,
-      p_customer_id: payload.customer_id,
-      p_shipping_address_id: payload.shipping_address_id,
-      p_one_time_address: payload.one_time_address ?? null,
-      p_ship_date: payload.ship_date,
-      p_carrier: payload.carrier ?? null,
-      p_tracking_number: payload.tracking_number ?? null,
-      p_shipping_arrangement: payload.shipping_arrangement ?? null,
-      p_shipping_arrangement_other: payload.shipping_arrangement_other ?? null,
-      p_weight_lbs: payload.weight_lbs ?? null,
-      p_package_count: payload.package_count ?? null,
-      p_package_type: payload.package_type ?? null,
-      p_notes: payload.notes ?? null,
-      p_coc_text: payload.coc_text ?? null,
-      p_line_items: payload.line_items,
-    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcArgs as any,
   );
 
   if (error || !shipmentId) {

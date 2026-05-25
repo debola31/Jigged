@@ -1,4 +1,5 @@
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database, Json } from '@/types/database';
 import type {
   MarkupRate,
   MarkupRateFormData,
@@ -6,6 +7,16 @@ import type {
 } from '@/types/markupRates';
 import type { PartPricingTierInput } from '@/types/partPricing';
 import { replaceTiersForPart } from '@/utils/partPricingTiersAccess';
+
+// markup_rates.breakpoints is jsonb in the DB → generated as Json. The
+// app models it as MarkupRateBreakpoint[]. On reads we bridge via this
+// helper; on writes we cast inline (see createMarkupRate / updateMarkupRate).
+// A future migration that adds a CHECK constraint on the shape would let
+// us tighten this without scattered casts.
+type MarkupRateRow = Database['public']['Tables']['markup_rates']['Row'];
+function asMarkupRate(row: MarkupRateRow): MarkupRate {
+  return row as unknown as MarkupRate;
+}
 
 /**
  * Fetch all markup rates for a company, sorted by name ascending. The
@@ -26,7 +37,7 @@ export async function getAllMarkupRates(companyId: string): Promise<MarkupRate[]
     throw error;
   }
 
-  return (data || []) as MarkupRate[];
+  return (data || []).map(asMarkupRate);
 }
 
 export async function getMarkupRate(rateId: string): Promise<MarkupRate | null> {
@@ -43,7 +54,7 @@ export async function getMarkupRate(rateId: string): Promise<MarkupRate | null> 
     throw error;
   }
 
-  return (data as MarkupRate) ?? null;
+  return data ? asMarkupRate(data) : null;
 }
 
 export async function createMarkupRate(
@@ -61,7 +72,8 @@ export async function createMarkupRate(
   const payload = {
     company_id: companyId,
     name: formData.name.trim(),
-    breakpoints: normalizeBreakpoints(formData.breakpoints),
+    // breakpoints is jsonb in the DB → cast required (see asMarkupRate note).
+    breakpoints: normalizeBreakpoints(formData.breakpoints) as unknown as Json,
     is_default: formData.is_default,
   };
 
@@ -76,7 +88,7 @@ export async function createMarkupRate(
     throw error;
   }
 
-  return data as MarkupRate;
+  return asMarkupRate(data);
 }
 
 export async function updateMarkupRate(
@@ -102,7 +114,7 @@ export async function updateMarkupRate(
 
   const payload = {
     name: formData.name.trim(),
-    breakpoints: normalizeBreakpoints(formData.breakpoints),
+    breakpoints: normalizeBreakpoints(formData.breakpoints) as unknown as Json,
     is_default: formData.is_default,
   };
 
@@ -118,7 +130,7 @@ export async function updateMarkupRate(
     throw error;
   }
 
-  return data as MarkupRate;
+  return asMarkupRate(data);
 }
 
 /**
@@ -164,7 +176,7 @@ export async function getDefaultMarkupRate(companyId: string): Promise<MarkupRat
     console.error('Error fetching default markup rate:', error);
     throw error;
   }
-  return (data as MarkupRate) ?? null;
+  return data ? asMarkupRate(data) : null;
 }
 
 /**
@@ -333,11 +345,14 @@ export async function bulkApplyMarkupRate(
         failed.push({ partId, error: error.message });
       }
     } else {
+      // RPC returns jsonb; typed as Json so the precise shape lives in the
+      // interface above. Cast through unknown because Json is a union with
+      // primitives and Json[].
       const result = (data ?? {
         updated: 0,
         price_uncomputed: 0,
         failed: [],
-      }) as BulkApplyMarkupRateRpcResult;
+      }) as unknown as BulkApplyMarkupRateRpcResult;
       updated += result.updated;
       priceUncomputed += result.price_uncomputed;
       for (const f of result.failed) {

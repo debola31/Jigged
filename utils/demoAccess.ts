@@ -1,4 +1,4 @@
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 export interface DemoStatus {
   isDemoCompany: boolean;

@@ -16,7 +16,8 @@
  * because the UI is single-user-per-vendor at any given moment.
  */
 
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
 import type {
   VendorContact,
   VendorContactFormData,
@@ -25,7 +26,12 @@ import type {
 const VENDOR_CONTACT_COLUMNS =
   'id, vendor_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
 
-function formDataToInsert(formData: VendorContactFormData): Record<string, unknown> {
+// Narrow the form-derived insert; vendor_id is added at the call site.
+type VendorContactInsert = Database['public']['Tables']['vendor_contacts']['Insert'];
+
+function formDataToInsert(
+  formData: VendorContactFormData,
+): Omit<VendorContactInsert, 'vendor_id'> {
   const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
   return {
     name: formData.name.trim(),

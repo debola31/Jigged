@@ -1,4 +1,4 @@
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   BomLine,
   BomLineFormData,

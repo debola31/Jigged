@@ -23,7 +23,11 @@ export interface Quote {
   id: string;
   company_id: string;
   quote_number: string;
-  customer_id: string;
+  // customer_id has no NOT NULL constraint in the schema, so we mirror the
+  // DB type here. In practice the QuoteForm requires a customer before
+  // submit, but read paths still need to tolerate the null case until a
+  // future migration tightens the constraint.
+  customer_id: string | null;
   billing_address_id: string | null;
   shipping_address_id: string | null;
   contact_id: string | null;
@@ -32,7 +36,6 @@ export interface Quote {
   status: QuoteStatus;
   status_changed_at: string | null;
   converted_at: string | null;
-  legacy_quote_number: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -221,7 +224,9 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
     }
   }
   return {
-    customer_id: quote.customer_id,
+    // customer_id is nullable in the schema but the form treats '' as
+    // "unset" — match the same convention as contact / address IDs below.
+    customer_id: quote.customer_id ?? '',
     contact_id: quote.contact_id ?? '',
     billing_address_id: quote.billing_address_id ?? '',
     shipping_address_id: quote.shipping_address_id ?? '',

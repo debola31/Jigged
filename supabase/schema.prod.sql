@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-21T00:18:02Z
+-- Generated: 2026-05-21T03:16:45Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -238,7 +238,6 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "lead_time_days" integer,
     "production_status" text NOT NULL,
     "fulfillment_status" text NOT NULL,
-    "related_to_job_id" uuid,
     "customer_po_number" text,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
@@ -2120,9 +2119,6 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."jobs"
-    ADD CONSTRAINT "jobs_related_to_job_id_fkey" FOREIGN KEY (related_to_job_id) REFERENCES jobs(id) ON DELETE SET NULL;
-
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2339,7 +2335,6 @@ CREATE INDEX IF NOT EXISTS idx_jobs_fulfillment_status ON public.jobs USING btre
 CREATE INDEX IF NOT EXISTS idx_jobs_job_number_trgm ON public.jobs USING gin (job_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
-CREATE INDEX IF NOT EXISTS idx_jobs_related_to_job_id ON public.jobs USING btree (related_to_job_id) WHERE (related_to_job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
@@ -3141,37 +3136,6 @@ BEGIN
     END LOOP;
 
     RETURN v_shipment_id;
-END $function$
-
-;
-
-CREATE OR REPLACE FUNCTION public.enforce_jobs_related_to_same_company()
- RETURNS trigger
- LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-DECLARE
-    v_related_company uuid;
-BEGIN
-    IF NEW.related_to_job_id IS NULL THEN
-        RETURN NEW;
-    END IF;
-    IF NEW.related_to_job_id = NEW.id THEN
-        RAISE EXCEPTION 'jobs.related_to_job_id cannot reference itself (job %)', NEW.id
-            USING ERRCODE = 'check_violation';
-    END IF;
-    SELECT company_id INTO v_related_company
-      FROM public.jobs WHERE id = NEW.related_to_job_id;
-    IF v_related_company IS NULL THEN
-        RAISE EXCEPTION 'related_to_job_id % does not exist', NEW.related_to_job_id
-            USING ERRCODE = 'foreign_key_violation';
-    END IF;
-    IF v_related_company <> NEW.company_id THEN
-        RAISE EXCEPTION 'related_to_job_id % belongs to a different company',
-            NEW.related_to_job_id
-            USING ERRCODE = 'foreign_key_violation';
-    END IF;
-    RETURN NEW;
 END $function$
 
 ;
@@ -4582,9 +4546,6 @@ CREATE TRIGGER trigger_sync_job_production_status_from_parts_ins AFTER INSERT ON
 DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_upd" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_production_status_from_parts_upd AFTER UPDATE OF production_status ON public.job_parts FOR EACH ROW WHEN ((old.production_status IS DISTINCT FROM new.production_status)) EXECUTE FUNCTION sync_job_production_status_from_parts();
 
-DROP TRIGGER IF EXISTS "enforce_jobs_related_to_same_company_trg" ON "public"."jobs";
-CREATE TRIGGER enforce_jobs_related_to_same_company_trg BEFORE INSERT OR UPDATE OF related_to_job_id ON public.jobs FOR EACH ROW EXECUTE FUNCTION enforce_jobs_related_to_same_company();
-
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -4951,9 +4912,6 @@ COMMENT ON COLUMN "public"."job_operations"."work_center_id"
 
 COMMENT ON COLUMN "public"."job_operations"."routing_operation_id"
     IS 'FK to the routing_operation this row was snapshotted from at job creation (renamed from routing_node_id).';
-
-COMMENT ON COLUMN "public"."jobs"."related_to_job_id"
-    IS 'Forward link to the job this row was reordered from. Same-company enforced by enforce_jobs_related_to_same_company_trg. Reverse lookups use the partial index above.';
 
 COMMENT ON COLUMN "public"."jobs"."customer_po_number"
     IS 'Customer-issued PO number for this job. Captured at convertQuoteToJob time (or by reorder when applicable). Indexed via the partial unique-per-company index and via pg_trgm for the jobs-list search RPC.';

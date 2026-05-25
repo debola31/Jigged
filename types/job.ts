@@ -69,8 +69,6 @@ export interface Job {
   completed_at: string | null;
   due_date: string | null;
   lead_time_days: number | null;
-  /** Forward link to the original job this row was reordered from (PR 6). */
-  related_to_job_id: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

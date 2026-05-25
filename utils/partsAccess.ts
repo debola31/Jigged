@@ -1,4 +1,13 @@
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 30 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+// Insert payload for the parts table. company_id is supplied at the call
+// site (so the helper that builds the rest of the columns doesn't need
+// to know about scope), but every other NOT NULL column has to be
+// present for the typed insert to compile.
+type PartsInsert = Database['public']['Tables']['parts']['Insert'];
 import type {
   Part,
   PartFormData,
@@ -616,7 +625,7 @@ export async function checkPartNameExists(
 // CREATE / UPDATE / DELETE
 // ============================================================
 
-function formDataToInsert(formData: PartFormData): Record<string, unknown> {
+function formDataToInsert(formData: PartFormData): Omit<PartsInsert, 'company_id'> {
   // `quantity` is intentionally NOT written through this path: only
   // inventory_transactions ever changes the on-hand count
   // (PartTransactionModal / recordInventoryTransaction) so there is always

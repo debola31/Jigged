@@ -9,8 +9,11 @@ export interface Customer {
   default_shipping_arrangement: ShippingArrangement | null;
   default_carrier: string | null;
   default_coc_text: string | null;
-  created_at: string;
-  updated_at: string;
+  // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
+  // mirror the DB shape. Consumers (e.g. the customer detail page) already
+  // handle null via formatDate(string | null).
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 /**

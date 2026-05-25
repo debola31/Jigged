@@ -1,4 +1,8 @@
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client — every .from('customers').select(...) chain in
+// this file is now validated against types/database.ts at compile time.
+// Aliased to getSupabase so the existing call sites stay untouched. See
+// CLAUDE.md "Typed Supabase client (incremental adoption)".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   Customer,
   CustomerAddress,
@@ -13,6 +17,7 @@ import type {
   CustomerContactFormData,
   CustomerContactRole,
 } from '@/types/customerContact';
+import type { ShippingArrangement } from '@/types/shipment';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
 
 /**
@@ -27,6 +32,20 @@ import { createCustomerContact } from '@/utils/customerContactsAccess';
  * as the primary after the parent row is created — mirrors VendorForm's
  * "Initial Contact (optional)" accordion behavior.
  */
+
+/**
+ * Cast a DB row to Customer. The DB stores `default_shipping_arrangement`
+ * as text with a CHECK constraint pinning it to ShippingArrangement values
+ * (see schema.prod.sql ~line 109); the generated Database type only sees
+ * `string`. Centralized here so the assertion is documented once instead
+ * of scattered across read sites. Same pattern as asQuote() in
+ * utils/quotesAccess.ts.
+ */
+function asCustomer<T extends { default_shipping_arrangement: string | null }>(
+  row: T,
+): T & { default_shipping_arrangement: ShippingArrangement | null } {
+  return row as T & { default_shipping_arrangement: ShippingArrangement | null };
+}
 
 /** Joined customer + primary contact shape returned by the list queries. */
 type CustomerWithPrimaryContactRow = Customer & {
@@ -180,10 +199,10 @@ export async function getCustomer(
 
   if (!data) return null;
 
-  return {
+  return asCustomer({
     ...data,
     addresses: (data.addresses ?? []) as CustomerAddress[],
-  };
+  });
 }
 
 /**
@@ -314,7 +333,7 @@ export async function createCustomer(
     }
   }
 
-  return customer;
+  return asCustomer(customer);
 }
 
 export async function updateCustomer(
@@ -339,7 +358,7 @@ export async function updateCustomer(
     throw error;
   }
 
-  return data;
+  return asCustomer(data);
 }
 
 /**

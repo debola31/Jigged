@@ -871,41 +871,5 @@ export async function convertQuoteToJob(
   };
 }
 
-// ============== Helper Functions ==============
-
-/**
- * Get a single part with category info for quote form.
- */
-export async function getPartWithCostInfo(partId: string): Promise<{
-  id: string;
-  part_name: string;
-  description: string | null;
-  category_id: string | null;
-  part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
-} | null> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('parts')
-    .select(
-      'id, part_name, description, category_id, part_categories(id, name, default_markup_percent)',
-    )
-    .eq('id', partId)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching part:', error);
-    return null;
-  }
-
-  return data as {
-    id: string;
-    part_name: string;
-    description: string | null;
-    category_id: string | null;
-    part_categories: { id: string; name: string; default_markup_percent: number | null } | null;
-  } | null;
-}
-
 // Re-export the expired-status helper so consumers don't need a separate import.
 export { isQuoteExpired };

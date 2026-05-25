@@ -7,7 +7,16 @@
  * `utils/bomAccess.ts`.
  */
 
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 12 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+// Insert payload for routing_operations, minus the columns the callers
+// add at the boundary (routing_id, sequence, metadata). Narrowing the
+// form-derived shape lets the typed .insert() validate column names
+// instead of falling back to Record<string, unknown>.
+type RoutingOperationInsert = Database['public']['Tables']['routing_operations']['Insert'];
 import type {
   Routing,
   RoutingOperation,
@@ -159,8 +168,9 @@ export async function getRoutings(
     name: string;
     description: string | null;
     created_by: string | null;
-    created_at: string;
-    updated_at: string;
+    // Mirror DB nullability (DEFAULT-without-NOT-NULL).
+    created_at: string | null;
+    updated_at: string | null;
     part: { id: string; part_name: string; description: string | null } | null;
     operations?: Array<{ id: string; cycle_minutes_per_unit: number | null }>;
   }
@@ -302,7 +312,9 @@ function parseNumOrNull(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function formDataToOpInsert(formData: RoutingOperationFormData): Record<string, unknown> {
+function formDataToOpInsert(
+  formData: RoutingOperationFormData,
+): Omit<RoutingOperationInsert, 'routing_id' | 'sequence' | 'metadata'> {
   return {
     work_center_id: formData.work_center_id,
     setup_minutes: parseNumOrNull(formData.setup_minutes) ?? 0,

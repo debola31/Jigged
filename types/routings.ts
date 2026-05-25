@@ -24,8 +24,11 @@ export interface Routing {
   name: string;
   description: string | null;
   created_by: string | null;
-  created_at: string;
-  updated_at: string;
+  // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
+  // mirror the DB shape so typed-mode reads stay clean. Same convention as
+  // Customer.created_at (PR #286), Company.is_demo (PR #290).
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 /**

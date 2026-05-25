@@ -1,4 +1,12 @@
-import { getSupabase } from '@/lib/supabase';
+// Typed Supabase client (typed-client rollout). Aliased so the 11 call
+// sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
+
+// Insert payload for the vendors table, minus company_id which is added
+// at the boundary. Narrowing this avoids the Record<string, unknown>
+// spread that defeats typed-mode column-name validation.
+type VendorInsert = Database['public']['Tables']['vendors']['Insert'];
 import type {
   Vendor,
   VendorFormData,
@@ -197,7 +205,7 @@ export async function checkVendorNameExists(
   return (data?.length || 0) > 0;
 }
 
-function formDataToInsert(formData: VendorFormData): Record<string, unknown> {
+function formDataToInsert(formData: VendorFormData): Omit<VendorInsert, 'company_id'> {
   const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
   return {
     name: formData.name.trim(),

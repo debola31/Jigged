@@ -36,7 +36,7 @@ import {
   pickShippingAddress,
   pickPrimaryContact,
 } from '@/utils/customerAccess';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import type { PartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
@@ -197,7 +197,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       return next;
     });
     try {
-      const tiers = await getTiersForPart(partId);
+      const tiers = await getTiersWithComputedPrices(partId);
       setPartBlocks((prev) => {
         const next = [...prev];
         if (next[idx] && next[idx].part?.id === partId) {

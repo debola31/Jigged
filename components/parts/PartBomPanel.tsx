@@ -115,6 +115,22 @@ interface BomRowCost {
   missingLeaf: PartCostMissingLeaf | null;
 }
 
+/**
+ * One break-point in the child part's cost ladder. For bought children
+ * these come from the preferred vendor's procurement tiers; for made
+ * children they come from the child's own pricing tier qty breaks. The
+ * `costPerUnit` is the value returned by `compute_part_cost_at_qty(child,
+ * qty)` — i.e. the exact number that feeds this BOM line into the parent's
+ * rollup at each break. Showing these inline makes the rollup math
+ * transparent and surfaces tier-pricing mistakes (e.g. quoted tiers that
+ * don't actually drop the cost at higher qty).
+ */
+interface ChildCostTier {
+  qty: number;
+  unit: string;
+  costPerUnit: number | null;
+}
+
 export default function PartBomPanel({
   partId,
   companyId,
@@ -132,6 +148,11 @@ export default function PartBomPanel({
   // null, an explain call surfaces the deepest unpriced leaf for the
   // tooltip — so the user sees which part to fix, not just a generic dash.
   const [costs, setCosts] = useState<Map<string, BomRowCost>>(new Map());
+  // Per-row tier ladder (one entry per qty break point on the child). Loaded
+  // lazily after rows arrive so the main contribution number renders first.
+  const [tierLadders, setTierLadders] = useState<Map<string, ChildCostTier[]>>(
+    new Map(),
+  );
 
   // Inline editor state machine — same shape as RoutingOperationsList.
   const [editorState, setEditorState] = useState<
@@ -299,6 +320,95 @@ export default function PartBomPanel({
       cancelled = true;
     };
   }, [rows, partId]);
+
+  // Load each BOM row's tier ladder — the qty break points defined on the
+  // child + the cost at each (via compute_part_cost_at_qty). These are the
+  // exact numbers that feed the parent's rollup at each qty, so rendering
+  // them inline lets the user trace the math. Bought children pull qty
+  // break points from procurement tiers under the preferred vendor; made
+  // children pull them from their own pricing tiers.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (rows.length === 0) {
+      setTierLadders(new Map());
+      return;
+    }
+
+    (async () => {
+      const supabase = getSupabase();
+      const next = new Map<string, ChildCostTier[]>();
+
+      await Promise.all(
+        rows.map(async (row) => {
+          const child = row.child_part;
+          const unit = child.primary_unit ?? '';
+
+          let breakpoints: number[] = [];
+          try {
+            if (child.source === 'bought') {
+              const { data: partRow } = await supabase
+                .from('parts')
+                .select('preferred_vendor_id')
+                .eq('id', child.id)
+                .maybeSingle();
+              const preferred = partRow?.preferred_vendor_id ?? null;
+              // Only the preferred vendor's tiers contribute to the rollup
+              // (compute_part_cost_at_qty restricts to preferred_vendor_id),
+              // so showing other vendors here would suggest costs that don't
+              // actually apply.
+              if (preferred) {
+                const { data } = await supabase
+                  .from('part_procurement_tiers')
+                  .select('min_quantity')
+                  .eq('part_id', child.id)
+                  .eq('vendor_id', preferred);
+                const rows = (data ?? []) as Array<{ min_quantity: number | string }>;
+                breakpoints = [
+                  ...new Set(rows.map((t) => Number(t.min_quantity))),
+                ].sort((a, b) => a - b);
+              }
+            } else {
+              const { data } = await supabase
+                .from('part_pricing_tiers')
+                .select('quantity')
+                .eq('part_id', child.id)
+                .order('quantity', { ascending: true });
+              const rows = (data ?? []) as Array<{ quantity: number | string }>;
+              breakpoints = rows.map((t) => Number(t.quantity));
+            }
+          } catch (err) {
+            console.warn('Failed to load tier breakpoints for', child.id, err);
+            breakpoints = [];
+          }
+
+          if (breakpoints.length === 0) {
+            next.set(row.id, []);
+            return;
+          }
+
+          const ladder = await Promise.all(
+            breakpoints.map(async (qty) => {
+              let costPerUnit: number | null = null;
+              try {
+                costPerUnit = await getComputedPartCost(child.id, qty);
+              } catch {
+                costPerUnit = null;
+              }
+              return { qty, unit, costPerUnit };
+            }),
+          );
+          next.set(row.id, ladder);
+        }),
+      );
+
+      if (!cancelled) setTierLadders(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rows]);
 
   const closeEditor = () => {
     setEditorState({ mode: 'closed' });
@@ -470,6 +580,7 @@ export default function PartBomPanel({
             const child = row.child_part;
             const rowCost = costs.get(row.id);
             const contribution = rowCost ? rowCost.contribution : null;
+            const ladder = tierLadders.get(row.id) ?? [];
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -524,6 +635,22 @@ export default function PartBomPanel({
                     {child.part_name}
                     <ChevronRightIcon sx={{ fontSize: 16 }} />
                   </Link>
+                  {ladder.length > 0 && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', mt: 0.25 }}
+                    >
+                      {'Tiers: '}
+                      {ladder
+                        .map((t) =>
+                          `${formatQuantity(t.qty)} ${t.unit} @ ${formatCurrency(
+                            t.costPerUnit,
+                          )}/${t.unit}`.trim(),
+                        )
+                        .join(' · ')}
+                    </Typography>
+                  )}
                 </Box>
                 <Box sx={{ minWidth: 110, textAlign: 'right' }}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }}>

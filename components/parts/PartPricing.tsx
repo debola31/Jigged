@@ -193,7 +193,10 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
+        // unitPrice is recomputed live by recomputeRow below; the stored
+        // part_pricing_tiers.unit_price column is no longer the source of
+        // truth (it's a dead cache pending a drop migration).
+        unitPrice: '',
         baseCostPerUnit: 0,
       }));
       setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
@@ -262,7 +265,10 @@ export default function PartPricing({
                         sequence: t.sequence,
                         quantity: String(t.quantity),
                         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-                        unitPrice: t.unit_price !== null ? String(t.unit_price) : '',
+                        // unitPrice is recomputed live by recomputeRow below; the stored
+        // part_pricing_tiers.unit_price column is no longer the source of
+        // truth (it's a dead cache pending a drop migration).
+        unitPrice: '',
                         baseCostPerUnit: 0,
                       },
                       breakdown,

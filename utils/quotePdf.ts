@@ -11,7 +11,7 @@ import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 import type { PartPricingTier } from '@/types/partPricing';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 
 const MARGIN = 40;
 
@@ -160,7 +160,7 @@ async function loadTiersForQuote(
   await Promise.all(
     partIds.map(async (id) => {
       try {
-        out[id] = await getTiersForPart(id);
+        out[id] = await getTiersWithComputedPrices(id);
       } catch (err) {
         console.warn('Quote PDF: failed to load tiers for part', id, err);
         out[id] = [];

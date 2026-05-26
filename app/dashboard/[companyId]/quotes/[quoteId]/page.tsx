@@ -33,7 +33,7 @@ import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
 import SendQuoteEmailDialog from '@/components/quotes/SendQuoteEmailDialog';
 import EmailIcon from '@mui/icons-material/Email';
 import Snackbar from '@mui/material/Snackbar';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -81,7 +81,7 @@ export default function QuoteDetailPage() {
     const missing = partIds.filter((id) => !(id in tiersByPart));
     if (missing.length === 0) return;
     let cancelled = false;
-    Promise.all(missing.map((id) => getTiersForPart(id).then((tiers) => [id, tiers] as const)))
+    Promise.all(missing.map((id) => getTiersWithComputedPrices(id).then((tiers) => [id, tiers] as const)))
       .then((entries) => {
         if (cancelled) return;
         setTiersByPart((prev) => {

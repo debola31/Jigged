@@ -79,7 +79,9 @@ interface EditRow {
   quantity: string;
   markupPercent: string;
   unitPrice: string;
-  baseCostPerUnit: number;
+  /** null when materials are incomplete or the breakdown is missing — render
+   * "—" rather than $0. See `RoutingCostBreakdown.materials_complete`. */
+  baseCostPerUnit: number | null;
 }
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
@@ -99,7 +101,7 @@ function parseNumber(s: string): number | null {
 function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): EditRow {
   const qty = parseNumber(row.quantity);
   if (!breakdown || qty === null || qty <= 0) {
-    return { ...row, baseCostPerUnit: 0 };
+    return { ...row, baseCostPerUnit: null };
   }
   const markup = parseNumber(row.markupPercent);
   const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
@@ -314,7 +316,10 @@ export default function PartPricing({
       const unitPrice = parseNumber(value);
       const base = row.baseCostPerUnit;
       let markupStr = row.markupPercent;
-      if (unitPrice !== null && base > 0) {
+      // Back-solve markup only when we actually know the base cost. With
+      // missing materials the base is null and there's nothing to invert
+      // against — leave markup alone.
+      if (unitPrice !== null && base !== null && base > 0) {
         const back = calculateMarkupFromUnitPrice(base, unitPrice);
         if (back !== null) markupStr = String(back);
       }
@@ -393,7 +398,13 @@ export default function PartPricing({
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
-  const materialPerUnit = breakdown ? Math.round(breakdown.total_material_cost * 100) / 100 : 0;
+  // null when materials are incomplete: render "Materials / unit: —" so the
+  // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
+  const materialPerUnit: number | null = breakdown
+    ? breakdown.total_material_cost === null
+      ? null
+      : Math.round(breakdown.total_material_cost * 100) / 100
+    : 0;
 
   // Three states drive what renders in the markup section:
   //   1. linked to a rate                → read-only tier table + switch/edit bar
@@ -553,7 +564,7 @@ export default function PartPricing({
               value={formatCurrency(setupBatch)}
               hint="amortized across tier qty"
             />
-            {materialPerUnit > 0 && (
+            {(materialPerUnit === null || materialPerUnit > 0) && (
               <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
             )}
           </Box>
@@ -669,10 +680,16 @@ export default function PartPricing({
                   <TableBody>
                     {rows.map((row, idx) => {
                       const markupNum = parseNumber(row.markupPercent);
+                      const base = row.baseCostPerUnit;
+                      // No placeholder when we can't compute — showing "0.00"
+                      // would imply $0 is a sensible suggestion. Empty
+                      // placeholder makes the missing data visible.
                       const suggestedUnitPrice =
-                        row.baseCostPerUnit > 0 && markupNum !== null
-                          ? (Math.round(row.baseCostPerUnit * (1 + markupNum / 100) * 100) / 100).toFixed(2)
-                          : '0.00';
+                        base !== null && base > 0 && markupNum !== null
+                          ? (Math.round(base * (1 + markupNum / 100) * 100) / 100).toFixed(2)
+                          : base === null
+                            ? ''
+                            : '0.00';
                       return (
                         <TableRow key={row.id ?? `tier-${idx}`}>
                           <TableCell sx={{ minWidth: 90 }}>

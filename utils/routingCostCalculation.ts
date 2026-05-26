@@ -60,8 +60,15 @@ export interface RoutingCostBreakdown {
   material_items: MaterialItem[];
   total_labor_cost: number;
   total_setup_cost: number;
-  total_material_cost: number;
-  total_cost: number;
+  /** null when any BOM line is missing a priced cost — mirrors the SQL
+   * `compute_part_cost_at_qty` behavior of propagating NULL up the tree. */
+  total_material_cost: number | null;
+  /** null when total_material_cost is null. */
+  total_cost: number | null;
+  /** false when any BOM line could not be priced (unit conversion missing,
+   * cost lookup threw, or child returned null). Callers that display a
+   * Base/unit or Unit price must blank those values when this is false. */
+  materials_complete: boolean;
   warnings: CostWarning[];
 }
 
@@ -100,6 +107,11 @@ export async function calculateRoutingCost(
   const warnings: CostWarning[] = [];
   const laborItems: LaborItem[] = [];
   const materialItems: MaterialItem[] = [];
+  // Flips to false on the first BOM line we can't price (missing unit
+  // conversion, cost-lookup throw, or null child cost). When false, the
+  // total_material_cost + total_cost become null so the UI can't quietly
+  // render a tier built on $0-treated-as-missing material.
+  let materialsComplete = true;
 
   if (routing && routing.operations.length === 0) {
     warnings.push({
@@ -232,6 +244,7 @@ export async function calculateRoutingCost(
             child_part_name: itemName,
             child_part_source: child.source,
           });
+          materialsComplete = false;
           continue;
         }
         qtyInPrimary = bomQty * factor;
@@ -255,6 +268,7 @@ export async function calculateRoutingCost(
           child_part_name: itemName,
           child_part_source: child.source,
         });
+        materialsComplete = false;
         continue;
       }
 
@@ -290,6 +304,7 @@ export async function calculateRoutingCost(
           child_part_name: itemName,
           child_part_source: child.source,
         });
+        materialsComplete = false;
         continue;
       }
 
@@ -308,8 +323,13 @@ export async function calculateRoutingCost(
     Math.round(laborItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
   const totalSetupCost =
     Math.round(laborItems.reduce((sum, item) => sum + item.setup_cost, 0) * 100) / 100;
-  const totalMaterialCost =
-    Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100;
+  const totalMaterialCost = materialsComplete
+    ? Math.round(materialItems.reduce((sum, item) => sum + item.cost, 0) * 100) / 100
+    : null;
+  const totalCost =
+    totalMaterialCost === null
+      ? null
+      : Math.round((totalLaborCost + totalMaterialCost) * 100) / 100;
 
   return {
     labor_items: laborItems,
@@ -317,7 +337,8 @@ export async function calculateRoutingCost(
     total_labor_cost: totalLaborCost,
     total_setup_cost: totalSetupCost,
     total_material_cost: totalMaterialCost,
-    total_cost: Math.round((totalLaborCost + totalMaterialCost) * 100) / 100,
+    total_cost: totalCost,
+    materials_complete: materialsComplete,
     warnings,
   };
 }
@@ -328,7 +349,10 @@ function formatQty(q: number): string {
 }
 
 export interface TierPricing {
-  baseCostPerUnit: number;
+  /** null when the breakdown has incomplete materials — see
+   * `RoutingCostBreakdown.materials_complete`. UI should render "—" rather
+   * than a misleading number that silently treats unpriced materials as $0. */
+  baseCostPerUnit: number | null;
   unitPrice: number | null;
 }
 
@@ -353,6 +377,11 @@ export function calculateTierPricing(
   quantity: number,
   markupPercent: number | null,
 ): TierPricing {
+  // If any BOM line couldn't be priced, the breakdown's material total is
+  // null — there is no honest Base/unit to display.
+  if (breakdown.total_material_cost === null) {
+    return { baseCostPerUnit: null, unitPrice: null };
+  }
   const qty = Math.max(quantity, 1);
   const runPerUnit = breakdown.total_labor_cost;
   const materialPerUnit = breakdown.total_material_cost;

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-21T03:16:45Z
+-- Generated: 2026-05-27T02:21:40Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -387,7 +387,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "sequence" integer NOT NULL,
     "quantity" integer NOT NULL,
     "markup_percent" numeric(5,2),
-    "unit_price" numeric(12,4),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
@@ -2526,14 +2525,11 @@ DECLARE
     v_markup           numeric;
     v_sequence         integer;
     v_base_cost        numeric;
-    v_unit_price       numeric;
     v_has_null_price   boolean;
     v_updated          integer := 0;
     v_price_uncomputed integer := 0;
     v_failed           jsonb := '[]'::jsonb;
 BEGIN
-    -- Lookup rate. RLS on markup_rates restricts to the caller's companies, so
-    -- a mismatched p_company_id will simply not find the row.
     SELECT breakpoints INTO v_rate_breakpoints
     FROM public.markup_rates
     WHERE id = p_rate_id AND company_id = p_company_id;
@@ -2558,29 +2554,22 @@ BEGIN
             LOOP
                 v_sequence := v_sequence + 10;
 
-                -- Cost compute can RAISE (missing rate / external pricing /
-                -- unit conversion) or return NULL (bought leaf with no
-                -- procurement tier). Either way: store NULL unit_price, flag
-                -- the part, keep going. The outer SQL block's commit is what
-                -- locks tier rows in, so a nested EXCEPTION here doesn't lose
-                -- the DELETE we already issued.
+                -- Still call compute_part_cost_at_qty so the per-part
+                -- "price uncomputed" flag returned to the UI stays accurate.
+                -- We just no longer persist the resulting unit price.
                 BEGIN
                     v_base_cost := public.compute_part_cost_at_qty(v_part_id, v_qty);
                     IF v_base_cost IS NULL THEN
-                        v_unit_price := NULL;
                         v_has_null_price := true;
-                    ELSE
-                        v_unit_price := v_base_cost * (1 + v_markup / 100);
                     END IF;
                 EXCEPTION WHEN OTHERS THEN
-                    v_unit_price := NULL;
                     v_has_null_price := true;
                 END;
 
                 INSERT INTO public.part_pricing_tiers
-                    (part_id, company_id, sequence, quantity, markup_percent, unit_price)
+                    (part_id, company_id, sequence, quantity, markup_percent)
                 VALUES
-                    (v_part_id, p_company_id, v_sequence, v_qty, v_markup, v_unit_price);
+                    (v_part_id, p_company_id, v_sequence, v_qty, v_markup);
             END LOOP;
 
             UPDATE public.parts

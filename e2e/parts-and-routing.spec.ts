@@ -36,6 +36,14 @@ test.describe('Parts and Routing workflow', () => {
     // Fill description
     await partFormDialog.getByLabel(/Description/i).fill(partDescription);
 
+    // Pick a primary unit. The parts_requires_unit DB constraint (added in
+    // 20260602000000_fix_cost_error_part_name_and_unit_canonicalization)
+    // makes primary_unit NOT NULL for every part, and PartForm gates submit
+    // on the same rule client-side — without this, validation blocks Create
+    // and the modal never closes.
+    await partFormDialog.getByLabel(/Unit of measurement/i).click();
+    await page.getByRole('option', { name: /^each$/i }).first().click();
+
     // Submit — primary action is "Create" (was "Save" in the route-based form).
     await partFormDialog.getByRole('button', { name: /^Create$/i }).click();
 

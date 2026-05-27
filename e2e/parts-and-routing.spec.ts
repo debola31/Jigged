@@ -40,8 +40,12 @@ test.describe('Parts and Routing workflow', () => {
     // 20260602000000_fix_cost_error_part_name_and_unit_canonicalization)
     // makes primary_unit NOT NULL for every part, and PartForm gates submit
     // on the same rule client-side — without this, validation blocks Create
-    // and the modal never closes.
-    await partFormDialog.getByLabel(/Unit of measurement/i).click();
+    // and the modal never closes. UnitOfMeasurementSelect renders an MUI
+    // Autocomplete, so the input has role="combobox" — getByLabel doesn't
+    // match it reliably.
+    const unitCombobox = partFormDialog.getByRole('combobox', { name: /Unit of measurement/i });
+    await expect(unitCombobox).toBeVisible();
+    await unitCombobox.click();
     await page.getByRole('option', { name: /^each$/i }).first().click();
 
     // Submit — primary action is "Create" (was "Save" in the route-based form).

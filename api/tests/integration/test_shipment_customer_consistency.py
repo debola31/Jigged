@@ -38,8 +38,8 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(scope="module")
 def admin() -> Client:
-    url = os.getenv("TEST_SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SECRET_KEY")
+    url = os.getenv("TEST_SUPABASE_URL")
+    key = os.getenv("TEST_SUPABASE_SECRET_KEY")
     if not url or not key:
         pytest.skip("Supabase admin credentials not configured")
     return create_client(url, key)

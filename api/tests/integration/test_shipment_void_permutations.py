@@ -37,8 +37,8 @@ def admin() -> Client:
     Admin Supabase client used by this harness. The harness writes
     directly to the schema (bypassing RLS), so service-role is required.
     """
-    url = os.getenv("TEST_SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SECRET_KEY")
+    url = os.getenv("TEST_SUPABASE_URL")
+    key = os.getenv("TEST_SUPABASE_SECRET_KEY")
     if not url or not key:
         pytest.skip("Supabase admin credentials not configured")
     return create_client(url, key)

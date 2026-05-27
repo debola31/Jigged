@@ -245,7 +245,7 @@ create_issue \
 Credibility is critical for manufacturing shop owners evaluating new software. We need a social proof section even if content is placeholder initially.
 
 ## Options (implement what's available)
-- [ ] Testimonial quote from Shane / Contour Tool & Machine (get permission first)
+- [ ] Testimonial quote from a pilot customer (get permission first)
 - [ ] \"Designed with input from real manufacturing shops\" messaging
 - [ ] Key stats: \"10+ hours saved per week\" or similar from PRD goals
 - [ ] Placeholder for future client logos

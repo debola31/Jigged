@@ -147,9 +147,9 @@ export default function ShipmentHistoryCard({
                   <TableCell>{s.carrier ?? '—'}</TableCell>
                   <TableCell>
                     {s.tracking_number ? (
-                      // Full tracking, untruncated (FR — Johnny reads it
-                      // aloud on phone calls). Overflow handled by cell
-                      // wrapping.
+                      // Full tracking, untruncated (FR — the salesperson
+                      // reads it aloud on phone calls). Overflow handled by
+                      // cell wrapping.
                       <Box component="span" sx={{ wordBreak: 'break-all' }}>
                         {s.tracking_number}
                       </Box>

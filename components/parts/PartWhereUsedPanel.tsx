@@ -35,10 +35,10 @@ const formatQuantity = (n: number): string =>
  * part as a child. Editing happens from the parent's BOM panel — here we
  * only navigate.
  *
- * Paginated client-side at 25 rows per page. Some Contour parts have 159
- * parents; rendering them all in a single scrollable list would be fine
- * functionally, but pagination keeps the panel a predictable height and
- * matches the transaction-history table's UX.
+ * Paginated client-side at 25 rows per page. Some real-shop parts have
+ * 100+ parents; rendering them all in a single scrollable list would be
+ * fine functionally, but pagination keeps the panel a predictable height
+ * and matches the transaction-history table's UX.
  */
 export default function PartWhereUsedPanel({
   partId,

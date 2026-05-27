@@ -2,9 +2,9 @@
 
 ## Overview
 
-Phase 0 establishes the core quote-to-job workflow for Jigged. This is the minimum viable product that allows Shane to manage customer quotes and track jobs through completion.
+Phase 0 establishes the core quote-to-job workflow for Jigged. This is the minimum viable product that allows the pilot shop owner to manage customer quotes and track jobs through completion.
 
-**Goal:** Shane can create a quote, accept it, convert to a job, and track it through to shipped.
+**Goal:** the pilot shop owner can create a quote, accept it, convert to a job, and track it through to shipped.
 
 **Timeline:** ~14 working days
 
@@ -134,7 +134,7 @@ JOB (shipped)
 
 ### Phase 1 Success Criteria
 
-Phase 1 (Cost-Plus) is complete when Shane can:
+Phase 1 (Cost-Plus) is complete when the pilot shop owner can:
 
 - [ ] Create a part, define its routing, see the cost breakdown update live as he edits
 - [ ] Add multiple quantity tiers to the part with their own markup %; setup amortizes into each tier's base cost
@@ -148,7 +148,7 @@ Phase 1 (Cost-Plus) is complete when Shane can:
 
 ## Success Criteria
 
-Phase 0 is complete when Shane can:
+Phase 0 is complete when the pilot shop owner can:
 
 - [x] Log in to Jigged
 
@@ -196,7 +196,7 @@ Phase 0 is complete when Shane can:
 
 - Repo: [https://github.com/debola31/Jigged](https://github.com/debola31/Jigged)
 
-**Company ID (Shane/Contour):** `08856a10-0153-4094-b065-d482c6a9b08d`
+**Company ID (pilot customer):** `<pilot-company-id>`
 
 **Database Tables:**
 
@@ -1089,7 +1089,7 @@ Phase 0 is complete when Shane can:
 
 ## Terminology
 
-  Aligned with Contour's legacy system for familiarity:
+  Aligned with the pilot customer's legacy system for familiarity:
 
   | Jigged Term | Legacy System Term | Description |
   |---|---|---|
@@ -1306,7 +1306,7 @@ Phase 0 is complete when Shane can:
 
   1. **Execute** - Import with results summary
 
-### Expected Source Columns (from Contour export)
+### Expected Source Columns (from the pilot customer export)
 
   | Source Column | Maps To | Notes |
   |---|---|---|
@@ -1527,7 +1527,7 @@ Phase 0 is complete when Shane can:
 [Parts Module](modules/parts.md)
 ## Overview
 
-  The Parts module manages the catalog of products/parts that Contour manufactures. Parts are typically customer-specific and include pricing information. Parts can be referenced when creating quotes and jobs.
+  The Parts module manages the catalog of products/parts that the pilot customer manufactures. Parts are typically customer-specific and include pricing information. Parts can be referenced when creating quotes and jobs.
 
   **Priority:** Must Have (Build Second)
 
@@ -1602,7 +1602,7 @@ Phase 0 is complete when Shane can:
 
   - Legacy data has up to 8 price tiers (fixed columns only supported 3)
 
-  - ~450 parts in Shane's data have 4+ tiers
+  - ~450 parts in the pilot shop owner's data have 4+ tiers
 
   - Flexible for future enhancements (seasonal pricing, date ranges)
 
@@ -1862,7 +1862,7 @@ Phase 0 is complete when Shane can:
 [Customers Module](modules/customers.md)
 ## Overview
 
-  The Customers module manages the master list of companies that Contour does business with. Customers are required to create quotes and jobs.
+  The Customers module manages the master list of companies that the pilot customer does business with. Customers are required to create quotes and jobs.
 
   **Priority:** Must Have (Build First)
 
@@ -1890,7 +1890,7 @@ Phase 0 is complete when Shane can:
 
   | Field | Type | Required | Description |
   |---|---|---|---|
-  | customer_code | Text | Yes | Short unique identifier (e.g., "ABC00", "CONTOUR") |
+  | customer_code | Text | Yes | Short unique identifier (e.g., "ABC00", "XYZ99") |
   | name | Text | Yes | Full company name |
   | phone | Text | No | Main phone number |
   | email | Text | No | Main email address |
@@ -3905,11 +3905,11 @@ Phase 0 is complete when Shane can:
 
   
 
-  1. [**[Phase 0A: Platform Foundation](https://www.notion.so/Phase-0A-Platform-Foundation-2e95314e84758186a863f4c8f68c3d5d)**](https://www.notion.so/Phase-0A-Platform-Foundation-2e95314e84758186a863f4c8f68c3d5d) - system_admins table for platform-level admin privileges
+  1. **Phase 0A: Platform Foundation** - system_admins table for platform-level admin privileges
 
   2. **Phase 0B: Demo Mode** - Hidden demo company with Settings toggle, banner, and reset functionality
 
-  3. [**[Phase 0C: Invitation System](https://www.notion.so/Phase-0C-Invitation-System-2e95314e847581bdb102d04827204734)**](https://www.notion.so/Phase-0C-Invitation-System-2e95314e847581bdb102d04827204734) - Team invitations, referral links, email via Resend
+  3. **Phase 0C: Invitation System** - Team invitations, referral links, email via Resend
 
   
 

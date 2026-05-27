@@ -2,7 +2,7 @@
 
 **Last Updated: 2026-04-15**
 
-This document describes the technical architecture of Jigged, a multi-tenant ERP system for small-scale precision manufacturing shops.
+This document describes the technical architecture of Jigged, a multi-tenant data platform for small-scale precision manufacturing shops.
 
 ---
 

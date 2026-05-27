@@ -95,6 +95,15 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 
 The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_anon_waitlist.sql`) are grandfathered — leave them alone. Never reuse the 8-digit pattern for new files.
 
+### Schema source-of-truth
+
+Two artifacts describe the database schema. They serve different purposes:
+
+- `supabase/migrations/<timestamp>_baseline.sql` (and any migrations on top of it) is the source of truth for what *gets applied* to a fresh database via `supabase start` or `supabase db push`. This is the executable history. New schema changes land here as new migration files.
+- `supabase/schema.staging.sql` / `supabase/schema.prod.sql` are *cached snapshots* of the live database state at the time `scripts/export_schema.py` last ran. Regenerate after every prod push so the cached snapshot tracks reality. Never edit by hand — they get clobbered on the next export.
+
+Use the schema files for "what does column X look like today" lookups without spinning up Postgres. Use the baseline + migrations for "what should the schema be" answers and for any code path that actually creates the DB. They should match; if they don't, regenerate the schema file (don't edit the migration).
+
 ---
 
 ## Design System: Jigged Manufacturing Data Platform (Material-UI)

@@ -15,8 +15,8 @@ on:
 
 env:
   TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-  TEST_SUPABASE_SERVICE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_KEY }}
-  TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+  TEST_SUPABASE_SECRET_KEY: ${{ secrets.TEST_SUPABASE_SECRET_KEY }}
+  TEST_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.TEST_SUPABASE_PUBLISHABLE_KEY }}
 
 jobs:
   frontend-tests:
@@ -128,8 +128,8 @@ Add these to GitHub repository settings:
 | Secret Name | Description |
 |---|---|
 | TEST_SUPABASE_URL | Test project URL |
-| TEST_SUPABASE_SERVICE_KEY | Service role key (bypasses RLS) |
-| TEST_SUPABASE_ANON_KEY | Anon key for user simulation |
+| TEST_SUPABASE_SECRET_KEY | Service role key (bypasses RLS) |
+| TEST_SUPABASE_PUBLISHABLE_KEY | Anon key for user simulation |
 | TEST_PREVIEW_URL | Vercel preview URL for E2E |
 
 ---

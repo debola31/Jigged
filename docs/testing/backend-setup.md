@@ -58,7 +58,7 @@ from api.index import app
 
 # Test Supabase credentials
 TEST_SUPABASE_URL = os.environ.get("TEST_SUPABASE_URL")
-TEST_SUPABASE_KEY = os.environ.get("TEST_SUPABASE_SERVICE_KEY")
+TEST_SUPABASE_KEY = os.environ.get("TEST_SUPABASE_SECRET_KEY")
 
 
 @pytest.fixture(scope="session")

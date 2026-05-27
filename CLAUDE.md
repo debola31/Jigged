@@ -1,8 +1,8 @@
-# Jigged - Manufacturing ERP
+# Jigged - Manufacturing Data Platform
 
 ## Project Overview
 
-Jigged is a web-based ERP system designed for small-scale precision manufacturing shops. It centralizes work orders, inventory tracking, and shop-floor status with AI-driven insights and gamification for operators.
+Jigged is a web-based data platform for small-scale precision manufacturing shops. It centralizes jobs, inventory tracking, and shop-floor status with AI-driven insights and gamification for operators.
 
 ## Tech Stack
 
@@ -97,7 +97,7 @@ The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_ano
 
 ---
 
-## Design System: Jigged Manufacturing ERP (Material-UI)
+## Design System: Jigged Manufacturing Data Platform (Material-UI)
 
 > **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.
 > **Detailed Reference:** `docs/design-system.md` explains principles and rationale.
@@ -173,7 +173,7 @@ The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_ano
 2. **Readable Text:** Minimum 16px font size for body text
 3. **Simple Navigation:** Use bottom navigation for primary actions on mobile
 4. **QR Code Scanning:** Design with large scanning area
-5. **Landscape Support:** Ensure work order details are usable in landscape mode
+5. **Landscape Support:** Ensure job details are usable in landscape mode
 
 ### Accessibility (WCAG 2.1 Level A)
 
@@ -460,8 +460,3 @@ See [docs/testing/](docs/testing/) for testing strategy and guides.
 - **Check module specs** for detailed requirements
 - **Keep docs in sync** - update docs if implementation diverges
 
----
-
-## Notion Integration (Deprecated)
-
-> **Note:** All product documentation has been migrated to the `/docs` folder. The Notion CLI is no longer needed for standard development workflows. Notion page IDs are retained for historical reference only.

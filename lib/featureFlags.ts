@@ -1,21 +1,21 @@
 /**
  * Per-tenant feature flags stored in companies.settings (jsonb).
  *
- * Phase-1 shipments is rolled out to Contour only by setting
+ * Phase-1 shipments is rolled out to the pilot customer only by setting
  * `settings.features.shipments = true` on that company's row. The DB
  * columns + triggers ship to every tenant (they're harmless when no
  * shipments exist), so the gate is UI + access-layer only.
  *
- * Toggle for Contour:
+ * Toggle for a pilot tenant:
  *   UPDATE public.companies
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
  *                               '{features,shipments}', 'true')
- *    WHERE id = '<contour-uuid>';
+ *    WHERE id = '<pilot-company-uuid>';
  *
  * Rollback:
  *   UPDATE public.companies
  *      SET settings = settings #- '{features,shipments}'
- *    WHERE id = '<contour-uuid>';
+ *    WHERE id = '<pilot-company-uuid>';
  */
 
 import type { Company } from '@/utils/companyAccess';

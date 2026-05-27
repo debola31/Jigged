@@ -24,8 +24,8 @@ compatible with already-prepared CSVs for one version, the importer accepts
   - is_manufacturable=false → source='bought'
   - is_stockable value passes through to is_stocked
 Each legacy-mapped row writes a deprecation entry to the import-event log
-(visible in server logs). Plan to remove the alias once Shane's CSVs use the
-new headers.
+(visible in server logs). Plan to remove the alias once the pilot customer's
+CSVs use the new headers.
 
 `legacy_id` is unique per company; rows with a `legacy_id` set are upserted
 via ON CONFLICT so re-importing the same source CSV is idempotent.

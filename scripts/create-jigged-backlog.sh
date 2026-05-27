@@ -2,12 +2,12 @@
 # =============================================================================
 # Jigged Productionization Backlog v2 — GitHub Issues & Project Setup
 # =============================================================================
-# Updated after Shane/Contour Inc user interview (March 2026).
+# Updated after the shop owner/the pilot customer Inc user interview (March 2026).
 #
 # Changes from v1:
 #   - REMOVED 3 issues for already-built features (AI Insights, Operator View,
 #     AI rate limiting)
-#   - REPLACED vague "Module refinements" with 6 specific Shane feedback issues
+#   - REPLACED vague "Module refinements" with 6 specific the shop owner feedback issues
 #   - RE-PRIORITIZED: product features → P0, infrastructure → P1
 #   - CORRECTED effort estimates based on actual codebase state
 #   - Total: 29 issues (was 26)
@@ -220,14 +220,14 @@ echo ">>> Step 3: Creating issues..."
 echo "=========================================="
 
 # ============================================================
-# P0: THIS WEEK — Johnny is playing with the app NOW
+# P0: THIS WEEK — the salesperson is playing with the app NOW
 # Focus: Make the quote-to-job workflow solid + prevent crashes
 # ============================================================
 
 create_issue \
   "Routing UX: Add 'Add Operation' button alongside drag-and-drop" \
   "## Problem
-Shane's feedback: the routing editor only supports drag-and-drop from the sidebar to add operations. New users (especially Johnny evaluating the app) won't discover this. Need an explicit \"Add Operation\" button as a primary CTA.
+the shop owner's feedback: the routing editor only supports drag-and-drop from the sidebar to add operations. New users (especially the salesperson evaluating the app) won't discover this. Need an explicit \"Add Operation\" button as a primary CTA.
 
 ## What Already Exists
 - \`OperationsSidebar.tsx\` with drag-and-drop operation tiles
@@ -249,9 +249,9 @@ Shane's feedback: the routing editor only supports drag-and-drop from the sideba
   "P0: This Week" "M" "Ease of Use" "Claude Code"
 
 create_issue \
-  "Dashboard: Surface Shane's 4 KPI metrics as defaults" \
+  "Dashboard: Surface the shop owner's 4 KPI metrics as defaults" \
   "## Problem
-Shane explicitly requested four dashboard metrics: open quotes, active jobs, jobs in progress, and completed jobs. The PinnedMetrics component and SummaryCard component already exist, but may not show these specific metrics by default.
+the shop owner explicitly requested four dashboard metrics: open quotes, active jobs, jobs in progress, and completed jobs. The PinnedMetrics component and SummaryCard component already exist, but may not show these specific metrics by default.
 
 ## What Already Exists
 - \`PinnedMetrics.tsx\` — customizable metric display
@@ -262,7 +262,7 @@ Shane explicitly requested four dashboard metrics: open quotes, active jobs, job
 ## Acceptance Criteria
 - [ ] Verify \`jobs_in_progress\` and \`completed_jobs\` exist as available metrics (add if missing)
 - [ ] Default pinned metrics for new users: Open Quotes, Active Jobs, Jobs In Progress, Completed Jobs
-- [ ] All four metrics display correctly with real data from Shane's company
+- [ ] All four metrics display correctly with real data from the shop owner's company
 - [ ] Metrics are prominent and visible immediately on dashboard load (top of page)
 
 ## Key Files
@@ -274,9 +274,9 @@ Shane explicitly requested four dashboard metrics: open quotes, active jobs, job
   "P0: This Week" "S" "Ease of Use" "Claude Code"
 
 create_issue \
-  "Inventory: Verify unit conversion UI for Shane's use case" \
+  "Inventory: Verify unit conversion UI for the shop owner's use case" \
   "## Problem
-Shane needs to remove inventory in different units than the primary unit (e.g., feet of cold roll steel bar stored by the bar). The backend supports this but the UI may not expose it properly.
+the shop owner needs to remove inventory in different units than the primary unit (e.g., feet of cold roll steel bar stored by the bar). The backend supports this but the UI may not expose it properly.
 
 ## What Already Exists (Backend)
 - \`InventoryUnitConversion\` table with conversion rules per item
@@ -289,7 +289,7 @@ Shane needs to remove inventory in different units than the primary unit (e.g., 
 - [ ] Unit conversion is displayed clearly: \"Removing 6 feet = 1 bar\"
 - [ ] Available units populated from \`InventoryUnitConversion\` records for that item
 - [ ] If no conversions configured, only primary unit is shown (no errors)
-- [ ] Test with Shane's specific case: cold roll steel bar measured in feet
+- [ ] Test with the shop owner's specific case: cold roll steel bar measured in feet
 
 ## Key Files
 - \`utils/inventoryAccess.ts\` (removeStock, convertToBaseUnit)
@@ -301,7 +301,7 @@ Shane needs to remove inventory in different units than the primary unit (e.g., 
 create_issue \
   "Inventory: Surface job selector in stock depletion form" \
   "## Problem
-Shane wants to link inventory removals to specific jobs so he can track which job consumed stock. The backend already supports \`job_id\` on transactions, but the UI needs to expose a job picker in the depletion form.
+the shop owner wants to link inventory removals to specific jobs so he can track which job consumed stock. The backend already supports \`job_id\` on transactions, but the UI needs to expose a job picker in the depletion form.
 
 ## What Already Exists (Backend)
 - \`inventory_transactions\` table has \`job_id\` and \`job_operation_id\` columns
@@ -325,7 +325,7 @@ Shane wants to link inventory removals to specific jobs so he can track which jo
 create_issue \
   "Add root-level error boundary and 404 page" \
   "## Problem
-Per-module error boundaries exist (parts, customers, jobs) but there's no root-level catch-all. If Shane or Johnny hits an unhandled error outside a module, they see a white screen or Next.js default error. Also no custom 404 for invalid routes.
+Per-module error boundaries exist (parts, customers, jobs) but there's no root-level catch-all. If the shop owner or the salesperson hits an unhandled error outside a module, they see a white screen or Next.js default error. Also no custom 404 for invalid routes.
 
 ## What Already Exists
 - Per-module \`error.tsx\` files in parts, customers, jobs directories
@@ -347,7 +347,7 @@ Per-module error boundaries exist (parts, customers, jobs) but there's no root-l
 create_issue \
   "Landing page polish — credible for forwarded links" \
   "## Problem
-Shane is showing jigged.app to others this week. If he texts the URL, the landing page is their first impression. It needs to look intentional and professional.
+the shop owner is showing jigged.app to others this week. If he texts the URL, the landing page is their first impression. It needs to look intentional and professional.
 
 ## What Already Exists
 - Marketing layout at \`app/(marketing)/\`
@@ -361,7 +361,7 @@ Shane is showing jigged.app to others this week. If he texts the URL, the landin
 - [ ] Verify landing page renders correctly (no broken images/layout)
 - [ ] Link preview looks good in iMessage, Slack, LinkedIn (OG tags working)
 - [ ] Clear CTA — \"Sign In\" for existing users
-- [ ] Responsive on mobile (Shane's contacts will likely open on phone)
+- [ ] Responsive on mobile (the shop owner's contacts will likely open on phone)
 - [ ] Favicon is Jigged icon
 - [ ] No placeholder or lorem ipsum text visible
 
@@ -373,14 +373,14 @@ Shane is showing jigged.app to others this week. If he texts the URL, the landin
   "P0: This Week" "S" "First Impressions" "Claude Code"
 
 # ============================================================
-# P1: BEFORE 2-WEEK MEETING — Johnny formally evaluates
+# P1: BEFORE 2-WEEK MEETING — the salesperson formally evaluates
 # Focus: Complete quoting workflow + reliability hardening
 # ============================================================
 
 create_issue \
   "Quotes: Add margin/markup fields to QuoteForm" \
   "## Problem
-Shane discussed customizable margin settings during the meeting. Currently quotes only store unit_price and total_price with no margin/markup calculation. A salesperson needs to see and adjust margins.
+the shop owner discussed customizable margin settings during the meeting. Currently quotes only store unit_price and total_price with no margin/markup calculation. A salesperson needs to see and adjust margins.
 
 ## What Already Exists
 - \`QuoteForm.tsx\` with customer, part, quantity, unit_price, total_price fields
@@ -422,7 +422,7 @@ If a user's Supabase auth token expires while using the app, API calls silently 
 create_issue \
   "Fix visible console errors and smoke test all modules" \
   "## Problem
-Open DevTools and click through every module. Any console errors, layout shifts, or broken states need to be caught before Johnny's evaluation.
+Open DevTools and click through every module. Any console errors, layout shifts, or broken states need to be caught before the salesperson's evaluation.
 
 ## Acceptance Criteria
 - [ ] Zero console errors on initial page load of every module
@@ -446,7 +446,7 @@ Before any second company touches the app, verify Company A cannot see Company B
 
 ## Acceptance Criteria
 - [ ] Create a test company with test data in Supabase
-- [ ] Log in as Shane's account and verify zero test company data appears anywhere
+- [ ] Log in as the shop owner's account and verify zero test company data appears anywhere
 - [ ] Attempt to access test company records via URL manipulation (change companyId in URL)
 - [ ] Verify RLS policies exist and are correct on ALL tables
 - [ ] Audit the \`ai_readonly\` bypass role scope — ensure it cannot leak cross-company data
@@ -496,10 +496,10 @@ A salesperson in a manufacturing shop will likely pull up the app on a phone or 
 create_issue \
   "Performance check with realistic data volumes" \
   "## Problem
-The app needs to feel snappy with Shane's actual data volumes. AG Grid uses batch fetching (1000 rows per batch) which works for small shops but should be verified.
+The app needs to feel snappy with the shop owner's actual data volumes. AG Grid uses batch fetching (1000 rows per batch) which works for small shops but should be verified.
 
 ## Acceptance Criteria
-- [ ] Measure page load time for each module with Shane's current data volume
+- [ ] Measure page load time for each module with the shop owner's current data volume
 - [ ] Target: < 1.5s initial load, < 500ms for interactions (sort, filter, search)
 - [ ] Identify and fix any N+1 queries (e.g., \`getCustomerWithRelations\` makes 3 separate queries)
 - [ ] AG Grid pagination configured appropriately
@@ -510,7 +510,7 @@ The app needs to feel snappy with Shane's actual data volumes. AG Grid uses batc
 create_issue \
   "Environment separation — dev, UAT, prod" \
   "## Problem
-No safe place to test changes without risking the production app Shane is using. A broken deploy during Johnny's evaluation would be catastrophic.
+No safe place to test changes without risking the production app the shop owner is using. A broken deploy during the salesperson's evaluation would be catastrophic.
 
 ## Acceptance Criteria
 - [ ] Separate Supabase projects: dev (local/CI), staging/UAT, production
@@ -677,7 +677,7 @@ During usability tests, you want quantitative data on which pages people visit, 
 create_issue \
   "Mobile operator workflow refinements" \
   "## Problem
-Shane tested the mobile operator workflow during the meeting. The operator view is built and functional at \`/operator/[companyId]/\` with mobile-first layout, bottom nav, and job tracking. Needs polish based on Shane's hands-on feedback, not a rebuild.
+the shop owner tested the mobile operator workflow during the meeting. The operator view is built and functional at \`/operator/[companyId]/\` with mobile-first layout, bottom nav, and job tracking. Needs polish based on the shop owner's hands-on feedback, not a rebuild.
 
 ## What Already Exists
 - Operator view at \`/app/operator/[companyId]/\` with AppBar + BottomNavigation
@@ -686,7 +686,7 @@ Shane tested the mobile operator workflow during the meeting. The operator view 
 - Station selector
 
 ## Acceptance Criteria
-- [ ] Collect specific feedback from Shane on operator workflow
+- [ ] Collect specific feedback from the shop owner on operator workflow
 - [ ] Address any navigation confusion or missing actions
 - [ ] Ensure job status updates work smoothly on mobile
 - [ ] Verify operation time tracking works
@@ -783,7 +783,7 @@ echo "  - REMOVED: Dashboard AI Insights (already built)"
 echo "  - REMOVED: Operator View (already built)"
 echo "  - REMOVED: AI Rate Limiting (already implemented)"
 echo "  - REMOVED: Vague 'Module refinements' catch-all"
-echo "  - ADDED: 6 specific Shane feedback issues (P0/P1)"
+echo "  - ADDED: 6 specific the shop owner feedback issues (P0/P1)"
 echo "  - ADDED: Operator workflow refinements (P2, not P3)"
 echo "  - ADDED: AI rate limiting enhancements (P3, scoped to gaps)"
 echo "  - RE-PRIORITIZED: Product features → P0, infrastructure → P1"
@@ -791,5 +791,5 @@ echo ""
 echo "Next steps:"
 echo "  1. Go to https://github.com/users/debola31/projects/$PROJECT_NUMBER"
 echo "  2. Add a 'Group by: Phase' view for execution"
-echo "  3. Start with P0 issues — Johnny is using the app NOW"
+echo "  3. Start with P0 issues — the salesperson is using the app NOW"
 echo ""

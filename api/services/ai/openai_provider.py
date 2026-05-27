@@ -9,7 +9,7 @@ from openai import OpenAI
 from .base_provider import AIProvider, MappingSuggestion
 
 
-MAPPING_PROMPT_TEMPLATE = """You are analyzing a CSV file to map columns to a customer database schema for a manufacturing ERP system.
+MAPPING_PROMPT_TEMPLATE = """You are analyzing a CSV file to map columns to a customer database schema for a manufacturing operations data platform.
 
 ## Target Database Schema:
 {schema_json}

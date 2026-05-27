@@ -406,7 +406,7 @@ Per-tier `base_cost_per_unit` already contains the amortized setup. A 30 min eng
 - **Qty 4:** $15.625 per unit
 - **Qty 10:** $6.25 per unit
 
-This is exactly what Johnny described in the April 17 usability test: "anything I put into setup will amortize over the number of pieces."
+This is exactly what the pilot salesperson described in the April 17 usability test: "anything I put into setup will amortize over the number of pieces."
 
 ### Setup-only operations are first-class
 

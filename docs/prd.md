@@ -2,7 +2,7 @@
 
 ### 1. Overview
 
-Jigged is a web-based operations system for small manufacturing shops that struggle to manage their custom workflows in existing ERP systems. It centralizes jobs, inventory tracking, and shop-floor status into focused tabs, then layers on AI-assisted insights to surface bottlenecks and recommend actions to preserve operational efficiency. Gamified experiences for operators—including performance metrics, streaks, and achievements—encourage consistent data capture and process compliance, so owners get reliable, real-time visibility into their production.
+Jigged is a web-based data platform for small manufacturing shops that struggle to manage their custom workflows in existing legacy systems. It centralizes jobs, inventory tracking, and shop-floor status into focused tabs, then layers on AI-assisted insights to surface bottlenecks and recommend actions to preserve operational efficiency. Gamified experiences for operators—including performance metrics, streaks, and achievements—encourage consistent data capture and process compliance, so owners get reliable, real-time visibility into their production.
 
 **Problem Statement**
 
@@ -60,7 +60,7 @@ Success looks like:
 
 **Target Users / Personas**
 
-| Role | Description | Primary Goals | ERP Needs |
+| Role | Description | Primary Goals | Capabilities Needed |
 |---|---|---|---|
 | Owner | Business owner who oversees all operations, makes strategic decisions. | Maximize revenue, minimize waste, ensure on-time delivery, maintain quality | Dashboard views of work orders, inventory, and revenue. Approve material replenishment. Access business insights and performance metrics. |
 | Operator | Manual machine operators who execute defined steps in work orders to build products. May operate CNC machines, lathes, grinders, or perform assembly work. | Complete jobs efficiently, know what to work on next, understand job requirements | Access work orders and instructions. Log progress at stations. View performance metrics and gamified feedback. |
@@ -370,7 +370,7 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 7. Legacy data from Tangle/E2 JobBoss can be exported to CSV for migration
 
-8. Shop owner (Shane) available for feedback during development
+8. Pilot shop owner available for feedback during development
 
 ---
 
@@ -379,8 +379,8 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 | Milestone | Description | Owner | Target Date | Status |
 |---|---|---|---|---|
 | Discovery complete | PRD finalized, technical architecture approved, design mockups reviewed | Debola | 2025-12-29  | In progress |
-| MVP ready | Core features: Work orders, inventory, operator stations, basic invoicing. Deployed to Contour for pilot. | Debola | 2026-01-04  | Not started |
-| Pilot feedback incorporated | Contour uses system for 60 days, feedback collected and addressed | Debola / Shane | 2026-04-30  | Not started |
+| MVP ready | Core features: Work orders, inventory, operator stations, basic invoicing. Deployed to pilot customer. | Debola | 2026-01-04  | Not started |
+| Pilot feedback incorporated | Pilot customer uses system for 60 days, feedback collected and addressed | Debola / pilot shop owner | 2026-04-30  | Not started |
 | GA release | Public launch with integrations (QuickBooks, shipping carriers), marketing site live | Debola | 2026-07-31  | Not started |
 
 ---
@@ -393,13 +393,13 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 2. Should operators be able to deplete inventory without associating to a job? (For shop supplies, maintenance materials?)
   1. Yes, you should primarily deplete inventory through jobs but for many other reasons you should be able to do it elsewhere
 
-3. What is the target timeline for MVP deployment to Contour?
+3. What is the target timeline for MVP deployment to the pilot customer?
   1. 6 months
 
-4. Does Contour have ITAR compliance requirements that would affect data handling?
+4. Does the pilot customer have ITAR compliance requirements that would affect data handling?
   1. No
 
-5. What specific reports or exports does Shane currently use from Tangle that must be replicated?
+5. What specific reports or exports does the pilot shop owner currently use from Tangle that must be replicated?
   1. Exports to excel for all the data elements, no visualizations yet
 
 6. What is the tolerance for offline operation on the shop floor? (Must-have or nice-to-have?)

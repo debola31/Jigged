@@ -274,8 +274,8 @@ export default function ShipmentForm({
             qty_remaining: p.qty_remaining,
             production_status: p.production_status,
             qty_input: p.qty_remaining > 0 ? String(p.qty_remaining) : '0',
-            // Customer mode: nothing checked by default — Bri picks what
-            // she's actually boxing.
+            // Customer mode: nothing checked by default — the shipping
+            // clerk picks what they're actually boxing.
             selected: false,
           }));
         }

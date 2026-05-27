@@ -4,7 +4,7 @@ import LegalPageContainer from '@/components/marketing/LegalPageContainer';
 
 export const metadata: Metadata = {
   title: 'Terms of Service – Jigged',
-  description: 'Jigged Terms of Service for precision manufacturing ERP.',
+  description: 'Jigged Terms of Service for the precision manufacturing data platform.',
 };
 
 export default function TermsPage() {

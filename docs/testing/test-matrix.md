@@ -36,7 +36,3 @@ This matrix tracks all test cases for the Jigged application.
 | IM-003 | Missing required | Import | Implemented | Row without name | Validation error | Import proceeds | csvParser.test.ts |
 | IM-004 | Auto-create groups | Import | Partial | New resource group name | Created automatically | Error or ignored | Backend import tests |
 | IM-005 | Large batch | Import | Not Implemented | 1000+ rows | Batched processing | Timeout or crash | TBD |
-
----
-
-*Exported from Notion on Tue Feb 10 02:12:03 WAT 2026*

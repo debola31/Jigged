@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Customers module manages the master list of companies that Contour does business with. Customers are required to create quotes and jobs.
+The Customers module manages the master list of companies that the shop does business with. Customers are required to create quotes and jobs.
 
 **Priority:** Must Have (Build First)
 

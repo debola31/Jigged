@@ -292,14 +292,15 @@ export default function JobsPage() {
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Auto-focus the search field on mount so Johnny's "where's my order?"
-  // flow lands keyboard-ready (FR-NEW-1: headline-moment on /jobs).
+  // Auto-focus the search field on mount so the salesperson's "where's my
+  // order?" flow lands keyboard-ready (FR-NEW-1: headline-moment on /jobs).
   useEffect(() => {
     searchInputRef.current?.focus();
   }, []);
 
   // Enter on the search input navigates directly when exactly one job
-  // matches — Johnny's typical 1-shot lookup short-circuits the click.
+  // matches — the salesperson's typical 1-shot lookup short-circuits the
+  // click.
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== 'Enter') return;

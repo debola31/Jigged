@@ -27,16 +27,23 @@ from index import app
 @pytest.fixture
 def supabase_admin() -> Generator[Client, None, None]:
     """
-    Create an admin Supabase client using service key.
+    Create an admin Supabase client using the local-Supabase service-role key.
 
-    Uses TEST_SUPABASE_URL and TEST_SUPABASE_SERVICE_KEY environment variables.
-    Falls back to regular Supabase vars if test vars not set.
+    Requires TEST_SUPABASE_URL and TEST_SUPABASE_SECRET_KEY. No fallback to
+    SUPABASE_URL / SUPABASE_SECRET_KEY (those are prod); silently running tests
+    against prod is exactly the failure mode this guard prevents.
     """
-    url = os.getenv("TEST_SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    service_key = os.getenv("TEST_SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_SECRET_KEY")
-
-    if not url or not service_key:
-        pytest.skip("Supabase credentials not configured")
+    url = os.getenv("TEST_SUPABASE_URL")
+    if not url:
+        pytest.exit(
+            "TEST_SUPABASE_URL not configured. Run `supabase start` and "
+            "`eval \"$(supabase status -o env)\"`, then export "
+            "TEST_SUPABASE_URL / TEST_SUPABASE_PUBLISHABLE_KEY / TEST_SUPABASE_SECRET_KEY. "
+            "See docs/testing/backend-setup.md."
+        )
+    service_key = os.getenv("TEST_SUPABASE_SECRET_KEY")
+    if not service_key:
+        pytest.exit("TEST_SUPABASE_SECRET_KEY not configured.")
 
     client = create_client(url, service_key)
     yield client

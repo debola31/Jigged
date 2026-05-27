@@ -1,6 +1,6 @@
 -- ============================================================
--- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-27T03:58:00Z
+-- Jigged Manufacturing Data Platform - Database Schema
+-- Generated: 2026-05-27T15:22:58Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -4805,10 +4805,10 @@ COMMENT ON COLUMN "public"."companies"."id"
     IS 'Primary key. UUID auto-generated. Referenced by all other tables for multi-tenant isolation.';
 
 COMMENT ON COLUMN "public"."companies"."name"
-    IS 'Display name of the company/shop. Example: "Contour Tool & Machine"';
+    IS 'Display name of the company/shop. Example: "Acme Precision Machining".';
 
 COMMENT ON COLUMN "public"."companies"."slug"
-    IS 'URL-friendly unique identifier. Used in routes like /dashboard/{slug}/. Example: "contour-tool"';
+    IS 'URL-friendly unique identifier. Used in routes like /dashboard/{slug}/. Example: "acme-precision".';
 
 COMMENT ON COLUMN "public"."companies"."settings"
     IS 'Company-wide settings as JSONB. May include: default currency, timezone, fiscal year start, feature flags.';
@@ -5027,7 +5027,7 @@ COMMENT ON COLUMN "public"."routing_operations"."cycle_minutes_per_unit"
     IS 'Per-unit run time, in minutes. Used for kind=internal cost calculation only.';
 
 COMMENT ON COLUMN "public"."routing_operations"."labor_rate_override"
-    IS 'Per-step override of the work_center labor_rate, in dollars per hour. Dominant pattern in real shop data (98.6% of comparable Contour rows override). NULL = inherit work_center.labor_rate. Used for kind=internal only.';
+    IS 'Per-step override of the work_center labor_rate, in dollars per hour. Dominant pattern in real shop data: internal ops typically override the work-center default rather than inherit it. NULL = inherit work_center.labor_rate. Used for kind=internal only.';
 
 COMMENT ON COLUMN "public"."routing_operations"."external_unit_price"
     IS 'For kind=external only: cost per output unit charged by the vendor.';

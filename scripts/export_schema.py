@@ -5,7 +5,27 @@ PostgreSQL/Supabase Schema Export Script
 Exports a complete database schema with deterministic ordering for git diffs.
 Includes RLS policies, functions, triggers, and all constraints.
 
-Exports separate schema files for prod and staging environments.
+Exports separate schema files for prod and staging environments to
+supabase/schema.prod.sql and supabase/schema.staging.sql.
+
+SOURCE-OF-TRUTH NOTE
+--------------------
+Two artifacts in this repo describe the database schema. They serve different
+purposes; keep them straight:
+
+1. supabase/migrations/<timestamp>_baseline.sql (and any migrations layered
+   on top): the source of truth for what gets *applied* to a fresh database
+   via `supabase start` or `supabase db push`. This is the executable
+   history. New schema changes land here as new migration files.
+
+2. supabase/schema.staging.sql and supabase/schema.prod.sql: cached,
+   greppable snapshots of the live database state at the time this script
+   last ran. Regenerate after every prod push so the cached snapshot tracks
+   reality. Never edit by hand — they get clobbered on the next export.
+
+Use the schema files for "what does column X look like today" lookups
+without spinning up Postgres. Use the baseline + migrations for "what should
+the schema be" answers and for any code path that actually creates the DB.
 
 Usage:
     python scripts/export_schema.py                  # Export both prod and staging

@@ -1,9 +1,18 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { PartPricingTier, PartPricingTierInput } from '@/types/partPricing';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import {
+  calculateRoutingCost,
+  calculateTierPricing,
+} from '@/utils/routingCostCalculation';
 
 /**
  * Get all pricing tiers for a part, ordered by sequence.
+ *
+ * The `unit_price` field on each row reflects whatever was last persisted
+ * (a denormalized cache from an older write path). It can drift from the
+ * live recompute when underlying BOM costs change — see
+ * `getTiersWithComputedPrices` for the canonical "what does this tier cost
+ * right now" read used by the quote form, PDF, and line-item snapshot.
  */
 export async function getTiersForPart(partId: string): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
@@ -18,6 +27,43 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
     throw error;
   }
   return (data || []) as PartPricingTier[];
+}
+
+/**
+ * Single source of truth for tier pricing: load the tier rows (markup % is
+ * the user-controlled source of truth), compute the current base cost from
+ * the part's live routing + BOM, then derive `unit_price = base × (1 +
+ * markup/100)` per tier qty.
+ *
+ * Use this anywhere a user sees a tier price (quote form chip, PDF, the
+ * resolved tier picked for a quote line item). The Part detail page already
+ * computes the same way via `calculateTierPricing`; this helper unifies the
+ * other read paths so they can't drift.
+ *
+ * When materials are incomplete (a BOM child has no priced procurement tier)
+ * `calculateTierPricing` returns `unit_price: null` — the resolver then
+ * skips that tier, and the quote form surfaces "no pricing tiers yet" so
+ * the user fixes the underlying gap rather than getting a misleading price.
+ */
+export async function getTiersWithComputedPrices(
+  partId: string,
+): Promise<PartPricingTier[]> {
+  const [tiers, breakdown] = await Promise.all([
+    getTiersForPart(partId),
+    calculateRoutingCost(partId).catch(() => null),
+  ]);
+
+  if (!breakdown) {
+    // No routing/BOM (e.g. bought parts) — unit_price cannot be computed
+    // from a parent routing. Leave whatever was stored; bought parts hit
+    // a different pricing flow.
+    return tiers;
+  }
+
+  return tiers.map((t) => {
+    const { unitPrice } = calculateTierPricing(breakdown, t.quantity, t.markup_percent);
+    return { ...t, unit_price: unitPrice };
+  });
 }
 
 /**
@@ -40,10 +86,13 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
 
 /**
  * Replace the full set of tiers for a part (upsert + delete diff).
- * Markup % is the source of truth: unit_price is always recomputed from
- * `base_cost × (1 + markup/100)` against the current routing. There is no
- * lock concept — typing a unit price in the UI back-calculates markup before
- * calling this function, so the markup field captured here always governs.
+ *
+ * Persists tier metadata only: `quantity` (qty break) and `markup_percent`
+ * (the user-controlled source of truth). The DB column `unit_price` is no
+ * longer written — every read recomputes it live via
+ * `getTiersWithComputedPrices` so the stored cache can't drift from the
+ * underlying routing + BOM. The column stays nullable in the schema as
+ * dead data pending a follow-up drop migration.
  *
  * Also writes parts.markup_rate_id from `opts.rateId`. Two callers, two
  * intents:
@@ -88,22 +137,6 @@ export async function replaceTiersForPart(
   }
 
   for (const tier of tiers) {
-    // Compute the base cost live at this tier's quantity. The SQL function
-    // amortizes setup over the passed qty and cascades through the BOM at
-    // cumulative qty per sub-assembly.
-    let unitPrice: number | null = null;
-    try {
-      const baseCost = await getComputedPartCost(partId, tier.quantity);
-      if (baseCost !== null && tier.markup_percent !== null) {
-        unitPrice = baseCost * (1 + tier.markup_percent / 100);
-      }
-    } catch {
-      // compute_part_cost RAISES on missing labor rates / external pricing /
-      // unit conversions. Store unit_price as null so the UI surfaces the
-      // gap rather than persisting a wrong price.
-      unitPrice = null;
-    }
-
     if (tier.id) {
       const { error } = await supabase
         .from('part_pricing_tiers')
@@ -111,7 +144,11 @@ export async function replaceTiersForPart(
           sequence: tier.sequence,
           quantity: tier.quantity,
           markup_percent: tier.markup_percent,
-          unit_price: unitPrice,
+          // Null the legacy cache on every update so the stored column
+          // can't carry a stale price forward into a context where it
+          // might still be read by mistake. All real prices come from
+          // getTiersWithComputedPrices.
+          unit_price: null,
         })
         .eq('id', tier.id);
       if (error) throw error;
@@ -124,7 +161,6 @@ export async function replaceTiersForPart(
           sequence: tier.sequence,
           quantity: tier.quantity,
           markup_percent: tier.markup_percent,
-          unit_price: unitPrice,
         });
       if (error) throw error;
     }

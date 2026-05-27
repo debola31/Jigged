@@ -482,7 +482,38 @@ describe('calculateRoutingCost', () => {
       expect(result!.warnings[0].message).toContain('UNPRICED-PART');
       expect(result!.warnings[0].material_id).toBe('bom-1');
       expect(result!.material_items).toHaveLength(0);
-      expect(result!.total_material_cost).toBe(0);
+      // total_material_cost/total_cost go null and materials_complete=false
+      // so downstream tier pricing can't silently render a "$0 material"
+      // base cost. The misleading "tier shows $97.66 even though materials
+      // are unpriced" bug shipped because this used to roll up to 0.
+      expect(result!.total_material_cost).toBeNull();
+      expect(result!.total_cost).toBeNull();
+      expect(result!.materials_complete).toBe(false);
+    });
+
+    it('calculateTierPricing returns null base + unit price when materials incomplete', async () => {
+      // End-to-end gate: the same breakdown that flags materials_complete=false
+      // must also produce null Base/unit + null Unit price, so the part page
+      // and quote form render "—" rather than a misleading number.
+      mockGetRoutingForPart.mockResolvedValue(
+        makeRouting([
+          makeOp({
+            setup_minutes: 30,
+            cycle_minutes_per_unit: 6,
+            labor_rate_override: 100,
+          }),
+        ]),
+      );
+      mockGetBomForPart.mockResolvedValue([
+        makeBomLine({ quantity: 1, childName: 'UNPRICED', childCost: null }),
+      ]);
+
+      const breakdown = await calculateRoutingCost('part-1');
+      const tier = calculateTierPricing(breakdown!, 1, 25);
+
+      expect(breakdown!.materials_complete).toBe(false);
+      expect(tier.baseCostPerUnit).toBeNull();
+      expect(tier.unitPrice).toBeNull();
     });
 
     it('exposes child_part_name + detail on missing_material_cost so the renderer can link the part name', async () => {

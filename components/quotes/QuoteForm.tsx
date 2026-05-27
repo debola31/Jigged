@@ -36,7 +36,7 @@ import {
   pickShippingAddress,
   pickPrimaryContact,
 } from '@/utils/customerAccess';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import type { PartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
@@ -186,41 +186,46 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     loadData();
   }, [loadData]);
 
-  // Load tiers for each part block when its part_id changes.
-  useEffect(() => {
-    const loadTiers = async (idx: number, partId: string) => {
+  // Load tiers for one block. Shared by the effect (newly-added block) and
+  // updatePartInBlock (re-select of the same part wipes the previous tiers,
+  // and the effect's id-string dep doesn't change so it won't refire).
+  const loadTiersForBlock = useCallback(async (idx: number, partId: string) => {
+    setPartBlocks((prev) => {
+      const next = [...prev];
+      if (!next[idx]) return prev;
+      next[idx] = { ...next[idx], loading: true, error: null };
+      return next;
+    });
+    try {
+      const tiers = await getTiersWithComputedPrices(partId);
       setPartBlocks((prev) => {
         const next = [...prev];
-        next[idx] = { ...next[idx], loading: true, error: null };
+        if (next[idx] && next[idx].part?.id === partId) {
+          next[idx] = { ...next[idx], tiers, loading: false };
+        }
         return next;
       });
-      try {
-        const tiers = await getTiersForPart(partId);
-        setPartBlocks((prev) => {
-          const next = [...prev];
-          if (next[idx]) {
-            next[idx] = { ...next[idx], tiers, loading: false };
-          }
-          return next;
-        });
-      } catch (err) {
-        setPartBlocks((prev) => {
-          const next = [...prev];
-          if (next[idx]) {
-            next[idx] = {
-              ...next[idx],
-              loading: false,
-              error: err instanceof Error ? err.message : 'Failed to load tiers',
-            };
-          }
-          return next;
-        });
-      }
-    };
+    } catch (err) {
+      setPartBlocks((prev) => {
+        const next = [...prev];
+        if (next[idx] && next[idx].part?.id === partId) {
+          next[idx] = {
+            ...next[idx],
+            loading: false,
+            error: err instanceof Error ? err.message : 'Failed to load tiers',
+          };
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  // Load tiers for each part block when its part_id changes.
+  useEffect(() => {
     partBlocks.forEach((block, idx) => {
       const partId = block.part?.id;
       if (partId && block.tiers.length === 0 && !block.loading && !block.error) {
-        loadTiers(idx, partId);
+        loadTiersForBlock(idx, partId);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,6 +376,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       next[idx] = { ...emptyBlock(), part: option };
       return next;
     });
+    // Re-selecting the same part wipes tiers above, but the load-tiers effect
+    // keys off the part-ids string — which doesn't change when the id is the
+    // same. Trigger the fetch directly so the block reloads either way.
+    if (option) {
+      loadTiersForBlock(idx, option.id);
+    }
   };
 
   const openCreatePartModalForBlock = (idx: number) => {
@@ -764,6 +775,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               block.order_quantity !== '' && Number.isFinite(orderQtyNum) && orderQtyNum > 0;
             const matched = preview?.resolved ?? null;
             const isOverride = block.override_open && block.override_unit_price.trim() !== '';
+            // A tier with unit_price=null exists in the DB when
+            // `replaceTiersForPart` couldn't compute a cost — e.g. a BOM
+            // material has no priced procurement tier. Treat that as the
+            // same "no pricing" state as zero tier rows, so the warning
+            // fires and the user isn't trapped typing a quantity that
+            // can't resolve to a line price.
+            const hasUsableTier = block.tiers.some((t) => t.unit_price !== null);
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -795,7 +813,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
                 {block.error && <Alert severity="error">{block.error}</Alert>}
 
-                {!block.loading && block.part && block.tiers.length === 0 && !block.error && (
+                {!block.loading && block.part && !hasUsableTier && !block.error && (
                   <Alert severity="warning">
                     This part has no pricing tiers yet.{' '}
                     <Link
@@ -878,8 +896,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       )}
                     </Box>
 
-                    {/* Pricing tiers reference (always visible) */}
-                    {block.tiers.length > 0 && (
+                    {/* Pricing tiers reference (only when at least one tier
+                        has a usable unit price — a tier with unit_price=null
+                        rendered as "1 · — each" before, which contradicted
+                        the warning above). */}
+                    {hasUsableTier && (
                       <Box>
                         <Typography
                           variant="caption"

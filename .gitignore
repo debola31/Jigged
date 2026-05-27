@@ -63,3 +63,6 @@ api/.cache/
 # Usability test data (contains user research / PII)
 docs/usability-tests/
 scripts/data/
+
+# Supabase
+supabase/.temp/

@@ -54,6 +54,7 @@ vi.mock('jspdf-autotable', () => ({
 
 vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersForPart: vi.fn().mockResolvedValue([]),
+  getTiersWithComputedPrices: vi.fn().mockResolvedValue([]),
 }));
 
 import { generateQuotePdf, quotePdfFilename } from '@/utils/quotePdf';
@@ -378,7 +379,7 @@ describe('generateQuotePdf', () => {
 
   it('renders a separate Pricing Tiers section for multi-tier parts', async () => {
     const tierMockModule = await import('@/utils/partPricingTiersAccess');
-    const getTiersMock = vi.mocked(tierMockModule.getTiersForPart);
+    const getTiersMock = vi.mocked(tierMockModule.getTiersWithComputedPrices);
     getTiersMock.mockResolvedValueOnce([
       {
         id: 't1', part_id: 'part-1', company_id: 'company-1', sequence: 1, quantity: 1,

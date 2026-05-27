@@ -18,7 +18,6 @@ import Divider from '@mui/material/Divider';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import NextLink from 'next/link';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
@@ -29,12 +28,7 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import {
-  getComputedPartCost,
-  getPartCostExplain,
-  type PartCostMissingLeaf,
-} from '@/utils/partsAccess';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getComputedPartCost } from '@/utils/partsAccess';
 import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
@@ -82,11 +76,6 @@ const formatCurrency = (n: number | null): string => {
 const formatQuantity = (n: number): string =>
   n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
-const formatQty = (q: number): string => {
-  if (Number.isInteger(q)) return String(q);
-  return q.toFixed(2).replace(/\.?0+$/, '');
-};
-
 /**
  * Materials editor on the part detail page.
  *
@@ -95,24 +84,26 @@ const formatQty = (q: number): string => {
  * row for an editor in place. No modal — keeps the editing flow consistent
  * with operations and avoids covering the rest of the page.
  *
- * Each saved row shows the child part name (linked), the child's
- * PartTypeChip, the BOM-line quantity + unit, and the cost contribution
- * (qty_in_primary × child_cost_at_cumulative_qty resolved live via
- * compute_part_cost_at_qty). When the child's cost is unknown, the
- * contribution shows "—" with a hover hint identifying the deepest
- * unpriced leaf — never a silent zero, since that would understate the
- * rolled-up cost without the user noticing.
+ * Each saved row shows the child part name (linked), the BOM-line
+ * quantity + unit, and a small table of the child's tier ladder (qty
+ * break + cost/unit from compute_part_cost_at_qty). The ladder is the
+ * full transparency a parent's tier pricing depends on: at parent qty N
+ * the child cost flows through `compute_part_cost_at_qty(child_id, N ×
+ * bom_qty_in_primary)`, which picks the child's tier matching that
+ * cascaded qty.
+ *
+ * Per-parent-unit totals are deliberately not rendered — the contribution
+ * varies by which parent tier you're at, so a single "Material total"
+ * number would mislead. The user reads the table per child to see how
+ * each tier price is built.
  *
  * After any mutation, reloads the BOM list and pings `onChanged` so the
  * parent page can rerun the stale-cost check.
  */
-interface BomRowCost {
-  /** Per-parent-unit contribution: qty_in_primary × child_cost_at_cumulative_qty. */
-  contribution: number | null;
-  /** Tooltip text when contribution is null. Pulled from compute_part_cost_explain. */
-  missingHint: string | null;
-  /** Specific leaf (when known) so the tooltip can link to it. */
-  missingLeaf: PartCostMissingLeaf | null;
+interface ChildCostTier {
+  qty: number;
+  unit: string;
+  costPerUnit: number | null;
 }
 
 export default function PartBomPanel({
@@ -126,12 +117,13 @@ export default function PartBomPanel({
   const [rows, setRows] = useState<BomLineWithChildPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Per-row cost contribution computed live from compute_part_cost_at_qty.
-  // The panel uses `displayQty` (= min(parent's pricing tier qty) ?? 1) so a
-  // qty-agnostic card still produces a fixed number per row. When a cost is
-  // null, an explain call surfaces the deepest unpriced leaf for the
-  // tooltip — so the user sees which part to fix, not just a generic dash.
-  const [costs, setCosts] = useState<Map<string, BomRowCost>>(new Map());
+  // Per-row tier ladder (one entry per qty break point on the child).
+  // Loaded after rows arrive. Each entry's costPerUnit comes from
+  // compute_part_cost_at_qty so the displayed numbers match what the
+  // parent's rollup uses at the corresponding cascaded qty.
+  const [tierLadders, setTierLadders] = useState<Map<string, ChildCostTier[]>>(
+    new Map(),
+  );
 
   // Inline editor state machine — same shape as RoutingOperationsList.
   const [editorState, setEditorState] = useState<
@@ -163,142 +155,94 @@ export default function PartBomPanel({
     fetchRows();
   }, [fetchRows]);
 
-  // Compute the per-row cost contributions live whenever rows change. The
-  // display qty is the parent's lowest-defined tier (or 1 if no tiers yet)
-  // so the card always shows a fixed number that matches the cheapest qty
-  // a quote could use. For sub-assembly tier cascading and unit conversion
-  // we delegate to the canonical SQL function via getComputedPartCost.
+  // Load each BOM row's tier ladder — the qty break points defined on the
+  // child + the cost at each (via compute_part_cost_at_qty). These are the
+  // exact numbers that feed the parent's rollup at each qty, so rendering
+  // them inline lets the user trace the math. Bought children pull qty
+  // break points from procurement tiers under the preferred vendor; made
+  // children pull them from their own pricing tiers.
   useEffect(() => {
     let cancelled = false;
 
     if (rows.length === 0) {
-      setCosts(new Map());
+      setTierLadders(new Map());
       return;
     }
 
     (async () => {
-      try {
-        // Pick the display qty. min(parent's tier quantity) ?? 1.
-        const tiers = await getTiersForPart(partId);
-        const displayQty =
-          tiers.length > 0
-            ? Math.min(...tiers.map((t) => t.quantity))
-            : 1;
+      const supabase = getSupabase();
+      const next = new Map<string, ChildCostTier[]>();
 
-        // Resolve unit conversions for BOM lines whose unit ≠ child's
-        // primary_unit, batched in one query.
-        const conversionLookups = rows
-          .filter(
-            (r) =>
-              r.child_part.primary_unit !== null &&
-              r.unit !== r.child_part.primary_unit,
-          )
-          .map((r) => ({ child_id: r.child_part.id, from_unit: r.unit }));
+      await Promise.all(
+        rows.map(async (row) => {
+          const child = row.child_part;
+          const unit = child.primary_unit ?? '';
 
-        const conversionMap = new Map<string, number>();
-        if (conversionLookups.length > 0) {
-          const supabase = getSupabase();
-          const partIds = [...new Set(conversionLookups.map((c) => c.child_id))];
-          const fromUnits = [...new Set(conversionLookups.map((c) => c.from_unit))];
-          const { data: convs } = await supabase
-            .from('parts_unit_conversions')
-            .select('part_id, from_unit, to_primary_factor')
-            .in('part_id', partIds)
-            .in('from_unit', fromUnits);
-          for (const c of (convs ?? []) as Array<{
-            part_id: string;
-            from_unit: string;
-            to_primary_factor: number;
-          }>) {
-            conversionMap.set(`${c.part_id}:${c.from_unit}`, Number(c.to_primary_factor));
-          }
-        }
-
-        const nextCosts = new Map<string, BomRowCost>();
-
-        await Promise.all(
-          rows.map(async (row) => {
-            const child = row.child_part;
-            const childPrimary = child.primary_unit;
-            const bomUnit = row.unit;
-            let qtyInPrimary: number;
-            if (childPrimary !== null && bomUnit !== childPrimary) {
-              const factor = conversionMap.get(`${child.id}:${bomUnit}`);
-              if (factor === undefined) {
-                nextCosts.set(row.id, {
-                  contribution: null,
-                  missingHint: `no unit conversion from "${bomUnit}" to "${childPrimary}" — add one on the child part`,
-                  missingLeaf: null,
-                });
-                return;
+          let breakpoints: number[] = [];
+          try {
+            if (child.source === 'bought') {
+              const { data: partRow } = await supabase
+                .from('parts')
+                .select('preferred_vendor_id')
+                .eq('id', child.id)
+                .maybeSingle();
+              const preferred = partRow?.preferred_vendor_id ?? null;
+              // Only the preferred vendor's tiers contribute to the rollup
+              // (compute_part_cost_at_qty restricts to preferred_vendor_id),
+              // so showing other vendors here would suggest costs that don't
+              // actually apply.
+              if (preferred) {
+                const { data } = await supabase
+                  .from('part_procurement_tiers')
+                  .select('min_quantity')
+                  .eq('part_id', child.id)
+                  .eq('vendor_id', preferred);
+                const rows = (data ?? []) as Array<{ min_quantity: number | string }>;
+                breakpoints = [
+                  ...new Set(rows.map((t) => Number(t.min_quantity))),
+                ].sort((a, b) => a - b);
               }
-              qtyInPrimary = row.quantity * factor;
             } else {
-              qtyInPrimary = row.quantity;
+              const { data } = await supabase
+                .from('part_pricing_tiers')
+                .select('quantity')
+                .eq('part_id', child.id)
+                .order('quantity', { ascending: true });
+              const rows = (data ?? []) as Array<{ quantity: number | string }>;
+              breakpoints = rows.map((t) => Number(t.quantity));
             }
+          } catch (err) {
+            console.warn('Failed to load tier breakpoints for', child.id, err);
+            breakpoints = [];
+          }
 
-            const cumulativeQty = displayQty * qtyInPrimary;
+          if (breakpoints.length === 0) {
+            next.set(row.id, []);
+            return;
+          }
 
-            let unitCost: number | null = null;
-            try {
-              unitCost = await getComputedPartCost(child.id, cumulativeQty);
-            } catch (err) {
-              nextCosts.set(row.id, {
-                contribution: null,
-                missingHint: (err as Error).message,
-                missingLeaf: null,
-              });
-              return;
-            }
-
-            if (unitCost === null) {
-              // Use explain to surface the deepest unpriced leaf.
-              let leaf: PartCostMissingLeaf | null = null;
-              let hint = '';
+          const ladder = await Promise.all(
+            breakpoints.map(async (qty) => {
+              let costPerUnit: number | null = null;
               try {
-                const explain = await getPartCostExplain(child.id, cumulativeQty);
-                leaf = explain.missing_leaves[0] ?? null;
-                if (leaf) {
-                  hint =
-                    leaf.part_id === child.id
-                      ? `no priced tier covers qty ${formatQty(cumulativeQty)} on this part — add a procurement tier.`
-                      : `no priced tier covers qty ${formatQty(leaf.qty_required)} for ${leaf.part_name} — add a procurement tier on that part.`;
-                }
+                costPerUnit = await getComputedPartCost(child.id, qty);
               } catch {
-                // explain failed; fall through to a generic message
+                costPerUnit = null;
               }
-              if (!hint) {
-                hint =
-                  child.source === 'bought'
-                    ? 'No procurement tier covers this qty — add one on the child part.'
-                    : 'A leaf in this subassembly has no priced tier — open the child to inspect.';
-              }
-              nextCosts.set(row.id, {
-                contribution: null,
-                missingHint: hint,
-                missingLeaf: leaf,
-              });
-              return;
-            }
+              return { qty, unit, costPerUnit };
+            }),
+          );
+          next.set(row.id, ladder);
+        }),
+      );
 
-            nextCosts.set(row.id, {
-              contribution: qtyInPrimary * unitCost,
-              missingHint: null,
-              missingLeaf: null,
-            });
-          }),
-        );
-
-        if (!cancelled) setCosts(nextCosts);
-      } catch (err) {
-        console.error('Failed to compute BOM costs:', err);
-      }
+      if (!cancelled) setTierLadders(next);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [rows, partId]);
+  }, [rows]);
 
   const closeEditor = () => {
     setEditorState({ mode: 'closed' });
@@ -404,16 +348,6 @@ export default function PartBomPanel({
       }
     : undefined;
 
-  const totalCost = rows.reduce((sum, row) => {
-    const c = costs.get(row.id);
-    if (!c || c.contribution === null) return sum;
-    return sum + c.contribution;
-  }, 0);
-  const anyMissingCost = rows.some((row) => {
-    const c = costs.get(row.id);
-    return !c || c.contribution === null;
-  });
-
   return (
     <Box>
       {error && (
@@ -468,8 +402,7 @@ export default function PartBomPanel({
         <Stack divider={<Divider flexItem />} spacing={0}>
           {rows.map((row) => {
             const child = row.child_part;
-            const rowCost = costs.get(row.id);
-            const contribution = rowCost ? rowCost.contribution : null;
+            const ladder = tierLadders.get(row.id) ?? [];
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -492,123 +425,117 @@ export default function PartBomPanel({
               <Box
                 key={row.id}
                 sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
                   py: 1.5,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
                 }}
               >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  {/* Restyled to read as an obvious link: primary color +
-                      always-underlined + trailing chevron. The rest of
-                      the row stays inert; edit/remove icons keep their
-                      own click targets. The href pushes this part onto
-                      the back chain so the destination renders a
-                      breadcrumb back to here. */}
-                  <Link
-                    component={NextLink}
-                    href={buildPartHref({
-                      companyId,
-                      targetPartId: child.id,
-                      chain: pushPartToChain(currentChain, partId, child.id),
-                    })}
-                    underline="always"
-                    color="primary.main"
-                    sx={{
-                      fontWeight: 500,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 0.25,
-                    }}
-                  >
-                    {child.part_name}
-                    <ChevronRightIcon sx={{ fontSize: 16 }} />
-                  </Link>
-                </Box>
-                <Box sx={{ minWidth: 110, textAlign: 'right' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {formatQuantity(row.quantity)} {row.unit}
-                  </Typography>
-                </Box>
-                <Box sx={{ minWidth: 100, textAlign: 'right' }}>
-                  {contribution === null ? (
-                    <Tooltip
-                      title={
-                        <Box>
-                          <Typography variant="caption" sx={{ display: 'block' }}>
-                            {rowCost?.missingHint ??
-                              (child.source === 'bought'
-                                ? 'No procurement tier covers this qty — add one on the child part.'
-                                : 'A leaf in this subassembly has no priced tier.')}
-                          </Typography>
-                          {rowCost?.missingLeaf &&
-                            rowCost.missingLeaf.part_id !== child.id && (
-                              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                                Leaf: {rowCost.missingLeaf.part_name}
-                              </Typography>
-                            )}
-                        </Box>
-                      }
+                {/* Header row: name + BOM qty + actions on one line, all
+                    centered at the part-name baseline. The tier table
+                    renders BELOW so the actions can't drift downward when
+                    a long ladder makes the left column taller. */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Link
+                      component={NextLink}
+                      href={buildPartHref({
+                        companyId,
+                        targetPartId: child.id,
+                        chain: pushPartToChain(currentChain, partId, child.id),
+                      })}
+                      underline="always"
+                      color="primary.main"
+                      sx={{
+                        fontWeight: 500,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 0.25,
+                      }}
                     >
-                      <Box
-                        component={NextLink}
-                        href={buildPartHref({
-                          companyId,
-                          targetPartId: rowCost?.missingLeaf?.part_id ?? child.id,
-                          chain: pushPartToChain(
-                            currentChain,
-                            partId,
-                            rowCost?.missingLeaf?.part_id ?? child.id,
-                          ),
-                        })}
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 0.5,
-                          color: 'text.secondary',
-                          textDecoration: 'none',
-                          '&:hover': { color: 'primary.main' },
-                        }}
-                      >
-                        <HelpOutlineIcon sx={{ fontSize: 14 }} />
-                        <Typography variant="body2">—</Typography>
-                      </Box>
-                    </Tooltip>
-                  ) : (
+                      {child.part_name}
+                      <ChevronRightIcon sx={{ fontSize: 16 }} />
+                    </Link>
+                  </Box>
+                  <Box sx={{ minWidth: 110, textAlign: 'right' }}>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {formatCurrency(contribution)}
+                      {formatQuantity(row.quantity)} {row.unit}
                     </Typography>
+                  </Box>
+                  {!readOnly && (
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <Tooltip title="Edit">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => openEdit(row.id)}
+                            disabled={editorOpen || saving}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Remove">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => setPendingDelete(row)}
+                            disabled={editorOpen || saving}
+                            sx={{
+                              color: 'text.secondary',
+                              '&:hover': { color: 'error.main' },
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Box>
                   )}
                 </Box>
-                {!readOnly && (
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    <Tooltip title="Edit">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => openEdit(row.id)}
-                          disabled={editorOpen || saving}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Remove">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => setPendingDelete(row)}
-                          disabled={editorOpen || saving}
-                          sx={{
-                            color: 'text.secondary',
-                            '&:hover': { color: 'error.main' },
-                          }}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+
+                {ladder.length > 0 ? (
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto auto',
+                      columnGap: 2,
+                      rowGap: 0.25,
+                      alignItems: 'baseline',
+                      width: 'fit-content',
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontWeight: 600 }}
+                    >
+                      Qty
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontWeight: 600, textAlign: 'right' }}
+                    >
+                      Cost / unit
+                    </Typography>
+                    {ladder.map((t, i) => (
+                      <Box key={`tier-${i}`} sx={{ display: 'contents' }}>
+                        <Typography variant="caption">
+                          {formatQuantity(t.qty)} {t.unit}
+                        </Typography>
+                        <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                          {t.costPerUnit === null
+                            ? '—'
+                            : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
+                        </Typography>
+                      </Box>
+                    ))}
                   </Box>
+                ) : (
+                  <Typography variant="caption" color="text.secondary">
+                    No pricing tiers on this part yet.
+                  </Typography>
                 )}
               </Box>
             );
@@ -625,29 +552,6 @@ export default function PartBomPanel({
             />
           )}
         </Stack>
-      )}
-
-      {rows.length > 0 && !loading && (
-        <Box
-          sx={{
-            mt: 2,
-            pt: 2,
-            borderTop: '1px solid',
-            borderColor: 'divider',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Typography variant="caption" color="text.secondary">
-            {anyMissingCost
-              ? 'Material total excludes lines with no child cost.'
-              : 'Material total (per parent unit)'}
-          </Typography>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {formatCurrency(totalCost)}
-          </Typography>
-        </Box>
       )}
 
       <Dialog open={!!pendingDelete} onClose={deleting ? undefined : () => setPendingDelete(null)}>

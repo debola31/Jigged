@@ -19,7 +19,7 @@ import type {
 import { isQuoteExpired } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
-import { getTiersForPart } from '@/utils/partPricingTiersAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { insertLineItemForPart, getLineItemsForQuote } from '@/utils/quoteLineItemsAccess';
 
 /**
@@ -382,7 +382,7 @@ export async function createQuote(
   let sequence = 10;
 
   for (const block of formData.parts) {
-    const tiers = await getTiersForPart(block.part_id);
+    const tiers = await getTiersWithComputedPrices(block.part_id);
     await insertLineItemForPart(
       quote.id,
       companyId,

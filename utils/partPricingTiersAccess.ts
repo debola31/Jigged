@@ -8,11 +8,13 @@ import {
 /**
  * Get all pricing tiers for a part, ordered by sequence.
  *
- * The `unit_price` field on each row reflects whatever was last persisted
- * (a denormalized cache from an older write path). It can drift from the
- * live recompute when underlying BOM costs change — see
- * `getTiersWithComputedPrices` for the canonical "what does this tier cost
- * right now" read used by the quote form, PDF, and line-item snapshot.
+ * `unit_price` is no longer stored in the DB — `getTiersWithComputedPrices`
+ * is the canonical "what does this tier cost right now" read used by the
+ * quote form, PDF, and line-item snapshot. This helper returns the tier
+ * metadata only and shapes `unit_price: null` so the existing
+ * `PartPricingTier` consumers keep type-checking; the bought-parts path
+ * (`getTiersWithComputedPrices` with no routing breakdown) relies on this
+ * default value.
  */
 export async function getTiersForPart(partId: string): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
@@ -26,7 +28,7 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
     console.error('Error fetching part pricing tiers:', error);
     throw error;
   }
-  return (data || []) as PartPricingTier[];
+  return (data || []).map((t) => ({ ...t, unit_price: null })) as PartPricingTier[];
 }
 
 /**
@@ -88,11 +90,9 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
  * Replace the full set of tiers for a part (upsert + delete diff).
  *
  * Persists tier metadata only: `quantity` (qty break) and `markup_percent`
- * (the user-controlled source of truth). The DB column `unit_price` is no
- * longer written — every read recomputes it live via
- * `getTiersWithComputedPrices` so the stored cache can't drift from the
- * underlying routing + BOM. The column stays nullable in the schema as
- * dead data pending a follow-up drop migration.
+ * (the user-controlled source of truth). The DB column `unit_price` was
+ * dropped — every read recomputes it live via `getTiersWithComputedPrices`
+ * so the stored cache can't drift from the underlying routing + BOM.
  *
  * Also writes parts.markup_rate_id from `opts.rateId`. Two callers, two
  * intents:
@@ -144,11 +144,6 @@ export async function replaceTiersForPart(
           sequence: tier.sequence,
           quantity: tier.quantity,
           markup_percent: tier.markup_percent,
-          // Null the legacy cache on every update so the stored column
-          // can't carry a stale price forward into a context where it
-          // might still be read by mistake. All real prices come from
-          // getTiersWithComputedPrices.
-          unit_price: null,
         })
         .eq('id', tier.id);
       if (error) throw error;

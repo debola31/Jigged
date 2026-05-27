@@ -365,6 +365,9 @@ async function ensureRouting(
  * `part_pricing_tiers` rows on the manufacturable test part — without them
  * the form shows "no pricing tiers yet" and the quote-to-job spec is forced
  * to runtime-skip. UNIQUE(part_id, sequence) keeps this idempotent.
+ *
+ * Tier rows only carry metadata (qty break + markup %); the unit price is
+ * derived live from the routing + BOM at read time.
  */
 async function ensurePricingTier(
   supabase: SupabaseClient,
@@ -372,7 +375,6 @@ async function ensurePricingTier(
   partId: string,
   sequence: number,
   quantity: number,
-  unitPrice: number,
   markupPercent: number,
 ): Promise<void> {
   const { data: existing, error: lookupErr } = await supabase
@@ -391,7 +393,6 @@ async function ensurePricingTier(
       company_id: companyId,
       sequence,
       quantity,
-      unit_price: unitPrice,
       markup_percent: markupPercent,
     });
   if (error) throw new Error(`pricing tier insert failed: ${error.message}`);
@@ -487,8 +488,8 @@ export default async function globalSetup(): Promise<void> {
   // when the spec types an order quantity. sequence is the UI ordering; the
   // tier-resolver matches by quantity, picking the highest tier with
   // tier_qty <= order_qty.
-  await ensurePricingTier(supabase, env.companyId, mfgPartId, 1, 1, 200, 50);
-  await ensurePricingTier(supabase, env.companyId, mfgPartId, 2, 10, 150, 40);
+  await ensurePricingTier(supabase, env.companyId, mfgPartId, 1, 1, 50);
+  await ensurePricingTier(supabase, env.companyId, mfgPartId, 2, 10, 40);
 
   // eslint-disable-next-line no-console
   console.log('[e2e/global-setup] Done.');

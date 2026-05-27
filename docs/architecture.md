@@ -31,10 +31,13 @@ Jigged/
 │   └── dashboard/[companyId]/  # Protected routes
 │       ├── customers/
 │       ├── parts/
-│       │   └── [partId]/routing/  # Routing editor (1:1 with part)
+│       │   └── [partId]/          # Routing edited inline on the part detail page
 │       ├── quotes/
-│       ├── jobs/
-│       └── operations/
+│       ├── jobs/                  # No /jobs/new — jobs come from quote conversion
+│       ├── work-centers/          # Replaces the old "Operations" module
+│       ├── vendors/
+│       ├── markup-rates/
+│       └── shipments/             # Feature-flagged per tenant
 │
 ├── components/
 │   ├── providers/           # AuthProvider, ThemeProvider
@@ -58,8 +61,12 @@ Jigged/
 │   └── services/          # Business logic
 │
 └── supabase/
-    └── schema.sql         # Database schema
+    ├── migrations/         # Source of truth for schema (timestamped)
+    ├── schema.staging.sql  # Auto-generated; do not edit
+    └── schema.prod.sql     # Auto-generated; do not edit
 ```
+
+Routings live **inline on the part detail page** (`PartRoutingPanel`) — there is no `/parts/[partId]/routing/` page. See [Routings](modules/routings.md).
 
 ---
 

@@ -117,11 +117,7 @@ Activity is derived from `created_at`, `started_at`, `completed_at`, `shipped_at
 
 - Click → Navigate to `/dashboard/{companyId}/quotes/new`
 
-### + New Job Button
-
-- Secondary button style
-
-- Click → Navigate to `/dashboard/{companyId}/jobs/new`
+> **Note:** The dashboard previously had a "+ New Job" button pointing at `/dashboard/{companyId}/jobs/new`. That route and button were removed in commit d9b7e98 — jobs are now created exclusively via quote conversion (see [Quotes](quotes.md) → "Convert to Job"). New quotes remain the entry point.
 
 ---
 

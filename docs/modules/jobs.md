@@ -133,31 +133,14 @@ Overdue surfaces as:
 
 ### 2. Job Create
 
-**Route:** `/dashboard/{companyId}/jobs/new`
+Jobs are **only** created via quote conversion. There is no standalone "New Job" form. The `/dashboard/{companyId}/jobs/new` route and "New Job" button were removed in commit d9b7e98; the spec previously here described that flow.
 
-**Note:** Jobs are usually created via quote conversion, but direct creation is supported.
+To create a job today:
+1. Build a quote with the desired customer / part / pricing tier.
+2. Open the quote detail page.
+3. Use the **Convert to Job** action; one job is produced per `(part, selected tier)` line on the quote.
 
-**Form Sections:**
-
-▸ **Customer** (required)
-
-- Customer dropdown with search with quick create option similar to quotes
-
-▸ **Part** (required)
-
-- Part dropdown (all company parts, independent of selected customer). A part must be selected to proceed. If the selected part has no routing, a warning is shown with a link to create one from the part detail page.
-
-**Note:** Routing is auto-resolved from the selected part. There is no routing dropdown. The part must have a routing defined for the job to be created.
-
-▸ **Notes**
-
-- Notes (multiline)
-
-**Actions:**
-
-- Create Job → Creates job in Not Started status, redirects to detail
-
-- Cancel → Returns to list
+The Convert flow lives in [Quotes](quotes.md) — see the "Convert to Job" section there for current behavior.
 
 ### 3. Job Detail View
 

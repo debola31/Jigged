@@ -2357,11 +2357,7 @@ Phase 0 is complete when the pilot shop owner can:
 
   - Click → Navigate to `/dashboard/{companyId}/quotes/new`
 
-### + New Job Button
-
-  - Secondary button style
-
-  - Click → Navigate to `/dashboard/{companyId}/jobs/new`
+  > **Note:** The dashboard previously had a "+ New Job" button pointing at `/dashboard/{companyId}/jobs/new`. That route and button were removed in commit d9b7e98 — jobs are now created exclusively via quote conversion. New quotes remain the entry point.
 
   ---
 
@@ -2542,29 +2538,7 @@ Phase 0 is complete when the pilot shop owner can:
 
 ### 2. Job Create
 
-  **Route:** `/dashboard/{companyId}/jobs/new`
-
-  **Note:** Jobs are usually created via quote conversion, but direct creation is supported.
-
-  **Form Sections:**
-
-  ▸ **Customer** (required)
-
-  - Customer dropdown with search with quick create part UX option similar to quotes
-
-  ▸ **Part**
-
-  - Part dropdown with search with quick create part UX option similar to quotes
-
-  ▸ **Notes**
-
-  - Notes (multiline)
-
-  **Actions:**
-
-  - Create Job → Creates job in Pending status, redirects to detail
-
-  - Cancel → Returns to list
+  Jobs are **only** created via quote conversion. The `/dashboard/{companyId}/jobs/new` route and standalone "New Job" form were removed in commit d9b7e98. See [Quotes](modules/quotes.md) → "Convert to Job" for the current flow; conversion produces one job per `(part, selected tier)` line on the quote.
 
 ### 3. Job Detail View
 

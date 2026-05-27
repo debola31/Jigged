@@ -1,14 +1,16 @@
-# Operations Module
+# Operations Module (Historical)
+
+> **Superseded by [Work Centers](work-centers.md).** Migration `20260502_unify_parts_inventory_add_work_centers_vendors.sql` dropped the `operation_types` table and replaced it with the `work_centers` table. The new design unifies internal machine capabilities and external outsourced work into a single entity with a `kind` enum. This document is retained for historical context only — it does not describe the current implementation.
 
 ## Overview
 
-The Operations module manages the catalog of operation types available in the shop. Operation types define what work can be done and at what cost — they're referenced when creating routings and for job costing.
+The Operations module managed the catalog of operation types available in the shop. Operation types defined what work could be done and at what cost — they were referenced when creating routings and for job costing.
 
-**Priority:** Must Have (Build after Parts, before Quotes)
+**Priority:** Historical.
 
-**Dependencies:** None (foundational module)
+**Dependencies:** None (was foundational).
 
-**Database Tables:** `operation_types`
+**Database Tables:** `operation_types` (dropped — see [work-centers.md](work-centers.md))
 
 ---
 

@@ -479,12 +479,9 @@ export default function PartBomPanel({
                         <span>
                           <IconButton
                             size="small"
+                            color="error"
                             onClick={() => setPendingDelete(row)}
                             disabled={editorOpen || saving}
-                            sx={{
-                              color: 'text.secondary',
-                              '&:hover': { color: 'error.main' },
-                            }}
                           >
                             <DeleteOutlineIcon fontSize="small" />
                           </IconButton>

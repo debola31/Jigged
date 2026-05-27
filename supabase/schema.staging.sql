@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing ERP - Database Schema
--- Generated: 2026-05-27T02:21:44Z
+-- Generated: 2026-05-27T03:58:00Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -375,8 +375,8 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     CONSTRAINT "parts_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
-    CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text]))),
-    CONSTRAINT "parts_stocked_requires_unit" CHECK (((NOT is_stocked) OR (primary_unit IS NOT NULL)))
+    CONSTRAINT "parts_requires_unit" CHECK ((primary_unit IS NOT NULL)),
+    CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
@@ -2692,6 +2692,7 @@ CREATE OR REPLACE FUNCTION public.compute_part_cost_at_qty(p_part_id uuid, p_qty
 AS $function$
 DECLARE
     v_source text;
+    v_part_name text;
     v_preferred_vendor_id uuid;
     v_routing_id uuid;
     v_total numeric := 0;
@@ -2708,8 +2709,8 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT source, preferred_vendor_id
-      INTO v_source, v_preferred_vendor_id
+    SELECT source, part_name, preferred_vendor_id
+      INTO v_source, v_part_name, v_preferred_vendor_id
       FROM public.parts
      WHERE id = p_part_id;
     IF v_source IS NULL THEN
@@ -2731,7 +2732,7 @@ BEGIN
          ORDER BY t.cost_per_unit ASC,
                   t.min_quantity DESC
          LIMIT 1;
-        RETURN v_tier_cost;  -- NULL propagates if no tier matches under preferred vendor
+        RETURN v_tier_cost;
     END IF;
 
     -- ---------- Made parts: own routing + BOM rollup ----------
@@ -2754,7 +2755,7 @@ BEGIN
                 IF v_op.labor_rate_override IS NULL AND v_op.wc_labor_rate IS NULL THEN
                     RAISE EXCEPTION
                         'Cannot compute cost for part %: internal routing op has no labor rate (neither override nor work_center default)',
-                        p_part_id
+                        v_part_name
                         USING ERRCODE = 'check_violation';
                 END IF;
                 v_op_cost := (COALESCE(v_op.setup_minutes, 0) / p_qty
@@ -2765,7 +2766,7 @@ BEGIN
                 IF v_op.external_unit_price IS NULL AND v_op.external_setup_cost IS NULL THEN
                     RAISE EXCEPTION
                         'Cannot compute cost for part %: external routing op has no pricing (neither external_unit_price nor external_setup_cost)',
-                        p_part_id
+                        v_part_name
                         USING ERRCODE = 'check_violation';
                 END IF;
                 v_op_cost := COALESCE(v_op.external_unit_price, 0)
@@ -2779,7 +2780,8 @@ BEGIN
         SELECT b.quantity,
                b.unit,
                b.child_part_id,
-               c.primary_unit AS child_primary_unit
+               c.primary_unit AS child_primary_unit,
+               c.part_name    AS child_part_name
           FROM public.parts_bom b
           JOIN public.parts c ON c.id = b.child_part_id
          WHERE b.parent_part_id = p_part_id
@@ -2792,7 +2794,7 @@ BEGIN
             IF v_to_primary_factor IS NULL THEN
                 RAISE EXCEPTION
                     'No unit conversion from % to % for part %',
-                    v_bom.unit, v_bom.child_primary_unit, v_bom.child_part_id
+                    v_bom.unit, v_bom.child_primary_unit, v_bom.child_part_name
                     USING ERRCODE = 'check_violation';
             END IF;
             v_qty_in_primary_unit := v_bom.quantity * v_to_primary_factor;

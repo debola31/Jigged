@@ -167,9 +167,9 @@ export default function PartForm({
       }
     }
 
-    // DB CHECK: parts_stocked_requires_unit
-    if (formData.is_stocked && !(formData.primary_unit && formData.primary_unit.trim())) {
-      errors.primary_unit = 'Unit of measurement is required for stocked parts';
+    // DB CHECK: parts_requires_unit — every part needs a primary unit.
+    if (!(formData.primary_unit && formData.primary_unit.trim())) {
+      errors.primary_unit = 'Unit of measurement is required';
     }
 
     if (formData.reorder_point !== null && formData.reorder_point < 0) {
@@ -192,16 +192,10 @@ export default function PartForm({
 
     const payload: PartFormData = {
       ...formData,
-      // Ensure null-vs-empty consistency for primary_unit on the way to the DB.
       primary_unit:
-        formData.is_stocked && formData.primary_unit && formData.primary_unit.trim() !== ''
+        formData.primary_unit && formData.primary_unit.trim() !== ''
           ? formData.primary_unit.trim()
           : null,
-      // `quantity` is stripped by formDataToInsert before the DB write —
-      // it only changes through inventory_transactions for audit. The form
-      // also never writes cost; cost is computed live by
-      // compute_part_cost_at_qty (made parts) or read from the Procurement
-      // Cost panel's tier sheets (bought parts).
     };
 
     try {
@@ -248,7 +242,7 @@ export default function PartForm({
 
   const canDelete = !part || ((part.quotes_count ?? 0) === 0 && (part.jobs_count ?? 0) === 0);
 
-  const showUomField = formData.is_stocked;
+  const showReorderPointField = formData.is_stocked;
   // Preferred vendor is procurement-only — a stocked sub-assembly has no
   // vendor because you make it yourself. Gated on source, not on stocked.
   const showVendorPicker = formData.source === 'bought';
@@ -347,82 +341,68 @@ export default function PartForm({
         </CardContent>
       </Card>
 
-      {/* Stocked-only fields: UOM + reorder point. Quantity on hand is NOT
-          edited here — it's managed through Add Stock / Remove Stock /
-          Adjust on the part detail page so every change goes through
-          inventory_transactions. UOM is the standard-units combobox (chunk
-          14); unit conversions live on the part detail page, not here. */}
-      {/* Inventory card combines stocking fields (UOM + reorder point) with
-          the preferred vendor picker. UOM/reorder appear when is_stocked;
-          vendor appears when source='bought' (a stocked sub-assembly is
-          made in-shop and has no vendor). The card itself shows when at
-          least one of those conditions is true. */}
-      {(showUomField || showVendorPicker) && (
-        <Card elevation={2} sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-              Inventory
-            </Typography>
-            <Grid container spacing={3}>
-              {showUomField && (
-                <>
-                  <Grid size={{ xs: 12, sm: 6 }}>
-                    <UnitOfMeasurementSelect
-                      value={formData.primary_unit}
-                      onChange={(next) => {
-                        setFormData((prev) => ({ ...prev, primary_unit: next }));
-                        if (fieldErrors.primary_unit) {
-                          setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
-                        }
-                      }}
-                      companyId={companyId}
-                      required
-                      disabled={loading}
-                      error={!!fieldErrors.primary_unit}
-                      helperText={
-                        fieldErrors.primary_unit ||
-                        'Costs and quantities are denominated in this unit.'
-                      }
-                    />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 6 }}>
-                    <TextField
-                      fullWidth
-                      label="Reorder Point"
-                      type="number"
-                      value={formData.reorder_point ?? ''}
-                      onChange={handleNumberChange('reorder_point')}
-                      error={!!fieldErrors.reorder_point}
-                      helperText={
-                        fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts when reached.'
-                      }
-                      disabled={loading}
-                      inputProps={{ min: 0, step: 'any' }}
-                    />
-                  </Grid>
-                </>
-              )}
-              {showVendorPicker && (
-                <Grid size={{ xs: 12 }}>
-                  <VendorAutocomplete
-                    companyId={companyId}
-                    valueId={formData.preferred_vendor_id}
-                    onChange={(vendor) => {
-                      setFormData((prev) => ({
-                        ...prev,
-                        preferred_vendor_id: vendor ? vendor.id : null,
-                      }));
-                    }}
-                    disabled={loading}
-                    label="Preferred Vendor"
-                    helperText="Optional. The default supplier for this part."
-                  />
-                </Grid>
-              )}
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+            Inventory
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <UnitOfMeasurementSelect
+                value={formData.primary_unit}
+                onChange={(next) => {
+                  setFormData((prev) => ({ ...prev, primary_unit: next }));
+                  if (fieldErrors.primary_unit) {
+                    setFieldErrors((prev) => ({ ...prev, primary_unit: '' }));
+                  }
+                }}
+                companyId={companyId}
+                required
+                disabled={loading}
+                error={!!fieldErrors.primary_unit}
+                helperText={
+                  fieldErrors.primary_unit ||
+                  'Costs and quantities are denominated in this unit.'
+                }
+              />
             </Grid>
-          </CardContent>
-        </Card>
-      )}
+            {showReorderPointField && (
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Reorder Point"
+                  type="number"
+                  value={formData.reorder_point ?? ''}
+                  onChange={handleNumberChange('reorder_point')}
+                  error={!!fieldErrors.reorder_point}
+                  helperText={
+                    fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts when reached.'
+                  }
+                  disabled={loading}
+                  inputProps={{ min: 0, step: 'any' }}
+                />
+              </Grid>
+            )}
+            {showVendorPicker && (
+              <Grid size={{ xs: 12 }}>
+                <VendorAutocomplete
+                  companyId={companyId}
+                  valueId={formData.preferred_vendor_id}
+                  onChange={(vendor) => {
+                    setFormData((prev) => ({
+                      ...prev,
+                      preferred_vendor_id: vendor ? vendor.id : null,
+                    }));
+                  }}
+                  disabled={loading}
+                  label="Preferred Vendor"
+                  helperText="Optional. The default supplier for this part."
+                />
+              </Grid>
+            )}
+          </Grid>
+        </CardContent>
+      </Card>
 
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
         {mode === 'edit' && (

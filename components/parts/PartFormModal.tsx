@@ -110,10 +110,6 @@ export default function PartFormModal({
 
   const handleStockedChange = (_e: unknown, checked: boolean) => {
     setFormData((prev) => ({ ...prev, is_stocked: checked }));
-    // If they're toggling off, clear any pending UOM validation.
-    if (!checked && fieldErrors.primary_unit) {
-      setFieldErrors((prev) => ({ ...prev, primary_unit: undefined }));
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -128,10 +124,10 @@ export default function PartFormModal({
       errors.part_name = 'Part name is required';
     }
 
-    // Mirror the DB CHECK so the user sees an inline field error rather than
-    // a Postgres exception bubbling up after the round-trip.
-    if (formData.is_stocked && !formData.primary_unit?.trim()) {
-      errors.primary_unit = 'Unit of measurement is required for stocked parts';
+    // Mirror parts_requires_unit so the user sees an inline field error rather
+    // than a Postgres exception bubbling up after the round-trip.
+    if (!formData.primary_unit?.trim()) {
+      errors.primary_unit = 'Unit of measurement is required';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -151,7 +147,7 @@ export default function PartFormModal({
       const payload: PartFormData = {
         ...formData,
         part_name: trimmedName,
-        primary_unit: formData.is_stocked ? formData.primary_unit?.trim() ?? null : null,
+        primary_unit: formData.primary_unit?.trim() ?? null,
       };
 
       const newPart = await createPart(companyId, payload);
@@ -278,28 +274,26 @@ export default function PartFormModal({
             sx={{ mb: 3 }}
           />
 
-          {/* Unit of measurement — required for stocked parts (DB CHECK
-              parts_stocked_requires_unit). Only shown when Stocked is on so
-              the modal stays minimal for parts that don't track quantity. */}
-          {formData.is_stocked && (
-            <UnitOfMeasurementSelect
-              value={formData.primary_unit}
-              onChange={(next) => {
-                setFormData((prev) => ({ ...prev, primary_unit: next }));
-                if (fieldErrors.primary_unit) {
-                  setFieldErrors((prev) => ({ ...prev, primary_unit: undefined }));
-                }
-              }}
-              companyId={companyId}
-              required
-              disabled={submitting}
-              error={!!fieldErrors.primary_unit}
-              helperText={
-                fieldErrors.primary_unit ||
-                'How quantities of this part are measured (each, lbs, sq in, …).'
+          {/* Unit of measurement — required for every part (DB CHECK
+              parts_requires_unit). Costs and quantities are denominated in
+              this unit; without it, downstream BOM and cost rollups break. */}
+          <UnitOfMeasurementSelect
+            value={formData.primary_unit}
+            onChange={(next) => {
+              setFormData((prev) => ({ ...prev, primary_unit: next }));
+              if (fieldErrors.primary_unit) {
+                setFieldErrors((prev) => ({ ...prev, primary_unit: undefined }));
               }
-            />
-          )}
+            }}
+            companyId={companyId}
+            required
+            disabled={submitting}
+            error={!!fieldErrors.primary_unit}
+            helperText={
+              fieldErrors.primary_unit ||
+              'How quantities of this part are measured (each, lbs, sq in, …).'
+            }
+          />
 
           {/* Preferred vendor — bought parts only. Optional; the user can
               also leave it blank and pick a vendor later from the part

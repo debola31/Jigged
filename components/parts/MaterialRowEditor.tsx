@@ -61,8 +61,8 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * The Unit field is constrained to the child's primary_unit + every
  * parts_unit_conversions.from_unit row for that child — typing an
  * unconvertible unit would silently break the cost rollup later in
- * compute_part_cost_at_qty. Children with no primary_unit fall back to
- * free-text since there's no canonical anchor to lock to.
+ * compute_part_cost_at_qty. The DB CHECK parts_requires_unit guarantees
+ * every part has a primary_unit, so there's no free-text fallback path.
  *
  * The editor is purely presentational. Cycle pre-check + addBomLine /
  * updateBomLine calls live in PartBomPanel which holds the state machine.
@@ -121,9 +121,9 @@ export default function MaterialRowEditor({
   }, [value.childPart?.id]);
 
   // Build the constrained option list: primary_unit first, then every
-  // conversion `from_unit`, de-duped, preserving order. When the child has
-  // no primary_unit (legacy/odd parts), this is empty and we fall back to
-  // free-text below — there's no canonical anchor unit to lock to.
+  // conversion `from_unit`, de-duped, preserving order. parts_requires_unit
+  // guarantees every child has a primary_unit, so the list is never empty
+  // once a child is picked.
   const unitOptions = useMemo<string[]>(() => {
     const child = value.childPart;
     if (!child) return [];
@@ -135,7 +135,6 @@ export default function MaterialRowEditor({
     return list;
   }, [value.childPart, conversionUnits]);
 
-  const noPrimaryUnit = !!value.childPart && !value.childPart.primary_unit;
   const onlyPrimaryAvailable =
     !!value.childPart && !!value.childPart.primary_unit && conversionUnits.length === 0;
 
@@ -148,12 +147,11 @@ export default function MaterialRowEditor({
     if (conversionsLoading) return;
     const child = value.childPart;
     if (!child) return;
-    if (noPrimaryUnit) return; // free-text fallback handles this
     if (unitOptions.includes(value.unit)) return;
     setValue((prev) => ({ ...prev, unit: child.primary_unit ?? '' }));
     // value.unit and value.childPart are read; updating value here is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unitOptions, conversionsLoading, noPrimaryUnit]);
+  }, [unitOptions, conversionsLoading]);
 
   const handlePartChange = (option: PartSelectOption | null) => {
     setValue((prev) => ({
@@ -171,12 +169,11 @@ export default function MaterialRowEditor({
     const qty = parseFloat(value.quantity);
     if (!Number.isFinite(qty) || qty <= 0) return false;
     if (!value.unit?.trim()) return false;
-    // When a primary_unit is defined, the unit must match one of the
-    // resolvable options. The free-text fallback (noPrimaryUnit) skips this
-    // check since there are no conversions to validate against.
-    if (!noPrimaryUnit && !unitOptions.includes(value.unit)) return false;
+    // The unit must match one of the resolvable options (primary_unit + any
+    // parts_unit_conversions rows for the child).
+    if (!unitOptions.includes(value.unit)) return false;
     return true;
-  }, [value, unitOptions, noPrimaryUnit]);
+  }, [value, unitOptions]);
 
   return (
     <Box
@@ -217,52 +214,40 @@ export default function MaterialRowEditor({
         {/* Unit picker: constrained to the child's primary_unit + every
             parts_unit_conversions.from_unit row. Free-text was removed
             because typed-but-unconvertible units silently broke the cost
-            rollup later. The no-primary-unit branch (legacy parts) keeps
-            the old free-text behavior. */}
-        {noPrimaryUnit ? (
-          <TextField
-            label="Unit"
-            value={value.unit}
-            onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
-            required
-            size="small"
-            disabled={saving}
-            sx={{ width: 110 }}
-            helperText="Child has no primary unit"
-          />
-        ) : (
-          <TextField
-            select
-            label="Unit"
-            value={value.childPart && unitOptions.includes(value.unit) ? value.unit : ''}
-            onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
-            required
-            size="small"
-            disabled={saving || !value.childPart || conversionsLoading || onlyPrimaryAvailable}
-            sx={{ width: 130 }}
-            slotProps={{
-              input: {
-                endAdornment: conversionsLoading ? (
-                  <InputAdornment position="end">
-                    <CircularProgress size={14} />
-                  </InputAdornment>
-                ) : undefined,
-              },
-            }}
-          >
-            {unitOptions.length === 0 && (
-              <MenuItem value="" disabled>
-                {value.childPart ? 'No units available' : 'Pick a part first'}
-              </MenuItem>
-            )}
-            {unitOptions.map((u) => (
-              <MenuItem key={u} value={u}>
-                {u}
-                {value.childPart?.primary_unit === u ? ' (primary)' : ''}
-              </MenuItem>
-            ))}
-          </TextField>
-        )}
+            rollup later. parts_requires_unit guarantees every child has a
+            primary_unit, so the option list is never empty once a child is
+            picked. */}
+        <TextField
+          select
+          label="Unit"
+          value={value.childPart && unitOptions.includes(value.unit) ? value.unit : ''}
+          onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
+          required
+          size="small"
+          disabled={saving || !value.childPart || conversionsLoading || onlyPrimaryAvailable}
+          sx={{ width: 130 }}
+          slotProps={{
+            input: {
+              endAdornment: conversionsLoading ? (
+                <InputAdornment position="end">
+                  <CircularProgress size={14} />
+                </InputAdornment>
+              ) : undefined,
+            },
+          }}
+        >
+          {unitOptions.length === 0 && (
+            <MenuItem value="" disabled>
+              {value.childPart ? 'No units available' : 'Pick a part first'}
+            </MenuItem>
+          )}
+          {unitOptions.map((u) => (
+            <MenuItem key={u} value={u}>
+              {u}
+              {value.childPart?.primary_unit === u ? ' (primary)' : ''}
+            </MenuItem>
+          ))}
+        </TextField>
       </Box>
 
       {value.childPart?.primary_unit &&

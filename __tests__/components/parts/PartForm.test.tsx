@@ -75,6 +75,8 @@ describe('PartForm', () => {
       ...EMPTY_PART_FORM,
       part_name: 'NEW-PART-001',
       description: 'Test Part Description',
+      // primary_unit is required for every part (DB CHECK parts_requires_unit).
+      primary_unit: 'each',
     };
 
     it('creates part and redirects on success', async () => {

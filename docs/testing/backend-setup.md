@@ -1,5 +1,45 @@
 # Backend Testing Setup
 
+## Local Supabase for tests (sub-PR 3c onwards)
+
+Backend integration tests + RLS tests (sub-PR 3d) run against an ephemeral local Supabase stack started via the CLI. They never touch staging or prod; the conftest exits with an actionable error if `TEST_SUPABASE_URL` is unset.
+
+```bash
+# Prereqs (once per machine):
+brew install supabase/tap/supabase     # or follow the CLI install docs
+docker --version                       # Docker must be running
+
+# Per session:
+supabase start                         # boots Postgres + Auth + Storage + Realtime locally
+eval "$(supabase status -o env)"       # exposes API_URL / ANON_KEY / SERVICE_ROLE_KEY
+
+# Run backend tests against local (prod-aligned key names with TEST_ prefix):
+cd api && \
+  TEST_SUPABASE_URL=$API_URL \
+  TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY \
+  TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY \
+  pytest -v
+
+# Tear down:
+supabase stop
+```
+
+CI does the same dance automatically — see `.github/workflows/test.yml`.
+
+The local-Supabase service-role key is publicly known (it's a fixed development default; not the staging or prod one), so using it for test setup is safe. The actual RLS assertions added in 3d use the publishable key + a user JWT — they exercise the policies the same way the app does.
+
+### JWT fixtures
+
+`api/tests/conftest.py` exposes three session-scoped fixtures that the 3d RLS tests build on:
+
+- `seeded_user_a` — creates a user + company (member of A only), signs in, yields `{user, user_id, access_token, company_id, client}` where `client` is an anon-key Supabase client carrying the user JWT.
+- `seeded_user_b` — symmetric on company B.
+- `seeded_company_b_graph` — builds the parent-child object graph in company B (vendor, internal work center, customer, made part, routing + one operation) so cross-tenant RLS tests have something to attempt to read.
+
+Smoke tests for the fixtures live at `api/tests/database/test_jwt_fixtures_smoke.py`. If those pass, the fixtures wire up correctly.
+
+---
+
 ## Step 1: Install Dependencies
 
 Create `api/requirements-test.txt`:

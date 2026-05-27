@@ -330,132 +330,81 @@ describe('quotesAccess utilities', () => {
 
   // ============== Create/Update Tests ==============
 
-  // TODO: Rewrite these tests against the new createQuote signature
-  // (parts: { part_id, tier_ids }[]) and the new line_items snapshot flow.
-  // The old tests asserted the single-quantity shape that has been removed.
-  describe.skip('createQuote', () => {
-    const validFormData: QuoteFormData = {
+  // createQuote takes the multi-part form shape (parts: QuoteFormPartBlock[])
+  // and snapshots one line_item per part. These tests cover the validation
+  // paths that fail BEFORE any Supabase call — the happy-path tests that
+  // require mocking insertLineItemForPart + writeCostSnapshotsForPart are
+  // sub-PR 3f+ territory.
+  describe('createQuote (validation paths)', () => {
+    const baseForm: QuoteFormData = {
       customer_id: 'customer-1',
-      part_type: 'existing',
-      part_id: 'part-1',
-      description: 'New quote',
-      quantity: '100',
-      unit_price: '25.50',
+      contact_id: '',
+      billing_address_id: '',
+      shipping_address_id: '',
+      parts: [{ part_id: 'part-1', order_quantity: 100 }],
+      lead_time_days: '14',
+      expiration_date: '',
     };
 
-    it('creates quote with valid data', async () => {
-      mockQueryBuilder.data = { ...mockQuote, id: 'new-quote-id' };
-      mockQueryBuilder.error = null;
-
-      const result = await createQuote('company-1', validFormData);
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('quotes');
-      expect(mockQueryBuilder.insert).toHaveBeenCalled();
-      expect(result.quote.id).toBe('new-quote-id');
-    });
-
-    it('validates quantity bounds - too low', async () => {
-      const invalidForm = { ...validFormData, quantity: '0' };
-
-      await expect(createQuote('company-1', invalidForm)).rejects.toThrow(
-        'Quantity must be between 1 and 1,000,000'
+    it('rejects when parts array is empty', async () => {
+      await expect(createQuote('company-1', { ...baseForm, parts: [] })).rejects.toThrow(
+        'A quote must include at least one part.',
       );
     });
 
-    it('validates quantity bounds - too high', async () => {
-      const invalidForm = { ...validFormData, quantity: '1000001' };
-
-      await expect(createQuote('company-1', invalidForm)).rejects.toThrow(
-        'Quantity must be between 1 and 1,000,000'
-      );
+    it('rejects when a part block has no part_id', async () => {
+      await expect(
+        createQuote('company-1', { ...baseForm, parts: [{ part_id: '', order_quantity: 5 }] }),
+      ).rejects.toThrow('Every part selection must reference a real part.');
     });
 
-    it('validates price bounds - negative', async () => {
-      const invalidForm = { ...validFormData, unit_price: '-1' };
-
-      await expect(createQuote('company-1', invalidForm)).rejects.toThrow(
-        'Unit price must be between 0 and 999,999.99'
-      );
+    it('rejects duplicate part_id within the same quote', async () => {
+      await expect(
+        createQuote('company-1', {
+          ...baseForm,
+          parts: [
+            { part_id: 'part-1', order_quantity: 5 },
+            { part_id: 'part-1', order_quantity: 10 },
+          ],
+        }),
+      ).rejects.toThrow('A part can only appear once on a quote');
     });
 
-    it('validates price bounds - too high', async () => {
-      const invalidForm = { ...validFormData, unit_price: '1000000' };
-
-      await expect(createQuote('company-1', invalidForm)).rejects.toThrow(
-        'Unit price must be between 0 and 999,999.99'
-      );
+    it('rejects order_quantity <= 0', async () => {
+      await expect(
+        createQuote('company-1', { ...baseForm, parts: [{ part_id: 'part-1', order_quantity: 0 }] }),
+      ).rejects.toThrow('Every part needs an order quantity greater than zero.');
     });
 
-    // The description field was removed from quotes in April 2026 — no longer a validation path.
-
-    it('creates quote with null part_id for adhoc quotes', async () => {
-      const adhocForm = { ...validFormData, part_type: 'adhoc' as const, part_id: '' };
-      mockQueryBuilder.data = { ...mockQuote, part_id: null };
-      mockQueryBuilder.error = null;
-
-      const result = await createQuote('company-1', adhocForm);
-
-      const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(insertCall.part_id).toBeNull();
-      expect(result.quote.part_id).toBeNull();
+    it('rejects lead_time_days > 3650', async () => {
+      await expect(
+        createQuote('company-1', { ...baseForm, lead_time_days: '5000' }),
+      ).rejects.toThrow('Lead time must be between 0 and 3,650 days');
     });
 
+    it('rejects negative lead_time_days', async () => {
+      await expect(
+        createQuote('company-1', { ...baseForm, lead_time_days: '-5' }),
+      ).rejects.toThrow('Lead time must be between 0 and 3,650 days');
+    });
   });
 
   describe('updateQuote', () => {
     const updateFormData: QuoteFormData = {
       customer_id: 'customer-1',
-      part_type: 'existing',
-      part_id: 'part-1',
-      description: 'Updated quote',
-      quantity: '200',
-      unit_price: '30.00',
+      contact_id: '',
+      billing_address_id: '',
+      shipping_address_id: '',
+      parts: [{ part_id: 'part-1', order_quantity: 200 }],
+      lead_time_days: '14',
+      expiration_date: '',
     };
 
-    // TODO: Rewrite for the new metadata-only updateQuote (customer/lead/expiration).
-    it.skip('updates pending approval quote successfully', async () => {
-      // First call - check status
-      let callCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { status: 'active', converted_to_job_id: null, part_id: null, base_cost: null, markup_percent: null, company_id: 'company-1' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        // Second call - update
-        return {
-          ...mockQueryBuilder,
-          update: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            eq: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { ...mockQuote, quantity: 200 },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        };
-      });
-
-      const result = await updateQuote('quote-1', updateFormData);
-
-      expect(result.quantity).toBe(200);
-    });
+    // The `pending_approval` quote status was removed in April 2026 (CLAUDE.md
+    // references the simplified status enum). The `updates pending approval
+    // quote successfully` test that used to live here was deleted because the
+    // flow it covered no longer exists. Update happy-path coverage against the
+    // metadata-only updateQuote is sub-PR 3f territory.
 
     it('rejects updating expired quotes', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
@@ -662,98 +611,14 @@ describe('quotesAccess utilities', () => {
 
   // ============== Convert to Job Tests ==============
 
-  // TODO: Rewrite for the new convertQuoteToJob signature
-  // (options.selections: one line_item_id per distinct part) producing N jobs.
-  describe.skip('convertQuoteToJob', () => {
-    it('converts approved quote to job', async () => {
-      let quotesCallCount = 0;
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quotes') {
-          quotesCallCount++;
-          if (quotesCallCount === 1) {
-            // First quotes call: fetch quote
-            return {
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  ...mockQueryBuilder,
-                  single: vi.fn().mockReturnValue({
-                    data: {
-                      ...mockQuote,
-                      status: 'approved',
-                      converted_to_job_id: null,
-                      quote_attachments: [],
-                    },
-                    error: null,
-                  }),
-                }),
-              }),
-            };
-          }
-          // Subsequent quotes calls: update quote with conversion info
-          return {
-            ...mockQueryBuilder,
-            update: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                select: vi.fn().mockReturnValue({
-                  ...mockQueryBuilder,
-                  single: vi.fn().mockReturnValue({
-                    data: { ...mockQuote, converted_to_job_id: 'job-1' },
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'routings') {
-          // Routing lookup (auto-resolve from part)
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                maybeSingle: vi.fn().mockReturnValue({
-                  data: { id: 'routing-1' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === 'jobs') {
-          return {
-            ...mockQueryBuilder,
-            insert: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              select: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                single: vi.fn().mockReturnValue({
-                  data: { id: 'job-1', job_number: 'J-2024-001' },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return mockQueryBuilder;
-      });
-
-      const result = await convertQuoteToJob('quote-1');
-
-      expect(result.job.id).toBe('job-1');
-      expect(result.job.job_number).toBe('J-2024-001');
-    });
-
-    // The "only approved quotes can convert" gate was removed in April 2026 —
-    // quotes can be converted from any status (with a warning for expired).
-    // Only the "already-converted" guard remains.
-
-    it('rejects already converted quotes', async () => {
+  // convertQuoteToJob produces ONE job that owns one job_part per
+  // quote_line_item. The "only approved quotes can convert" gate was removed
+  // in April 2026; only the already-converted and missing-line-items guards
+  // remain at the validation layer. The happy-path test that mocks the full
+  // RPC chain (job insert + create_job_part_operations_from_routing) is
+  // sub-PR 3f territory.
+  describe('convertQuoteToJob (validation paths)', () => {
+    it('rejects already-converted quotes', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
         select: vi.fn().mockReturnValue({
@@ -763,8 +628,8 @@ describe('quotesAccess utilities', () => {
             single: vi.fn().mockReturnValue({
               data: {
                 ...mockQuote,
-                status: 'approved',
-                converted_to_job_id: 'existing-job',
+                converted_at: '2026-04-16T10:00:00Z',
+                line_items: [],
               },
               error: null,
             }),
@@ -773,7 +638,27 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
-        'This quote has already been converted to a job'
+        'This quote has already been converted to a job',
+      );
+    });
+
+    it('rejects quotes with no line items', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        ...mockQueryBuilder,
+        select: vi.fn().mockReturnValue({
+          ...mockQueryBuilder,
+          eq: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            single: vi.fn().mockReturnValue({
+              data: { ...mockQuote, converted_at: null, line_items: [] },
+              error: null,
+            }),
+          }),
+        }),
+      }));
+
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
+        'This quote has no line items to convert.',
       );
     });
   });

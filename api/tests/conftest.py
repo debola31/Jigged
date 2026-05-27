@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from index import app
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def supabase_admin() -> Generator[Client, None, None]:
     """
     Create an admin Supabase client using the local-Supabase service-role key.
@@ -32,6 +32,10 @@ def supabase_admin() -> Generator[Client, None, None]:
     Requires TEST_SUPABASE_URL and TEST_SUPABASE_SECRET_KEY. No fallback to
     SUPABASE_URL / SUPABASE_SECRET_KEY (those are prod); silently running tests
     against prod is exactly the failure mode this guard prevents.
+
+    Session-scoped so seeded_user_a / seeded_user_b (also session-scoped) can
+    depend on it. The underlying client is stateless — sharing it across tests
+    in a session is safe.
     """
     url = os.getenv("TEST_SUPABASE_URL")
     if not url:
@@ -121,3 +125,221 @@ async def anon_client() -> AsyncGenerator[AsyncClient, None]:
         base_url="http://testserver"
     ) as ac:
         yield ac
+
+
+# ============================================================================
+# JWT-fixture scaffolding for RLS tests (sub-PR 3d builds on these).
+#
+# These fixtures exercise the policies the same way the app does: anon-key
+# clients carrying a real user JWT. Service-role only does the cross-tenant
+# setup (creating both companies + linking users); the actual SELECT/INSERT/
+# UPDATE/DELETE assertions go through the user-JWT client below.
+# ============================================================================
+
+
+def _publishable_key() -> str:
+    """Local Supabase publishable (anon) key, required for user-JWT clients."""
+    key = os.getenv("TEST_SUPABASE_PUBLISHABLE_KEY")
+    if not key:
+        pytest.exit(
+            "TEST_SUPABASE_PUBLISHABLE_KEY not configured. Required for JWT-fixture "
+            "tests. Run `supabase start` and `eval \"$(supabase status -o env)\"`."
+        )
+    return key
+
+
+def _create_seeded_user(supabase_admin: Client, company_name_suffix: str) -> dict:
+    """
+    Create an isolated company + auth user, link them via user_company_access,
+    and return a dict with everything an RLS test needs:
+
+        {
+          "user": SupabaseUser,
+          "user_id": str,
+          "access_token": str,
+          "company_id": str,
+          "client": Client,     # anon-key client carrying the user JWT
+        }
+
+    Email confirmation is set to True so signInWithPassword works immediately
+    (no inbucket roundtrip needed). Local-Supabase default service-role lets
+    us call auth.admin.create_user freely; on prod this fixture would never
+    work — that's intentional, the conftest exits if TEST_SUPABASE_URL is
+    unset earlier.
+    """
+    company = (
+        supabase_admin.table("companies")
+        .insert({"name": f"3c-{company_name_suffix}-{os.urandom(3).hex()}"})
+        .execute()
+    )
+    company_id = company.data[0]["id"]
+
+    email = f"3c-{company_name_suffix}-{os.urandom(4).hex()}@test.jigged.local"
+    password = "test-password-3c-rls"
+
+    created = supabase_admin.auth.admin.create_user(
+        {"email": email, "password": password, "email_confirm": True}
+    )
+    user = created.user
+    user_id = user.id
+
+    supabase_admin.table("user_company_access").insert(
+        {"user_id": user_id, "company_id": company_id, "role": "admin"}
+    ).execute()
+
+    # Anon-key client used for sign-in + downstream RLS-exercising calls.
+    anon_client = create_client(os.environ["TEST_SUPABASE_URL"], _publishable_key())
+    session = anon_client.auth.sign_in_with_password(
+        {"email": email, "password": password}
+    )
+    return {
+        "user": user,
+        "user_id": user_id,
+        "email": email,
+        "access_token": session.session.access_token,
+        "company_id": company_id,
+        "client": anon_client,
+    }
+
+
+def _teardown_seeded_user(supabase_admin: Client, seeded: dict) -> None:
+    """Reverse what _create_seeded_user did, in dependency order."""
+    # user_company_access cascades from companies; companies cascades to
+    # everything we own. Cleaning the auth user is the only step that
+    # doesn't cascade automatically.
+    supabase_admin.table("companies").delete().eq("id", seeded["company_id"]).execute()
+    try:
+        supabase_admin.auth.admin.delete_user(seeded["user_id"])
+    except Exception:
+        # Local-Supabase will sometimes 404 if the user is already gone via
+        # an explicit test step; we don't want teardown noise to fail tests.
+        pass
+
+
+@pytest.fixture(scope="session")
+def seeded_user_a(supabase_admin: Client) -> Generator[dict, None, None]:
+    """
+    Session-scoped: one user + one company, member of A only. RLS tests sign
+    in as this user to attempt cross-tenant operations against B's data.
+    """
+    seeded = _create_seeded_user(supabase_admin, "user-a")
+    yield seeded
+    _teardown_seeded_user(supabase_admin, seeded)
+
+
+@pytest.fixture(scope="session")
+def seeded_user_b(supabase_admin: Client) -> Generator[dict, None, None]:
+    """
+    Session-scoped counterpart to seeded_user_a. Used to populate company B
+    with rows that user A then attempts to read/write across the tenant boundary.
+    """
+    seeded = _create_seeded_user(supabase_admin, "user-b")
+    yield seeded
+    _teardown_seeded_user(supabase_admin, seeded)
+
+
+@pytest.fixture(scope="session")
+def seeded_company_b_graph(
+    supabase_admin: Client, seeded_user_b: dict
+) -> Generator[dict, None, None]:
+    """
+    Build the parent-child object graph in company B once per session. RLS
+    tests in sub-PR 3d read against this graph as user A and assert empty /
+    blocked / 403 results.
+
+    The graph mirrors a realistic shop: a customer, a vendor, two work
+    centers (internal + external), three parts (made, raw, sub-assembly), a
+    routing on the made part with one operation, and pricing tiers. Tables
+    that 3d's RLS tests cover (customers, parts, quotes, jobs, routings,
+    vendors, work_centers, shipments) all have at least one row here.
+
+    The shape of this fixture is intentionally close to e2e/global-setup.ts's
+    legacy_id-tagged seed — sub-PR 3g may reuse the same shape on the E2E
+    side.
+    """
+    company_b_id = seeded_user_b["company_id"]
+
+    # Vendor + work centers
+    vendor = (
+        supabase_admin.table("vendors")
+        .insert({"company_id": company_b_id, "name": "RLS-3d Vendor B"})
+        .execute()
+    )
+    vendor_id = vendor.data[0]["id"]
+
+    internal_wc = (
+        supabase_admin.table("work_centers")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "name": "RLS-3d Internal WC",
+                "kind": "internal",
+                "labor_rate": 75.0,
+            }
+        )
+        .execute()
+    )
+    internal_wc_id = internal_wc.data[0]["id"]
+
+    # Customer
+    customer = (
+        supabase_admin.table("customers")
+        .insert({"company_id": company_b_id, "name": "RLS-3d Customer B"})
+        .execute()
+    )
+    customer_id = customer.data[0]["id"]
+
+    # Part (made) — needs routing for downstream coverage
+    part = (
+        supabase_admin.table("parts")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "part_name": "RLS-3d-MFG-001",
+                "source": "made",
+                "primary_unit": "each",
+            }
+        )
+        .execute()
+    )
+    part_id = part.data[0]["id"]
+
+    routing = (
+        supabase_admin.table("routings")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "part_id": part_id,
+                "name": "RLS-3d Routing Default",
+            }
+        )
+        .execute()
+    )
+    routing_id = routing.data[0]["id"]
+
+    # routing_operations inherits company_id transitively via the routing FK;
+    # no company_id column on this table itself.
+    supabase_admin.table("routing_operations").insert(
+        {
+            "routing_id": routing_id,
+            "work_center_id": internal_wc_id,
+            "sequence": 10,
+            "setup_minutes": 30,
+            "cycle_minutes_per_unit": 2,
+        }
+    ).execute()
+
+    yield {
+        "company_id": company_b_id,
+        "user": seeded_user_b,
+        "vendor_id": vendor_id,
+        "work_center_id": internal_wc_id,
+        "customer_id": customer_id,
+        "part_id": part_id,
+        "routing_id": routing_id,
+    }
+
+    # Teardown order: clean up rows that the company-delete cascade won't
+    # reach automatically. The seeded_user_b teardown will delete the
+    # company itself; we leave the children alone here and let CASCADE
+    # handle them.

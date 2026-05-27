@@ -8,6 +8,7 @@ Requires AI_READONLY_DATABASE_URL to be set.
 """
 
 import json
+import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -91,6 +92,14 @@ def _mock_text_response(text: str):
     return response
 
 
+@pytest.mark.skipif(
+    not os.getenv("ANTHROPIC_API_KEY"),
+    reason=(
+        "ClaudeProvider() validates ANTHROPIC_API_KEY at construction even when "
+        "the chat call itself is mocked. Set ANTHROPIC_API_KEY (any value — "
+        "the API call is patched) to run these tests locally."
+    ),
+)
 class TestChatPipeline:
     """Tests for the full chat -> tool -> SQL -> response pipeline."""
 

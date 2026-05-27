@@ -51,5 +51,34 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-test.txt
 
+      # Local Supabase via the CLI — replays supabase/migrations/ on a fresh
+      # Postgres + Auth + Storage stack. Backend integration tests + RLS tests
+      # talk to this localhost instance instead of staging or prod. Default
+      # ports: API 54321, DB 54322.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        working-directory: ./
+        run: supabase start
+
+      - name: Export prod-aligned env vars
+        # `supabase status -o env` emits API_URL / ANON_KEY / SERVICE_ROLE_KEY.
+        # We re-export under the TEST_*_KEY names that conftest.py reads.
+        # PUBLISHABLE_KEY is required for the JWT fixtures added in 3c.
+        working-directory: ./
+        run: |
+          eval "$(supabase status -o env)"
+          echo "TEST_SUPABASE_URL=$API_URL" >> $GITHUB_ENV
+          echo "TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY" >> $GITHUB_ENV
+          echo "TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY" >> $GITHUB_ENV
+
       - name: Run tests
         run: pytest -v
+
+      - name: Stop local Supabase
+        if: always()
+        continue-on-error: true
+        working-directory: ./
+        run: supabase stop

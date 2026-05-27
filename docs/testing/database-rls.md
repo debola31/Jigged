@@ -18,7 +18,7 @@ import os
 pytestmark = pytest.mark.asyncio
 
 TEST_SUPABASE_URL = os.environ.get("TEST_SUPABASE_URL")
-TEST_SUPABASE_ANON_KEY = os.environ.get("TEST_SUPABASE_ANON_KEY")
+TEST_SUPABASE_PUBLISHABLE_KEY = os.environ.get("TEST_SUPABASE_PUBLISHABLE_KEY")
 
 
 class TestCustomerRLS:
@@ -49,7 +49,7 @@ class TestCustomerRLS:
         # Create client as user
         user_client = create_client(
             TEST_SUPABASE_URL, 
-            TEST_SUPABASE_ANON_KEY
+            TEST_SUPABASE_PUBLISHABLE_KEY
         )
         user_client.auth.set_session(
             session.session.access_token,
@@ -81,7 +81,7 @@ class TestCustomerRLS:
         
         user_client = create_client(
             TEST_SUPABASE_URL,
-            TEST_SUPABASE_ANON_KEY
+            TEST_SUPABASE_PUBLISHABLE_KEY
         )
         user_client.auth.set_session(
             session.session.access_token,
@@ -115,7 +115,7 @@ class TestCustomerRLS:
         
         user_client = create_client(
             TEST_SUPABASE_URL,
-            TEST_SUPABASE_ANON_KEY
+            TEST_SUPABASE_PUBLISHABLE_KEY
         )
         user_client.auth.set_session(
             session.session.access_token,
@@ -158,7 +158,7 @@ class TestPartsRLS:
         
         user_client = create_client(
             TEST_SUPABASE_URL,
-            TEST_SUPABASE_ANON_KEY
+            TEST_SUPABASE_PUBLISHABLE_KEY
         )
         user_client.auth.set_session(
             session.session.access_token,

@@ -619,7 +619,7 @@ pnpm test:e2e:ui       # Visual runner
   
   # Test Supabase credentials
   TEST_SUPABASE_URL = os.environ.get("TEST_SUPABASE_URL")
-  TEST_SUPABASE_KEY = os.environ.get("TEST_SUPABASE_SERVICE_KEY")
+  TEST_SUPABASE_KEY = os.environ.get("TEST_SUPABASE_SECRET_KEY")
   
   
   @pytest.fixture(scope="session")
@@ -1042,7 +1042,7 @@ pnpm test:e2e:ui       # Visual runner
   pytestmark = pytest.mark.asyncio
   
   TEST_SUPABASE_URL = os.environ.get("TEST_SUPABASE_URL")
-  TEST_SUPABASE_ANON_KEY = os.environ.get("TEST_SUPABASE_ANON_KEY")
+  TEST_SUPABASE_PUBLISHABLE_KEY = os.environ.get("TEST_SUPABASE_PUBLISHABLE_KEY")
   
   
   class TestCustomerRLS:
@@ -1073,7 +1073,7 @@ pnpm test:e2e:ui       # Visual runner
           # Create client as user
           user_client = create_client(
               TEST_SUPABASE_URL, 
-              TEST_SUPABASE_ANON_KEY
+              TEST_SUPABASE_PUBLISHABLE_KEY
           )
           user_client.auth.set_session(
               session.session.access_token,
@@ -1105,7 +1105,7 @@ pnpm test:e2e:ui       # Visual runner
           
           user_client = create_client(
               TEST_SUPABASE_URL,
-              TEST_SUPABASE_ANON_KEY
+              TEST_SUPABASE_PUBLISHABLE_KEY
           )
           user_client.auth.set_session(
               session.session.access_token,
@@ -1139,7 +1139,7 @@ pnpm test:e2e:ui       # Visual runner
           
           user_client = create_client(
               TEST_SUPABASE_URL,
-              TEST_SUPABASE_ANON_KEY
+              TEST_SUPABASE_PUBLISHABLE_KEY
           )
           user_client.auth.set_session(
               session.session.access_token,
@@ -1182,7 +1182,7 @@ pnpm test:e2e:ui       # Visual runner
           
           user_client = create_client(
               TEST_SUPABASE_URL,
-              TEST_SUPABASE_ANON_KEY
+              TEST_SUPABASE_PUBLISHABLE_KEY
           )
           user_client.auth.set_session(
               session.session.access_token,
@@ -1506,8 +1506,8 @@ pnpm test:e2e:ui       # Visual runner
   
   env:
     TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
-    TEST_SUPABASE_SERVICE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_KEY }}
-    TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
+    TEST_SUPABASE_SECRET_KEY: ${{ secrets.TEST_SUPABASE_SECRET_KEY }}
+    TEST_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.TEST_SUPABASE_PUBLISHABLE_KEY }}
   
   jobs:
     frontend-tests:
@@ -1619,8 +1619,8 @@ pnpm test:e2e:ui       # Visual runner
   | Secret Name | Description |
   |---|---|
   | TEST_SUPABASE_URL | Test project URL |
-  | TEST_SUPABASE_SERVICE_KEY | Service role key (bypasses RLS) |
-  | TEST_SUPABASE_ANON_KEY | Anon key for user simulation |
+  | TEST_SUPABASE_SECRET_KEY | Service role key (bypasses RLS) |
+  | TEST_SUPABASE_PUBLISHABLE_KEY | Anon key for user simulation |
   | TEST_PREVIEW_URL | Vercel preview URL for E2E |
 
   ---

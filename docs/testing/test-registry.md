@@ -1,130 +1,149 @@
 # Test Registry
 
-## Coverage Dashboard
+**Last updated:** 2026-05-27. Counts measured directly from `pnpm exec vitest --run --reporter=json` and `cd api && pytest --collect-only`.
 
-Current test coverage metrics:
+## Coverage dashboard
 
-| Metric | Target | Current |
+| Metric | Threshold | Current |
 |---|---|---|
-| Statements | 45% | ~65% |
-| Branches | 45% | ~59% |
-| Functions | 45% | ~67% |
-| Lines | 45% | ~66% |
+| Statements | 45% | 47.4% |
+| Branches | 45% | 42.3% (under threshold) |
+| Functions | 45% | 43.44% (under threshold) |
+| Lines | 45% | 48.64% |
 
----
+Two metrics are under the configured floor. Sub-PR 3e (CI hardening) makes this a PR-blocking check; sub-PR 3f+ closes the gaps. See [checklist.md](checklist.md) for the sequence.
 
-## Coverage Roadmap
+Coverage roadmap: 45% → 50% → 55% → 60%. Each 3f sub-PR raises the floor in lockstep with the tests it adds (ratchet, not target).
 
-- Phase 1: 45% (achieved)
+## Frontend test files (25 files, 348 tests + 9 skipped)
 
-- Phase 2: 50%
+### Utilities
 
-- Phase 3: 55%
-
-- Phase 4: 60%
-
----
-
-## Test Files Inventory
-
-### Unit Tests - Utilities
-
-| Module | File | Tests | Coverage |
-|---|---|---|---|
-| quotesAccess | __tests__/utils/quotesAccess.test.ts | 58 | ~67% |
-| companyAccess | __tests__/utils/companyAccess.test.ts | 23 | 100% |
-| operationsAccess | __tests__/utils/operationsAccess.test.ts | 35 | ~70% |
-| csvParser | __tests__/utils/csvParser.test.ts | 24 | 100% |
-| storageHelpers | __tests__/utils/storageHelpers.test.ts | 28 | 100% |
-| customerAccess | __tests__/utils/customerAccess.test.ts | 12 | ~34% |
-| partsAccess | __tests__/utils/partsAccess.test.ts | 26 | ~68% |
-
-### Component Tests
-
-| Component | File | Tests | Coverage |
-|---|---|---|---|
-| AuthGuard | __tests__/components/auth/AuthGuard.test.tsx | 11 | 93% |
-| CustomerForm | __tests__/components/customers/CustomerForm.test.tsx | 5 | ~58% |
-| PartForm | __tests__/components/parts/PartForm.test.tsx | 9 | ~52% |
-
-### Backend Tests (pytest)
-
-| Module | File | Description |
+| File | Tests | Coverage notes |
 |---|---|---|
-| Customer Import | api/tests/integration/test_import_api.py | 3-phase import flow |
-| Parts Import | api/tests/integration/test_parts_import_api.py | Parts CSV import |
-| Smoke | api/tests/test_smoke.py | Basic sanity checks |
+| `__tests__/utils/quotesAccess.test.ts` | 29 (+9 skipped) | `quotesAccess.ts` 33.33%. Skips: `createQuote`, `convertQuoteToJob`, pending-approval — fixed in sub-PR 3c. |
+| `__tests__/utils/storageHelpers.test.ts` | 31 | `storageHelpers.ts` 93.18%. |
+| `__tests__/utils/csvParser.test.ts` | 28 | `csvParser.ts` covered indirectly via import flows. |
+| `__tests__/utils/companyAccess.test.ts` | 25 | `companyAccess.ts` 64.04%. |
+| `__tests__/utils/routingCostCalculation.test.ts` | 22 | `routingCostCalculation.ts` 85.45%. |
+| `__tests__/utils/procurementTiersAccess.test.ts` | 20 | `partPricingTiersAccess.ts` 95.83% (related). |
+| `__tests__/utils/quotePdf.test.ts` | 18 | `quotePdf.ts` 91.66%. |
+| `__tests__/utils/partsAccess.test.ts` | 16 | `partsAccess.ts` 24.11%. |
+| `__tests__/utils/customerAccess.test.ts` | 11 | `customerAccess.ts` 31.81%. |
+| `__tests__/utils/quotePricingResolver.test.ts` | 9 | Embedded in `quotesAccess`. |
+| `__tests__/utils/operatorAccess.test.ts` | 6 | `operatorAccess.ts` not separately reported. |
+| `__tests__/utils/shipmentsAccess.test.ts` | 6 | `shipmentsAccess.ts` 15.26%. |
 
----
+### Components
 
-## Running Tests
+| File | Tests | Coverage |
+|---|---|---|
+| `__tests__/components/auth/AuthGuard.test.tsx` | 17 | `AuthGuard.tsx` 95%. |
+| `__tests__/components/inventory/StockStatusChip.test.tsx` | 8 | `StockStatusChip.tsx` covered indirectly. |
+| `__tests__/components/parts/UnitOfMeasurementSelect.test.tsx` | 7 | `UnitOfMeasurementSelect.tsx` 79.59%. |
+| `__tests__/components/auth/AdminGuard.test.tsx` | 6 | `AdminGuard.tsx` 90%. |
+| `__tests__/components/auth/ChangePassword.test.tsx` | 6 | `ChangePassword.tsx` 83.14%. |
+| `__tests__/components/layout/Sidebar.test.tsx` | 6 | `Sidebar.tsx` 95.23%. |
+| `__tests__/components/parts/PartForm.test.tsx` | 5 | `PartForm.tsx` 46.42%. |
+| `__tests__/components/customers/CustomerForm.test.tsx` | 4 | `CustomerForm.tsx` 51.11%. |
 
-### Frontend (Vitest)
+### Library / schema / types / smoke
 
-```bash
-# Run all tests
-pnpm test
+| File | Tests |
+|---|---|
+| `__tests__/types/quote.test.ts` | 23 |
+| `__tests__/lib/supabaseErrors.test.ts` | 21 |
+| `__tests__/lib/partNavStack.test.ts` | 20 |
+| `__tests__/schema/embedCheck.test.ts` | 9 |
+| `__tests__/smoke.test.ts` | 4 |
 
-# Run with UI dashboard
-pnpm test:ui
+## Backend test files (13 files, 151 tests)
 
-# Run with coverage report
-pnpm test:coverage
+### Unit
 
-# Run specific test file
-pnpm test __tests__/utils/quotesAccess.test.ts
-```
+| File | Description |
+|---|---|
+| `api/tests/unit/test_email.py` | Email-sending helpers and templates |
+| `api/tests/unit/test_sql_validator.py` | SQL grammar validation for the read-only insights endpoint |
 
-### Backend (pytest)
+### Integration (require `TEST_SUPABASE_URL` + `TEST_SUPABASE_SECRET_KEY`)
 
-```bash
-cd api
+| File | Description |
+|---|---|
+| `api/tests/integration/test_import_api.py` | 3-phase customer import flow (analyze / validate / execute) |
+| `api/tests/integration/test_parts_import_api.py` | Parts CSV import with AI mapping |
+| `api/tests/integration/test_bom_import_api.py` | BOM structure import |
+| `api/tests/integration/test_vendors_import_api.py` | Vendor CSV import (analyze / validate / execute) |
+| `api/tests/integration/test_work_centers_import_api.py` | Work-center CSV import |
+| `api/tests/integration/test_routings_import_api.py` | Routing CSV import |
+| `api/tests/integration/test_shipment_customer_consistency.py` | Triggers reject cross-customer line items |
+| `api/tests/integration/test_shipment_void_permutations.py` | Shipment void state-machine edge cases |
+| `api/tests/integration/test_insights_chat.py` | AI insights endpoint (skips when `AI_READONLY_DATABASE_URL` unset) |
+| `api/tests/integration/test_sql_executor.py` | Safe SQL execution for insights queries |
 
-# Run all tests
-pytest
+### Smoke
 
-# Run with verbose output
-pytest -v
+| File | Description |
+|---|---|
+| `api/tests/test_smoke.py` | Pytest-infrastructure sanity (collection, async, markers, exceptions) |
 
-# Run specific test file
-pytest tests/integration/test_import_api.py
+## E2E specs (4 files, 5 tests, 2 skipped)
 
-# Run with coverage
-pytest --cov=.
-```
+| File | Tests | Status |
+|---|---|---|
+| `e2e/smoke.spec.ts` | 2 | Passing — dashboard load + login page accessibility |
+| `e2e/quote-to-job.spec.ts` | 1 | Passing — quote create → job conversion (covers the May 2026 `jobs.status` regression path) |
+| `e2e/parts-and-routing.spec.ts` | 1 | **Always-skipped** at line 95 (`test.skip(true, …)`); resolved by sub-PR 3g |
+| `e2e/csv-import.spec.ts` | 1 | **CI-skipped** (`test.skip(!!process.env.CI, …)`); resolved by sub-PR 3g (Anthropic mock) |
 
----
+## Known gaps (unchanged from [checklist.md](checklist.md))
 
-## Known Gaps
+### Untested components — sub-PR 3f+ targets
 
-### Not Yet Tested (Frontend)
+- `components/quotes/QuoteForm.tsx`
+- `components/operations/OperationForm.tsx`
+- `components/auth/Login.tsx`, `components/auth/SignUp.tsx`, `components/auth/CompanySelector.tsx`
+- Import UI: `MappingReviewTable`, `ConflictDialog`, `ConfidenceChip`
+- `components/vendors/VendorAutocomplete.tsx`
 
-- utils/jobAttachmentsAccess.ts
+### Untested access files — sub-PR 3f+ targets
 
-- components/quotes/QuoteForm.tsx
+17 of 24 `utils/*Access.ts` files have no test file. Highest-impact:
+- `bomAccess.ts` (2.67% coverage)
+- `customerContactsAccess.ts` (1.78%)
+- `markupRatesAccess.ts` (6.29%)
+- `quoteLineItemsAccess.ts` (0%)
+- `routingsAccess.ts` (1.34%)
+- `partPricingTiersAccess.ts` (0%)
 
-- components/auth/Login.tsx
+### Backend gaps
 
-- components/auth/SignUp.tsx
-
-- components/auth/CompanySelector.tsx
-
-- components/operations/OperationForm.tsx
-
-- Import components (MappingReviewTable, ConflictDialog, etc.)
-
-### Not Yet Tested (Backend)
-
-- api/routes/operations_import_routes.py
-
-- AI provider unit tests
-
+- `api/routes/operations_import_routes.py` (no direct test file)
+- AI provider unit tests (`api/services/ai/*`)
 - Import framework service unit tests
+- RLS policies — sub-PR 3d
 
-### E2E Tests (Not Implemented)
+### E2E gaps
 
-- Authentication flow
+- Authentication flow (Login, SignUp, password reset, company selector)
+- Quote lifecycle beyond the convert-to-job happy path
+- Import workflows (csv-import covered only when 3g lands)
 
-- Quote lifecycle
+## How to run
 
-- Import workflows
+```bash
+# Frontend
+pnpm test                                    # watch mode
+pnpm test --run                              # one-shot
+pnpm test --run --coverage                   # with coverage
+pnpm test --run __tests__/<path>             # file-scoped
+
+# Backend
+cd api && pytest                             # all (with TEST_SUPABASE_URL set)
+cd api && pytest tests/unit/                 # unit only
+cd api && pytest -m integration              # integration marker
+
+# E2E
+pnpm test:e2e                                # full suite
+pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list
+```

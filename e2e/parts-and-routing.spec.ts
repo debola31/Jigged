@@ -36,6 +36,21 @@ test.describe('Parts and Routing workflow', () => {
     // Fill description
     await partFormDialog.getByLabel(/Description/i).fill(partDescription);
 
+    // Pick a primary unit. The parts_requires_unit DB constraint (added in
+    // 20260602000000_fix_cost_error_part_name_and_unit_canonicalization)
+    // makes primary_unit NOT NULL for every part, and PartFormModal gates
+    // submit on the same rule client-side — without this, validation blocks
+    // Create and the modal never closes.
+    //
+    // UnitOfMeasurementSelect wraps an MUI Autocomplete. A bare click on the
+    // combobox doesn't reliably open the listbox, so fill the input instead —
+    // that opens the dropdown AND filters to matching options. The rendered
+    // label for the 'each' standard unit is "Each (ea)".
+    const unitCombobox = partFormDialog.getByRole('combobox', { name: /Unit of measurement/i });
+    await expect(unitCombobox).toBeVisible();
+    await unitCombobox.fill('each');
+    await page.getByRole('option', { name: /Each \(ea\)/i }).first().click();
+
     // Submit — primary action is "Create" (was "Save" in the route-based form).
     await partFormDialog.getByRole('button', { name: /^Create$/i }).click();
 

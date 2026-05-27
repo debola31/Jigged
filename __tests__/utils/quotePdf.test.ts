@@ -136,7 +136,7 @@ const baseQuote: QuoteWithRelations = {
 
 const baseCompany: Company = {
   id: 'company-1',
-  name: 'Contour Tool & Machine',
+  name: 'Acme Precision Machining',
 };
 
 describe('generateQuotePdf', () => {
@@ -257,8 +257,8 @@ describe('generateQuotePdf', () => {
     const filledCompany: Company = {
       ...baseCompany,
       phone: '313-555-0100',
-      email: 'sales@contour.example',
-      website: 'https://contour.example',
+      email: 'sales@acmeprecision.example',
+      website: 'https://acmeprecision.example',
       address_line1: '1 Shop Street',
       city: 'Detroit',
       state: 'MI',
@@ -272,12 +272,12 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    expect(rendered).toContain('Contour Tool & Machine');
+    expect(rendered).toContain('Acme Precision Machining');
     expect(rendered).toContain('1 Shop Street');
     expect(rendered).toContain('313-555-0100');
     // Email and website are intentionally suppressed in the printable header.
-    expect(rendered).not.toContain('sales@contour.example');
-    expect(rendered).not.toContain('https://contour.example');
+    expect(rendered).not.toContain('sales@acmeprecision.example');
+    expect(rendered).not.toContain('https://acmeprecision.example');
   });
 
   it('combines short address_line1 + address_line2 onto a single line', async () => {
@@ -349,7 +349,7 @@ describe('generateQuotePdf', () => {
     const quoteWithCreator: QuoteWithRelations = {
       ...baseQuote,
       created_by: 'user-1',
-      created_by_member: { user_id: 'user-1', name: 'Johnny T', email: 'johnny@example.com' },
+      created_by_member: { user_id: 'user-1', name: 'Sam T', email: 'sam@example.com' },
     };
 
     await generateQuotePdf(quoteWithCreator, baseCompany);
@@ -360,8 +360,8 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered).toContain('CREATED BY');
-    expect(rendered).toContain('Johnny T');
-    expect(rendered).toContain('johnny@example.com');
+    expect(rendered).toContain('Sam T');
+    expect(rendered).toContain('sam@example.com');
   });
 
   it('omits the CREATED BY label when there is no creator on the quote', async () => {

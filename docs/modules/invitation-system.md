@@ -450,7 +450,7 @@ Hi,
 
 {inviter_name} has invited you to join {company_name} on Jigged as a {role}.
 
-Jigged is a manufacturing ERP system that helps shops manage work orders,
+Jigged is a manufacturing data platform that helps shops manage jobs,
 inventory, and shop floor operations.
 
 Click the link below to accept your invitation:
@@ -461,7 +461,7 @@ This invitation expires on {expires_date}.
 If you didn't expect this invitation, you can ignore this email.
 
 —
-Jigged Manufacturing ERP
+Jigged Manufacturing Data Platform
 ```
 
 #### Referral Invitation Email (Future Enhancement)

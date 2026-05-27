@@ -190,7 +190,7 @@ def get_job_status_distribution(company_id: str) -> dict:
     Returns the breakdown over production_status (not_started, in_progress,
     completed, cancelled). Fulfillment is a separate lifecycle and is not
     surfaced in this metric; PR 4 may add a parallel fulfillment-distribution
-    insight if Shane asks for one.
+    insight if customer feedback asks for one.
     """
     supabase = _get_supabase_service_role()
 

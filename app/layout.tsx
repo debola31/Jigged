@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     default: 'Jigged — Manufacturing Operations System',
   },
   description:
-    'Replace your rigid legacy ERP with a flexible operations system built for small precision manufacturing shops. Real-time visibility, flexible inventory, and operators who actually log their work.',
+    'A flexible data platform for small precision manufacturing shops. Real-time visibility, flexible inventory, and operators who actually log their work.',
   icons: {
     icon: '/icon.svg',
     apple: '/apple-icon.png',

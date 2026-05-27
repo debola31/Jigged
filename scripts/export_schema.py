@@ -709,7 +709,7 @@ class SchemaExporter:
         # Mask password in URL for display
         sections = [
             f"-- ============================================================",
-            f"-- Jigged Manufacturing ERP - Database Schema",
+            f"-- Jigged Manufacturing Data Platform - Database Schema",
             f"-- Generated: {timestamp}",
             f"-- Schemas: {', '.join(self.schemas)}",
             f"-- ============================================================",

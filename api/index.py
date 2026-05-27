@@ -40,7 +40,7 @@ else:
 
 app = FastAPI(
     title="Jigged API",
-    description="Jigged Manufacturing ERP API",
+    description="Jigged Manufacturing Data Platform API",
     version="1.0.0",
 )
 

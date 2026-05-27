@@ -10,7 +10,7 @@ A part owns three layers of information that drive quoting:
 2. **Cost breakdown** — labor + setup + materials, derived live from the routing. The Cost Breakdown card on the part detail page reloads automatically every time the routing auto-saves; there is no Recalculate button.
 3. **Pricing** — quantity break-points (e.g., 1, 2, 4 pieces) each with their own markup %. Markup % is the source of truth on a tier; unit price is always derived as `base_cost × (1 + markup/100)`. Typing a unit price directly back-calculates the markup. Tiers persist on the part; quotes snapshot tiers as immutable line items.
 
-This three-layer split mirrors how shops like Contour Tool & Machine already think: cost the part once, set quantity break-points once, then point quotes at the tiers that apply to a given customer conversation.
+This three-layer split mirrors how real shops already think: cost the part once, set quantity break-points once, then point quotes at the tiers that apply to a given customer conversation.
 
 **Priority:** Must Have (Build Second)
 

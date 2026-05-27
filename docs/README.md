@@ -1,6 +1,6 @@
 # Jigged Documentation
 
-Welcome to the Jigged Manufacturing ERP documentation.
+Welcome to the Jigged documentation. Jigged is a data platform for small precision manufacturing shops.
 
 ## Contents
 
@@ -11,7 +11,7 @@ Welcome to the Jigged Manufacturing ERP documentation.
 - [Design System](design-system.md) - UI/UX design guidelines and MUI theme
 
 ### Build Guide
-- [Build Sequence](build-sequence.md) - Phase 0 implementation roadmap
+- [Build Sequence](build-sequence.md) - Implementation roadmap
 
 ### Module Specifications
 See [modules/](modules/) for detailed specifications:
@@ -28,7 +28,3 @@ See [modules/](modules/) for detailed specifications:
 
 ### Testing
 See [testing/](testing/) for testing strategy and guides.
-
----
-
-*Migrated from Notion on $(date +%Y-%m-%d)*

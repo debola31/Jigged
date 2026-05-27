@@ -17,13 +17,13 @@ The traditional PRD opens with problem and goals. This one opens with a press re
 One material deviation from Cagan: he insists MVP should mean "Minimum Viable Prototype" because building production code for learning is wasteful. We are shipping production code as the prototype. The deviation is deliberate. Two conditions have changed since Cagan wrote that:
 
 1. AI-assisted development has compressed the cost of "production-quality enough" by an order of magnitude. The waste argument is weaker.
-2. Bri cannot be reached for a remote Figma walkthrough. Johnny is the only path to her, and Johnny needs to demo something real in her workflow.
+2. the shipping clerk cannot be reached for a remote Figma walkthrough. the salesperson is the only path to her, and the salesperson needs to demo something real in her workflow.
 
-So the beta-in-production *is* the prototype, gated behind a feature flag scoped to Contour. Cagan's underlying principle — validate before you commit to scale — is preserved. The artifact is different.
+So the beta-in-production *is* the prototype, gated behind a feature flag scoped to the pilot customer. Cagan's underlying principle — validate before you commit to scale — is preserved. The artifact is different.
 
-This is consistent with Fadell's V1 framing in Build: the first generation product is essentially a prototype that ships, for innovators and early adopters who tolerate a rough experience. Contour is exactly that profile.
+This is consistent with Fadell's V1 framing in Build: the first generation product is essentially a prototype that ships, for innovators and early adopters who tolerate a rough experience. the pilot customer is exactly that profile.
 
-One architectural commitment v2 makes deliberately: we are getting the job status model right on the first commit, not patching it later. The existing `jobs.status` enum (`not_started | in_progress | completed | shipped | cancelled`) conflates two independent concepts — what's happening in the shop versus what's happening to the customer's order. The conflation worked when no real shipments existed in the system. It breaks now. §7 makes this architecturally clean before we start writing shipment records against it. Doing this upfront is more work than reusing the existing `shipped` value would be, but it avoids a migration we'd otherwise be forced to run within weeks, and it removes a class of ambiguity that would confuse Bri on Friday ("is this job still being worked on?" cannot be answered if the only available status says `shipped`).
+One architectural commitment v2 makes deliberately: we are getting the job status model right on the first commit, not patching it later. The existing `jobs.status` enum (`not_started | in_progress | completed | shipped | cancelled`) conflates two independent concepts — what's happening in the shop versus what's happening to the customer's order. The conflation worked when no real shipments existed in the system. It breaks now. §7 makes this architecturally clean before we start writing shipment records against it. Doing this upfront is more work than reusing the existing `shipped` value would be, but it avoids a migration we'd otherwise be forced to run within weeks, and it removes a class of ambiguity that would confuse the shipping clerk on Friday ("is this job still being worked on?" cannot be answered if the only available status says `shipped`).
 
 ---
 
@@ -33,23 +33,23 @@ Jigged covers customer → part → quote → job → operator execution. It sto
 
 Fadell's framework distinguishes painkillers from vitamins. Painkillers solve acute, frequent, named pain. Vitamins are pleasant additions. The shipment work is two things bundled together, and they have different framings:
 
-**The painkiller is shipment visibility, not the packing slip.** Johnny spent six minutes in usability testing describing the inability to answer "where's my order?" without walking to find Bri. He uses the words: "I have to go find Bri up front and say, 'Can you look in here and tell me if this has been shipped?'" That is a pain felt every working day, multiple times per day, by a senior salesperson. Painkiller.
+**The painkiller is shipment visibility, not the packing slip.** the salesperson spent six minutes in usability testing describing the inability to answer "where's my order?" without walking to find the shipping clerk. He uses the words: "I have to go find the shipping clerk up front and say, 'Can you look in here and tell me if this has been shipped?'" That is a pain felt every working day, multiple times per day, by a senior salesperson. Painkiller.
 
-**The packing slip itself is closer to a vitamin.** Tangle has one. E2 has one. Every system in the category has one. Bri prints one every day; she's not bleeding. A better-looking slip is a nice addition but it's not what creates the relief moment.
+**The packing slip itself is closer to a vitamin.** Tangle has one. E2 has one. Every system in the category has one. the shipping clerk prints one every day; she's not bleeding. A better-looking slip is a nice addition but it's not what creates the relief moment.
 
-This distinction matters because it tells you what to design around. The packing slip is table stakes — get it right, ship it, move on. The visibility experience is where Jigged earns its place in Johnny's day.
+This distinction matters because it tells you what to design around. The packing slip is table stakes — get it right, ship it, move on. The visibility experience is where Jigged earns its place in the salesperson's day.
 
 ---
 
 ## 2. The press release
 
-Fadell's discipline: if you can't write the press release for the feature, you don't yet know what you're building. This is the press release for Jigged Shipments six months after launch, written from Johnny's perspective in his own voice. The acid test is whether it sounds true.
+Fadell's discipline: if you can't write the press release for the feature, you don't yet know what you're building. This is the press release for Jigged Shipments six months after launch, written from the salesperson's perspective in his own voice. The acid test is whether it sounds true.
 
-> "Used to be, every time a customer called asking where their order was at, I'd put them on hold, walk down to the front, find Bri, and have her dig through Tangle to see what shipped. Sometimes it took ten minutes. Now I just pull up the job in Jigged and I can see it right there — what's shipped, what's still owed, the packing slip number, the date, the tracking if she put it in. I'm answering customer calls in thirty seconds without leaving my desk. And the jobs list actually shows what's open versus done. Tangle had a whole bunch of jobs sitting open that were really shipped weeks ago. Jigged closes them on its own when the last piece goes out. Honestly the biggest thing for me isn't the packing slips, it's that I can finally see what's going on without bugging Bri."
+> "Used to be, every time a customer called asking where their order was at, I'd put them on hold, walk down to the front, find the shipping clerk, and have her dig through Tangle to see what shipped. Sometimes it took ten minutes. Now I just pull up the job in Jigged and I can see it right there — what's shipped, what's still owed, the packing slip number, the date, the tracking if she put it in. I'm answering customer calls in thirty seconds without leaving my desk. And the jobs list actually shows what's open versus done. Tangle had a whole bunch of jobs sitting open that were really shipped weeks ago. Jigged closes them on its own when the last piece goes out. Honestly the biggest thing for me isn't the packing slips, it's that I can finally see what's going on without bugging the shipping clerk."
 
-If that's what Johnny actually says in six months, the feature worked. Every requirement below should ladder up to making that paragraph true.
+If that's what the salesperson actually says in six months, the feature worked. Every requirement below should ladder up to making that paragraph true.
 
-What's notable about this press release: Johnny names the painkiller (visibility, not paperwork), he names a specific number (thirty seconds, ten minutes), he distinguishes Jigged from Tangle on the behavior that matters (auto-close), and he downgrades the packing slip relative to the visibility. The PRD should match this hierarchy.
+What's notable about this press release: the salesperson names the painkiller (visibility, not paperwork), he names a specific number (thirty seconds, ten minutes), he distinguishes Jigged from Tangle on the behavior that matters (auto-close), and he downgrades the packing slip relative to the visibility. The PRD should match this hierarchy.
 
 ---
 
@@ -59,17 +59,17 @@ Fadell asks: if one thing in this feature is perfect, what is it? The thing the 
 
 For Shipments, the headline moment is this:
 
-> A customer is on the phone with Johnny. Johnny types the PO number into Jigged's search bar. The job loads. At the top of the job page, in his immediate field of view, he sees: ordered, shipped, remaining, last ship date, packing slip number, tracking. He reads it to the customer. The call ends in under sixty seconds. Bri never knew the call happened.
+> A customer is on the phone with the salesperson. the salesperson types the PO number into Jigged's search bar. The job loads. At the top of the job page, in his immediate field of view, he sees: ordered, shipped, remaining, last ship date, packing slip number, tracking. He reads it to the customer. The call ends in under sixty seconds. the shipping clerk never knew the call happened.
 
 Three design implications follow from picking this moment as the anchor:
 
-**Information density is prioritized over visual minimalism on the job detail page.** Johnny is reading aloud during a phone call. He needs to see everything at once without scrolling, hovering, or clicking. This is where Jigged should look more like the legacy systems Johnny is used to (information-dense, scannable) than like a modern minimal SaaS dashboard. Johnny told us in usability testing that the new E2 layout "wasn't immediately recognizable" — change aversion is real in this market. The job detail header should be a heads-up display, not a hero section.
+**Information density is prioritized over visual minimalism on the job detail page.** the salesperson is reading aloud during a phone call. He needs to see everything at once without scrolling, hovering, or clicking. This is where Jigged should look more like the legacy systems the salesperson is used to (information-dense, scannable) than like a modern minimal SaaS dashboard. the salesperson told us in usability testing that the new E2 layout "wasn't immediately recognizable" — change aversion is real in this market. The job detail header should be a heads-up display, not a hero section.
 
-**Search has to be fast and forgiving.** A PO number, a job number, a customer name should all hit. Auto-suggest with the right answer in the first two characters typed. This is the moment Johnny is interrupting a phone call. Friction here is the whole feature failing.
+**Search has to be fast and forgiving.** A PO number, a job number, a customer name should all hit. Auto-suggest with the right answer in the first two characters typed. This is the moment the salesperson is interrupting a phone call. Friction here is the whole feature failing.
 
-**Auto-close has to be trustworthy.** If Johnny's customer is on the line and the job says "open" but it actually shipped last week (because someone forgot to close it), the painkiller becomes a poison pill. Auto-close from physical shipment events is what makes the displayed status believable.
+**Auto-close has to be trustworthy.** If the salesperson's customer is on the line and the job says "open" but it actually shipped last week (because someone forgot to close it), the painkiller becomes a poison pill. Auto-close from physical shipment events is what makes the displayed status believable.
 
-Every other flow in this PRD supports this moment. Shipment creation has to happen reliably so the data is there for Johnny. The packing slip has to print so Bri keeps using the system instead of routing around it. The job detail page has to render the status block before anything else loads. If we built shipment creation perfectly but the headline moment was broken, the feature would fail.
+Every other flow in this PRD supports this moment. Shipment creation has to happen reliably so the data is there for the salesperson. The packing slip has to print so the shipping clerk keeps using the system instead of routing around it. The job detail page has to render the status block before anything else loads. If we built shipment creation perfectly but the headline moment was broken, the feature would fail.
 
 ---
 
@@ -77,25 +77,25 @@ Every other flow in this PRD supports this moment. Shipment creation has to happ
 
 Cagan frames every product idea against four risks: value, usability, feasibility, business viability. This section names what we believe, what would prove us wrong, and which risk each belief addresses. The Friday demo is structured to probe all four.
 
-### Value risk: will Bri actually use the create-shipment flow?
+### Value risk: will the shipping clerk actually use the create-shipment flow?
 
-**What we believe:** Bri will adopt the create-shipment flow if it's three clicks or fewer for the common case (ship everything that's remaining on a job) and the resulting packing slip looks at least as good as Tangle's.
+**What we believe:** the shipping clerk will adopt the create-shipment flow if it's three clicks or fewer for the common case (ship everything that's remaining on a job) and the resulting packing slip looks at least as good as Tangle's.
 
-**Why we believe it:** Johnny said E2 "worked pretty well" for this job. E2 and Tangle both have the same basic flow pattern. The pain isn't the flow, it's the visibility downstream of it. If Bri's daily flow is comparable in friction to what she has now, adoption is mostly determined by whether the rest of the shop (Johnny, Shane) is using Jigged.
+**Why we believe it:** the salesperson said E2 "worked pretty well" for this job. E2 and Tangle both have the same basic flow pattern. The pain isn't the flow, it's the visibility downstream of it. If the shipping clerk's daily flow is comparable in friction to what she has now, adoption is mostly determined by whether the rest of the shop (the salesperson, the pilot shop owner) is using Jigged.
 
-**What would disprove it:** Bri watches Johnny demo the create-shipment flow on Friday and her reaction is "that's more steps than what I do now" or "I'd never give up Tangle for that." Or she tries it and gets stuck on a step we didn't anticipate.
+**What would disprove it:** the shipping clerk watches the salesperson demo the create-shipment flow on Friday and her reaction is "that's more steps than what I do now" or "I'd never give up Tangle for that." Or she tries it and gets stuck on a step we didn't anticipate.
 
-**How we mitigate it:** This is the riskiest assumption in the PRD because Bri has not been a research participant. Friday is the first time she sees anything. We mitigate by making her reaction the gating decision for Phase 3 (full rollout). If she objects on Friday, we don't build the full thing.
+**How we mitigate it:** This is the riskiest assumption in the PRD because the shipping clerk has not been a research participant. Friday is the first time she sees anything. We mitigate by making her reaction the gating decision for Phase 3 (full rollout). If she objects on Friday, we don't build the full thing.
 
-### Usability risk: can Bri figure out the flow without training?
+### Usability risk: can the shipping clerk figure out the flow without training?
 
-**What we believe:** A first-time user can create and print a packing slip in under five minutes during a guided session, with Johnny narrating but not clicking.
+**What we believe:** A first-time user can create and print a packing slip in under five minutes during a guided session, with the salesperson narrating but not clicking.
 
-**Why we believe it:** The flow is conventional. Every job-shop ERP in our research has roughly this pattern. Bri has used both E2 and Tangle and is comfortable with the genre.
+**Why we believe it:** The flow is conventional. Every job-shop ERP in our research has roughly this pattern. the shipping clerk has used both E2 and Tangle and is comfortable with the genre.
 
-**What would disprove it:** Bri can't find the "Create Shipment" button. Bri doesn't understand what "Shipping Arrangement" means. Bri creates the wrong quantity and doesn't realize it. Bri prints the slip and reacts negatively to its appearance.
+**What would disprove it:** the shipping clerk can't find the "Create Shipment" button. the shipping clerk doesn't understand what "Shipping Arrangement" means. the shipping clerk creates the wrong quantity and doesn't realize it. the shipping clerk prints the slip and reacts negatively to its appearance.
 
-**How we mitigate it:** Pre-Friday checklist requires a colleague (not Johnny) doing the flow cold. If they can't do it in five minutes, neither can Bri.
+**How we mitigate it:** Pre-Friday checklist requires a colleague (not the salesperson) doing the flow cold. If they can't do it in five minutes, neither can the shipping clerk.
 
 ### Feasibility risk: can we build it cleanly in the time we have?
 
@@ -105,15 +105,15 @@ Cagan frames every product idea against four risks: value, usability, feasibilit
 
 **How we mitigate it:** Phase 1 is shipped end-to-end (ugly) before Phase 2 begins. If feasibility blows up, we discover it before we've committed to polish.
 
-### Viability risk: does this make Shane more likely to pay for Jigged?
+### Viability risk: does this make the pilot shop owner more likely to pay for Jigged?
 
-**What we believe:** This feature, combined with quoting, brings Jigged across the threshold where Shane sees it as a credible Tangle replacement and is willing to start the paid-pilot conversation.
+**What we believe:** This feature, combined with quoting, brings Jigged across the threshold where the pilot shop owner sees it as a credible Tangle replacement and is willing to start the paid-pilot conversation.
 
-**Why we believe it:** Johnny's biggest complaint about Tangle is shipment visibility, and Shane reportedly cares most about reporting and accountability. Both of those concerns are addressed by the shipment data this feature captures. The auto-close feature alone removes one of the most visible operational frustrations in Shane's current setup ("half of them are closed").
+**Why we believe it:** the salesperson's biggest complaint about Tangle is shipment visibility, and the pilot shop owner reportedly cares most about reporting and accountability. Both of those concerns are addressed by the shipment data this feature captures. The auto-close feature alone removes one of the most visible operational frustrations in the pilot shop owner's current setup ("half of them are closed").
 
-**What would disprove it:** Shane sees the demo and says "interesting but I need [other feature] first." Or Shane uses it for two weeks and his behavior doesn't change because Tangle is still the source of truth for him.
+**What would disprove it:** the pilot shop owner sees the demo and says "interesting but I need [other feature] first." Or the pilot shop owner uses it for two weeks and his behavior doesn't change because Tangle is still the source of truth for him.
 
-**How we mitigate it:** The post-Friday decision framework explicitly includes a "Shane conversation" trigger — when do we ask Shane the paid-pilot question? The answer should be after Bri has used the system for at least one week and we have signal from her.
+**How we mitigate it:** The post-Friday decision framework explicitly includes a "the pilot shop owner conversation" trigger — when do we ask the pilot shop owner the paid-pilot question? The answer should be after the shipping clerk has used the system for at least one week and we have signal from her.
 
 ---
 
@@ -121,25 +121,25 @@ Cagan frames every product idea against four risks: value, usability, feasibilit
 
 V1 of the PRD treated three personas equally. Cagan would force a hierarchy. Here it is.
 
-### Primary user: Bri (shipping clerk)
+### Primary user: the shipping clerk (shipping clerk)
 
-Bri uses the create-shipment flow daily. She is the user whose adoption determines whether the feature is real or theoretical. Every functional requirement in this PRD should pass the "Bri can do this on Friday" test.
+the shipping clerk uses the create-shipment flow daily. She is the user whose adoption determines whether the feature is real or theoretical. Every functional requirement in this PRD should pass the "the shipping clerk can do this on Friday" test.
 
-What we know about Bri: she handles shipping at Contour. Johnny mentioned her by name. She uses Tangle today. That's it. Everything else in v1's persona description was invented from Johnny's secondhand account.
+What we know about the shipping clerk: she handles shipping at the pilot customer. the salesperson mentioned her by name. She uses Tangle today. That's it. Everything else in v1's persona description was invented from the salesperson's secondhand account.
 
 This is the riskiest gap in the PRD. The Friday demo is the first time we will have direct contact with this user. The whole beta exists to convert her from an inferred user to an observed one.
 
-### Secondary user: Johnny (salesperson, primary buyer-proxy)
+### Secondary user: the salesperson (salesperson, primary buyer-proxy)
 
-Johnny doesn't create shipments. He consumes the data Bri's flow generates. His daily pain — "where's my order?" — is the visibility experience, not the create flow. The job detail page and the job list views are his surfaces.
+the salesperson doesn't create shipments. He consumes the data the shipping clerk's flow generates. His daily pain — "where's my order?" — is the visibility experience, not the create flow. The job detail page and the job list views are his surfaces.
 
-Johnny is also the buyer-proxy: he's the user Shane listens to about whether Jigged is working. Johnny's experience is what creates the case for Shane to pay for Jigged. Cagan's framing: features that empower the daily user create the references that empower the sale.
+the salesperson is also the buyer-proxy: he's the user the pilot shop owner listens to about whether Jigged is working. the salesperson's experience is what creates the case for the pilot shop owner to pay for Jigged. Cagan's framing: features that empower the daily user create the references that empower the sale.
 
-### Secondary user: Shane (owner, budget owner)
+### Secondary user: the pilot shop owner (owner, budget owner)
 
-Shane cares about reporting. He's interested in fulfillment rates by customer, on-time delivery, jobs that have been stuck open too long. None of these reports ship in v1. The data layer captures everything Shane will eventually want; the reports come after pilot validation.
+the pilot shop owner cares about reporting. He's interested in fulfillment rates by customer, on-time delivery, jobs that have been stuck open too long. None of these reports ship in v1. The data layer captures everything the pilot shop owner will eventually want; the reports come after pilot validation.
 
-Shane is the budget owner and the gate to a paid pilot. His experience of this feature is "Johnny stopped complaining about Tangle" and "the open-orders list actually means something now." Indirect but high-leverage.
+the pilot shop owner is the budget owner and the gate to a paid pilot. His experience of this feature is "the salesperson stopped complaining about Tangle" and "the open-orders list actually means something now." Indirect but high-leverage.
 
 ### Out-of-scope user: operator
 
@@ -151,15 +151,15 @@ Operators do not create or view shipments in v1. They see "this job has shipped"
 
 ### Primary goals
 
-- Make the headline moment from §3 real. Johnny answers a customer's "where's my order?" call in under 60 seconds without leaving his desk.
-- Get Bri to use the create-shipment flow at least once on Friday with Johnny watching, and ideally multiple times in the week after.
+- Make the headline moment from §3 real. the salesperson answers a customer's "where's my order?" call in under 60 seconds without leaving his desk.
+- Get the shipping clerk to use the create-shipment flow at least once on Friday with the salesperson watching, and ideally multiple times in the week after.
 - Auto-close jobs when fully shipped so the open-orders list reflects reality.
 - Produce a packing slip that's at least as good as Tangle's.
 
 ### Secondary goals
 
 - Capture shipment data cleanly enough that it becomes a useful dataset for the platform thesis (delivery performance, customer concentration, repeat ship-to patterns) when reporting ships in v1.1.
-- Earn the Contour pilot conversation. Move Contour from design partner to reference customer.
+- Earn the the pilot customer pilot conversation. Move the pilot customer from design partner to reference customer.
 - Set up the data model so that future work (carrier integrations, BOL generation, customer portal) slots in without rework.
 
 ### Non-goals
@@ -203,7 +203,7 @@ unshipped → partially_shipped → fully_shipped
 
 These evolve independently. Examples of real states that the old conflated enum cannot represent cleanly:
 
-- *In production AND partially shipped:* 10 of 50 parts are made and shipped; the remaining 40 are still being machined. Production = `in_progress`, Fulfillment = `partially_shipped`. Common at Contour today.
+- *In production AND partially shipped:* 10 of 50 parts are made and shipped; the remaining 40 are still being machined. Production = `in_progress`, Fulfillment = `partially_shipped`. Common at the pilot customer today.
 - *Completed AND unshipped:* the parts are finished and sitting in finished goods, waiting for the customer to pick them up next Tuesday. Production = `completed`, Fulfillment = `unshipped`. This is the "Ready to Ship" queue.
 - *Cancelled AND partially shipped:* the customer cancelled the remainder after the shop had already shipped 5 of 20. The shipped quantity stays shipped (it's at the customer); the rest will never be made. Production = `cancelled`, Fulfillment = `partially_shipped`. Rare but not theoretical.
 
@@ -244,12 +244,12 @@ Every existing query that reads `jobs.status` needs to be updated. The audit is 
 
 ### 7.4 Display vs storage
 
-Field names in storage are stable (`production_status`, `fulfillment_status`). UI labels are decoupled and validated with Bri on Friday. Initial labels are conservative:
+Field names in storage are stable (`production_status`, `fulfillment_status`). UI labels are decoupled and validated with the shipping clerk on Friday. Initial labels are conservative:
 
 - Production: "Not Started", "In Progress", "Completed", "Cancelled."
 - Fulfillment: "Not Shipped", "Partially Shipped" (with "X of Y" detail), "Shipped".
 
-If Bri says "Completed" doesn't match what she calls it, we change the label without changing the field name. Storage stays internally consistent; UI tracks how Bri talks.
+If the shipping clerk says "Completed" doesn't match what she calls it, we change the label without changing the field name. Storage stays internally consistent; UI tracks how the shipping clerk talks.
 
 ### 7.5 The rest of the model
 
@@ -290,18 +290,18 @@ The full schema sketch is in Appendix A. **Note:** Appendix A is illustrative an
 
 Ordered by importance to the headline moment.
 
-### Flow A (the headline moment): Johnny answers a customer call
+### Flow A (the headline moment): the salesperson answers a customer call
 
 1. Customer calls: "What's the status on PO 4471?"
-2. Johnny types `4471` into the global search bar.
+2. the salesperson types `4471` into the global search bar.
 3. The matching job appears in the top result within 200ms.
-4. Johnny clicks. Job detail page loads, and within his immediate field of view he sees:
+4. the salesperson clicks. Job detail page loads, and within his immediate field of view he sees:
    - Production status: e.g., "In Progress" or "Completed."
    - Fulfillment status with detail: e.g., "Partially Shipped: 5 of 10. 5 remaining" or "Shipped" or "Not Shipped."
    - Last ship date, packing slip number, tracking number, carrier (if any shipment exists).
 5. He reads the answer to the customer. Call ends.
 
-The two statuses sit side by side. Production and fulfillment are independent facts, and Johnny needs both to answer common questions. "Are you still working on it?" is production. "Did anything go out yet?" is fulfillment. Single-status systems make him guess.
+The two statuses sit side by side. Production and fulfillment are independent facts, and the salesperson needs both to answer common questions. "Are you still working on it?" is production. "Did anything go out yet?" is fulfillment. Single-status systems make him guess.
 
 What has to be true for this flow to work:
 - Global search must hit on PO number, job number, customer name, packing slip number.
@@ -309,39 +309,39 @@ What has to be true for this flow to work:
 - The status block must be readable at a glance (no nested clicks, no hover-to-reveal).
 - Both statuses must be derived correctly from underlying data (triggers, not application-layer code that can drift).
 
-### Flow B: Bri creates a shipment from a finished job (Friday demo flow)
+### Flow B: the shipping clerk creates a shipment from a finished job (Friday demo flow)
 
-1. Bri opens the job (Johnny shows her where).
-2. Job detail page shows a "Create Shipment" button. Bri clicks it.
+1. the shipping clerk opens the job (the salesperson shows her where).
+2. Job detail page shows a "Create Shipment" button. the shipping clerk clicks it.
 3. Form opens, pre-filled with: today's date, customer's default ship-to, all open line items at full remaining quantity, default carrier (if set on customer), default shipping arrangement (if set on customer), default CoC text (if set on customer or company).
-4. Bri confirms or edits, clicks "Create Shipment & Print."
+4. the shipping clerk confirms or edits, clicks "Create Shipment & Print."
 5. System generates packing slip number, saves shipment, opens PDF.
-6. Bri prints. `fulfillment_status` updates to `fully_shipped` (all line items now fully shipped). Status block on the job page updates visibly. Job disappears from the default jobs-list view (now considered "done" per FR-18). The operations panel on the job stays editable — only `production_status = 'cancelled'` disables it. Production and fulfillment are orthogonal lifecycles per §7, so a job that ships partially with remaining production work still allows operators to log time.
+6. the shipping clerk prints. `fulfillment_status` updates to `fully_shipped` (all line items now fully shipped). Status block on the job page updates visibly. Job disappears from the default jobs-list view (now considered "done" per FR-18). The operations panel on the job stays editable — only `production_status = 'cancelled'` disables it. Production and fulfillment are orthogonal lifecycles per §7, so a job that ships partially with remaining production work still allows operators to log time.
 
 Three clicks: Create Shipment → confirm → Print. This is the bar.
 
-### Flow C: Bri ships a partial (5 of 10)
+### Flow C: the shipping clerk ships a partial (5 of 10)
 
-1. Bri opens the job, clicks "Create Shipment."
-2. Form pre-fills with full remaining (10). Bri edits the qty for that line to 5.
-3. Bri saves. Packing slip prints showing "Quantity shipped: 5, Remaining: 5 still owed."
+1. the shipping clerk opens the job, clicks "Create Shipment."
+2. Form pre-fills with full remaining (10). the shipping clerk edits the qty for that line to 5.
+3. the shipping clerk saves. Packing slip prints showing "Quantity shipped: 5, Remaining: 5 still owed."
 4. Job stays open. Job detail page shows shipment history (1 shipment, 5 of 10).
-5. When the rest is ready, Bri creates another shipment. Form pre-fills at qty 5 (the remaining), gets a new packing slip number, completes the job.
+5. When the rest is ready, the shipping clerk creates another shipment. Form pre-fills at qty 5 (the remaining), gets a new packing slip number, completes the job.
 
-### Flow D: Bri ships mixed parts from one customer across two jobs
+### Flow D: the shipping clerk ships mixed parts from one customer across two jobs
 
-1. Bri (or Johnny) opens the top-level Shipments page from the sidebar.
+1. the shipping clerk (or the salesperson) opens the top-level Shipments page from the sidebar.
 2. Clicks "New Shipment."
 3. Picks a customer (searchable typeahead).
 4. Sees every open line for that customer, grouped by job. Default view applies the line-level "Ready to Ship" filter (`job_parts.production_status = 'completed'` only). Search input filters by part / job / customer PO. Each line is a checkbox with editable qty pre-filled at `qty_remaining` (clamped to zero for over-shipped lines, which render with a disabled checkbox and an "already shipped in full" indicator).
-5. Bri checks the lines she's actually boxing across one or more jobs, confirms, saves.
+5. the shipping clerk checks the lines she's actually boxing across one or more jobs, confirms, saves.
 6. One packing slip is generated covering the selected lines. Each affected job's `fulfillment_status` updates via trigger; either or both may reach `fully_shipped`.
 
 Less common than Flow B but worth supporting because the alternative (separate slips for one physical box) is what shops complain about. Pulled into active scope as part of Phase 1.5 (was deferred to Phase 4 in v2.0).
 
-### Flow E: Shane reviews fulfillment health
+### Flow E: the pilot shop owner reviews fulfillment health
 
-1. Shane opens the jobs list.
+1. the pilot shop owner opens the jobs list.
 2. Default view hides "done" jobs (per FR-18: `production_status IN ('completed', 'cancelled')` AND `fulfillment_status = 'fully_shipped'`). Open jobs are visible.
 3. Each row shows order date, due date, customer, qty ordered, qty shipped, qty remaining, production status, fulfillment status, days-since-due-date for overdue items.
 4. He can sort by overdue or filter by customer.
@@ -358,7 +358,7 @@ Each requirement maps back to the headline moment or to a specific risk being mi
 
 - `[FR-12]` Job detail page shows a Shipment History section: one row per shipment with packing slip #, ship date, carrier, tracking #, qty shipped that shipment, and a download/view link.
 - `[FR-13]` Job detail page shows a dual-status block in the top section, rendered before any other section on the page. Block contains: production status badge, fulfillment status badge with "X of Y" detail when partially shipped, latest shipment summary (PS#, date, carrier, tracking) when a shipment exists. Per-line breakdown ("Part A: 5 of 10 shipped. Part B: 3 of 3 shipped.") visible without clicking.
-- `[FR-14]` Status labels are storage-stable and display-decoupled. Internal field names: `production_status`, `fulfillment_status`. Display labels are configurable in code and validated with Bri on Friday.
+- `[FR-14]` Status labels are storage-stable and display-decoupled. Internal field names: `production_status`, `fulfillment_status`. Display labels are configurable in code and validated with the shipping clerk on Friday.
 - `[FR-15]` All users with job access see shipment history and both status fields. No role restriction in v1.
 - `[FR-NEW-1]` Global search hits on PO number, job number, customer name, packing slip number, part number. Sub-second response.
 - `[FR-NEW-2]` Job detail page renders the status block in under 200ms server-side. Both status values come from indexed columns or materialized triggers, not computed at request time.
@@ -380,7 +380,7 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 - `[FR-2]` User can create a shipment from a top-level Shipments page that spans multiple jobs for one customer. Entry point is the global "New Shipment" button on `/dashboard/{companyId}/shipments`. The customer detail page is not a shipment-creation surface.
 - `[FR-NEW-3]` Top-level Shipments nav entry and route `/dashboard/{companyId}/shipments`, gated by the company `shipments_enabled` feature flag.
 - `[FR-NEW-4]` Shipments list view: paginated table with packing slip #, ship date, customer, jobs covered (one chip per distinct `job_number`), carrier, tracking number, line-item count, created-by. Searchable by packing slip #, customer name, tracking number. Sortable by ship date (newest first by default).
-- `[FR-NEW-5]` "New Shipment" entry from the list: customer-first picker, then a per-job_part picker grouped by job, showing every line with `qty_remaining > 0` and `production_status != 'cancelled'` for that customer. The picker has a default-on "Ready to Ship" filter chip and a search input over part name / job number / customer PO. The "Ready to Ship" filter operates at the **line level** (`job_parts.production_status = 'completed'`), not the job level — a job with mixed completion states surfaces only its completed parts. This matches the operations/fulfillment orthogonality §7 commits to: Bri ships what's done, regardless of whether sibling parts on the same job are still in production. Lines already fully shipped render visibly with a disabled checkbox and an "already shipped in full" indicator. Same downstream form fields and the same `create_shipment_with_line_items` RPC as Flow B.
+- `[FR-NEW-5]` "New Shipment" entry from the list: customer-first picker, then a per-job_part picker grouped by job, showing every line with `qty_remaining > 0` and `production_status != 'cancelled'` for that customer. The picker has a default-on "Ready to Ship" filter chip and a search input over part name / job number / customer PO. The "Ready to Ship" filter operates at the **line level** (`job_parts.production_status = 'completed'`), not the job level — a job with mixed completion states surfaces only its completed parts. This matches the operations/fulfillment orthogonality §7 commits to: the shipping clerk ships what's done, regardless of whether sibling parts on the same job are still in production. Lines already fully shipped render visibly with a disabled checkbox and an "already shipped in full" indicator. Same downstream form fields and the same `create_shipment_with_line_items` RPC as Flow B.
 - `[FR-NEW-6]` Database integrity for multi-job shipments, enforced by trigger (not just RPC) so the invariant holds for any future insert path:
   - Every `shipment_line_items.job_part_id` must reference a `job_part` whose `job.customer_id` equals the parent `shipments.customer_id`.
   - `shipments.customer_id` is immutable after insert. Any `UPDATE` that changes `customer_id` raises — voiding and recreating is the right path for that case. Without this pair, flipping the parent shipment's customer would leave existing line items pointing at the old customer's jobs and the line-item trigger wouldn't fire (no rows on that table changed).
@@ -416,9 +416,9 @@ The old "auto-close" requirement is replaced. Status is derived from underlying 
 - **Performance:** Job detail page status block in under 200ms server-side. Global search in under 500ms. PDF generation in under 3 seconds.
 - **Reliability:** Packing slip numbers never duplicated, never skipped. Unique constraint plus a sequence.
 - **Auditability:** Every shipment creation, edit, and void logged with user, timestamp, previous state.
-- **Editability:** Shipment can be edited within 24 hours; after that, void + recreate. Voided shipments stay in history with strikethrough. Validate window with Bri.
+- **Editability:** Shipment can be edited within 24 hours; after that, void + recreate. Voided shipments stay in history with strikethrough. Validate window with the shipping clerk.
 - **Print fidelity:** PDF tested on a real shop printer before Friday.
-- **Feature flag:** All shipment-related UI gated behind a per-company feature flag. Default off. Contour-only for v1.
+- **Feature flag:** All shipment-related UI gated behind a per-company feature flag. Default off. the pilot customer-only for v1.
 
 ---
 
@@ -428,7 +428,7 @@ This section names the methodology explicitly so Claude Code and future PRD read
 
 ### What we're doing
 
-Shipping production code to Contour as the prototype. Everything is feature-flagged. No other Jigged customer sees this feature until Friday's results are evaluated.
+Shipping production code to the pilot customer as the prototype. Everything is feature-flagged. No other Jigged customer sees this feature until Friday's results are evaluated.
 
 ### Why this is defensible despite Cagan's "MVP = prototype" warning
 
@@ -438,7 +438,7 @@ Two conditions break that equation in our case:
 
 First, AI-assisted development has compressed the cost of "production-quality enough" by an order of magnitude. The labor cost of building this feature is days, not weeks. The marginal cost of building production code over a clickable mock is small.
 
-Second, our user is unreachable except through her existing workflow. Bri does not take Zoom calls. We cannot put a Figma prototype in front of her. The only way she sees this feature is if Johnny demos it during his Friday visit, and the only credible demo is something running in the actual Jigged she would use.
+Second, our user is unreachable except through her existing workflow. the shipping clerk does not take Zoom calls. We cannot put a Figma prototype in front of her. The only way she sees this feature is if the salesperson demos it during his Friday visit, and the only credible demo is something running in the actual Jigged she would use.
 
 The deviation is real but it preserves Cagan's underlying principle: validate before committing to scale. Feature-flagging keeps the blast radius at one company.
 
@@ -446,11 +446,11 @@ The deviation is real but it preserves Cagan's underlying principle: validate be
 
 We lose the chance to test multiple visual layouts cheaply. The packing slip looks however it looks; we don't get to compare three versions. We lose the chance to test the create-shipment flow with a non-shipping-clerk user before we commit to it.
 
-Mitigation: pre-Friday, a colleague who has never seen Jigged before runs the create-shipment flow cold. If they can't do it in five minutes, the flow gets reworked before Bri sees it.
+Mitigation: pre-Friday, a colleague who has never seen Jigged before runs the create-shipment flow cold. If they can't do it in five minutes, the flow gets reworked before the shipping clerk sees it.
 
 ### What we gain
 
-We get real data on real workflows. Bri tries to ship a real part to a real customer. The packing slip prints from a real printer. If something is broken in that flow, we find out from the user who matters, not from a researcher reading body language during a Figma walkthrough.
+We get real data on real workflows. the shipping clerk tries to ship a real part to a real customer. The packing slip prints from a real printer. If something is broken in that flow, we find out from the user who matters, not from a researcher reading body language during a Figma walkthrough.
 
 ---
 
@@ -460,7 +460,7 @@ V1 of the PRD phased by engineering layer. V2 phases by user-visible experience.
 
 ### Phase 1: Friday-ready, end-to-end (target: complete 48 hours before Friday)
 
-The full vertical slice with the architecture done right. Bri sees this on Friday.
+The full vertical slice with the architecture done right. the shipping clerk sees this on Friday.
 
 **Schema and triggers (the foundation):**
 - New tables: `addresses`, `shipments`, `shipment_line_items`.
@@ -503,11 +503,11 @@ The full vertical slice with the architecture done right. Bri sees this on Frida
 - Hits on PO number, job number, customer name, packing slip number, part number.
 
 **Operational:**
-- Feature flag on for Contour. Off for every other tenant.
+- Feature flag on for the pilot customer. Off for every other tenant.
 - Audit log entry on `fulfillment_status` transition to `fully_shipped`.
 
 **Acceptance:**
-- Debola does the full loop on staging with realistic Contour data. It works.
+- Debola does the full loop on staging with realistic the pilot customer data. It works.
 - A colleague who has never used Jigged completes Flow B in under five minutes, cold.
 - The pre-Friday checklist in §13 passes.
 
@@ -522,16 +522,16 @@ Phase 1 covered single-job shipments via the per-job "Create Shipment" button. P
 - Refactor `CreateShipmentModal` so the same inner form body serves both `jobId` (Flow B) and `customerId` (Flow D) entry modes.
 - Per-job "Create Shipment" button remains as the shortcut for the common single-job case.
 
-### Phase 2: Whatever Bri tells us is missing (target: week after Friday)
+### Phase 2: Whatever the shipping clerk tells us is missing (target: week after Friday)
 
 Driven by Friday observation. No commitments in advance. Examples of things that might land here, none decided now:
 
 - Different default values on the form.
 - A field we missed (e.g., box dimensions).
-- A label change because the current word didn't match Bri's mental model.
+- A label change because the current word didn't match the shipping clerk's mental model.
 - A workflow tweak based on something we didn't anticipate.
 
-Acceptance: Bri uses Jigged for shipping on at least three real shipments in the week, without falling back to Tangle.
+Acceptance: the shipping clerk uses Jigged for shipping on at least three real shipments in the week, without falling back to Tangle.
 
 ### Phase 3: One-time addresses, edit/void
 
@@ -545,44 +545,44 @@ Only built once we have a month of pilot data. Post-pilot.
 
 ## 13. The Friday demo: plan, prep, decisions
 
-### What Johnny shows Bri
+### What the salesperson shows the shipping clerk
 
 A short demo, not a full pitch. The order matters.
 
-1. **Open a real job at Contour.** Johnny picks a job that Bri actually shipped recently in Tangle. Reproduces it in Jigged.
-2. **Show the status block.** "Hey Bri, look at this — I can see the order is shipped without coming to find you." Plant the headline-moment seed.
+1. **Open a real job at the pilot customer.** the salesperson picks a job that the shipping clerk actually shipped recently in Tangle. Reproduces it in Jigged.
+2. **Show the status block.** "Hey the shipping clerk, look at this — I can see the order is shipped without coming to find you." Plant the headline-moment seed.
 3. **Hand her the keyboard.** "Want to try shipping the next one?" This is the moment of truth.
-4. **Let her drive Flow B (or Flow C if a real partial is queued up).** Johnny narrates as little as possible. The script is: don't help unless she's stuck for 30+ seconds, don't explain how things work.
+4. **Let her drive Flow B (or Flow C if a real partial is queued up).** the salesperson narrates as little as possible. The script is: don't help unless she's stuck for 30+ seconds, don't explain how things work.
 5. **Print the slip.** Hand it to her. Watch her reaction. Compare it to her Tangle slip.
 
 Total session: 15-30 minutes if everything works. Less if it doesn't.
 
-### What Johnny should observe and capture
+### What the salesperson should observe and capture
 
-Johnny is a salesperson, not a researcher. The instrumentation has to be lightweight. Three questions to answer, written down after the session, not during:
+the salesperson is a salesperson, not a researcher. The instrumentation has to be lightweight. Three questions to answer, written down after the session, not during:
 
-1. **Did Bri get stuck anywhere?** If yes, where and for how long?
-2. **What did Bri say out loud during the flow?** Verbatim quotes only. No interpretation.
-3. **Would Bri use this tomorrow if it was available?** Direct question at the end. Watch for hedging.
+1. **Did the shipping clerk get stuck anywhere?** If yes, where and for how long?
+2. **What did the shipping clerk say out loud during the flow?** Verbatim quotes only. No interpretation.
+3. **Would the shipping clerk use this tomorrow if it was available?** Direct question at the end. Watch for hedging.
 
-Optional: a phone photo of any moment where Bri's face changes (confusion, satisfaction, frustration).
+Optional: a phone photo of any moment where the shipping clerk's face changes (confusion, satisfaction, frustration).
 
 ### Pre-Friday checklist
 
-Must all be true before Johnny demos. Owner: Debola.
+Must all be true before the salesperson demos. Owner: Debola.
 
-- [ ] Feature flag is on for Contour. Off for every other tenant.
-- [ ] The Contour database has at least three open jobs with parts that match what Bri actually ships.
+- [ ] Feature flag is on for the pilot customer. Off for every other tenant.
+- [ ] The the pilot customer database has at least three open jobs with parts that match what the shipping clerk actually ships.
 - [ ] One of those jobs is set up to be a clean full-shipment demo.
 - [ ] One of those jobs is set up to be a clean partial-shipment demo.
-- [ ] Contour's shipping address is correct on the company settings.
+- [ ] the pilot customer's shipping address is correct on the company settings.
 - [ ] Default carrier and shipping arrangement are set on at least one customer.
 - [ ] A test print of the packing slip has been done on a standard laser printer. It looks professional.
 - [ ] A colleague who has never seen Jigged has done Flow B cold and completed it in under five minutes.
-- [ ] The status block on the job detail page renders correctly on Johnny's actual laptop, in actual Contour network conditions.
+- [ ] The status block on the job detail page renders correctly on the salesperson's actual laptop, in actual the pilot customer network conditions.
 - [ ] Auto-close has been tested with at least three real-data scenarios.
 - [ ] Global search returns the right job within 500ms for PO number, job number, and customer name.
-- [ ] Johnny has been walked through the demo flow at least once before Friday. He can do it without referring to notes.
+- [ ] the salesperson has been walked through the demo flow at least once before Friday. He can do it without referring to notes.
 - [ ] A rollback plan exists. If something breaks on Friday, we know how to turn the feature off without taking down Jigged.
 
 If any of these are false on Thursday evening, the demo doesn't happen. Better to skip the demo than to show broken software to the only user we have.
@@ -591,13 +591,13 @@ If any of these are false on Thursday evening, the demo doesn't happen. Better t
 
 The Friday session produces one of four outcomes. Each has a defined next step.
 
-**Outcome A: Bri uses it, finishes the flow, says she'd use it tomorrow.** Highest-confidence outcome. Trigger: build Phase 2 immediately. Schedule a one-week check-in. Begin Shane conversation about paid pilot.
+**Outcome A: the shipping clerk uses it, finishes the flow, says she'd use it tomorrow.** Highest-confidence outcome. Trigger: build Phase 2 immediately. Schedule a one-week check-in. Begin the pilot shop owner conversation about paid pilot.
 
-**Outcome B: Bri completes the flow with help but has reservations.** Most likely outcome. Trigger: identify the reservations, scope Phase 2 around them, ship the changes, schedule a follow-up demo in two weeks. Hold Shane conversation until reservations are addressed.
+**Outcome B: the shipping clerk completes the flow with help but has reservations.** Most likely outcome. Trigger: identify the reservations, scope Phase 2 around them, ship the changes, schedule a follow-up demo in two weeks. Hold the pilot shop owner conversation until reservations are addressed.
 
-**Outcome C: Bri can't complete the flow or rejects the slip's appearance.** Trigger: pause feature development. Schedule a research session with Bri (in person or phone). Re-evaluate the design with new information. Possibly rework substantially.
+**Outcome C: the shipping clerk can't complete the flow or rejects the slip's appearance.** Trigger: pause feature development. Schedule a research session with the shipping clerk (in person or phone). Re-evaluate the design with new information. Possibly rework substantially.
 
-**Outcome D: The demo never happens** because something is broken in the pre-checklist or Johnny's visit changes. Trigger: reset. The PRD is fine. The execution failed. Use the time to make Phase 1 better before the next opportunity.
+**Outcome D: The demo never happens** because something is broken in the pre-checklist or the salesperson's visit changes. Trigger: reset. The PRD is fine. The execution failed. Use the time to make Phase 1 better before the next opportunity.
 
 The decision must happen within 48 hours of Friday. Don't let the outcome sit.
 
@@ -616,7 +616,7 @@ Direct anti-features. Fadell's "don't disrupt too many things at once" applied a
 - Do not modify the operator view as part of this work.
 - Do not implement a per-shipment photo upload.
 - Do not add SMS or push notifications.
-- Do not roll the feature out to any tenant other than Contour. Feature flag must default off.
+- Do not roll the feature out to any tenant other than the pilot customer. Feature flag must default off.
 - Do not redesign the job detail page beyond adding the status block at the top.
 - Do not introduce new dependencies (image libraries, PDF libraries beyond what's already in the stack) without flagging.
 
@@ -811,8 +811,8 @@ Claude Code's Phase 1 plan will produce the actual trigger function bodies. The 
 | 1 | Shipment is a first-class entity; PDF is a render | First-principles analysis |
 | 2 | One shipment can span multiple jobs (same customer). Entry point is the top-level `/shipments/new` page with a customer-first picker — not the customer detail page | Research: shops box mixed parts |
 | 3 | Partial shipments are line-item-level | A job can have multiple parts shipping on different schedules |
-| 4 | Auto-close on full shipment, computed via trigger | Johnny: "I don't know why Tangle doesn't do that" |
-| 5 | No role-gated shipping visibility | Johnny's complaint at Contour |
+| 4 | Auto-close on full shipment, computed via trigger | the salesperson: "I don't know why Tangle doesn't do that" |
+| 5 | No role-gated shipping visibility | the salesperson's complaint at the pilot customer |
 | 6 | No carrier API integration in v1 | Research: shops use carrier tools or customer accounts |
 | 7 | No BOL in v1 | LTL is minority of small-shop volume |
 | 8 | CoC as embedded packing-slip text | Industry pragmatic pattern |
@@ -820,11 +820,11 @@ Claude Code's Phase 1 plan will produce the actual trigger function bodies. The 
 | 10 | Shipments voidable but not deletable | Audit integrity |
 | 11 | Default packing slip number format `PS-{YYYY}-{0000}` | Configurable per company |
 | 12 | No "Powered by Jigged" on slip | Shop's brand is the headline |
-| 13 | **Beta-as-prototype** in production with feature flag for Contour-only | Cost calculus has changed; user is unreachable remotely |
-| 14 | **Bri is the primary user**, Johnny is the buyer-proxy, Shane is the budget owner | Cagan: name your primary user |
+| 13 | **Beta-as-prototype** in production with feature flag for the pilot customer-only | Cost calculus has changed; user is unreachable remotely |
+| 14 | **the shipping clerk is the primary user**, the salesperson is the buyer-proxy, the pilot shop owner is the budget owner | Cagan: name your primary user |
 | 15 | **Job detail status block renders first** | Headline-moment design implication |
 | 16 | **Phasing is experience-slice, not engineering-layer** | Fadell: ship the whole experience |
-| 17 | **Friday is the gating event** for Phase 2 and Shane conversation | Pilot validation precedes scale |
+| 17 | **Friday is the gating event** for Phase 2 and the pilot shop owner conversation | Pilot validation precedes scale |
 | 18 | **Production and fulfillment are orthogonal lifecycles**, stored as separate fields | Shop-floor reality; every reference ERP separates them; existing conflation breaks once real shipments exist |
 | 19 | **Old `jobs.status` enum is replaced**, not extended, in Phase 1 | Avoids temporary state; backfill is trivial because no shipments exist yet |
 | 20 | **"Done" is a derived predicate**, not a stored status | Auto-close becomes a query, not a state transition; eliminates a class of drift bugs |
@@ -845,7 +845,7 @@ Lightweight map showing which framework principle informs which PRD section. For
 | Principle | Source | Applied in |
 |-----------|--------|------------|
 | Painkillers, not vitamins | Build (Fadell) | §1 — distinguishes visibility (painkiller) from packing slip (vitamin) |
-| Story / press release first | Build (Fadell) | §2 — Johnny's six-months-later quote |
+| Story / press release first | Build (Fadell) | §2 — the salesperson's six-months-later quote |
 | The whole experience matters | Build (Fadell) | §12 — phasing by experience slices |
 | Don't disrupt too many things | Build (Fadell) | §6, §14 — non-goals and anti-features |
 | V1 = prototype, ship to early adopters | Build (Fadell) | §0, §11 — beta-as-prototype methodology |
@@ -856,7 +856,7 @@ Lightweight map showing which framework principle informs which PRD section. For
 | Four big risks | Inspired (Cagan) | §4 — value, usability, feasibility, viability |
 | Discovery vs. delivery | Inspired (Cagan) | §0, §13 — Friday demo is the discovery moment |
 | Outcomes over outputs | Inspired (Cagan) | §6 — goals named in terms of behavior change |
-| Reference customers / Customer Discovery Program | SVPG | §6, §13 — Contour as 1 of 6-8 needed |
+| Reference customers / Customer Discovery Program | SVPG | §6, §13 — the pilot customer as 1 of 6-8 needed |
 | Fall in love with the problem | Inspired (Cagan) | §1 — pain comes before solution |
 | Test value qualitatively | Inspired (Cagan) | §13 — "would you use this tomorrow" question |
 | Empowered teams | Inspired (Cagan) | §11 — acknowledged solo team and what that means |

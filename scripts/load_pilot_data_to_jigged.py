@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-load_contour_to_jigged.py
-=========================
+load_pilot_data_to_jigged.py
+============================
 
-Direct-SQL bulk loader for Contour Tool & Machine's data into Jigged.
+Direct-SQL bulk loader for a pilot customer's legacy data into Jigged.
 
-Reads the cleaned CSVs we produced in this conversation:
-  - vendors.csv                          (50 vendor display names)
-  - resources.csv                        (27 internal work centers with rates)
-  - parts_and_inventory_merged_v6.csv    (8,393 parts with costs)
-  - routings_for_jigged.csv              (18,639 routing operations)
-  - bom_for_jigged_v2.csv                   (5,266 BOM lines)
+Reads cleaned CSVs prepared from the legacy ERP export:
+  - vendors.csv                          (vendor display names)
+  - resources.csv                        (internal work centers with rates)
+  - parts_and_inventory_merged_v6.csv    (parts with costs)
+  - routings_for_jigged.csv              (routing operations)
+  - bom_for_jigged_v2.csv                (BOM lines)
 
 Wipes the company's existing parts / routings / BOM / work_centers / vendors
 in dependency order, then INSERTs all of the above in one transaction. If
@@ -20,11 +20,12 @@ USAGE
 -----
 1. Install deps:        pip install psycopg2-binary
 2. Edit CONFIG below:   set DATABASE_URL and COMPANY_ID
-3. Run:                 python load_contour_to_jigged.py
+3. Run:                 python load_pilot_data_to_jigged.py
 4. Confirm the prompt before destructive operations execute.
 
-This is a single-shot migration script. Once the AI-agent import is built,
-this script gets retired.
+This is a single-shot migration script for one-time pilot onboarding. Once
+the AI-agent import path is the standard ingestion route, this script is
+retired.
 """
 
 from __future__ import annotations

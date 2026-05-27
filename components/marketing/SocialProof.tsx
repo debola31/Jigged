@@ -31,19 +31,10 @@ export default function SocialProof() {
           </Typography>
 
           <Typography
-            variant="body1"
-            sx={{
-              fontWeight: 600,
-              color: 'rgba(255, 255, 255, 0.9)',
-            }}
-          >
-            Shane Sobieski
-          </Typography>
-          <Typography
             variant="body2"
             sx={{ color: 'rgba(255, 255, 255, 0.6)' }}
           >
-            Contour Tool & Machine
+            Pilot customer
           </Typography>
         </Box>
       </Container>

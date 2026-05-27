@@ -2007,8 +2007,7 @@ pnpm test:e2e:ui       # Visual runner
 
 ---
 
-## New Resources
+## Related local docs
 
-- [Test Registry](https://www.notion.so/Test-Registry-2de5314e847581e48692c6f64a5837c8) - Coverage metrics, test file inventory, commands reference
-
-- [Test Case Matrix](https://www.notion.so/2de5314e847581f7a81af50c3200b78d) - Filterable database with 22 test cases, pass/fail criteria
+- [Test Registry](test-registry.md) - Coverage metrics, test file inventory, commands reference
+- [Test Case Matrix](test-matrix.md) - Filterable list of test cases with pass/fail criteria

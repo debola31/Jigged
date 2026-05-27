@@ -425,127 +425,117 @@ export default function PartBomPanel({
               <Box
                 key={row.id}
                 sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
                   py: 1.5,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1,
                 }}
               >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  {/* Restyled to read as an obvious link: primary color +
-                      always-underlined + trailing chevron. The rest of
-                      the row stays inert; edit/remove icons keep their
-                      own click targets. The href pushes this part onto
-                      the back chain so the destination renders a
-                      breadcrumb back to here. */}
-                  <Link
-                    component={NextLink}
-                    href={buildPartHref({
-                      companyId,
-                      targetPartId: child.id,
-                      chain: pushPartToChain(currentChain, partId, child.id),
-                    })}
-                    underline="always"
-                    color="primary.main"
-                    sx={{
-                      fontWeight: 500,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 0.25,
-                    }}
-                  >
-                    {child.part_name}
-                    <ChevronRightIcon sx={{ fontSize: 16 }} />
-                  </Link>
-                  {ladder.length > 0 ? (
-                    <Box
+                {/* Header row: name + BOM qty + actions on one line, all
+                    centered at the part-name baseline. The tier table
+                    renders BELOW so the actions can't drift downward when
+                    a long ladder makes the left column taller. */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Link
+                      component={NextLink}
+                      href={buildPartHref({
+                        companyId,
+                        targetPartId: child.id,
+                        chain: pushPartToChain(currentChain, partId, child.id),
+                      })}
+                      underline="always"
+                      color="primary.main"
                       sx={{
-                        mt: 0.75,
-                        display: 'grid',
-                        gridTemplateColumns: 'auto auto',
-                        columnGap: 2,
-                        rowGap: 0.25,
-                        alignItems: 'baseline',
-                        width: 'fit-content',
+                        fontWeight: 500,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 0.25,
                       }}
                     >
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ fontWeight: 600 }}
-                      >
-                        Qty
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ fontWeight: 600, textAlign: 'right' }}
-                      >
-                        Cost / unit
-                      </Typography>
-                      {ladder.map((t, i) => (
-                        <Box
-                          key={`tier-${i}`}
-                          sx={{ display: 'contents' }}
-                        >
-                          <Typography variant="caption">
-                            {formatQuantity(t.qty)} {t.unit}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ textAlign: 'right' }}
+                      {child.part_name}
+                      <ChevronRightIcon sx={{ fontSize: 16 }} />
+                    </Link>
+                  </Box>
+                  <Box sx={{ minWidth: 110, textAlign: 'right' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                      {formatQuantity(row.quantity)} {row.unit}
+                    </Typography>
+                  </Box>
+                  {!readOnly && (
+                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                      <Tooltip title="Edit">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => openEdit(row.id)}
+                            disabled={editorOpen || saving}
                           >
-                            {t.costPerUnit === null
-                              ? '—'
-                              : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
-                          </Typography>
-                        </Box>
-                      ))}
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Remove">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={() => setPendingDelete(row)}
+                            disabled={editorOpen || saving}
+                            sx={{
+                              color: 'text.secondary',
+                              '&:hover': { color: 'error.main' },
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
                     </Box>
-                  ) : (
+                  )}
+                </Box>
+
+                {ladder.length > 0 ? (
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto auto',
+                      columnGap: 2,
+                      rowGap: 0.25,
+                      alignItems: 'baseline',
+                      width: 'fit-content',
+                    }}
+                  >
                     <Typography
                       variant="caption"
                       color="text.secondary"
-                      sx={{ display: 'block', mt: 0.5 }}
+                      sx={{ fontWeight: 600 }}
                     >
-                      No pricing tiers on this part yet.
+                      Qty
                     </Typography>
-                  )}
-                </Box>
-                <Box sx={{ minWidth: 110, textAlign: 'right' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {formatQuantity(row.quantity)} {row.unit}
-                  </Typography>
-                </Box>
-                {!readOnly && (
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    <Tooltip title="Edit">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => openEdit(row.id)}
-                          disabled={editorOpen || saving}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title="Remove">
-                      <span>
-                        <IconButton
-                          size="small"
-                          onClick={() => setPendingDelete(row)}
-                          disabled={editorOpen || saving}
-                          sx={{
-                            color: 'text.secondary',
-                            '&:hover': { color: 'error.main' },
-                          }}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontWeight: 600, textAlign: 'right' }}
+                    >
+                      Cost / unit
+                    </Typography>
+                    {ladder.map((t, i) => (
+                      <Box key={`tier-${i}`} sx={{ display: 'contents' }}>
+                        <Typography variant="caption">
+                          {formatQuantity(t.qty)} {t.unit}
+                        </Typography>
+                        <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                          {t.costPerUnit === null
+                            ? '—'
+                            : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
+                        </Typography>
+                      </Box>
+                    ))}
                   </Box>
+                ) : (
+                  <Typography variant="caption" color="text.secondary">
+                    No pricing tiers on this part yet.
+                  </Typography>
                 )}
               </Box>
             );

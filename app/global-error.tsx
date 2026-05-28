@@ -93,6 +93,13 @@ export default function GlobalError({
             >
               Try Again
             </button>
+            {/*
+              global-error.tsx replaces the root layout when rendered, so
+              the Next.js router context that <Link /> depends on isn't
+              available. Plain <a href> is the recommended fallback for
+              navigating out of an unrecoverable error state.
+            */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/"
               style={{

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -69,9 +69,22 @@ export default function QuoteDetailPage() {
   /** Tier reference data: part_id → all tiers for that part. */
   const [tiersByPart, setTiersByPart] = useState<Record<string, PartPricingTier[]>>({});
 
+  const fetchQuote = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await getQuoteWithRelations(quoteId, companyId);
+      setQuote(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load quote');
+    } finally {
+      setLoading(false);
+    }
+  }, [quoteId, companyId]);
+
   useEffect(() => {
     fetchQuote();
-  }, [quoteId]);
+  }, [fetchQuote]);
 
   // Once the quote loads, fetch the master tier list for each part on it
   // (read-only reference for the PRICING TIERS section).
@@ -95,19 +108,6 @@ export default function QuoteDetailPage() {
       cancelled = true;
     };
   }, [quote, tiersByPart]);
-
-  const fetchQuote = async () => {
-    try {
-      setLoading(true);
-      const data = await getQuoteWithRelations(quoteId, companyId);
-      setQuote(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load quote');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDelete = async () => {
     setActionLoading(true);

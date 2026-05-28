@@ -155,6 +155,19 @@ export default function InsightCard({
   onRemove,
   chartHeight = 200,
 }: InsightCardProps) {
+  // Hooks must run in the same order on every render — declare them all
+  // before any conditional return. The early-loading return below would
+  // otherwise skip these hooks on the first render and break the order.
+  const [expanded, setExpanded] = useState(false);
+  const summaryRef = useRef<HTMLElement>(null);
+  const [isClamped, setIsClamped] = useState(false);
+
+  useEffect(() => {
+    if (summaryRef.current) {
+      setIsClamped(summaryRef.current.scrollHeight > summaryRef.current.clientHeight);
+    }
+  }, [insight?.summary]);
+
   if (loading || !insight) {
     return (
       <Card
@@ -176,16 +189,6 @@ export default function InsightCard({
   const isAlertType = insight.type === 'at_risk_jobs' || insight.type === 'inventory_alerts';
   const title = titleOverride || INSIGHT_LABELS[insight.type] || insight.type;
   const timeAgo = getTimeAgo(insight.computed_at);
-
-  const [expanded, setExpanded] = useState(false);
-  const summaryRef = useRef<HTMLElement>(null);
-  const [isClamped, setIsClamped] = useState(false);
-
-  useEffect(() => {
-    if (summaryRef.current) {
-      setIsClamped(summaryRef.current.scrollHeight > summaryRef.current.clientHeight);
-    }
-  }, [insight.summary]);
 
   return (
     <Card

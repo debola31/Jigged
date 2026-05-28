@@ -203,11 +203,38 @@ def _create_seeded_user(supabase_admin: Client, company_name_suffix: str) -> dic
 
 
 def _teardown_seeded_user(supabase_admin: Client, seeded: dict) -> None:
-    """Reverse what _create_seeded_user did, in dependency order."""
-    # user_company_access cascades from companies; companies cascades to
-    # everything we own. Cleaning the auth user is the only step that
-    # doesn't cascade automatically.
-    supabase_admin.table("companies").delete().eq("id", seeded["company_id"]).execute()
+    """
+    Reverse what _create_seeded_user did, in dependency order.
+
+    A subset of FKs into `companies` lack ON DELETE CASCADE in the current
+    schema (e.g. shipments.company_id, jobs.company_id). Same drift that
+    test_shipment_void_permutations.py is xfailed against. Delete the
+    known blockers explicitly before the company; the rest cascades.
+    """
+    company_id = seeded["company_id"]
+
+    # Tables with FKs to companies(id) that are NOT ON DELETE CASCADE.
+    # Order matters: shipment_line_items → shipments → (job_parts via
+    # job_part_id) is independent of the company cascade, but PostgreSQL
+    # evaluates the references at the parent-row delete, so wiping
+    # shipments first is sufficient.
+    for table in ("shipment_line_items", "shipments", "job_parts", "jobs"):
+        try:
+            (
+                supabase_admin.table(table)
+                .delete()
+                .eq("company_id", company_id)
+                .execute()
+            )
+        except Exception:
+            # Some of these may not actually have a company_id column
+            # (shipment_line_items doesn't — it inherits via the
+            # shipment FK). Swallow the column-not-found error; the
+            # subsequent company-delete will tell us if anything else
+            # is still referencing us.
+            pass
+
+    supabase_admin.table("companies").delete().eq("id", company_id).execute()
     try:
         supabase_admin.auth.admin.delete_user(seeded["user_id"])
     except Exception:
@@ -319,15 +346,78 @@ def seeded_company_b_graph(
 
     # routing_operations inherits company_id transitively via the routing FK;
     # no company_id column on this table itself.
-    supabase_admin.table("routing_operations").insert(
-        {
-            "routing_id": routing_id,
-            "work_center_id": internal_wc_id,
-            "sequence": 10,
-            "setup_minutes": 30,
-            "cycle_minutes_per_unit": 2,
-        }
-    ).execute()
+    routing_op = (
+        supabase_admin.table("routing_operations")
+        .insert(
+            {
+                "routing_id": routing_id,
+                "work_center_id": internal_wc_id,
+                "sequence": 10,
+                "setup_minutes": 30,
+                "cycle_minutes_per_unit": 2,
+            }
+        )
+        .execute()
+    )
+    routing_operation_id = routing_op.data[0]["id"]
+
+    # Quote — minimum viable to satisfy NOT NULL constraints. The
+    # `set_quote_number` trigger fills quote_number when '' or NULL.
+    quote = (
+        supabase_admin.table("quotes")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "customer_id": customer_id,
+                "quote_number": "",  # filled by trigger
+                "status": "active",
+            }
+        )
+        .execute()
+    )
+    quote_id = quote.data[0]["id"]
+
+    # Job — production_status NOT NULL, fulfillment_status defaults to
+    # 'unshipped' (per migration 20260523). Job number mirrors the quote
+    # number — fill explicitly to avoid relying on quote-conversion.
+    job = (
+        supabase_admin.table("jobs")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "customer_id": customer_id,
+                "job_number": "J-RLS-3D-B",
+                "production_status": "not_started",
+                "fulfillment_status": "unshipped",
+            }
+        )
+        .execute()
+    )
+    job_id = job.data[0]["id"]
+
+    # Shipment — minimum viable. `shipments_one_address_source` CHECK
+    # requires exactly one of (shipping_address_id, one_time_address) to
+    # be set. The customer has no addresses in this fixture, so use the
+    # one_time_address path with a stub JSONB blob.
+    shipment = (
+        supabase_admin.table("shipments")
+        .insert(
+            {
+                "company_id": company_b_id,
+                "customer_id": customer_id,
+                "packing_slip_number": "PS-RLS-3D-B-0001",
+                "one_time_address": {
+                    "name": "RLS-3d Fixture Address",
+                    "line1": "1 Test Street",
+                    "city": "Testville",
+                    "state": "TS",
+                    "postal_code": "00000",
+                },
+            }
+        )
+        .execute()
+    )
+    shipment_id = shipment.data[0]["id"]
 
     yield {
         "company_id": company_b_id,
@@ -337,6 +427,10 @@ def seeded_company_b_graph(
         "customer_id": customer_id,
         "part_id": part_id,
         "routing_id": routing_id,
+        "routing_operation_id": routing_operation_id,
+        "quote_id": quote_id,
+        "job_id": job_id,
+        "shipment_id": shipment_id,
     }
 
     # Teardown order: clean up rows that the company-delete cascade won't

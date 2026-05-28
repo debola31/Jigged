@@ -804,7 +804,7 @@ function renderCustomerLineGroups(
   if (groups.length === 0) {
     return (
       <Typography variant="body2" sx={{ color: 'text.secondary', py: 2 }}>
-        No open lines match the current filter. Toggle "Ready to Ship only" off to see
+        No open lines match the current filter. Toggle &quot;Ready to Ship only&quot; off to see
         lines whose production is still in progress.
       </Typography>
     );

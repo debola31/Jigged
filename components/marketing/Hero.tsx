@@ -107,7 +107,7 @@ export default function Hero() {
               }}
             >
               Quoting, job tracking, inventory, and operator tools — built for
-              precision shops, not enterprise factories. Everything you need, nothing you don't.
+              precision shops, not enterprise factories. Everything you need, nothing you don&apos;t.
             </Typography>
             <Button
               component={Link}

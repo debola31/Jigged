@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -41,11 +41,7 @@ export default function AcceptInvitePage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  useEffect(() => {
-    checkSessionAndLoadInvitation();
-  }, [invitationId]);
-
-  async function checkSessionAndLoadInvitation() {
+  const checkSessionAndLoadInvitation = useCallback(async () => {
     const supabase = getSupabase();
 
     // Handle auth tokens from the invite email redirect.
@@ -176,7 +172,11 @@ export default function AcceptInvitePage() {
     setCompanyName(inv.company_name || '');
     setInvitation(inv);
     setState('name-prompt');
-  }
+  }, [invitationId]);
+
+  useEffect(() => {
+    checkSessionAndLoadInvitation();
+  }, [checkSessionAndLoadInvitation]);
 
   async function handleAccept(e: React.FormEvent) {
     e.preventDefault();

@@ -19,17 +19,17 @@ export default defineConfig({
         '**/types/**',
       ],
       thresholds: {
-        // Floors set 3-5pp below measured-current on 2026-05-27 so natural
-        // fluctuation doesn't break builds, but adding untested code does.
-        // 3f sub-PRs ratchet these upward — bump in the same PR that adds
-        // the tests, never as a separate "increase threshold" PR.
+        // Ratchet: each 3f sub-PR that adds tests bumps these floors so the
+        // gain is locked in. Never lowered without a documented reason.
         //
-        // Measured 2026-05-27: statements 47.4%, branches 42.3%,
-        // functions 43.4%, lines 48.6%.
-        statements: 45,
-        branches: 38,
-        functions: 40,
-        lines: 45,
+        // 2026-05-27 (3e baseline): statements 47.4 / branches 42.3 /
+        //                           functions 43.4 / lines 48.6
+        // 2026-05-28 (3f auth): statements 50.0 / branches 44.85 /
+        //                       functions 45.95 / lines 51.36
+        statements: 48,
+        branches: 42,
+        functions: 43,
+        lines: 48,
       },
     },
   },

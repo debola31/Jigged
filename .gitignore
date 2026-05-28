@@ -65,4 +65,4 @@ docs/usability-tests/
 scripts/data/
 
 # Supabase
-supabase/.temp/
+supabase/.temp/api/.coverage

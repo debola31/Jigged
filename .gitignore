@@ -65,4 +65,7 @@ docs/usability-tests/
 scripts/data/
 
 # Supabase
-supabase/.temp/api/.coverage
+supabase/.temp/
+
+# pytest-cov artifact
+api/.coverage

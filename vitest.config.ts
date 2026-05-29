@@ -26,13 +26,13 @@ export default defineConfig({
         //                            functions 43.4 / lines 48.6
         // 2026-05-28 (3f auth):      statements 50.0 / branches 44.85 /
         //                            functions 45.95 / lines 51.36
-        // 2026-05-28 (3f QuoteForm): statements 50.37 / branches 45.65 /
-        //                            functions 44.77 / lines 51.78
-        // (functions dropped because QuoteForm added more uncovered
-        // functions than the 11 new tests covered. Floor stays at 43.)
+        // 2026-05-28 (3f QuoteForm):   statements 50.37 / branches 45.65 /
+        //                              functions 44.77 / lines 51.78
+        // 2026-05-28 (3f StationQRCode): statements 50.83 / branches 45.89 /
+        //                                functions 45.07 / lines 52.26
         statements: 49,
         branches: 44,
-        functions: 43,
+        functions: 44,
         lines: 50,
       },
     },

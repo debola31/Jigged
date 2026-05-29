@@ -58,18 +58,36 @@ test.describe('CSV Import workflow', () => {
     // Click "Continue to Import"
     await page.getByRole('button', { name: /Continue to Import/i }).click();
 
-    // ── Step 6: Handle validation/conflicts ──
+    // ── Step 6: Handle the two import dialogs ──
+    //
+    // The current import page can show up to two dialogs after Continue:
+    //
+    //   1. "Some Fields Not Mapped" — triggered when any optional schema
+    //      field (e.g. Category, Notes) isn't mapped from the CSV. The
+    //      test-parts.csv fixture only maps part_name + description, so
+    //      this dialog fires every run. Primary action: "Proceed Anyway"
+    //      (calls handleValidate); secondary: "Go Back".
+    //   2. ConflictDialog — only opens if validate-against-DB finds dup
+    //      rows or row-level validation errors. For a fresh local
+    //      Supabase the seed creates E2E-MFG-001/RAW-001/SUB-001 (NOT
+    //      E2E-CSV-00*), so the import CSV doesn't conflict and this
+    //      dialog typically does NOT show — handleValidate goes straight
+    //      to executeImport.
+    //
+    // Both dialogs share role="dialog", so disambiguate by heading text.
+    const unmappedDialog = page.getByRole('dialog', { name: /Some Fields Not Mapped/i });
+    if (await unmappedDialog.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await unmappedDialog.getByRole('button', { name: /Proceed Anyway/i }).click();
+    }
 
-    // Wait for validation to complete
-    // If there are conflicts, a dialog appears — confirm to proceed
-    const conflictDialog = page.getByRole('dialog');
-    const hasConflicts = await conflictDialog
-      .isVisible({ timeout: 10_000 })
-      .catch(() => false);
-
-    if (hasConflicts) {
-      // Click "Confirm" to proceed with import
-      await conflictDialog.getByRole('button', { name: /Confirm/i }).click();
+    // Conflict dialog is opportunistic — fires when validate-against-DB
+    // finds dup part_name rows (e.g. when re-running the spec against a
+    // local Supabase that already has the imported parts from a prior
+    // run). Title is "Issues Detected" per ConflictDialog.tsx; primary
+    // action is "Import {N} Parts".
+    const conflictDialog = page.getByRole('dialog', { name: /Issues Detected/i });
+    if (await conflictDialog.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await conflictDialog.getByRole('button', { name: /^Import \d+ Parts/i }).click();
     }
 
     // ── Step 7: Wait for import to complete ──

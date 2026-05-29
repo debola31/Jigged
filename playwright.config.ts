@@ -34,6 +34,15 @@ export default defineConfig({
   reporter: isCI ? [['html'], ['github']] : [['html']],
   timeout: 120_000,
 
+  // Default expect timeout is 5s — too tight for our `pnpm next dev` model
+  // in CI, where the *first* request to any route triggers a Turbopack
+  // compile that routinely takes 5–15s on a cold runner. A 5s URL
+  // assertion fires before navigation completes; a 5s "Q-NN visible"
+  // check fires before the freshly-compiled quote-detail page has
+  // hydrated. 30s gives cold routes enough room without masking real
+  // app failures (test-level timeout is still 120s).
+  expect: { timeout: 30_000 },
+
   globalSetup: require.resolve('./e2e/global-setup.ts'),
 
   use: {

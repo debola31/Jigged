@@ -31,11 +31,16 @@ import http from 'node:http';
 
 const PORT = parseInt(process.env.ANTHROPIC_MOCK_PORT || '9876', 10);
 
-// CSV → DB field mapping for the test-parts.csv fixture (Part Name +
-// Description). Confidence ≥ 0.8 keeps the UI on the auto-advance path;
-// review-prompts would force the spec to handle extra screens. If the
-// fixture grows new columns, extend this list to match — otherwise the
-// importer will mark them needs-review.
+// CSV → DB field mapping for the test-parts.csv fixture (Part Name,
+// Description, Unit). Confidence ≥ 0.8 keeps the UI on the auto-advance
+// path; review-prompts would force the spec to handle extra screens. If
+// the fixture grows new columns, extend this list to match — otherwise
+// the importer will mark them needs-review.
+//
+// The Unit column is required: the parts table has a `parts_requires_unit`
+// CHECK constraint (NOT NULL on primary_unit), and the importer can't
+// auto-populate it. Without mapping Unit → primary_unit, /import/execute
+// returns 500 from PostgREST.
 const MOCK_MAPPING = {
   mappings: [
     {
@@ -49,6 +54,12 @@ const MOCK_MAPPING = {
       db_field: 'description',
       confidence: 0.99,
       reasoning: 'Direct match',
+    },
+    {
+      csv_column: 'Unit',
+      db_field: 'primary_unit',
+      confidence: 0.95,
+      reasoning: 'Direct match for unit of measure (satisfies parts_requires_unit CHECK)',
     },
   ],
 };

@@ -9,11 +9,12 @@ import path from 'path';
  * - FastAPI backend must be running (for AI column analysis)
  * - Test company must exist
  *
- * AI provider: the orchestration layer (see `package.json` `e2e:local` and
- * `.github/workflows/e2e-tests.yml`) starts `e2e/mocks/anthropic-server.cjs`
- * on port 9876 and sets `ANTHROPIC_BASE_URL` so the FastAPI backend's
- * Anthropic SDK calls land there instead of api.anthropic.com. The mock
- * returns a canned mapping for the test-parts.csv fixture.
+ * AI provider: the orchestration layer (see `e2e/run-stack.mjs`,
+ * launched via the `test:e2e:local` npm script and the E2E CI workflow)
+ * starts `e2e/mocks/anthropic-server.mjs` on port 9876 and sets
+ * `ANTHROPIC_BASE_URL` so the FastAPI backend's Anthropic SDK calls land
+ * there instead of api.anthropic.com. The mock returns a canned mapping
+ * for the test-parts.csv fixture.
  */
 test.describe('CSV Import workflow', () => {
   test('import parts from CSV file', async ({ page }) => {

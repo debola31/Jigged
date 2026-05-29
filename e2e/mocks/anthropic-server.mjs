@@ -27,7 +27,7 @@
  * fixture changes, update `MOCK_MAPPING` to match.
  */
 
-const http = require('http');
+import http from 'node:http';
 
 const PORT = parseInt(process.env.ANTHROPIC_MOCK_PORT || '9876', 10);
 

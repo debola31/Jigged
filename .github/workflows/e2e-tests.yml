@@ -81,7 +81,7 @@ jobs:
             echo "ANTHROPIC_BASE_URL=http://localhost:9876"
           } >> $GITHUB_ENV
 
-      - name: Run E2E (start-server-and-test orchestrates anthropic mock + FastAPI + Next.js)
+      - name: Run E2E (e2e/run-stack.mjs orchestrates anthropic mock + FastAPI + Next.js)
         run: pnpm test:e2e:local
 
       - name: Upload Playwright report

@@ -5,8 +5,8 @@ End-to-end Playwright specs for Jigged. The suite runs against an
 all booted via the Supabase CLI), a locally-running Next.js dev server,
 the FastAPI backend, and a small Node HTTP mock for the Anthropic
 Messages API. All four services are orchestrated by
-[`start-server-and-test`](https://github.com/bahmutov/start-server-and-test);
-see the `test:e2e:local` script in `package.json`.
+[`e2e/run-stack.mjs`](./run-stack.mjs); see the `test:e2e:local` script
+in `package.json`.
 
 The CI workflow ([.github/workflows/e2e-tests.yml](../.github/workflows/e2e-tests.yml))
 mirrors the local stack — no cloud preview required. Vercel preview

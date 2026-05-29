@@ -30,10 +30,12 @@ export default defineConfig({
         //                              functions 44.77 / lines 51.78
         // 2026-05-28 (3f StationQRCode): statements 50.83 / branches 45.89 /
         //                                functions 45.07 / lines 52.26
-        statements: 49,
-        branches: 44,
-        functions: 44,
-        lines: 50,
+        // 2026-05-28 (3f import-ui + access files):
+        //   statements 50.99 / branches 46.09 / functions 48.91 / lines 52.37
+        statements: 50,
+        branches: 45,
+        functions: 47,
+        lines: 51,
       },
     },
   },

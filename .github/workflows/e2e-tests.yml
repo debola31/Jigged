@@ -1,15 +1,15 @@
 name: E2E Tests
 
 on:
-  deployment_status:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   e2e:
-    name: Playwright E2E
-    if: >
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment_status.environment == 'Preview'
-    timeout-minutes: 15
+    name: Playwright E2E (local Supabase)
+    timeout-minutes: 25
     runs-on: ubuntu-latest
 
     steps:
@@ -24,34 +24,85 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Install dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: api/requirements.txt
+
+      # Local Supabase via the CLI (same pattern as the backend test job).
+      # Boots Postgres + Auth + Storage + Realtime and replays migrations
+      # (the single baseline post-3b → matches prod). Ephemeral per run;
+      # no shared state to clean up.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Install Python dependencies
+        working-directory: ./api
+        run: pip install -r requirements.txt
 
-      - name: Run E2E tests
-        run: pnpm test:e2e
-        env:
-          PLAYWRIGHT_TEST_BASE_URL: ${{ github.event.deployment_status.target_url }}
-          E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
-          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          # Seed env for e2e/global-setup.ts (added in bfc4938 but never
-          # wired up, which is why the suite has been failing with "Cannot
-          # seed E2E fixtures — missing env vars"). global-setup signs in as
-          # E2E_TEST_EMAIL and writes through RLS, so only the public anon
-          # key is needed — no service-role secret in CI.
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          E2E_TEST_COMPANY_ID: ${{ secrets.E2E_TEST_COMPANY_ID }}
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Export Supabase + FastAPI + Next.js env
+        # `supabase status -o env` emits API_URL / ANON_KEY / SERVICE_ROLE_KEY.
+        # We re-export under:
+        #   - TEST_*           — read by e2e/global-setup.ts to seed the user
+        #                        and company against the local stack.
+        #   - NEXT_PUBLIC_*    — read by Next.js at dev-server startup. Same
+        #                        local URL + anon key the test user signs in
+        #                        with.
+        #   - SUPABASE_*       — read by the FastAPI backend (api/index.py).
+        #                        Backend needs the service-role key for its
+        #                        admin operations (auth.admin, etc.).
+        #   - ANTHROPIC_*      — point the Anthropic Python SDK at the mock
+        #                        server (e2e/mocks/anthropic-server.cjs).
+        #                        The SDK uses ANTHROPIC_BASE_URL natively;
+        #                        any non-empty API key satisfies the
+        #                        ClaudeProvider construction guard.
+        run: |
+          eval "$(supabase status -o env)"
+          {
+            echo "TEST_SUPABASE_URL=$API_URL"
+            echo "TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            # The frontend reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy
+            # name) — see [lib/supabase.ts](../../lib/supabase.ts) and
+            # [app/auth/callback/route.ts](../../app/auth/callback/route.ts).
+            # If we only set the prod-aligned PUBLISHABLE_KEY name, the
+            # Supabase browser client constructs with undefined → auth
+            # calls hang → AuthProvider stays in loading state → login
+            # page never renders the "Sign In" button → auth.setup.ts
+            # times out.
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY"
+            echo "ANTHROPIC_API_KEY=sk-mock-for-e2e"
+            echo "ANTHROPIC_BASE_URL=http://localhost:9876"
+          } >> $GITHUB_ENV
+
+      - name: Run E2E (e2e/run-stack.mjs orchestrates anthropic mock + FastAPI + Next.js)
+        run: pnpm test:e2e:local
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: |
             playwright-report/
             test-results/
           retention-days: 7
+
+      - name: Stop Supabase
+        if: always()
+        continue-on-error: true
+        run: supabase stop

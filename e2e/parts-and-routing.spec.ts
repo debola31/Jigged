@@ -80,21 +80,13 @@ test.describe('Parts and Routing workflow', () => {
 
     // Open the Work center autocomplete. Pick `E2E Internal WC` explicitly
     // — the seed (e2e/global-setup.ts) creates both an Internal and an
-    // External WC, alphabetical sort puts the External one first, and
-    // selecting an external WC reshapes the editor to vendor-price fields
-    // (no Cycle minutes per unit), which would break the next assertion.
+    // External WC; selecting the external one would reshape the editor to
+    // vendor-price fields (no Cycle minutes per unit) and break the next
+    // assertion.
     await page.getByLabel(/^Work center$/).click();
 
     const listbox = page.getByRole('listbox');
     const internalWcOption = listbox.getByRole('option', { name: /E2E Internal WC/ });
-    const hasInternalWc = await internalWcOption
-      .isVisible({ timeout: 10_000 })
-      .catch(() => false);
-
-    if (!hasInternalWc) {
-      test.skip(true, 'E2E Internal WC missing from test company (seed should have created it)');
-    }
-
     await internalWcOption.click();
 
     // Editor requires at least one of cycle / setup minutes before save will

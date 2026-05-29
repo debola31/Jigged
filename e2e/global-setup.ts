@@ -1,137 +1,150 @@
 /**
- * Playwright global setup: idempotent E2E fixture seeding.
+ * Playwright global setup: seed an ephemeral local Supabase for E2E.
  *
- * Promised in `e2e/SEED_TODO.md` — the unify-parts-inventory PR (chunk 1) tore
- * down the legacy seed and intentionally left the E2E company empty. The
- * existing specs (parts-and-routing, quote-to-job, csv-import) need a baseline
- * of: ≥1 vendor, ≥1 internal + ≥1 external work_center, ≥1 customer, ≥1
- * manufacturable part with a routing op, ≥1 stockable raw, ≥1 BOM child.
+ * The full setup runs against a fresh local Supabase stack (`supabase start`):
+ * fresh DB, no pre-existing users, no pre-existing companies. We use the
+ * local service-role key to:
+ *   1. Create or find the test auth user (deterministic email/password from
+ *      `e2e/fixtures/test-data.ts`).
+ *   2. Create or find the test company.
+ *   3. Link the user to the company via `user_company_access` (role=admin).
+ *   4. Seed the per-spec data graph: vendor, work centers, customer, parts,
+ *      routing, BOM, pricing tiers.
  *
- * Idempotency strategy: every seeded row carries a per-row sentinel via the
- * `legacy_id` column shaped as `${E2E_SEED_MARKER}:${stable_name}` (e.g.
- * `E2E_SEED_v1:E2E-MFG-001`). The per-row suffix is required because
- * `parts_legacy_id_unique_per_company` (and the equivalent on vendors)
- * forbids two rows in one company sharing the same legacy_id. Lookups
- * happen by stable name (which also has UNIQUE-per-company constraints),
- * so the marker is purely for teardown — `legacy_id LIKE 'E2E_SEED_v1%'`
- * cleanly scopes deletes to seeded rows. Re-runs are safe.
+ * Idempotency: every helper is find-or-insert so re-running locally without
+ * `supabase db reset` is safe. CI runs always start from a fresh DB so the
+ * "find" branches are no-ops there.
  *
- * Why we sign in as the test user (and not service-role): every table we
- * write to (vendors, work_centers, customers, parts, routings,
- * routing_operations, parts_bom) has an RLS policy of the form
- *   company_id IN (SELECT company_id FROM user_company_access WHERE user_id = auth.uid())
- * So an authenticated user with access to E2E_TEST_COMPANY_ID can do every
- * insert legitimately, no RLS bypass required. Avoiding the service-role key
- * shrinks the CI secret surface — if a future seed step actually needs
- * admin powers (e.g. seeding auth.users or RLS-immune tables), reintroduce
- * the service-role client at that boundary only, not for the whole script.
+ * Env contract (set by `.github/workflows/e2e-tests.yml` after
+ * `supabase status -o env`, or by the developer's shell after
+ * `eval "$(supabase status -o env)"`):
  *
- * Env contract:
- *   SUPABASE_URL                       — Supabase project URL (e.g. staging)
- *   NEXT_PUBLIC_SUPABASE_ANON_KEY      — public key the browser already uses
- *   E2E_TEST_COMPANY_ID                — UUID of the company the E2E user belongs to
- *   E2E_TEST_EMAIL / E2E_TEST_PASSWORD — credentials for sign-in (also used by auth.setup.ts)
+ *   TEST_SUPABASE_URL              — `API_URL` from `supabase status`
+ *   TEST_SUPABASE_SECRET_KEY       — `SERVICE_ROLE_KEY` from `supabase status`
  *
- * The E2E user must have a `user_company_access` row for E2E_TEST_COMPANY_ID
- * (any role — operator/user/admin all satisfy the RLS predicate).
+ * Both are required. Exits 1 if missing, with a copy-pasteable command in
+ * the error message — silent skipping would leave specs failing with
+ * confusing "Autocomplete is empty" timeouts.
  *
- * If any are missing we exit 1 — silent skipping would leave specs failing
- * with confusing "Autocomplete is empty" timeouts.
+ * Why service-role here: we need `auth.admin.createUser` to provision the
+ * test user, and we want every entity insert to bypass RLS so the seed
+ * doesn't double as an RLS test. The service-role key is the local-stack
+ * key (publicly-known default) — there is no production secret in this
+ * file or in CI.
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-import path from 'path';
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { TEST_EMAIL, TEST_PASSWORD } from './fixtures/test-data';
 
-// Load the same env file Playwright already reads, so devs only configure
-// E2E credentials once.
-dotenv.config({ path: path.resolve(__dirname, '.env.test.local') });
-
-/** Sentinel prefix that tags every row seeded by this script. Each row's
- *  legacy_id is `${E2E_SEED_MARKER}:${stable_name}` so the per-company
- *  legacy_id UNIQUE constraint is satisfied. Bump version when the seed
- *  shape changes so old rows fall out of the prefix match cleanly. */
-export const E2E_SEED_MARKER = 'E2E_SEED_v1';
-
-/** Build the per-row legacy_id tag for a given stable name. */
-const seedTag = (name: string) => `${E2E_SEED_MARKER}:${name}`;
-
-/** Customer name we look up to detect prior seeds (customers has no
- *  legacy_id column on its schema, so we scope by name + company). */
-export const E2E_CUSTOMER_NAME = 'E2E Test Customer';
-
-/** Stable names — the E2E specs match against these strings via Autocomplete. */
+/** Stable identifiers the specs match against. Changing these is a breaking
+ *  change to every spec. */
+const COMPANY_NAME = 'E2E Test Company';
 const VENDOR_NAME = 'E2E Test Vendor';
 const WC_INTERNAL_NAME = 'E2E Internal WC';
 const WC_EXTERNAL_NAME = 'E2E External WC';
+const CUSTOMER_NAME = 'E2E Test Customer';
 const PART_MFG_NAME = 'E2E-MFG-001';
 const PART_RAW_NAME = 'E2E-RAW-001';
 const PART_SUB_NAME = 'E2E-SUB-001';
 
-interface SeedEnv {
+interface SetupEnv {
   url: string;
-  anonKey: string;
-  companyId: string;
-  email: string;
-  password: string;
+  secretKey: string;
 }
 
-function readEnvOrExit(): SeedEnv {
+function readEnvOrExit(): SetupEnv {
+  const url = process.env.TEST_SUPABASE_URL ?? '';
+  const secretKey = process.env.TEST_SUPABASE_SECRET_KEY ?? '';
   const missing: string[] = [];
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.SUPABASE_ANON_KEY ??
-    process.env.SUPABASE_PUBLISHABLE_KEY ??
-    '';
-  const companyId = process.env.E2E_TEST_COMPANY_ID ?? '';
-  const email = process.env.E2E_TEST_EMAIL ?? '';
-  const password = process.env.E2E_TEST_PASSWORD ?? '';
-
-  if (!url) missing.push('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)');
-  if (!anonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)');
-  if (!companyId) missing.push('E2E_TEST_COMPANY_ID');
-  if (!email) missing.push('E2E_TEST_EMAIL');
-  if (!password) missing.push('E2E_TEST_PASSWORD');
-
+  if (!url) missing.push('TEST_SUPABASE_URL');
+  if (!secretKey) missing.push('TEST_SUPABASE_SECRET_KEY');
   if (missing.length > 0) {
     console.error(
-      '\n[e2e/global-setup] Cannot seed E2E fixtures — missing env vars:\n  - ' +
+      '\n[e2e/global-setup] Missing env vars:\n  - ' +
         missing.join('\n  - ') +
-        '\n\nSee e2e/README.md for the full env contract. Aborting.\n',
+        '\n\nRun `supabase start` and then\n' +
+        '  eval "$(supabase status -o env)"\n' +
+        '  export TEST_SUPABASE_URL=$API_URL\n' +
+        '  export TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY\n' +
+        '\nAborting.\n',
     );
     process.exit(1);
   }
-
-  return { url, anonKey, companyId, email, password };
+  return { url, secretKey };
 }
 
-async function makeAuthenticatedClient(env: SeedEnv): Promise<SupabaseClient> {
-  const supabase = createClient(env.url, env.anonKey, {
+function makeAdminClient(env: SetupEnv): SupabaseClient {
+  return createClient(env.url, env.secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { error } = await supabase.auth.signInWithPassword({
-    email: env.email,
-    password: env.password,
-  });
-  if (error) {
-    throw new Error(
-      `[e2e/global-setup] Failed to sign in as ${env.email}: ${error.message}. ` +
-        `The E2E test user must exist on this Supabase project and have a ` +
-        `user_company_access row for E2E_TEST_COMPANY_ID.`,
-    );
-  }
-  return supabase;
 }
 
 /**
- * Find-or-insert a vendor by name. Tags with E2E_SEED_MARKER so cleanup can
- * find it later without depending on the name string.
+ * Find-or-create the test auth user. Local Supabase's `admin.listUsers`
+ * isn't filterable by email, so we paginate the first page and match by
+ * email — for an ephemeral local DB the user list is tiny.
  */
-async function ensureVendor(
+async function ensureAuthUser(supabase: SupabaseClient): Promise<User> {
+  const { data: existingList, error: listErr } = await supabase.auth.admin.listUsers({
+    perPage: 100,
+  });
+  if (listErr) throw new Error(`listUsers failed: ${listErr.message}`);
+  const existing = existingList.users.find((u) => u.email === TEST_EMAIL);
+  if (existing) return existing;
+
+  const { data, error } = await supabase.auth.admin.createUser({
+    email: TEST_EMAIL,
+    password: TEST_PASSWORD,
+    email_confirm: true,
+  });
+  if (error || !data.user) {
+    throw new Error(`createUser failed for ${TEST_EMAIL}: ${error?.message}`);
+  }
+  return data.user;
+}
+
+async function ensureCompany(supabase: SupabaseClient): Promise<string> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('companies')
+    .select('id')
+    .eq('name', COMPANY_NAME)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`company lookup failed: ${lookupErr.message}`);
+  if (existing) return existing.id;
+
+  const { data, error } = await supabase
+    .from('companies')
+    .insert({ name: COMPANY_NAME })
+    .select('id')
+    .single();
+  if (error || !data) throw new Error(`company insert failed: ${error?.message}`);
+  return data.id;
+}
+
+async function ensureUserCompanyAccess(
   supabase: SupabaseClient,
+  userId: string,
   companyId: string,
-): Promise<string> {
+): Promise<void> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('user_company_access')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`user_company_access lookup failed: ${lookupErr.message}`);
+  if (existing) return;
+
+  const { error } = await supabase.from('user_company_access').insert({
+    user_id: userId,
+    company_id: companyId,
+    role: 'admin',
+    name: 'E2E Test User',
+  });
+  if (error) throw new Error(`user_company_access insert failed: ${error.message}`);
+}
+
+async function ensureVendor(supabase: SupabaseClient, companyId: string): Promise<string> {
   const { data: existing, error: lookupErr } = await supabase
     .from('vendors')
     .select('id')
@@ -141,28 +154,15 @@ async function ensureVendor(
   if (lookupErr) throw new Error(`vendor lookup failed: ${lookupErr.message}`);
   if (existing) return existing.id;
 
-  // The vendors table dropped contact_name/email/phone/notes in
-  // 20260504_vendor_contacts_and_drop_notes — contacts now live on a
-  // separate vendor_contacts row. None of the current specs touch vendor
-  // contact info, so we don't seed a vendor_contacts row here; if a spec
-  // needs one later, add an ensureVendorContact helper alongside this.
   const { data, error } = await supabase
     .from('vendors')
-    .insert({
-      company_id: companyId,
-      name: VENDOR_NAME,
-      legacy_id: seedTag(VENDOR_NAME),
-    })
+    .insert({ company_id: companyId, name: VENDOR_NAME })
     .select('id')
     .single();
   if (error || !data) throw new Error(`vendor insert failed: ${error?.message}`);
   return data.id;
 }
 
-/**
- * Find-or-insert work_center. The (company_id, name) unique constraint
- * makes the find-then-insert race-safe under serial Playwright setup.
- */
 async function ensureWorkCenter(
   supabase: SupabaseClient,
   companyId: string,
@@ -196,16 +196,12 @@ async function ensureWorkCenter(
   return data.id;
 }
 
-/** customers has no metadata or legacy_id column — match on (company_id, name). */
-async function ensureCustomer(
-  supabase: SupabaseClient,
-  companyId: string,
-): Promise<string> {
+async function ensureCustomer(supabase: SupabaseClient, companyId: string): Promise<string> {
   const { data: existing, error: lookupErr } = await supabase
     .from('customers')
     .select('id')
     .eq('company_id', companyId)
-    .eq('name', E2E_CUSTOMER_NAME)
+    .eq('name', CUSTOMER_NAME)
     .maybeSingle();
   if (lookupErr) throw new Error(`customer lookup failed: ${lookupErr.message}`);
   if (existing) return existing.id;
@@ -214,8 +210,7 @@ async function ensureCustomer(
     .from('customers')
     .insert({
       company_id: companyId,
-      name: E2E_CUSTOMER_NAME,
-      contact_email: 'e2e-customer@example.com',
+      name: CUSTOMER_NAME,
     })
     .select('id')
     .single();
@@ -230,12 +225,8 @@ interface PartSpec {
   is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
-  /**
-   * Procurement cost to seed for bought parts. Persisted as a NULL-vendor
-   * procurement tier at min_quantity=1 (parts.cost_per_unit was dropped in
-   * migration 20260514). Ignored for made parts — their cost is computed
-   * live by compute_part_cost_at_qty.
-   */
+  /** Persisted as a NULL-vendor procurement tier at min_quantity=1 for
+   *  bought parts. Ignored for made parts. */
   cost_per_unit: number | null;
 }
 
@@ -266,7 +257,6 @@ async function ensurePart(
         is_stocked: spec.is_stocked,
         primary_unit: spec.primary_unit,
         quantity: spec.quantity,
-        legacy_id: seedTag(spec.part_name),
       })
       .select('id')
       .single();
@@ -274,7 +264,6 @@ async function ensurePart(
     partId = data.id;
   }
 
-  // Idempotent NULL-vendor procurement tier for bought parts with a cost.
   if (spec.source === 'bought' && spec.cost_per_unit !== null && spec.cost_per_unit > 0) {
     const { data: existingTier, error: tierLookupErr } = await supabase
       .from('part_procurement_tiers')
@@ -287,14 +276,12 @@ async function ensurePart(
       throw new Error(`tier lookup failed (${spec.part_name}): ${tierLookupErr.message}`);
     }
     if (!existingTier) {
-      const { error: tierErr } = await supabase
-        .from('part_procurement_tiers')
-        .insert({
-          part_id: partId,
-          vendor_id: null,
-          min_quantity: 1,
-          cost_per_unit: spec.cost_per_unit,
-        });
+      const { error: tierErr } = await supabase.from('part_procurement_tiers').insert({
+        part_id: partId,
+        vendor_id: null,
+        min_quantity: 1,
+        cost_per_unit: spec.cost_per_unit,
+      });
       if (tierErr) {
         throw new Error(`tier insert failed (${spec.part_name}): ${tierErr.message}`);
       }
@@ -310,7 +297,6 @@ async function ensureRouting(
   partId: string,
   workCenterId: string,
 ): Promise<void> {
-  // routings has UNIQUE(part_id) — one routing per part. Find by part_id.
   const { data: existing, error: lookupErr } = await supabase
     .from('routings')
     .select('id')
@@ -336,7 +322,6 @@ async function ensureRouting(
     routingId = data.id;
   }
 
-  // Ensure at least one operation. UNIQUE(routing_id, sequence) → match on seq.
   const { data: existingOp, error: opLookupErr } = await supabase
     .from('routing_operations')
     .select('id')
@@ -346,29 +331,17 @@ async function ensureRouting(
   if (opLookupErr) throw new Error(`routing op lookup failed: ${opLookupErr.message}`);
   if (existingOp) return;
 
-  const { error: opErr } = await supabase
-    .from('routing_operations')
-    .insert({
-      routing_id: routingId,
-      work_center_id: workCenterId,
-      sequence: 10,
-      setup_minutes: 15,
-      cycle_minutes_per_unit: 2.5,
-      labor_rate_override: 100,
-    });
+  const { error: opErr } = await supabase.from('routing_operations').insert({
+    routing_id: routingId,
+    work_center_id: workCenterId,
+    sequence: 10,
+    setup_minutes: 15,
+    cycle_minutes_per_unit: 2.5,
+    labor_rate_override: 100,
+  });
   if (opErr) throw new Error(`routing op insert failed: ${opErr.message}`);
 }
 
-/**
- * Find-or-insert one pricing tier for a part at the given sequence. The spec
- * exercises the tier-resolution path inside QuoteForm, which requires
- * `part_pricing_tiers` rows on the manufacturable test part — without them
- * the form shows "no pricing tiers yet" and the quote-to-job spec is forced
- * to runtime-skip. UNIQUE(part_id, sequence) keeps this idempotent.
- *
- * Tier rows only carry metadata (qty break + markup %); the unit price is
- * derived live from the routing + BOM at read time.
- */
 async function ensurePricingTier(
   supabase: SupabaseClient,
   companyId: string,
@@ -386,22 +359,16 @@ async function ensurePricingTier(
   if (lookupErr) throw new Error(`pricing tier lookup failed: ${lookupErr.message}`);
   if (existing) return;
 
-  const { error } = await supabase
-    .from('part_pricing_tiers')
-    .insert({
-      part_id: partId,
-      company_id: companyId,
-      sequence,
-      quantity,
-      markup_percent: markupPercent,
-    });
+  const { error } = await supabase.from('part_pricing_tiers').insert({
+    part_id: partId,
+    company_id: companyId,
+    sequence,
+    quantity,
+    markup_percent: markupPercent,
+  });
   if (error) throw new Error(`pricing tier insert failed: ${error.message}`);
 }
 
-/**
- * Ensure a single BOM edge between two parts. UNIQUE(parent, child) keeps
- * this idempotent.
- */
 async function ensureBomEdge(
   supabase: SupabaseClient,
   parentId: string,
@@ -416,54 +383,51 @@ async function ensureBomEdge(
   if (lookupErr) throw new Error(`bom lookup failed: ${lookupErr.message}`);
   if (existing) return;
 
-  const { error } = await supabase
-    .from('parts_bom')
-    .insert({
-      parent_part_id: parentId,
-      child_part_id: childId,
-      quantity: 1,
-      unit: 'ea',
-      sequence: 10,
-    });
+  const { error } = await supabase.from('parts_bom').insert({
+    parent_part_id: parentId,
+    child_part_id: childId,
+    quantity: 1,
+    unit: 'ea',
+    sequence: 10,
+  });
   if (error) throw new Error(`bom insert failed: ${error.message}`);
 }
 
 export default async function globalSetup(): Promise<void> {
   const env = readEnvOrExit();
-  const supabase = await makeAuthenticatedClient(env);
+  const supabase = makeAdminClient(env);
 
   // eslint-disable-next-line no-console
-  console.log(`[e2e/global-setup] Seeding fixtures into company ${env.companyId}…`);
+  console.log('[e2e/global-setup] Seeding ephemeral local Supabase…');
 
-  const vendorId = await ensureVendor(supabase, env.companyId);
+  const user = await ensureAuthUser(supabase);
+  const companyId = await ensureCompany(supabase);
+  await ensureUserCompanyAccess(supabase, user.id, companyId);
+
+  const vendorId = await ensureVendor(supabase, companyId);
   const wcInternalId = await ensureWorkCenter(
     supabase,
-    env.companyId,
+    companyId,
     WC_INTERNAL_NAME,
     'internal',
     null,
     100,
   );
-  await ensureWorkCenter(
-    supabase,
-    env.companyId,
-    WC_EXTERNAL_NAME,
-    'external',
-    vendorId,
-    null,
-  );
-  await ensureCustomer(supabase, env.companyId);
+  await ensureWorkCenter(supabase, companyId, WC_EXTERNAL_NAME, 'external', vendorId, null);
+  await ensureCustomer(supabase, companyId);
 
-  const mfgPartId = await ensurePart(supabase, env.companyId, {
+  const mfgPartId = await ensurePart(supabase, companyId, {
     part_name: PART_MFG_NAME,
     description: 'E2E made part with routing',
     source: 'made',
     is_stocked: false,
-    primary_unit: null,
+    // parts_requires_unit CHECK constraint (20260602…) makes primary_unit
+    // NOT NULL for every part. 'ea' is the canonical unit for discrete parts.
+    primary_unit: 'ea',
     quantity: 0,
     cost_per_unit: null,
   });
-  await ensurePart(supabase, env.companyId, {
+  await ensurePart(supabase, companyId, {
     part_name: PART_RAW_NAME,
     description: 'E2E stocked raw material',
     source: 'bought',
@@ -472,7 +436,7 @@ export default async function globalSetup(): Promise<void> {
     quantity: 100,
     cost_per_unit: 5.5,
   });
-  const subPartId = await ensurePart(supabase, env.companyId, {
+  const subPartId = await ensurePart(supabase, companyId, {
     part_name: PART_SUB_NAME,
     description: 'E2E sub-assembly (BOM child of MFG-001)',
     source: 'made',
@@ -482,15 +446,12 @@ export default async function globalSetup(): Promise<void> {
     cost_per_unit: 12.0,
   });
 
-  await ensureRouting(supabase, env.companyId, mfgPartId, wcInternalId);
+  await ensureRouting(supabase, companyId, mfgPartId, wcInternalId);
   await ensureBomEdge(supabase, mfgPartId, subPartId);
-  // Two pricing tiers so the QuoteForm has a real tier to resolve against
-  // when the spec types an order quantity. sequence is the UI ordering; the
-  // tier-resolver matches by quantity, picking the highest tier with
-  // tier_qty <= order_qty.
-  await ensurePricingTier(supabase, env.companyId, mfgPartId, 1, 1, 50);
-  await ensurePricingTier(supabase, env.companyId, mfgPartId, 2, 10, 40);
+  // Two pricing tiers so QuoteForm can resolve a tier on the seeded MFG part.
+  await ensurePricingTier(supabase, companyId, mfgPartId, 1, 1, 50);
+  await ensurePricingTier(supabase, companyId, mfgPartId, 2, 10, 40);
 
   // eslint-disable-next-line no-console
-  console.log('[e2e/global-setup] Done.');
+  console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
 }

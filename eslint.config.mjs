@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import reactHooks from "eslint-plugin-react-hooks";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -14,6 +15,12 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
+    // ESLint 9 flat config: rules from a plugin need the plugin registered
+    // in the same config block (or one with overlapping `files`). The
+    // `eslint-config-next` "next" entry registers react-hooks under a
+    // `files: [tsx/ts]` glob that this block widens to defaults; without
+    // re-registering, ESLint can't resolve `react-hooks/...` here.
+    plugins: { "react-hooks": reactHooks },
     rules: {
       // Allow underscore-prefix to mark intentionally-unused parameters and
       // variables. Standard convention; matches typescript-eslint's defaults

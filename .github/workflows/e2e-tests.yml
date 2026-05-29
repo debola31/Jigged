@@ -74,7 +74,15 @@ jobs:
             echo "TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
             echo "TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY"
             echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
-            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            # The frontend reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy
+            # name) — see [lib/supabase.ts](../../lib/supabase.ts) and
+            # [app/auth/callback/route.ts](../../app/auth/callback/route.ts).
+            # If we only set the prod-aligned PUBLISHABLE_KEY name, the
+            # Supabase browser client constructs with undefined → auth
+            # calls hang → AuthProvider stays in loading state → login
+            # page never renders the "Sign In" button → auth.setup.ts
+            # times out.
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
             echo "SUPABASE_URL=$API_URL"
             echo "SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY"
             echo "ANTHROPIC_API_KEY=sk-mock-for-e2e"

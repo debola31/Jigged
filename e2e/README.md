@@ -43,7 +43,8 @@ export TEST_SUPABASE_URL=$API_URL
 export TEST_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
 export TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
 export NEXT_PUBLIC_SUPABASE_URL=$API_URL
-export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY
+# Frontend reads the legacy ANON_KEY name (lib/supabase.ts).
+export NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY
 export SUPABASE_URL=$API_URL
 export SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
 export ANTHROPIC_API_KEY=sk-mock-for-e2e
@@ -77,7 +78,7 @@ key ones, by consumer:
 | Consumer | Vars |
 |---|---|
 | `e2e/global-setup.ts` | `TEST_SUPABASE_URL`, `TEST_SUPABASE_SECRET_KEY` — exits 1 if missing |
-| Next.js dev server | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
+| Next.js dev server | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy name — see [lib/supabase.ts](../lib/supabase.ts)) |
 | FastAPI backend | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
 | Playwright auth.setup.ts | `E2E_TEST_EMAIL` / `E2E_TEST_PASSWORD` (optional — defaults in `fixtures/test-data.ts` work for local Supabase) |
 

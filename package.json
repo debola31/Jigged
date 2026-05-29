@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:local": "start-server-and-test 'node e2e/mocks/anthropic-server.cjs' http://localhost:9876/health 'cd api && python index.py' http-get://localhost:8000/docs 'next dev' http://localhost:3000 'playwright test'",
     "gen:db-types": "supabase gen types typescript --linked > types/database.ts"
   },
   "dependencies": {
@@ -52,6 +53,7 @@
     "eslint-config-next": "16.2.1",
     "jsdom": "^27.4.0",
     "msw": "^2.12.7",
+    "start-server-and-test": "^2.1.0",
     "supabase": "^2.84.4",
     "typescript": "^5",
     "vite": "7.3.2",

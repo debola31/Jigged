@@ -8,6 +8,7 @@ import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Alert from '@mui/material/Alert';
+import AlertTitle from '@mui/material/AlertTitle';
 import CircularProgress from '@mui/material/CircularProgress';
 import Table from '@mui/material/Table';
 import TableHead from '@mui/material/TableHead';
@@ -20,6 +21,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
   getTiersForPart,
   addTier as addTierApi,
@@ -490,19 +492,37 @@ export default function PartProcurementPricingPanel({
           <CircularProgress size={24} />
         </Box>
       ) : !selectedVendorId ? (
-        <Box
-          sx={{
-            py: 3,
-            px: 2,
-            textAlign: 'center',
-            border: (theme) => `1px dashed ${theme.palette.divider}`,
-            borderRadius: 1,
-          }}
+        <Alert severity="warning" icon={<WarningAmberIcon fontSize="inherit" />}>
+          <AlertTitle sx={{ fontWeight: 700, mb: 0.5 }}>
+            No cost on file
+          </AlertTitle>
+          Pick a preferred vendor above and add at least one qty-break tier.
+          Quotes can&apos;t price this part until a cost is on file.
+        </Alert>
+      ) : rows.length === 0 ? (
+        <Alert
+          severity="warning"
+          icon={<WarningAmberIcon fontSize="inherit" />}
+          action={
+            <Button
+              color="warning"
+              size="small"
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={addRow}
+              sx={{ alignSelf: 'center', whiteSpace: 'nowrap' }}
+            >
+              Add first tier
+            </Button>
+          }
+          sx={{ alignItems: 'center' }}
         >
-          <Typography variant="body2" color="text.secondary">
-            Pick a vendor above to set qty-break pricing.
-          </Typography>
-        </Box>
+          <AlertTitle sx={{ fontWeight: 700, mb: 0.5 }}>
+            No cost tiers set for {selectedVendor?.name ?? 'this vendor'}
+          </AlertTitle>
+          Quotes can&apos;t price this part until you add at least one
+          qty-break tier.
+        </Alert>
       ) : (
         <>
           <TableContainer>
@@ -516,17 +536,7 @@ export default function PartProcurementPricingPanel({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3}>
-                      <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-                        No tiers yet for {selectedVendor?.name ?? 'this vendor'}. Click
-                        Add tier to set the first qty break.
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((row, idx) => {
+                {rows.map((row, idx) => {
                     const costNum = parseNumber(row.cost);
                     const rowKey = row.id ?? row.tempKey ?? `idx-${idx}`;
                     const status = rowStatus.get(rowKey);
@@ -625,8 +635,7 @@ export default function PartProcurementPricingPanel({
                         </TableCell>
                       </TableRow>
                     );
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </TableContainer>

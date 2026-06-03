@@ -40,6 +40,7 @@ import type { Part, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
 import PartPricing from '@/components/parts/PartPricing';
+import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
 import PartClassificationChips from '@/components/parts/PartClassificationChips';
 import PartTransactionModal from '@/components/parts/PartTransactionModal';
 import PartTransactionHistoryTable from '@/components/parts/PartTransactionHistoryTable';
@@ -488,9 +489,10 @@ export default function PartDetailPage() {
           </Grid>
         )}
 
-        {/* For bought parts the Pricing card now hosts the procurement
-            cost source as its top subsection — no separate Procurement
-            Cost card. See PartPricing.tsx. */}
+        {/* Bought parts get a dedicated Cost card (vendor tier sheets)
+            above the Pricing card. Keeping them in separate cards makes
+            cost-of-goods and markup visually distinct so they don't get
+            confused with each other. */}
 
         {/* Main row for manufactured parts: Pricing on the left (md=7),
             Operations + Materials grouped together on the right (md=5).
@@ -563,6 +565,21 @@ export default function PartDetailPage() {
                       companyId={companyId}
                       description={`Parts consumed when manufacturing this ${part.part_name}.`}
                       onChanged={refreshAfterMutation}
+                    />
+                  </CardContent>
+                </Card>
+              </Grid>
+            )}
+
+            {part.source === 'bought' && (
+              <Grid size={{ xs: 12 }}>
+                <Card elevation={2}>
+                  <CardContent>
+                    <PartProcurementPricingPanel
+                      partId={partId}
+                      companyId={companyId}
+                      primaryUnit={part.primary_unit}
+                      preferredVendorId={part.preferred_vendor_id}
                     />
                   </CardContent>
                 </Card>

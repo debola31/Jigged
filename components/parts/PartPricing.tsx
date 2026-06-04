@@ -47,7 +47,6 @@ import {
 } from '@/types/markupRates';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
-import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 
 interface PartPricingProps {
@@ -123,8 +122,9 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
  *     - Unit price is editable and back-calculates the markup
  *
  *   Bought parts:
- *     - Cost source subsection at top: per-vendor tier sheets
- *       (PartProcurementPricingPanel embedded inline)
+ *     - Cost source (per-vendor tier sheets) lives in a separate
+ *       PartProcurementPricingPanel card above this one — keeping
+ *       cost-of-goods and markup visually distinct
  *     - Markup tier table with just Qty / Markup %
  *     - Unit price is NOT shown in the card — it depends on which vendor
  *       wins at the actual order quantity, which is only known at quote
@@ -421,8 +421,8 @@ export default function PartPricing({
   const showEditable = isCustom && rows.length > 0;
 
   /** Header row for the Pricing section: h6 + saving indicator + Markup
-      chip. Used as-is for made parts (top of the card) and after the
-      divider for bought parts (below the embedded Cost section). */
+      chip. Rendered at the top of the card for both made and bought
+      parts — bought parts get a separate Cost card above this one. */
   const pricingHeader = (
     <Box
       sx={{
@@ -463,24 +463,6 @@ export default function PartPricing({
 
   return (
     <Box>
-      {/* Bought parts: Cost section (vendor tier sheets, with their own h6
-          header + vendor switcher) renders first; divider; then the
-          Pricing section header + markup table. Mirrors the
-          Operations/Materials pattern in the made-part right-column card
-          where each subsection has its own h6 rather than a joint card
-          header. */}
-      {isBought && (
-        <>
-          <PartProcurementPricingPanel
-            partId={partId}
-            companyId={companyId}
-            primaryUnit={part.primary_unit}
-            preferredVendorId={part.preferred_vendor_id}
-          />
-          <Divider sx={{ my: 3 }} />
-        </>
-      )}
-
       {pricingHeader}
 
       {error && (

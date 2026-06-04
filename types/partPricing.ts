@@ -1,18 +1,12 @@
 /**
  * Part pricing tier — the "estimate" layer. Lives on the Part (not the Quote).
- * Each tier represents a quantity break-point with its own markup/price.
+ * Each tier represents a quantity break-point with its own markup.
  *
  * `base_cost_per_unit` was dropped in migration 20260514 — the base is no
- * longer stored. Callers that need it call `getComputedPartCost(partId,
- * tier.quantity)` to compute live (which also cascades through the BOM at
- * the cascaded qty).
- *
- * `unit_price` is also no longer stored — the DB column was dropped. The
- * field stays on this interface because every consumer (quote form, PDF,
- * pricing resolver) reads it from `getTiersWithComputedPrices`, which fills
- * it live from the routing + BOM rollup. `getTiersForPart` shapes it as
- * `null` so the bought-parts read path (which skips the live compute) is
- * still type-safe.
+ * longer stored. `unit_price` was dropped at the same time. Both derive
+ * live from the routing + BOM rollup. Callers that need a price use
+ * `getTiersWithComputedPrices`, which returns the `ComputedPartPricingTier`
+ * shape below.
  */
 export interface PartPricingTier {
   id: string;
@@ -21,9 +15,19 @@ export interface PartPricingTier {
   sequence: number;
   quantity: number;
   markup_percent: number | null;
-  unit_price: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * `PartPricingTier` plus the live-computed `unit_price`. Returned by
+ * `getTiersWithComputedPrices`. `unit_price` is null when the underlying
+ * cost can't be resolved (bought part missing procurement tier, made part
+ * with an unpriced BOM child, missing labor rate, etc.) — same condition
+ * that drives the quote form's "no usable tier" warning.
+ */
+export interface ComputedPartPricingTier extends PartPricingTier {
+  unit_price: number | null;
 }
 
 /**

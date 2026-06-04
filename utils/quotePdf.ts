@@ -9,7 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
-import type { PartPricingTier } from '@/types/partPricing';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 
@@ -154,9 +154,9 @@ function buildShippingAddressLines(
 /** Pre-fetch master tier lists for every part that appears on the quote. */
 async function loadTiersForQuote(
   quote: QuoteWithRelations,
-): Promise<Record<string, PartPricingTier[]>> {
+): Promise<Record<string, ComputedPartPricingTier[]>> {
   const partIds = Array.from(new Set((quote.line_items ?? []).map((li) => li.part_id)));
-  const out: Record<string, PartPricingTier[]> = {};
+  const out: Record<string, ComputedPartPricingTier[]> = {};
   await Promise.all(
     partIds.map(async (id) => {
       try {

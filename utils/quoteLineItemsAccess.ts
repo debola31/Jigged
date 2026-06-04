@@ -1,6 +1,6 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { QuoteLineItem } from '@/types/quote';
-import type { PartPricingTier } from '@/types/partPricing';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import { getComputedPartCost } from '@/utils/partsAccess';
 
@@ -51,7 +51,7 @@ export async function insertLineItemForPart(
   companyId: string,
   partId: string,
   orderQuantity: number,
-  tiers: PartPricingTier[],
+  tiers: ComputedPartPricingTier[],
   sequence: number,
   override?: QuoteLineItemOverride,
 ): Promise<QuoteLineItem> {

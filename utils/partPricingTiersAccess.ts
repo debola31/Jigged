@@ -1,20 +1,17 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import type { PartPricingTier, PartPricingTierInput } from '@/types/partPricing';
+import type {
+  PartPricingTier,
+  PartPricingTierInput,
+  ComputedPartPricingTier,
+} from '@/types/partPricing';
 import {
   calculateRoutingCost,
   calculateTierPricing,
 } from '@/utils/routingCostCalculation';
 
 /**
- * Get all pricing tiers for a part, ordered by sequence.
- *
- * `unit_price` is no longer stored in the DB — `getTiersWithComputedPrices`
- * is the canonical "what does this tier cost right now" read used by the
- * quote form, PDF, and line-item snapshot. This helper returns the tier
- * metadata only and shapes `unit_price: null` so the existing
- * `PartPricingTier` consumers keep type-checking; the bought-parts path
- * (`getTiersWithComputedPrices` with no routing breakdown) relies on this
- * default value.
+ * Get all pricing tiers for a part (raw DB shape), ordered by sequence.
+ * Callers that need a `unit_price` use `getTiersWithComputedPrices`.
  */
 export async function getTiersForPart(partId: string): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
@@ -28,7 +25,7 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
     console.error('Error fetching part pricing tiers:', error);
     throw error;
   }
-  return (data || []).map((t) => ({ ...t, unit_price: null })) as PartPricingTier[];
+  return (data || []) as PartPricingTier[];
 }
 
 /**
@@ -49,7 +46,7 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
  */
 export async function getTiersWithComputedPrices(
   partId: string,
-): Promise<PartPricingTier[]> {
+): Promise<ComputedPartPricingTier[]> {
   const [tiers, breakdown] = await Promise.all([
     getTiersForPart(partId),
     calculateRoutingCost(partId).catch(() => null),
@@ -57,9 +54,9 @@ export async function getTiersWithComputedPrices(
 
   if (!breakdown) {
     // No routing/BOM (e.g. bought parts) — unit_price cannot be computed
-    // from a parent routing. Leave whatever was stored; bought parts hit
-    // a different pricing flow.
-    return tiers;
+    // from a parent routing. Surface as null so the consumer's "no usable
+    // tier" check fires; bought parts hit a different pricing flow.
+    return tiers.map((t) => ({ ...t, unit_price: null }));
   }
 
   return tiers.map((t) => {
@@ -201,4 +198,24 @@ export async function deleteTier(tierId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.from('part_pricing_tiers').delete().eq('id', tierId);
   if (error) throw error;
+}
+
+/**
+ * Returns the set of part ids in `companyId` that the quote form would
+ * accept without warning — same semantic as QuoteForm.hasUsableTier: at
+ * least one tier whose live cost via `compute_part_cost_at_qty` resolves
+ * to a non-null number. Backed by the `get_priceable_part_ids` RPC so the
+ * Parts list can show the "priced" vs "no pricing" state in one round-trip
+ * instead of running the routing/BOM walk per row in the browser.
+ */
+export async function getPriceablePartIds(companyId: string): Promise<Set<string>> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('get_priceable_part_ids', {
+    p_company_id: companyId,
+  });
+  if (error) {
+    console.error('Error fetching priceable part ids:', error);
+    throw error;
+  }
+  return new Set((data ?? []) as string[]);
 }

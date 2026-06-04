@@ -27,6 +27,8 @@ import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
 import PercentIcon from '@mui/icons-material/Percent';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -44,12 +46,16 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
+import { getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import PartFormModal from '@/components/parts/PartFormModal';
 import BulkApplyMarkupRateDialog from '@/components/parts/BulkApplyMarkupRateDialog';
 import type { Part } from '@/types/part';
 
-type PartRow = Part;
+// Augment Part with the "would the quote form accept this without a
+// warning" flag. Computed at render time from the priceableIds set so AG
+// Grid sees the change as row-data, not a stale closure.
+type PartRow = Part & { is_priceable: boolean };
 type SourceFilter = 'all' | 'made' | 'bought';
 
 export default function PartsPage() {
@@ -57,7 +63,12 @@ export default function PartsPage() {
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [rows, setRows] = useState<PartRow[]>([]);
+  const [rows, setRows] = useState<Part[]>([]);
+  // Set of part ids the quote form would accept without warning (at least
+  // one tier with a non-null computed cost). Single source of truth driven
+  // by the get_priceable_part_ids RPC — matches QuoteForm.hasUsableTier so
+  // the Pricing column and the quote warning can't disagree.
+  const [priceableIds, setPriceableIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -101,13 +112,20 @@ export default function PartsPage() {
       // Pull every part the company owns (made + bought, stocked or not).
       // The source filter narrows this client-side. Inventory page handles
       // the stocked-only view; this page is the full catalog.
-      const parts = await getAllParts(
-        companyId,
-        searchDebounced,
-        sortModel.field,
-        sortModel.sort,
-      );
+      //
+      // Priceable-id set is fetched in parallel — independent query,
+      // unaffected by search/sort. Failure is non-fatal: an empty set
+      // degrades the Pricing column to "everything reads as no pricing"
+      // rather than blocking the whole page.
+      const [parts, priceable] = await Promise.all([
+        getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort),
+        getPriceablePartIds(companyId).catch((err) => {
+          console.error('Error fetching priceable part ids:', err);
+          return new Set<string>();
+        }),
+      ]);
       setRows(parts);
+      setPriceableIds(priceable);
     } catch (error) {
       console.error('Error fetching parts:', error);
       setSnackbar({
@@ -131,13 +149,15 @@ export default function PartsPage() {
     }
   }, [searchDebounced, sourceFilter]);
 
-  // Apply the source filter client-side so the grid, gridHeight, and
-  // empty-state checks all see the same row set. Same pattern the
-  // Inventory page uses for its status filter.
-  const filteredRows = useMemo(() => {
-    if (sourceFilter === 'all') return rows;
-    return rows.filter((r) => r.source === sourceFilter);
-  }, [rows, sourceFilter]);
+  // Apply source filter client-side and stamp each row with is_priceable
+  // from the RPC set so the grid, gridHeight, and empty-state checks all
+  // see the same row set. The map runs O(n) — fine at shop scale.
+  const filteredRows = useMemo<PartRow[]>(() => {
+    const filtered = sourceFilter === 'all'
+      ? rows
+      : rows.filter((r) => r.source === sourceFilter);
+    return filtered.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
+  }, [rows, sourceFilter, priceableIds]);
 
   const gridHeight = useMemo(() => {
     if (loading || filteredRows.length === 0) return 600;
@@ -152,12 +172,24 @@ export default function PartsPage() {
     });
   };
 
+  // Columns that map to real DB columns and can be sorted server-side.
+  // Synthetic columns (e.g. pricing_status, computed from priceableIds
+  // client-side) aren't in this set — clicking them sorts client-side via
+  // the column's valueGetter without triggering a refetch.
+  const SERVER_SORTABLE_FIELDS = ['part_name', 'source', 'updated_at'];
+
   const handleSortChanged = (event: SortChangedEvent) => {
     const columnState = event.api.getColumnState();
     const sortedColumn = columnState.find((col) => col.sort !== null);
     if (sortedColumn && sortedColumn.sort) {
+      const field = sortedColumn.colId || 'part_name';
+      if (!SERVER_SORTABLE_FIELDS.includes(field)) {
+        // Synthetic column — AG Grid handles the sort via valueGetter,
+        // server fetch stays on the current sortModel.
+        return;
+      }
       setSortModel({
-        field: sortedColumn.colId || 'part_name',
+        field,
         sort: sortedColumn.sort as 'asc' | 'desc',
       });
     } else {
@@ -278,6 +310,41 @@ export default function PartsPage() {
                 : 'rgba(165, 214, 167, 0.5)',
             }}
           />
+        );
+      },
+    },
+    {
+      // Both-states explicit: ✓ Priced (success) vs ⚠ No pricing (warning).
+      // "Priceable" = at least one tier yields a non-null cost via
+      // compute_part_cost_at_qty — same signal the quote form's
+      // hasUsableTier check uses, served by the get_priceable_part_ids RPC.
+      // Sorting puts the gaps at the top so a header click surfaces work.
+      colId: 'pricing_status',
+      headerName: 'Pricing',
+      width: 160,
+      sortable: true,
+      valueGetter: (params) => (params.data?.is_priceable ? 1 : 0),
+      cellStyle: { display: 'flex', alignItems: 'center' },
+      cellRenderer: (params: ICellRendererParams<PartRow>) => {
+        if (!params.data) return null;
+        const isPriceable = params.data.is_priceable;
+        return (
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.5,
+              color: isPriceable ? 'success.main' : 'warning.main',
+              fontWeight: 500,
+            }}
+          >
+            {isPriceable ? (
+              <CheckCircleOutlineIcon fontSize="small" />
+            ) : (
+              <WarningAmberIcon fontSize="small" />
+            )}
+            <span>{isPriceable ? 'Priced' : 'No pricing'}</span>
+          </Box>
         );
       },
     },

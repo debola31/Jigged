@@ -1,4 +1,4 @@
-import type { PartPricingTier } from '@/types/partPricing';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 export interface ResolvedTier {
   unit_price: number;
@@ -21,7 +21,7 @@ export interface ResolvedTier {
  * Returns `null` when no priced tier is available.
  */
 export function resolveTier(
-  tiers: PartPricingTier[],
+  tiers: ComputedPartPricingTier[],
   orderQuantity: number,
 ): ResolvedTier | null {
   if (!Number.isFinite(orderQuantity)) return null;

@@ -4,7 +4,9 @@
 
 The Quotes module handles the sales quoting process — the entry point for work into the shop. Quotes capture what a customer wants, at what price, and when they need it. A quote can be converted directly into one or more jobs at any time; there is no separate approval step.
 
-**The quote is the customer-facing document; the part owns the pricing math.** A quote references parts and snapshots one or more pricing tiers per part into `quote_line_items` at creation. After that, the line items are immutable — editing the part's tiers later does not change the quote.
+**The quote is the customer-facing document; the part owns the pricing math.** A quote references parts and snapshots one or more pricing tiers per part into `quote_line_items` at creation, including the tier-break table that produced the price (the **pricing basis**). On edit, the quote line items are reconciled — new parts insert, removed parts delete, edited lines update — but **pricing is frozen by default**: existing lines keep their snapshotted `unit_price` unless the user explicitly chooses to update it, and quantity changes recompute against the snapshotted basis curve, not against the current tier table. The only condition that gets flagged in the UI is **drift** — when the current tier table differs from the snapshot.
+
+See the [Edit policy AC section](#edit-policy-line-item-reconcile-frozen-pricing-drift) for the full set of bullets and their verification clauses.
 
 A single quote can include:
 
@@ -40,7 +42,7 @@ When the quote has more than one tier overall, the printed PDF intentionally omi
 
 **Status Definitions:**
 
-- **Active** — the quote is open. Editable (metadata only), attachable, convertible.
+- **Active** — the quote is open. Editable (metadata AND line items, via the reconcile policy below), attachable, convertible.
 - **Expired** — past `expiration_date`. Read-only, but can still be converted with a warning (the price is no longer guaranteed).
 
 **Conversion flag:** `converted_at` is set when the quote becomes one or more jobs. The reverse link lives on `jobs.source_quote_line_item_id` — each created job points at the specific line item (part + tier) it came from. A quote with N selected tiers across M parts becomes M jobs (one per part), each at the tier the user picked. Loading a quote shows every linked job in the "Jobs" banner.
@@ -496,7 +498,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Form blocks submission until every part block has a part selected and at least one tier checked
 
-- [ ] Quote header is editable (customer, lead time, expiration); line items are read-only after creation
+- [ ] Quote header is editable (customer, lead time, expiration). Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default
 
 - [ ] List page Total column shows the line-item total when there is exactly one line item, otherwise `—`
 
@@ -533,6 +535,63 @@ This follows the same pattern as Customers, Parts, and Operations:
 - [ ] The resulting `quote_line_items` row carries `is_quote_override = true` and the typed values
 - [ ] The cost-breakdown view renders a green "✏ adjusted for this quote" chip on overridden line items
 - [ ] The part's tier is unchanged
+
+### Edit policy (line-item reconcile, frozen pricing, drift)
+
+This section is the authoritative spec for editing an existing quote. It supersedes any older "line items are read-only" language elsewhere in this doc. Implementation tracked in [#324](https://github.com/debola31/Jigged/issues/324). Every behavior carries an `edit → save → reload → assert` verification clause; the reload step is the binding mechanism — see [docs/testing/Testing-gaps.md](../testing/Testing-gaps.md) for why.
+
+**Pricing basis snapshot (the data shape this all depends on)**
+
+- [ ] On create and on add-line, a `quote_line_items` row stores the **pricing basis** (the relevant tier breaks, the markup %, and the rates) that produced its `unit_price` — *verified by `__tests__/utils/quotesAccess.test.ts > 'createQuote snapshots pricing basis'` AND the basis column visible in `supabase/schema.staging.sql` after the schema migration ships*.
+- [ ] The pricing basis is stored as a structured snapshot, not only the resolved `unit_price` — *verified by the migration adding a `pricing_basis_snapshot jsonb` (or similarly-named) column to `quote_line_items`*.
+
+**Existing-quote handling (Option C — locked)**
+
+Rows that existed before the basis-snapshot migration are flagged `basis_unknown = true`. The edit UI renders a small "basis unknown" chip on those lines; drift detection on those rows falls back to comparing the resolved `unit_price` to the current tier price — a degraded signal, but visibly degraded.
+
+Option A (backfill the basis column from current tiers at the original quantity) is **explicitly dropped**. It would fabricate a pricing history that never existed — the Contour data loaded from Tangle has no basis and would get a false-history snapshot written into it, and the system would then report "no drift" on quotes that genuinely drifted. That violates the [no-silent-fallbacks engineering principle in CLAUDE.md](../../CLAUDE.md#no-silent-runtime-fallbacks-for-data-at-rest-issues). Option B (basis-unknown with no chip) is the silent-degradation variant of C and is also rejected.
+
+- [ ] Pre-snapshot rows are marked `basis_unknown = true` and render a "basis unknown" chip in the edit form — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'basis-unknown chip renders on pre-snapshot lines'`*.
+- [ ] On a `basis_unknown` line, drift detection compares the resolved `unit_price` to the current tier price (degraded signal) — *verified by `__tests__/utils/quotesAccess.test.ts > 'basis-unknown line uses resolved-vs-current drift comparison'`*.
+
+**Reconcile on save**
+
+- [ ] Opening an existing quote, adding a part, saving, reloading the page shows the new line persisted — *verified by `e2e/quote-edit.spec.ts > 'add part persists across reload'`*.
+- [ ] Opening an existing quote, removing a part, saving, reloading shows the line gone — *verified by `e2e/quote-edit.spec.ts > 'remove part persists across reload'`*.
+- [ ] Opening an existing quote, editing a line's quantity, saving, reloading shows the new quantity and a `unit_price` computed against the line's SNAPSHOTTED basis curve (not current tiers) — *verified by `e2e/quote-edit.spec.ts > 'quantity change persists and honors snapshotted basis'`*.
+- [ ] `updateQuote()` reconciles `quote_line_items` (insert new, update edited, delete removed), mirroring `createQuote()`'s pattern — *verified by `__tests__/utils/quotesAccess.test.ts > 'updateQuote reconciles line items on edit'`*.
+
+**Frozen-by-default pricing**
+
+- [ ] Editing only header fields (customer, lead time, expiration) and saving leaves every line's `unit_price` exactly as it was, and reloading confirms this — *verified by `e2e/quote-edit.spec.ts > 'header-only edit leaves every unit_price unchanged after reload'` AND `__tests__/utils/quotesAccess.test.ts > 'header-only edit leaves all unit prices unchanged'`*.
+- [ ] Quantity changes recompute via `resolveTier()` against the snapshotted basis — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'resolves against arbitrary tier set'` AND `__tests__/utils/quotesAccess.test.ts > 'quantity change recomputes against snapshotted basis, not current tiers'`*.
+- [ ] Lines with `is_quote_override = true` are never repriced under any circumstance (header edit, qty change, drift control, anything) — *verified by `__tests__/utils/quotesAccess.test.ts > 'override line stays frozen even on quantity change'` AND `e2e/quote-edit.spec.ts > 'override line stays frozen across edit and reload'`*.
+
+**Drift detection and flag UI**
+
+Drift = the current tier table differs from the line's snapshotted basis. Quantity-curve movement when the user changes a quantity is NOT drift; it's expected behavior computed against the snapshot.
+
+- [ ] A detection helper returns the set of line IDs whose current tier price differs from the snapshotted basis — *verified by `__tests__/utils/quotesAccess.test.ts > 'detectDrift returns flagged line IDs'`*.
+- [ ] On the edit form, drifted lines render a chip showing snapshotted price next to current price — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders drift chip on flagged lines'`*.
+- [ ] The form renders a per-line "Update to current price" control on each drifted line AND an "Update all flagged" bulk control above the lines list — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders per-line and update-all drift controls'`*.
+- [ ] Clicking the per-line control queues that line for repricing on save; the actual reprice happens at save time — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'per-line update marks line for reprice'`*.
+- [ ] The drift flag is NON-BLOCKING on untouched lines: a user can save a quote with drifted lines and never click any drift control — *verified by `e2e/quote-edit.spec.ts > 'untouched drifted line does not require user action to save'`*.
+- [ ] **An untouched drifted line keeps its original price after reload** — *verified by `e2e/quote-edit.spec.ts > 'untouched drifted line does not reprice on save'`*.
+- [ ] Drifted lines reprice only on explicit user choice (per-line control or update-all) — *verified by `e2e/quote-edit.spec.ts > 'drifted line repriced only via explicit control'`*.
+- [ ] `is_quote_override = true` lines are NEVER flagged as drifted, even if their tier has moved — *verified by `__tests__/utils/quotesAccess.test.ts > 'override lines never appear in drift set'` AND `__tests__/components/quotes/QuoteForm.test.tsx > 'override line never renders drift chip'`*.
+
+**Forced keep-or-update on actively-edited drifted lines (conditional)**
+
+The forced-choice path — block save on a line the user is actively editing where the price is ambiguous (drifted), until they explicitly pick keep-the-snapshot or update-to-current — is **gated on the [Issue #325](https://github.com/debola31/Jigged/issues/325) (drift-frequency conversation with the primary quoter) outcome**. If drift turns out to be rare, this clause is dropped and the non-blocking chip is sufficient.
+
+Choose ONE of the two bullets below based on the Issue #325 decision:
+
+- [ ] (if forced-choice ships) Attempting to save while editing a drifted line without choosing keep-or-update blocks save with a form error — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edited drifted line blocks save until keep-or-update chosen'`*.
+- [ ] (if forced-choice is dropped) Editing a drifted line and saving without making a drift choice uses the non-blocking chip behavior — the line keeps its snapshotted price unless the per-line control was clicked — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edit-time drift uses non-blocking chip only'`*.
+
+**Verification rule for the whole section**
+
+Every editable behavior above has at least one `edit → save → reload → assert persists` clause. The reload step is non-negotiable — it's what closes the gap between optimistic UI updates and DB writes. The E2E spec [`e2e/quote-edit.spec.ts`](../../e2e/quote-edit.spec.ts) (authored in [#331](https://github.com/debola31/Jigged/issues/331)) is the catch-all.
 
 ---
 

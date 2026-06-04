@@ -40,7 +40,7 @@ import {
   daysUntilExpiration,
 } from '@/types/quote';
 import type { QuoteWithRelations } from '@/types/quote';
-import type { PartPricingTier } from '@/types/partPricing';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
@@ -67,7 +67,7 @@ export default function QuoteDetailPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   /** Tier reference data: part_id → all tiers for that part. */
-  const [tiersByPart, setTiersByPart] = useState<Record<string, PartPricingTier[]>>({});
+  const [tiersByPart, setTiersByPart] = useState<Record<string, ComputedPartPricingTier[]>>({});
 
   const fetchQuote = useCallback(async () => {
     try {

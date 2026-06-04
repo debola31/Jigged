@@ -38,7 +38,7 @@ import {
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
-import type { PartPricingTier } from '@/types/partPricing';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import PartFormModal from '@/components/parts/PartFormModal';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
@@ -69,7 +69,7 @@ interface PartBlockState {
   order_quantity: string;
   override_open: boolean;
   override_unit_price: string;
-  tiers: PartPricingTier[];
+  tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
 }

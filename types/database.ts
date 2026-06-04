@@ -2342,6 +2342,10 @@ export type Database = {
         Args: { check_company_id: string }
         Returns: string
       }
+      get_priceable_part_ids: {
+        Args: { p_company_id: string }
+        Returns: string[]
+      }
       get_procurement_cost: {
         Args: { p_part_id: string; p_qty: number }
         Returns: {

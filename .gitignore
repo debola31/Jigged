@@ -69,3 +69,7 @@ supabase/.temp/
 
 # pytest-cov artifact
 api/.coverage
+
+# Stryker mutation-testing artifacts (regenerated per run)
+/reports/mutation/
+.stryker-tmp/

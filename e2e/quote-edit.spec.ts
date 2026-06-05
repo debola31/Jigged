@@ -188,7 +188,10 @@ test.describe('Quote edit — reload contract', () => {
     });
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     await page.getByRole('button', { name: /Create Quote/i }).click();
-    await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+    // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
+    // which let toHaveURL return immediately on the still-current /new
+    // before navigation to the post-create /quotes/<uuid> completed.
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
 
     // ── Edit pass: bump qty on the existing line, add a new part, then
     //    save. (Removal is exercised in the second edit pass below — doing
@@ -314,7 +317,10 @@ test.describe('Quote edit — reload contract', () => {
 
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     await page.getByRole('button', { name: /Create Quote/i }).click();
-    await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+    // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
+    // which let toHaveURL return immediately on the still-current /new
+    // before navigation to the post-create /quotes/<uuid> completed.
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
 
     // Confirm the persisted total uses the snapshotted price on the detail page.
     await expect(page.getByText(snapshottedDollar!).first()).toBeVisible({
@@ -346,7 +352,10 @@ test.describe('Quote edit — reload contract', () => {
       .filter({ hasText: /Q-\d+/ })
       .first()
       .click();
-    await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+    // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
+    // which let toHaveURL return immediately on the still-current /new
+    // before navigation to the post-create /quotes/<uuid> completed.
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
     await page.getByRole('button', { name: /^Edit$/ }).click();
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeVisible();
 
@@ -420,7 +429,10 @@ test.describe('Quote edit — reload contract', () => {
     expect(snapshottedDollar).toBeTruthy();
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     await page.getByRole('button', { name: /Create Quote/i }).click();
-    await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+    // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
+    // which let toHaveURL return immediately on the still-current /new
+    // before navigation to the post-create /quotes/<uuid> completed.
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
 
     // Same diagnostic as spec 2.
     const urlSpec3 = page.url();
@@ -442,7 +454,10 @@ test.describe('Quote edit — reload contract', () => {
       .filter({ hasText: /Q-\d+/ })
       .first()
       .click();
-    await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+    // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
+    // which let toHaveURL return immediately on the still-current /new
+    // before navigation to the post-create /quotes/<uuid> completed.
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
     await page.getByRole('button', { name: /^Edit$/ }).click();
     await expect(page.getByTestId('quote-drift-summary')).toBeVisible({
       timeout: 10_000,

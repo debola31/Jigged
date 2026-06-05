@@ -5,3 +5,8 @@ pytest-mock>=3.11.0
 httpx>=0.24.0
 factory-boy>=3.3.0
 responses>=0.23.0
+# Mutation testing — config lives in pyproject.toml [tool.mutmut].
+# Issue #322 sets it up; #323 records the post-#324 baseline.
+# Pinned to 2.x; mutmut 3.x has unstable mutants/ copy + argv handling on
+# this codebase. Revisit when 3.x mutates in-place or fixes both bugs.
+mutmut>=2.5.0,<3.0

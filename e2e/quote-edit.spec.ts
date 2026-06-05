@@ -93,6 +93,54 @@ async function setTierMarkup(partName: string, percent: number): Promise<number>
  */
 const TIER_MARKUP_BASELINE = 50;
 const TIER_MARKUP_DRIFTED = 200;
+
+/**
+ * Diagnostic — read the freshly-inserted quote_line_items row(s) for a
+ * given quote via the service-role admin client and assert that the
+ * pricing_basis_snapshot column is populated with a non-empty tiers
+ * array. Catches the failure mode where insertLineItemForPart writes
+ * the column but Supabase silently drops it (e.g., schema cache out
+ * of sync) or builds an empty tiers array.
+ *
+ * Run right after Create Quote so the spec fails early with a clear
+ * signal if the snapshot didn't land — vs timing out 100s later on a
+ * missing drift chip.
+ */
+async function assertSnapshotPersisted(quoteId: string): Promise<void> {
+  const url = process.env.TEST_SUPABASE_URL ?? '';
+  const key = process.env.TEST_SUPABASE_SECRET_KEY ?? '';
+  const admin = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await admin
+    .from('quote_line_items')
+    .select('id, unit_price, basis_unknown, pricing_basis_snapshot')
+    .eq('quote_id', quoteId);
+  if (error) throw new Error(`assertSnapshotPersisted: ${error.message}`);
+  expect(data, 'no line items for quote').toBeTruthy();
+  expect(data!.length).toBeGreaterThan(0);
+  for (const li of data!) {
+    // basis_unknown should be false on newly-inserted lines (Option C
+    // applies only to pre-migration rows).
+    expect(
+      li.basis_unknown,
+      `basis_unknown unexpectedly true on fresh line ${li.id}`,
+    ).toBe(false);
+    expect(
+      li.pricing_basis_snapshot,
+      `pricing_basis_snapshot null on fresh line ${li.id}`,
+    ).toBeTruthy();
+    const snap = li.pricing_basis_snapshot as { tiers?: Array<unknown> } | null;
+    expect(
+      snap?.tiers,
+      `snapshot.tiers missing on line ${li.id}; full snapshot=${JSON.stringify(snap)}`,
+    ).toBeTruthy();
+    expect(
+      (snap!.tiers as Array<unknown>).length,
+      `snapshot.tiers empty on line ${li.id}`,
+    ).toBeGreaterThan(0);
+  }
+}
 test.describe('Quote edit — reload contract', () => {
   test('add part, edit qty, remove part — all three persist across reload', async ({
     page,
@@ -273,6 +321,12 @@ test.describe('Quote edit — reload contract', () => {
       timeout: 10_000,
     });
 
+    // Diagnostic: confirm the snapshot was actually persisted (catches
+    // the "snapshot column silently dropped" failure mode early).
+    const createdQuoteIdSpec2 = page.url().match(/\/quotes\/([0-9a-f-]{36})/)?.[1];
+    expect(createdQuoteIdSpec2, 'failed to parse quote id from URL').toBeTruthy();
+    await assertSnapshotPersisted(createdQuoteIdSpec2!);
+
     // Step B: simulate drift by SETTING the tier markup to a new
     //         absolute value. See setTierMarkup docstring above —
     //         absolute rather than delta avoids overflow when specs
@@ -364,6 +418,11 @@ test.describe('Quote edit — reload contract', () => {
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
+
+    // Same diagnostic as spec 2.
+    const createdQuoteIdSpec3 = page.url().match(/\/quotes\/([0-9a-f-]{36})/)?.[1];
+    expect(createdQuoteIdSpec3, 'failed to parse quote id from URL').toBeTruthy();
+    await assertSnapshotPersisted(createdQuoteIdSpec3!);
 
     // Set tier markup to drifted value — absolute, not delta, so prior
     // spec mutations don't push us past numeric(5,2)'s 999.99 ceiling.

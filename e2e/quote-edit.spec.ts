@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 import { navigateTo } from './helpers/navigation';
 
 /**
@@ -14,11 +15,11 @@ import { navigateTo } from './helpers/navigation';
  *      was dropped, see docs/modules/quotes.md)
  *   3. override lines stay frozen on edit even when their tier moves
  *
- * Drift simulation: the spec is allowed to bump a part's pricing tier via
- * the admin UI (Parts page → tiers card). We don't reach into Supabase
- * directly from the spec — the seed populates the test user as company
- * admin, so tier edits via the normal UI are sufficient to simulate
- * "tier moved between quote creation and edit".
+ * Drift simulation: this spec writes to the part's pricing tier directly
+ * via the service-role Supabase client (same env the seed uses), then
+ * reopens the quote. The UI for editing tier markup on the Parts page
+ * has no accessible name on its TextFields, so a service-role UPDATE is
+ * both simpler and less brittle than scraping unlabeled inputs.
  *
  * If a future tier edit no longer surfaces in the QuoteForm as drift, the
  * cause is either:
@@ -27,6 +28,55 @@ import { navigateTo } from './helpers/navigation';
  *   - The snapshot column was dropped or not written on create
  * Each of those is a real regression; do NOT runtime-skip this spec.
  */
+
+/**
+ * Bump the markup_percent on every existing pricing tier for a given
+ * part name. Returns the number of rows touched (zero is an error — the
+ * seed should have populated tiers for E2E-MFG-001).
+ *
+ * Uses the local-stack service-role key that global-setup already wired
+ * up; the spec inherits those env vars at run time.
+ */
+async function bumpTierMarkup(partName: string, addPercent: number): Promise<number> {
+  const url = process.env.TEST_SUPABASE_URL ?? '';
+  const key = process.env.TEST_SUPABASE_SECRET_KEY ?? '';
+  if (!url || !key) {
+    throw new Error(
+      'bumpTierMarkup: missing TEST_SUPABASE_URL / TEST_SUPABASE_SECRET_KEY — global-setup should have set these.',
+    );
+  }
+  const admin = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: parts, error: partErr } = await admin
+    .from('parts')
+    .select('id')
+    .eq('part_name', partName);
+  if (partErr) throw new Error(`bumpTierMarkup part lookup: ${partErr.message}`);
+  if (!parts?.length) throw new Error(`bumpTierMarkup: no part named ${partName}`);
+  const partId = parts[0].id;
+
+  const { data: tiers, error: tierErr } = await admin
+    .from('part_pricing_tiers')
+    .select('id, markup_percent')
+    .eq('part_id', partId);
+  if (tierErr) throw new Error(`bumpTierMarkup tier lookup: ${tierErr.message}`);
+  if (!tiers?.length) {
+    throw new Error(
+      `bumpTierMarkup: ${partName} has no pricing tiers — seed should populate them`,
+    );
+  }
+
+  for (const t of tiers) {
+    const next = (Number(t.markup_percent ?? 0) || 0) + addPercent;
+    const { error } = await admin
+      .from('part_pricing_tiers')
+      .update({ markup_percent: next })
+      .eq('id', t.id);
+    if (error) throw new Error(`bumpTierMarkup update: ${error.message}`);
+  }
+  return tiers.length;
+}
 test.describe('Quote edit — reload contract', () => {
   test('add part, edit qty, remove part — all three persist across reload', async ({
     page,
@@ -86,7 +136,11 @@ test.describe('Quote edit — reload contract', () => {
     const orderQtyInputs = page.getByRole('textbox', { name: /Order quantity/i });
     await orderQtyInputs.first().fill('5');
 
-    // Add a second part — E2E-RAW-001 (bought, has procurement tiers + pricing).
+    // Add a second part — E2E-RAW-001 is bought-raw with no priced pricing
+    // tier in the seed (intentional — it's a raw material, not a sellable
+    // unit). The QuoteForm requires every part block to either resolve a
+    // tier OR have a custom-price override. Use the override path here
+    // (also exercises a different write path on the access layer).
     await page.getByRole('button', { name: /Add part/i }).click();
     const part2Field = page.getByRole('combobox', { name: /^Part 2$/i });
     await part2Field.click();
@@ -99,7 +153,16 @@ test.describe('Quote edit — reload contract', () => {
       .click();
     // The second order-qty input is the new block's.
     await orderQtyInputs.nth(1).fill('2');
+    // Open custom price for the second block — it has no priced tier.
+    await page.getByRole('button', { name: /Use custom price/i }).click();
+    // The Unit price input only exists after override is opened.
+    await page.getByRole('textbox', { name: /^Unit price$/i }).fill('25');
 
+    // Wait for the Save button to become enabled before clicking. With
+    // qty + override price filled, validation passes; the button enables
+    // synchronously, but a `toBeEnabled` assert protects against any
+    // future async validation hooks slipping in.
+    await expect(page.getByRole('button', { name: /Save changes/i })).toBeEnabled();
     await page.getByRole('button', { name: /Save changes/i }).click();
     // Save returns to the read-only detail page.
     await expect(page.getByRole('button', { name: /^Edit$/ })).toBeVisible({
@@ -188,26 +251,12 @@ test.describe('Quote edit — reload contract', () => {
       timeout: 10_000,
     });
 
-    // Step B: bump the part's tier markup to simulate drift between
-    //         create and edit. We do this via the Parts page UI.
-    await navigateTo(page, 'Parts');
-    await page.getByRole('link', { name: /E2E-MFG-001/i }).click();
-    await expect(page).toHaveURL(/\/parts\/[^/]+$/, { timeout: 15_000 });
-
-    // Find the pricing-tiers card and bump the markup% on the first tier
-    // by a clear amount (5x). The exact UI depends on the current Parts
-    // page layout, but the tier markup is a numeric input near "Pricing".
-    // We accept the first markup input on the page.
-    const markupInputs = page.getByRole('spinbutton', { name: /Markup/i });
-    await expect(markupInputs.first()).toBeVisible({ timeout: 10_000 });
-    const originalMarkup = await markupInputs.first().inputValue();
-    const driftedMarkup = String(Number(originalMarkup || '100') + 500);
-    await markupInputs.first().fill(driftedMarkup);
-    // Trigger the tier save — depends on the page; auto-save or a Save button.
-    // The Parts page autosaves on blur, so a Tab keystroke is enough.
-    await markupInputs.first().blur();
-    // Allow autosave to round-trip.
-    await page.waitForTimeout(500);
+    // Step B: simulate drift by bumping the part's tier markup directly
+    //         via the service-role client. See the bumpTierMarkup
+    //         docstring above for why we don't go through the Parts
+    //         page UI here.
+    const touched = await bumpTierMarkup('E2E-MFG-001', 500);
+    expect(touched).toBeGreaterThan(0);
 
     // Step C: reopen the quote, observe the drift chip, save WITHOUT
     //         clicking any drift control, reload, assert original price.
@@ -290,17 +339,10 @@ test.describe('Quote edit — reload contract', () => {
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
 
-    // Bump tier markup to create drift.
-    await navigateTo(page, 'Parts');
-    await page.getByRole('link', { name: /E2E-MFG-001/i }).click();
-    await expect(page).toHaveURL(/\/parts\/[^/]+$/, { timeout: 15_000 });
-    const markupInputs = page.getByRole('spinbutton', { name: /Markup/i });
-    await expect(markupInputs.first()).toBeVisible({ timeout: 10_000 });
-    const originalMarkup = await markupInputs.first().inputValue();
-    const driftedMarkup = String(Number(originalMarkup || '100') + 500);
-    await markupInputs.first().fill(driftedMarkup);
-    await markupInputs.first().blur();
-    await page.waitForTimeout(500);
+    // Bump tier markup to create drift — same service-role write
+    // as spec 2 above.
+    const touchedSpec3 = await bumpTierMarkup('E2E-MFG-001', 500);
+    expect(touchedSpec3).toBeGreaterThan(0);
 
     // Reopen the quote. Click the per-line "Update to current price"
     // control, save, reload, assert the price is NO LONGER the

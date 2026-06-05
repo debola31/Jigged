@@ -30,19 +30,24 @@ import { navigateTo } from './helpers/navigation';
  */
 
 /**
- * Bump the markup_percent on every existing pricing tier for a given
- * part name. Returns the number of rows touched (zero is an error — the
- * seed should have populated tiers for E2E-MFG-001).
+ * Set markup_percent on EVERY existing pricing tier for the given part
+ * to an absolute value. Idempotent across spec ordering — earlier specs
+ * that already bumped the tier can't carry the value past the column's
+ * numeric(5,2) ceiling (~999.99), so successive bumps would otherwise
+ * overflow on the second or third run within a single CI invocation.
  *
  * Uses the local-stack service-role key that global-setup already wired
  * up; the spec inherits those env vars at run time.
+ *
+ * Returns the number of rows touched (zero is an error — the seed
+ * should have populated tiers for E2E-MFG-001).
  */
-async function bumpTierMarkup(partName: string, addPercent: number): Promise<number> {
+async function setTierMarkup(partName: string, percent: number): Promise<number> {
   const url = process.env.TEST_SUPABASE_URL ?? '';
   const key = process.env.TEST_SUPABASE_SECRET_KEY ?? '';
   if (!url || !key) {
     throw new Error(
-      'bumpTierMarkup: missing TEST_SUPABASE_URL / TEST_SUPABASE_SECRET_KEY — global-setup should have set these.',
+      'setTierMarkup: missing TEST_SUPABASE_URL / TEST_SUPABASE_SECRET_KEY — global-setup should have set these.',
     );
   }
   const admin = createClient(url, key, {
@@ -52,31 +57,42 @@ async function bumpTierMarkup(partName: string, addPercent: number): Promise<num
     .from('parts')
     .select('id')
     .eq('part_name', partName);
-  if (partErr) throw new Error(`bumpTierMarkup part lookup: ${partErr.message}`);
-  if (!parts?.length) throw new Error(`bumpTierMarkup: no part named ${partName}`);
+  if (partErr) throw new Error(`setTierMarkup part lookup: ${partErr.message}`);
+  if (!parts?.length) throw new Error(`setTierMarkup: no part named ${partName}`);
   const partId = parts[0].id;
 
   const { data: tiers, error: tierErr } = await admin
     .from('part_pricing_tiers')
-    .select('id, markup_percent')
+    .select('id')
     .eq('part_id', partId);
-  if (tierErr) throw new Error(`bumpTierMarkup tier lookup: ${tierErr.message}`);
+  if (tierErr) throw new Error(`setTierMarkup tier lookup: ${tierErr.message}`);
   if (!tiers?.length) {
     throw new Error(
-      `bumpTierMarkup: ${partName} has no pricing tiers — seed should populate them`,
+      `setTierMarkup: ${partName} has no pricing tiers — seed should populate them`,
     );
   }
 
   for (const t of tiers) {
-    const next = (Number(t.markup_percent ?? 0) || 0) + addPercent;
     const { error } = await admin
       .from('part_pricing_tiers')
-      .update({ markup_percent: next })
+      .update({ markup_percent: percent })
       .eq('id', t.id);
-    if (error) throw new Error(`bumpTierMarkup update: ${error.message}`);
+    if (error) throw new Error(`setTierMarkup update: ${error.message}`);
   }
   return tiers.length;
 }
+
+/**
+ * Two constants the drift specs share: the BASELINE value gets written
+ * BEFORE the quote is created (so the quote's frozen snapshot pins to
+ * this), and DRIFTED gets written AFTER (so detectQuoteLineDrift sees
+ * the divergence). Specific values are arbitrary — just need to differ
+ * by enough to clear the EPSILON in isDrifted, and stay under
+ * numeric(5,2)'s 999.99 ceiling no matter how many times specs re-run
+ * within one CI invocation (we always set, never accumulate).
+ */
+const TIER_MARKUP_BASELINE = 50;
+const TIER_MARKUP_DRIFTED = 200;
 test.describe('Quote edit — reload contract', () => {
   test('add part, edit qty, remove part — all three persist across reload', async ({
     page,
@@ -153,8 +169,10 @@ test.describe('Quote edit — reload contract', () => {
       .click();
     // The second order-qty input is the new block's.
     await orderQtyInputs.nth(1).fill('2');
-    // Open custom price for the second block — it has no priced tier.
-    await page.getByRole('button', { name: /Use custom price/i }).click();
+    // Open custom price for the SECOND block only — both blocks render a
+    // "Use custom price" button, so the unscoped locator hits strict-mode
+    // violation. nth(1) targets the new block.
+    await page.getByRole('button', { name: /Use custom price/i }).nth(1).click();
     // The Unit price input only exists after override is opened.
     await page.getByRole('textbox', { name: /^Unit price$/i }).fill('25');
 
@@ -203,7 +221,12 @@ test.describe('Quote edit — reload contract', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
-    // Step A: create a quote at the current tier price.
+    // Step A0: pin the tier to the baseline value FIRST so the quote
+    //          snapshot is deterministic regardless of what prior specs
+    //          did to the tier in this CI run.
+    await setTierMarkup('E2E-MFG-001', TIER_MARKUP_BASELINE);
+
+    // Step A: create a quote at the baseline tier price.
     await navigateTo(page, 'Quotes');
     await expect(page).toHaveURL(/\/quotes/);
     await page.getByRole('button', { name: /New Quote/i }).click();
@@ -233,9 +256,8 @@ test.describe('Quote edit — reload contract', () => {
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
 
     // Capture the snapshotted unit price. The QuoteForm renders
-    // "Tier N ea · $XX.YY / unit" inline — the seed sets qty=1 @ markup 200%
-    // (resolved live from BOM cost) so the exact number depends on routing
-    // cost. We just need the page text containing the dollar amount.
+    // "Tier N ea · $XX.YY / unit" inline — the dollar amount depends on
+    // the routing cost rollup, so we just grab whatever number is shown.
     const unitPriceLocator = page.getByText(/\$[\d.,]+ \/ unit/);
     await expect(unitPriceLocator.first()).toBeVisible({ timeout: 10_000 });
     const snapshottedUnitPriceText = await unitPriceLocator.first().textContent();
@@ -251,11 +273,11 @@ test.describe('Quote edit — reload contract', () => {
       timeout: 10_000,
     });
 
-    // Step B: simulate drift by bumping the part's tier markup directly
-    //         via the service-role client. See the bumpTierMarkup
-    //         docstring above for why we don't go through the Parts
-    //         page UI here.
-    const touched = await bumpTierMarkup('E2E-MFG-001', 500);
+    // Step B: simulate drift by SETTING the tier markup to a new
+    //         absolute value. See setTierMarkup docstring above —
+    //         absolute rather than delta avoids overflow when specs
+    //         within the same CI run mutate the tier in sequence.
+    const touched = await setTierMarkup('E2E-MFG-001', TIER_MARKUP_DRIFTED);
     expect(touched).toBeGreaterThan(0);
 
     // Step C: reopen the quote, observe the drift chip, save WITHOUT
@@ -304,6 +326,10 @@ test.describe('Quote edit — reload contract', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
+    // Pin the tier to the baseline value BEFORE creating the quote so
+    // its snapshot is deterministic regardless of prior spec mutations.
+    await setTierMarkup('E2E-MFG-001', TIER_MARKUP_BASELINE);
+
     // Create a new quote.
     await navigateTo(page, 'Quotes');
     await expect(page).toHaveURL(/\/quotes/);
@@ -339,9 +365,9 @@ test.describe('Quote edit — reload contract', () => {
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
 
-    // Bump tier markup to create drift — same service-role write
-    // as spec 2 above.
-    const touchedSpec3 = await bumpTierMarkup('E2E-MFG-001', 500);
+    // Set tier markup to drifted value — absolute, not delta, so prior
+    // spec mutations don't push us past numeric(5,2)'s 999.99 ceiling.
+    const touchedSpec3 = await setTierMarkup('E2E-MFG-001', TIER_MARKUP_DRIFTED);
     expect(touchedSpec3).toBeGreaterThan(0);
 
     // Reopen the quote. Click the per-line "Update to current price"

@@ -246,7 +246,9 @@ pytest tests/integration/test_customers_[api.py](http://api.py/)
 
 ## Mutation testing (mutmut)
 
-Coverage tells you what's executed; mutation testing tells you what's actually asserted. mutmut (configured in [`api/pyproject.toml`](../../api/pyproject.toml) under `[tool.mutmut]`) mutates `routes/`, `services/`, `tools/`, and `utils/`, runs the unit suite per mutant, and reports survivors — code patterns the tests don't notice when broken.
+Coverage tells you what's executed; mutation testing tells you what's actually asserted. mutmut (configured in [`api/setup.cfg`](../../api/setup.cfg) under `[mutmut]`) mutates `routes/`, `services/`, `tools/`, and `utils/`, runs the unit suite per mutant, and reports survivors — code patterns the tests don't notice when broken.
+
+Config lives in `setup.cfg`, not `pyproject.toml`, because Vercel's Python auto-detect treats any `pyproject.toml` under `api/` as a uv project and runs `uv lock`, which fails on a `[tool.mutmut]`-only file with no `[project]` table.
 
 ```bash
 cd api

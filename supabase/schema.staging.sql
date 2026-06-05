@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-05T01:17:12Z
+-- Generated: 2026-06-05T02:07:01Z
 -- Schemas: public, storage
 -- ============================================================
 

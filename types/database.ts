@@ -1393,12 +1393,14 @@ export type Database = {
       quote_line_items: {
         Row: {
           base_cost_per_unit: number | null
+          basis_unknown: boolean
           company_id: string
           created_at: string
           id: string
           is_quote_override: boolean
           markup_percent: number | null
           part_id: string
+          pricing_basis_snapshot: Json | null
           quantity: number
           quote_id: string
           sequence: number
@@ -1408,12 +1410,14 @@ export type Database = {
         }
         Insert: {
           base_cost_per_unit?: number | null
+          basis_unknown?: boolean
           company_id: string
           created_at?: string
           id?: string
           is_quote_override?: boolean
           markup_percent?: number | null
           part_id: string
+          pricing_basis_snapshot?: Json | null
           quantity: number
           quote_id: string
           sequence: number
@@ -1423,12 +1427,14 @@ export type Database = {
         }
         Update: {
           base_cost_per_unit?: number | null
+          basis_unknown?: boolean
           company_id?: string
           created_at?: string
           id?: string
           is_quote_override?: boolean
           markup_percent?: number | null
           part_id?: string
+          pricing_basis_snapshot?: Json | null
           quantity?: number
           quote_id?: string
           sequence?: number

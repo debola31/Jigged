@@ -1,7 +1,12 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type { Json } from '@/types/database';
 import type { QuoteLineItem } from '@/types/quote';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
-import { resolveTier } from '@/utils/quotePricingResolver';
+import {
+  resolveTier,
+  resolveTierFromSnapshot,
+  buildPricingBasisSnapshot,
+} from '@/utils/quotePricingResolver';
 import { getComputedPartCost } from '@/utils/partsAccess';
 
 /**
@@ -26,7 +31,11 @@ export async function getLineItemsForQuote(quoteId: string): Promise<QuoteLineIt
     console.error('Error fetching quote line items:', error);
     throw error;
   }
-  return (data || []) as QuoteLineItem[];
+  // The generated Supabase type widens jsonb to `Json` (unknown-ish). The
+  // application layer relies on the structured shape we wrote in
+  // `buildPricingBasisSnapshot`; cast once at the boundary instead of
+  // sprinkling `as` across call sites.
+  return (data || []) as unknown as QuoteLineItem[];
 }
 
 /**
@@ -41,10 +50,13 @@ export interface QuoteLineItemOverride {
 
 /**
  * Snapshot a single (part, order_quantity) commitment into a new line item.
- * The unit price is auto-resolved from the part's tier table (highest tier with
- * `tier_qty <= order_qty`) unless an explicit override is supplied. The matched
- * tier id is recorded in `source_tier_id` so the PDF can highlight which break
- * was used.
+ * The unit price is auto-resolved from the part's tier table (highest tier
+ * with `tier_qty <= order_qty`) unless an explicit override is supplied.
+ *
+ * The full tier table at create-time is frozen onto the row via
+ * `pricing_basis_snapshot` — drift detection on edit compares this snapshot
+ * against current tiers, and quantity-curve recomputation on edit also
+ * resolves against this snapshot (never against live tiers).
  */
 export async function insertLineItemForPart(
   quoteId: string,
@@ -95,6 +107,11 @@ export async function insertLineItemForPart(
 
   const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;
 
+  // Build the basis snapshot from the same tier table that produced the
+  // resolved tier. For override lines, `resolved_tier_id` is null but the
+  // full tier table is still captured so future drift checks can run.
+  const basisSnapshot = buildPricingBasisSnapshot(tiers, orderQuantity, sourceTierId);
+
   const { data, error } = await supabase
     .from('quote_line_items')
     .insert({
@@ -109,6 +126,8 @@ export async function insertLineItemForPart(
       markup_percent: markupPercent,
       base_cost_per_unit: baseCost,
       is_quote_override: !!override,
+      pricing_basis_snapshot: basisSnapshot as unknown as Json,
+      basis_unknown: false,
     })
     .select('*')
     .single();
@@ -117,7 +136,153 @@ export async function insertLineItemForPart(
     console.error('Error inserting quote line item:', error);
     throw error;
   }
-  return data as QuoteLineItem;
+  return data as unknown as QuoteLineItem;
+}
+
+/**
+ * Update an existing line item's quantity (and recompute its unit_price
+ * from the frozen `pricing_basis_snapshot` — NEVER from current tiers).
+ *
+ * Override lines: quantity changes update the row but `unit_price` stays
+ * pinned at the override value (the snapshot's `resolved_tier_id` is null
+ * for overrides; we fall back to the override price stored on the row).
+ *
+ * `basis_unknown` lines have no snapshot to resolve against, so quantity
+ * changes are NOT supported for these — the read path falls back to the
+ * stored `unit_price` (degraded behavior, surfaced via the "basis unknown"
+ * chip). Callers should disable the qty input for `basis_unknown` rows.
+ */
+export async function updateLineItemQuantity(
+  lineItemId: string,
+  newQuantity: number,
+): Promise<QuoteLineItem> {
+  const supabase = getSupabase();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('quote_line_items')
+    .select('*')
+    .eq('id', lineItemId)
+    .single();
+  if (fetchError) {
+    console.error('Error loading line item for quantity update:', fetchError);
+    throw fetchError;
+  }
+  const row = existing as unknown as QuoteLineItem;
+
+  let newUnitPrice = row.unit_price;
+  let newSourceTierId = row.source_tier_id;
+
+  if (!row.is_quote_override) {
+    const snapshot = row.pricing_basis_snapshot;
+    if (snapshot && !row.basis_unknown) {
+      const resolved = resolveTierFromSnapshot(snapshot, newQuantity);
+      if (resolved) {
+        newUnitPrice = resolved.unit_price;
+        newSourceTierId = resolved.source_tier_id;
+      }
+    }
+    // basis_unknown rows keep the stored unit_price — there's no
+    // historical tier table to walk. The UI prevents qty edits for these,
+    // but the read-path fallback is still well-defined.
+  }
+
+  const newTotal = Math.round(newUnitPrice * newQuantity * 100) / 100;
+
+  const { data, error } = await supabase
+    .from('quote_line_items')
+    .update({
+      quantity: newQuantity,
+      unit_price: newUnitPrice,
+      source_tier_id: newSourceTierId,
+      total_price: newTotal,
+    })
+    .eq('id', lineItemId)
+    .select('*')
+    .single();
+  if (error) {
+    console.error('Error updating line item quantity:', error);
+    throw error;
+  }
+  return data as unknown as QuoteLineItem;
+}
+
+/**
+ * Reprice an existing line item against the part's CURRENT tier table —
+ * used when the user clicks "Update to current price" on a drifted line.
+ * Refreshes both the resolved price and the frozen snapshot so the row
+ * becomes the new baseline; subsequent drift checks compare against the
+ * current tiers.
+ *
+ * Override lines are never repriced; this should not be called for them.
+ */
+export async function repriceLineItemToCurrent(
+  lineItemId: string,
+  currentTiers: ComputedPartPricingTier[],
+): Promise<QuoteLineItem> {
+  const supabase = getSupabase();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('quote_line_items')
+    .select('*')
+    .eq('id', lineItemId)
+    .single();
+  if (fetchError) {
+    console.error('Error loading line item for reprice:', fetchError);
+    throw fetchError;
+  }
+  const row = existing as unknown as QuoteLineItem;
+  if (row.is_quote_override) {
+    throw new Error('Override line items cannot be repriced — clear the override first.');
+  }
+
+  const resolved = resolveTier(currentTiers, row.quantity);
+  if (!resolved) {
+    throw new Error('Cannot reprice: this part has no priced tiers in the current tier table.');
+  }
+  const matchedTier = currentTiers.find((t) => t.id === resolved.source_tier_id);
+  const newMarkup = matchedTier?.markup_percent ?? null;
+
+  const newSnapshot = buildPricingBasisSnapshot(
+    currentTiers,
+    row.quantity,
+    resolved.source_tier_id,
+  );
+  const newTotal = Math.round(resolved.unit_price * row.quantity * 100) / 100;
+
+  const { data, error } = await supabase
+    .from('quote_line_items')
+    .update({
+      unit_price: resolved.unit_price,
+      source_tier_id: resolved.source_tier_id,
+      markup_percent: newMarkup,
+      total_price: newTotal,
+      pricing_basis_snapshot: newSnapshot as unknown as Json,
+      basis_unknown: false,
+    })
+    .eq('id', lineItemId)
+    .select('*')
+    .single();
+  if (error) {
+    console.error('Error repricing line item:', error);
+    throw error;
+  }
+  return data as unknown as QuoteLineItem;
+}
+
+/**
+ * Delete a single line item by id (used by updateQuote's reconcile path
+ * when the user removes a part from an existing quote).
+ */
+export async function deleteLineItem(lineItemId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('quote_line_items')
+    .delete()
+    .eq('id', lineItemId);
+  if (error) {
+    console.error('Error deleting quote line item:', error);
+    throw error;
+  }
 }
 
 /**

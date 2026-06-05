@@ -580,14 +580,13 @@ Drift = the current tier table differs from the line's snapshotted basis. Quanti
 - [ ] Drifted lines reprice only on explicit user choice (per-line control or update-all) — *verified by `e2e/quote-edit.spec.ts > 'drifted line repriced only via explicit control'`*.
 - [ ] `is_quote_override = true` lines are NEVER flagged as drifted, even if their tier has moved — *verified by `__tests__/utils/quotesAccess.test.ts > 'override lines never appear in drift set'` AND `__tests__/components/quotes/QuoteForm.test.tsx > 'override line never renders drift chip'`*.
 
-**Forced keep-or-update on actively-edited drifted lines (conditional)**
+**Forced keep-or-update: DROPPED ([Issue #325](https://github.com/debola31/Jigged/issues/325) decision, 2026-06-04)**
 
-The forced-choice path — block save on a line the user is actively editing where the price is ambiguous (drifted), until they explicitly pick keep-the-snapshot or update-to-current — is **gated on the [Issue #325](https://github.com/debola31/Jigged/issues/325) (drift-frequency conversation with the primary quoter) outcome**. If drift turns out to be rare, this clause is dropped and the non-blocking chip is sufficient.
+The forced-choice path — block save on an actively-edited drifted line until the user picks keep-the-snapshot or update-to-current — was gated on Issue #325 and has been **dropped** from §0 scope. In the pilot population (Contour Tool & Machine, primary quoter Johnny), tier-price changes during an open quote's lifetime are rare enough that a save-blocking modal is more friction than the drift signal warrants. The non-blocking chip + per-line and update-all controls above already give the user a deliberate opt-in when drift does occur.
 
-Choose ONE of the two bullets below based on the Issue #325 decision:
+If post-pilot data shows drift is more frequent than estimated, forced-choice can be revisited as a follow-up; it is not part of #324's implementation scope.
 
-- [ ] (if forced-choice ships) Attempting to save while editing a drifted line without choosing keep-or-update blocks save with a form error — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edited drifted line blocks save until keep-or-update chosen'`*.
-- [ ] (if forced-choice is dropped) Editing a drifted line and saving without making a drift choice uses the non-blocking chip behavior — the line keeps its snapshotted price unless the per-line control was clicked — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edit-time drift uses non-blocking chip only'`*.
+- [x] Editing a drifted line and saving without making a drift choice uses the non-blocking chip behavior — the line keeps its snapshotted price unless the per-line control was clicked — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edit-time drift uses non-blocking chip only'`*.
 
 **Verification rule for the whole section**
 

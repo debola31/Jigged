@@ -20,7 +20,15 @@ import { isQuoteExpired } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
-import { insertLineItemForPart, getLineItemsForQuote } from '@/utils/quoteLineItemsAccess';
+import {
+  insertLineItemForPart,
+  getLineItemsForQuote,
+  updateLineItemQuantity,
+  repriceLineItemToCurrent,
+  deleteLineItem,
+} from '@/utils/quoteLineItemsAccess';
+import { isDrifted, isDriftedDegraded } from '@/utils/quotePricingResolver';
+import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
  * Cast a DB row to Quote. The DB stores `status` as text with a CHECK
@@ -72,7 +80,7 @@ function hydrateCreators<T extends QuoteWithRelations>(
 const QUOTE_LINE_ITEM_FIELDS = `
   id, quote_id, company_id, part_id, source_tier_id, sequence,
   quantity, unit_price, total_price, markup_percent, base_cost_per_unit,
-  is_quote_override, created_at,
+  is_quote_override, pricing_basis_snapshot, basis_unknown, created_at,
   parts(id, part_name, description)
 `;
 
@@ -411,10 +419,29 @@ export async function createQuote(
 }
 
 /**
- * Update a quote's metadata (customer, lead time, expiration, notes).
- * Line items are immutable snapshots — to change parts/tiers, create a new quote.
+ * Update a quote's metadata AND reconcile its line items against the form
+ * payload (#324 + Issue #317 policy):
+ *
+ *   - parts on the form but NOT in the DB → insert via `insertLineItemForPart`
+ *     (captures a fresh pricing basis snapshot at current tiers).
+ *   - parts in the DB but NOT on the form → delete.
+ *   - parts on both → quantity-curve recompute against the frozen snapshot
+ *     (`updateLineItemQuantity` uses the snapshot, NEVER current tiers).
+ *
+ * Pricing is FROZEN by default. Drifted lines reprice ONLY when the form
+ * payload includes their id in `acceptDriftLineItemIds` (the user clicked
+ * "Update to current price" or "Update all"). Override lines are never
+ * touched.
+ *
+ * Per the #325 decision recorded in [docs/modules/quotes.md] (2026-06-04),
+ * forced keep-or-update was dropped — there is no save-blocking modal.
+ * Untouched drifted lines simply keep their snapshotted price on save.
  */
-export async function updateQuote(quoteId: string, formData: QuoteFormData): Promise<Quote> {
+export async function updateQuote(
+  quoteId: string,
+  formData: QuoteFormData,
+  options: { acceptDriftLineItemIds?: string[] } = {},
+): Promise<Quote> {
   const supabase = getSupabase();
 
   const { data: existing, error: checkError } = await supabase
@@ -430,6 +457,27 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
 
   if (!isQuoteEditable(existing)) {
     throw new Error('This quote cannot be edited. Expired or converted quotes are read-only.');
+  }
+
+  const companyId = existing.company_id;
+
+  // Same shape validation as createQuote — duplicate parts and bad
+  // quantities are caught here before we issue any DB writes.
+  if (!formData.parts || formData.parts.length === 0) {
+    throw new Error('A quote must include at least one part.');
+  }
+  const seenPartsForValidation = new Set<string>();
+  for (const block of formData.parts) {
+    if (!block.part_id) throw new Error('Every part selection must reference a real part.');
+    if (seenPartsForValidation.has(block.part_id)) {
+      throw new Error(
+        'A part can only appear once on a quote — adjust the order quantity instead of duplicating it.',
+      );
+    }
+    seenPartsForValidation.add(block.part_id);
+    if (!Number.isFinite(block.order_quantity) || block.order_quantity <= 0) {
+      throw new Error('Every part needs an order quantity greater than zero.');
+    }
   }
 
   const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
@@ -463,7 +511,164 @@ export async function updateQuote(quoteId: string, formData: QuoteFormData): Pro
     throw error;
   }
 
+  await reconcileQuoteLineItems(quoteId, companyId, formData, options);
+
   return asQuote(data);
+}
+
+/**
+ * Reconcile the line items on a quote against the form payload.
+ * Insert new parts, update edited quantities (frozen-snapshot recompute),
+ * delete removed parts, and reprice ONLY the lines the user explicitly
+ * opted into via the drift controls.
+ *
+ * Split out so updateQuote stays readable; not exported because external
+ * callers should always go through updateQuote (which enforces editability
+ * and the metadata update).
+ */
+async function reconcileQuoteLineItems(
+  quoteId: string,
+  companyId: string,
+  formData: QuoteFormData,
+  options: { acceptDriftLineItemIds?: string[] },
+): Promise<void> {
+  const existingItems = await getLineItemsForQuote(quoteId);
+  const byPartId = new Map(existingItems.map((li) => [li.part_id, li]));
+  const formPartIds = new Set(formData.parts.map((p) => p.part_id));
+
+  // 1. Delete lines whose parts were removed on the form.
+  for (const li of existingItems) {
+    if (!formPartIds.has(li.part_id)) {
+      await deleteLineItem(li.id);
+    }
+  }
+
+  // 2. Insert / update remaining parts. We need fresh tiers for any
+  //    add-line (basis snapshot must use the part's CURRENT tier table at
+  //    add-line time) and for any line the user opted in to reprice.
+  //    Cache per-partId lookups so a quote with N parts only hits the
+  //    tiers query N times.
+  const tiersCache = new Map<string, ComputedPartPricingTier[]>();
+  const ensureTiers = async (partId: string): Promise<ComputedPartPricingTier[]> => {
+    const cached = tiersCache.get(partId);
+    if (cached) return cached;
+    const tiers = await getTiersWithComputedPrices(partId);
+    tiersCache.set(partId, tiers);
+    return tiers;
+  };
+
+  const acceptDriftIds = new Set(options.acceptDriftLineItemIds ?? []);
+
+  // Walk the form payload in order so the highest pre-existing sequence is
+  // the floor for new inserts (preserves render order on reload).
+  let nextSequence =
+    existingItems.length === 0
+      ? 10
+      : Math.max(...existingItems.map((li) => li.sequence)) + 10;
+
+  for (const block of formData.parts) {
+    const existing = byPartId.get(block.part_id);
+
+    if (!existing) {
+      // New part on this edit — snapshot from current tiers.
+      const tiers = await ensureTiers(block.part_id);
+      await insertLineItemForPart(
+        quoteId,
+        companyId,
+        block.part_id,
+        block.order_quantity,
+        tiers,
+        nextSequence,
+        block.override,
+      );
+      nextSequence += 10;
+      continue;
+    }
+
+    // Existing line — reprice only if explicitly accepted; never on
+    // override lines. Quantity changes recompute against the snapshot.
+    if (
+      !existing.is_quote_override &&
+      acceptDriftIds.has(existing.id)
+    ) {
+      const tiers = await ensureTiers(block.part_id);
+      await repriceLineItemToCurrent(existing.id, tiers);
+    }
+
+    if (existing.quantity !== block.order_quantity) {
+      await updateLineItemQuantity(existing.id, block.order_quantity);
+    }
+  }
+}
+
+/**
+ * For each non-override line item on a quote, decide whether its frozen
+ * pricing basis has drifted relative to the part's current tier table.
+ * Returns the set of drifted line item ids — the QuoteForm renders the
+ * "snapshotted vs current" chip and the per-line / update-all controls
+ * for exactly these ids.
+ *
+ * `basis_unknown` rows fall back to the degraded comparison
+ * (`isDriftedDegraded`). Override lines are NEVER returned regardless of
+ * snapshot state — they're frozen by design.
+ *
+ * The function loads each part's current tiers via
+ * `getTiersWithComputedPrices` (one query per distinct part_id). Cheap
+ * enough for the typical quote (single-digit parts); if a future quote
+ * routinely carries dozens of parts this could batch.
+ */
+export interface QuoteLineDriftInfo {
+  line_item_id: string;
+  basis_unknown: boolean;
+  snapshotted_unit_price: number;
+  current_unit_price: number | null;
+}
+
+export async function detectQuoteLineDrift(
+  quoteId: string,
+): Promise<QuoteLineDriftInfo[]> {
+  const items = await getLineItemsForQuote(quoteId);
+  if (items.length === 0) return [];
+
+  const partIds = Array.from(new Set(items.map((li) => li.part_id)));
+  const tiersByPart = new Map<string, ComputedPartPricingTier[]>();
+  await Promise.all(
+    partIds.map(async (partId) => {
+      const tiers = await getTiersWithComputedPrices(partId).catch(() => []);
+      tiersByPart.set(partId, tiers);
+    }),
+  );
+
+  const drifted: QuoteLineDriftInfo[] = [];
+  for (const li of items) {
+    if (li.is_quote_override) continue;
+    const tiers = tiersByPart.get(li.part_id) ?? [];
+
+    if (li.basis_unknown || !li.pricing_basis_snapshot) {
+      const isd = isDriftedDegraded(li.unit_price, li.quantity, tiers);
+      if (isd) {
+        const currentResolved = tiers.find((t) => t.quantity <= li.quantity);
+        drifted.push({
+          line_item_id: li.id,
+          basis_unknown: true,
+          snapshotted_unit_price: li.unit_price,
+          current_unit_price: currentResolved?.unit_price ?? null,
+        });
+      }
+      continue;
+    }
+
+    if (isDrifted(li.pricing_basis_snapshot, tiers)) {
+      const currentResolved = tiers.find((t) => t.quantity <= li.quantity);
+      drifted.push({
+        line_item_id: li.id,
+        basis_unknown: false,
+        snapshotted_unit_price: li.unit_price,
+        current_unit_price: currentResolved?.unit_price ?? null,
+      });
+    }
+  }
+  return drifted;
 }
 
 /**

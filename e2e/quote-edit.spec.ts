@@ -36,7 +36,14 @@ test.describe('Quote edit — reload contract', () => {
 
     // Create a quote with one line (E2E-MFG-001 @ qty 1).
     await navigateTo(page, 'Quotes');
+    await expect(page).toHaveURL(/\/quotes/);
     await page.getByRole('button', { name: /New Quote/i }).click();
+    // The /quotes list page also renders a combobox labeled "Customer"
+    // (the customer filter). Without this URL gate, Playwright can latch
+    // onto that filter while the navigation is in flight — the click
+    // succeeds but never updates the form's customer_id, and Create Quote
+    // stays disabled because validation reports "Pick a customer."
+    await expect(page).toHaveURL(/\/quotes\/new/, { timeout: 15_000 });
 
     const customerField = page.getByRole('combobox', { name: /^Customer$/i });
     await customerField.click();
@@ -59,6 +66,12 @@ test.describe('Quote edit — reload contract', () => {
       .first()
       .click();
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
+    // Wait for tier resolution before submitting — see quote-to-job.spec.ts.
+    // The Create Quote button stays disabled until the tier query returns
+    // and resolveTier produces a usable unit price.
+    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
@@ -129,7 +142,10 @@ test.describe('Quote edit — reload contract', () => {
 
     // Step A: create a quote at the current tier price.
     await navigateTo(page, 'Quotes');
+    await expect(page).toHaveURL(/\/quotes/);
     await page.getByRole('button', { name: /New Quote/i }).click();
+    // Required URL gate — see spec 1 above.
+    await expect(page).toHaveURL(/\/quotes\/new/, { timeout: 15_000 });
 
     const customerField = page.getByRole('combobox', { name: /^Customer$/i });
     await customerField.click();
@@ -241,7 +257,10 @@ test.describe('Quote edit — reload contract', () => {
 
     // Create a new quote.
     await navigateTo(page, 'Quotes');
+    await expect(page).toHaveURL(/\/quotes/);
     await page.getByRole('button', { name: /New Quote/i }).click();
+    // Required URL gate — see spec 1.
+    await expect(page).toHaveURL(/\/quotes\/new/, { timeout: 15_000 });
     const customerField = page.getByRole('combobox', { name: /^Customer$/i });
     await customerField.click();
     await customerField.fill('E2E Test Customer');

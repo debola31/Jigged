@@ -15,6 +15,33 @@ Two metrics are under the configured floor. Sub-PR 3e (CI hardening) makes this 
 
 Coverage roadmap: 45% → 50% → 55% → 60%. Each 3f sub-PR raises the floor in lockstep with the tests it adds (ratchet, not target).
 
+## Mutation testing (Stryker)
+
+Coverage tells you what's executed; mutation testing tells you what's actually asserted. Stryker (configured in [`stryker.conf.mjs`](../../stryker.conf.mjs)) mutates `utils/**/*.ts` and `lib/**/*.ts`, runs the Vitest Node-mode suite per mutant, and reports survivors — production code patterns the tests don't notice when broken.
+
+```bash
+# Full run (slow — minutes to hours depending on hardware)
+pnpm test:mutation
+# OR
+pnpm exec stryker run
+
+# Targeted run — much faster, useful when iterating
+pnpm exec stryker run --mutate utils/quotesAccess.ts
+
+# View the HTML report
+open reports/mutation/index.html
+```
+
+Reading the report:
+- **Killed** mutants are good — at least one test failed when the mutation was applied.
+- **Survived** mutants are red flags — the production code can be silently broken in that location and every test still passes. Each survivor names the file, line, and the mutation operator (`EqualityOperator`, `ConditionalExpression`, etc.).
+- **No coverage** mutants mean no test ran the line — usually a coverage gap before a test-strength gap.
+- **Timeout** mutants usually indicate infinite loops introduced by the mutation; Stryker counts them as killed.
+
+Playwright specs (`e2e/**`) are intentionally excluded from mutation testing — it's a unit/integration concept; running it across E2E would blow up runtime without surfacing useful signal.
+
+Baseline scores are recorded in issue #323 after the quote-edit fix (#324) ships — Stryker validates the reconcile block first.
+
 ## Frontend test files (25 files, 348 tests + 9 skipped)
 
 ### Utilities

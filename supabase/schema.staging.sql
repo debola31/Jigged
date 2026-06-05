@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-05-27T15:22:58Z
+-- Generated: 2026-06-05T01:17:12Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -456,6 +456,8 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "base_cost_per_unit" numeric(12,4),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "is_quote_override" boolean NOT NULL DEFAULT false,
+    "pricing_basis_snapshot" jsonb,
+    "basis_unknown" boolean NOT NULL DEFAULT false,
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
     CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
@@ -3339,6 +3341,89 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.get_priceable_part_ids(p_company_id uuid)
+ RETURNS uuid[]
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_priceable uuid[];
+    v_new uuid[];
+BEGIN
+    -- Base case: bought parts that have at least one pricing tier AND a
+    -- non-expired procurement tier on their preferred vendor.
+    SELECT COALESCE(array_agg(DISTINCT p.id), ARRAY[]::uuid[])
+    INTO v_priceable
+    FROM public.parts p
+    WHERE p.company_id = p_company_id
+      AND p.source = 'bought'
+      AND p.preferred_vendor_id IS NOT NULL
+      AND EXISTS (
+          SELECT 1
+          FROM public.part_pricing_tiers t
+          WHERE t.part_id = p.id
+      )
+      AND EXISTS (
+          SELECT 1
+          FROM public.part_procurement_tiers pt
+          WHERE pt.part_id = p.id
+            AND pt.vendor_id = p.preferred_vendor_id
+            AND (pt.expires_at IS NULL OR pt.expires_at >= CURRENT_DATE)
+      );
+
+    -- Fixed-point: add made parts whose routing is complete and whose BOM
+    -- children (if any) are all already in v_priceable. Loop terminates
+    -- when no new parts are added — bounded by BOM depth.
+    LOOP
+        SELECT COALESCE(array_agg(p.id), ARRAY[]::uuid[])
+        INTO v_new
+        FROM public.parts p
+        WHERE p.company_id = p_company_id
+          AND p.source = 'made'
+          AND NOT (p.id = ANY(v_priceable))
+          AND EXISTS (
+              SELECT 1
+              FROM public.part_pricing_tiers t
+              WHERE t.part_id = p.id
+          )
+          -- Every routing op (if any) must have full pricing. NOT EXISTS
+          -- with an unpriced op is the negative form of "all priced".
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.routings r
+              JOIN public.routing_operations ro ON ro.routing_id = r.id
+              JOIN public.work_centers wc ON wc.id = ro.work_center_id
+              WHERE r.part_id = p.id
+                AND (
+                    (wc.kind = 'internal'
+                        AND ro.labor_rate_override IS NULL
+                        AND wc.labor_rate IS NULL)
+                    OR
+                    (wc.kind <> 'internal'
+                        AND ro.external_unit_price IS NULL
+                        AND ro.external_setup_cost IS NULL)
+                )
+          )
+          -- Every BOM child must already be priceable. A made part with no
+          -- BOM children passes this check trivially (NOT EXISTS over empty).
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.parts_bom b
+              WHERE b.parent_part_id = p.id
+                AND NOT (b.child_part_id = ANY(v_priceable))
+          );
+
+        EXIT WHEN cardinality(v_new) = 0;
+        v_priceable := v_priceable || v_new;
+    END LOOP;
+
+    RETURN v_priceable;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.get_procurement_cost(p_part_id uuid, p_qty numeric)
  RETURNS TABLE(unit_cost numeric, vendor_id uuid, tier_id uuid, source text)
  LANGUAGE plpgsql
@@ -4998,6 +5083,12 @@ COMMENT ON COLUMN "public"."parts_bom"."sequence"
 
 COMMENT ON COLUMN "public"."parts_unit_conversions"."to_primary_factor"
     IS 'Multiplier: quantity_in_from_unit * to_primary_factor = quantity_in_primary_unit.';
+
+COMMENT ON COLUMN "public"."quote_line_items"."pricing_basis_snapshot"
+    IS 'JSON snapshot of the pricing tiers, markup, and resolved tier at quote-create time. Shape: { tiers: [{ id, quantity, unit_price, markup_percent }], resolved_tier_id, resolved_quantity, captured_at }. NULL when basis_unknown=true (pre-snapshot rows).';
+
+COMMENT ON COLUMN "public"."quote_line_items"."basis_unknown"
+    IS 'TRUE when this line was created before the basis-snapshot column existed. Renders a "basis unknown" chip on edit; drift detection uses degraded resolved-vs-current comparison. Option C from Issue #317 — Option A (backfill from current tiers) was explicitly dropped to avoid fabricating historical pricing.';
 
 COMMENT ON COLUMN "public"."quote_materials"."material_part_id"
     IS 'FK to the consumed material in the unified parts table (renamed from inventory_item_id when the item master was unified). Optional — supports ad-hoc materials not yet in the catalog.';

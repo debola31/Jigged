@@ -28,7 +28,12 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
-import { createQuote, updateQuote } from '@/utils/quotesAccess';
+import {
+  createQuote,
+  updateQuote,
+  detectQuoteLineDrift,
+  type QuoteLineDriftInfo,
+} from '@/utils/quotesAccess';
 import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import {
   getAllCustomers,
@@ -72,6 +77,10 @@ interface PartBlockState {
   tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
+  /** Set on edit-mode blocks; absent on newly-added or create-mode blocks. */
+  line_item_id?: string;
+  /** Pre-snapshot Option C — renders the "basis unknown" chip. */
+  basis_unknown?: boolean;
 }
 
 const CREATE_NEW_CUSTOMER: CustomerOption = {
@@ -113,6 +122,8 @@ function blockFromInitial(
     tiers: [],
     loading: false,
     error: null,
+    line_item_id: p.line_item_id,
+    basis_unknown: p.basis_unknown,
   };
 }
 
@@ -148,6 +159,19 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [partModalOpen, setPartModalOpen] = useState(false);
   const [partModalTargetIdx, setPartModalTargetIdx] = useState<number | null>(null);
+
+  // Drift state (edit mode only):
+  //   - driftByLineId: server-detected drift map for the lines currently
+  //     in the DB. Lines the user has since removed in the form remain in
+  //     this map but are simply ignored (the matching block is gone).
+  //   - acceptedDriftIds: lines the user explicitly opted in to reprice
+  //     via the per-line or "Update all" controls. These ids flow into
+  //     updateQuote's options on submit. Untouched drifted lines never
+  //     enter this set, so they keep their snapshot on save.
+  const [driftByLineId, setDriftByLineId] = useState<Map<string, QuoteLineDriftInfo>>(
+    () => new Map(),
+  );
+  const [acceptedDriftIds, setAcceptedDriftIds] = useState<Set<string>>(() => new Set());
 
   const loadData = useCallback(async () => {
     try {
@@ -185,6 +209,26 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Edit-mode only: detect drift once on mount. The result is keyed by
+  // line item id so each block can decide whether to render the chip.
+  // Failures here are logged but non-fatal — the form should still load
+  // (drift detection is an enhancement on top of the basic edit path).
+  useEffect(() => {
+    if (mode !== 'edit' || !quoteId) return;
+    let cancelled = false;
+    detectQuoteLineDrift(quoteId)
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<string, QuoteLineDriftInfo>();
+        for (const r of rows) m.set(r.line_item_id, r);
+        setDriftByLineId(m);
+      })
+      .catch((err) => console.warn('Drift detection failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, quoteId]);
 
   // Load tiers for one block. Shared by the effect (newly-added block) and
   // updatePartInBlock (re-select of the same part wipes the previous tiers,
@@ -367,12 +411,37 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   };
 
   const removePartBlock = (idx: number) => {
-    setPartBlocks((prev) => prev.filter((_, i) => i !== idx));
+    setPartBlocks((prev) => {
+      const removed = prev[idx];
+      if (removed?.line_item_id) {
+        // Drop any accept-drift selection that referenced this line — the
+        // user removed the whole part, so the per-line opt-in is moot.
+        setAcceptedDriftIds((cur) => {
+          if (!cur.has(removed.line_item_id!)) return cur;
+          const next = new Set(cur);
+          next.delete(removed.line_item_id!);
+          return next;
+        });
+      }
+      return prev.filter((_, i) => i !== idx);
+    });
   };
 
   const updatePartInBlock = (idx: number, option: PartSelectOption | null) => {
     setPartBlocks((prev) => {
       const next = [...prev];
+      // Re-selecting a part on an existing line means the user wants a
+      // different part on that slot — drop the line_item_id correlation
+      // and any accept-drift selection so reconcile treats it as new.
+      const previous = next[idx];
+      if (previous?.line_item_id) {
+        setAcceptedDriftIds((cur) => {
+          if (!cur.has(previous.line_item_id!)) return cur;
+          const nextIds = new Set(cur);
+          nextIds.delete(previous.line_item_id!);
+          return nextIds;
+        });
+      }
       next[idx] = { ...emptyBlock(), part: option };
       return next;
     });
@@ -546,6 +615,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           part_id: b.part?.id ?? '',
           order_quantity: orderQty,
         };
+        if (b.line_item_id) block.line_item_id = b.line_item_id;
+        if (b.basis_unknown) block.basis_unknown = b.basis_unknown;
         if (b.override_open && b.override_unit_price.trim() !== '') {
           const unitPrice = Number(b.override_unit_price);
           block.override = {
@@ -565,7 +636,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         onSave?.();
         router.push(`/dashboard/${companyId}/quotes/${quote.id}`);
       } else if (mode === 'edit' && quoteId) {
-        await updateQuote(quoteId, payload);
+        await updateQuote(quoteId, payload, {
+          acceptDriftLineItemIds: Array.from(acceptedDriftIds),
+        });
         onSave?.();
         router.push(`/dashboard/${companyId}/quotes/${quoteId}`);
       }
@@ -762,6 +835,51 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             </Button>
           </Box>
 
+          {/* Drift summary: a non-blocking notice above the list when any
+              current block correlates to a drifted line. Untouched
+              drifted lines simply keep their snapshotted price on save —
+              the user can save without ever clicking these controls
+              (#325 forced-choice was dropped, 2026-06-04). */}
+          {mode === 'edit' &&
+            (() => {
+              const flagged = partBlocks
+                .map((b) => (b.line_item_id ? driftByLineId.get(b.line_item_id) : undefined))
+                .filter((d): d is QuoteLineDriftInfo => !!d);
+              const pendingFlagged = flagged.filter(
+                (d) => !acceptedDriftIds.has(d.line_item_id),
+              );
+              if (flagged.length === 0) return null;
+              return (
+                <Alert
+                  severity="info"
+                  data-testid="quote-drift-summary"
+                  sx={{ mb: 2 }}
+                  action={
+                    pendingFlagged.length > 0 && (
+                      <Button
+                        color="inherit"
+                        size="small"
+                        data-testid="quote-drift-update-all"
+                        onClick={() => {
+                          setAcceptedDriftIds((cur) => {
+                            const next = new Set(cur);
+                            for (const d of pendingFlagged) next.add(d.line_item_id);
+                            return next;
+                          });
+                        }}
+                      >
+                        Update all flagged
+                      </Button>
+                    )
+                  }
+                >
+                  {flagged.length === 1
+                    ? '1 line has a price change since this quote was created. It will keep its original price unless you update it.'
+                    : `${flagged.length} lines have price changes since this quote was created. They will keep their original prices unless you update them.`}
+                </Alert>
+              );
+            })()}
+
           {partBlocks.length === 0 && (
             <Typography variant="body2" color="text.secondary">
               Add at least one part to quote.
@@ -782,6 +900,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // fires and the user isn't trapped typing a quantity that
             // can't resolve to a line price.
             const hasUsableTier = block.tiers.some((t) => t.unit_price !== null);
+            // Drift state for this block, if any. Override lines never
+            // appear here (detectQuoteLineDrift filters them out).
+            const drift = block.line_item_id
+              ? driftByLineId.get(block.line_item_id) ?? null
+              : null;
+            const isAcceptedDrift = !!(
+              block.line_item_id && acceptedDriftIds.has(block.line_item_id)
+            );
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -891,6 +1017,73 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                               variant="outlined"
                               sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
                             />
+                          )}
+                          {block.basis_unknown && (
+                            <Chip
+                              size="small"
+                              label="basis unknown"
+                              color="default"
+                              variant="outlined"
+                              data-testid={`basis-unknown-chip-${idx}`}
+                              sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
+                            />
+                          )}
+                          {drift && !isOverride && (
+                            <Box
+                              sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 0.5 }}
+                              data-testid={`drift-chip-${idx}`}
+                            >
+                              <Chip
+                                size="small"
+                                label={
+                                  isAcceptedDrift
+                                    ? `Will update to ${formatCurrency(drift.current_unit_price)} / unit`
+                                    : `Tier price changed: was ${formatCurrency(
+                                        drift.snapshotted_unit_price,
+                                      )}, now ${formatCurrency(drift.current_unit_price)}`
+                                }
+                                color={isAcceptedDrift ? 'primary' : 'warning'}
+                                variant="outlined"
+                                sx={{ height: 'auto', py: 0.5, alignSelf: 'flex-start' }}
+                              />
+                              {!isAcceptedDrift && drift.current_unit_price !== null && (
+                                <Button
+                                  size="small"
+                                  variant="text"
+                                  data-testid={`drift-update-${idx}`}
+                                  onClick={() => {
+                                    if (!block.line_item_id) return;
+                                    setAcceptedDriftIds((cur) => {
+                                      const next = new Set(cur);
+                                      next.add(block.line_item_id!);
+                                      return next;
+                                    });
+                                  }}
+                                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                                >
+                                  Update to current price
+                                </Button>
+                              )}
+                              {isAcceptedDrift && (
+                                <Button
+                                  size="small"
+                                  variant="text"
+                                  data-testid={`drift-cancel-${idx}`}
+                                  onClick={() => {
+                                    if (!block.line_item_id) return;
+                                    setAcceptedDriftIds((cur) => {
+                                      if (!cur.has(block.line_item_id!)) return cur;
+                                      const next = new Set(cur);
+                                      next.delete(block.line_item_id!);
+                                      return next;
+                                    });
+                                  }}
+                                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                                >
+                                  Keep original price
+                                </Button>
+                              )}
+                            </Box>
                           )}
                         </Box>
                       )}

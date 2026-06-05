@@ -75,6 +75,45 @@ vi.mock('@/lib/supabase', () => ({
 // Mock storage helpers
 vi.mock('@/utils/storageHelpers', () => mockStorageHelpers);
 
+// Reconcile boundary mocks — quotesAccess.updateQuote calls these
+// helpers; we verify dispatch (which got called, with what) rather than
+// re-test their internals (covered in quoteLineItemsAccess + resolver
+// tests). The hoisted spies are wired below so individual tests can swap
+// implementations as needed.
+const {
+  getLineItemsForQuoteMock,
+  insertLineItemForPartMock,
+  updateLineItemQuantityMock,
+  repriceLineItemToCurrentMock,
+  deleteLineItemMock,
+  getTiersWithComputedPricesMock,
+  detectQuoteLineDriftCallsToDb,
+} = vi.hoisted(() => ({
+  getLineItemsForQuoteMock: vi.fn(),
+  insertLineItemForPartMock: vi.fn(),
+  updateLineItemQuantityMock: vi.fn(),
+  repriceLineItemToCurrentMock: vi.fn(),
+  deleteLineItemMock: vi.fn(),
+  getTiersWithComputedPricesMock: vi.fn(),
+  detectQuoteLineDriftCallsToDb: vi.fn(),
+}));
+
+vi.mock('@/utils/quoteLineItemsAccess', () => ({
+  getLineItemsForQuote: getLineItemsForQuoteMock,
+  insertLineItemForPart: insertLineItemForPartMock,
+  updateLineItemQuantity: updateLineItemQuantityMock,
+  repriceLineItemToCurrent: repriceLineItemToCurrentMock,
+  deleteLineItem: deleteLineItemMock,
+  // clearLineItemsForQuote isn't exercised in these tests but the import
+  // exists on quotesAccess — provide a stub so the mocked module is
+  // syntactically complete.
+  clearLineItemsForQuote: vi.fn(),
+}));
+
+vi.mock('@/utils/partPricingTiersAccess', () => ({
+  getTiersWithComputedPrices: getTiersWithComputedPricesMock,
+}));
+
 // Import functions after mock setup
 import {
   getQuotes,
@@ -87,6 +126,7 @@ import {
   deleteQuote,
   bulkDeleteQuotes,
   convertQuoteToJob,
+  detectQuoteLineDrift,
 } from '@/utils/quotesAccess';
 
 describe('quotesAccess utilities', () => {
@@ -660,6 +700,376 @@ describe('quotesAccess utilities', () => {
       await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
         'This quote has no line items to convert.',
       );
+    });
+  });
+
+  // ============== updateQuote reconcile + drift detection ==============
+  //
+  // The boundary mocks above stub the line-item helpers; these tests
+  // verify which helpers updateQuote dispatches given a particular form
+  // payload vs existing DB state. The helpers' internals are covered in
+  // quotePricingResolver and quoteLineItemsAccess unit tests.
+
+  /**
+   * Wire mockSupabase so updateQuote's two `from('quotes')` chains both
+   * resolve successfully: first the editability check (returns active +
+   * unconverted), then the metadata update (returns the row back).
+   */
+  function stubUpdateQuoteHappyPath(): void {
+    const editableRow = {
+      status: 'active',
+      converted_at: null,
+      company_id: 'company-1',
+    };
+    const updatedRow = {
+      id: 'quote-1',
+      company_id: 'company-1',
+      status: 'active',
+    };
+    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: editableRow, error: null }),
+        }),
+      }),
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: updatedRow, error: null }),
+          }),
+        }),
+      }),
+    }));
+  }
+
+  describe('updateQuote — reconcile (Issue #324 / #317 policy)', () => {
+    const baseFormData: QuoteFormData = {
+      customer_id: 'customer-1',
+      contact_id: '',
+      billing_address_id: '',
+      shipping_address_id: '',
+      parts: [],
+      lead_time_days: '14',
+      expiration_date: '',
+    };
+
+    beforeEach(() => {
+      getLineItemsForQuoteMock.mockReset();
+      insertLineItemForPartMock.mockReset();
+      updateLineItemQuantityMock.mockReset();
+      repriceLineItemToCurrentMock.mockReset();
+      deleteLineItemMock.mockReset();
+      getTiersWithComputedPricesMock.mockReset();
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+      updateLineItemQuantityMock.mockResolvedValue({});
+      repriceLineItemToCurrentMock.mockResolvedValue({});
+      deleteLineItemMock.mockResolvedValue(undefined);
+    });
+
+    it('reconciles line items on edit — insert new, update qty, delete removed', async () => {
+      stubUpdateQuoteHappyPath();
+      // DB has lines for part-A (qty 10) and part-B (qty 5).
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+        {
+          id: 'li-B',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-B',
+          source_tier_id: 't1',
+          sequence: 20,
+          quantity: 5,
+          unit_price: 200,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 133.33,
+          is_quote_override: false,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 5, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      // Form keeps part-A (qty bumped to 25), drops part-B, adds part-C.
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [
+          { part_id: 'part-A', order_quantity: 25 },
+          { part_id: 'part-C', order_quantity: 1 },
+        ],
+      };
+
+      await updateQuote('quote-1', formData);
+
+      // part-B removed → deleteLineItem called once with li-B.
+      expect(deleteLineItemMock).toHaveBeenCalledTimes(1);
+      expect(deleteLineItemMock).toHaveBeenCalledWith('li-B');
+
+      // part-A kept with new qty → updateLineItemQuantity called.
+      expect(updateLineItemQuantityMock).toHaveBeenCalledWith('li-A', 25);
+
+      // part-C added → insertLineItemForPart called for it.
+      expect(insertLineItemForPartMock).toHaveBeenCalledTimes(1);
+      const insertArgs = insertLineItemForPartMock.mock.calls[0];
+      expect(insertArgs[2]).toBe('part-C'); // partId
+      expect(insertArgs[3]).toBe(1); // orderQuantity
+
+      // Reprice is NEVER called when acceptDriftLineItemIds is empty —
+      // pricing is frozen by default.
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+    });
+
+    it('unchanged lines keep snapshotted unit_price (no reprice on edit)', async () => {
+      stubUpdateQuoteHappyPath();
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [{ part_id: 'part-A', order_quantity: 10 }], // unchanged qty
+      };
+
+      await updateQuote('quote-1', formData);
+
+      // No quantity change → no update.
+      expect(updateLineItemQuantityMock).not.toHaveBeenCalled();
+      // No drift acceptance → no reprice.
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+      // No add → no insert.
+      expect(insertLineItemForPartMock).not.toHaveBeenCalled();
+    });
+
+    it('reprices a drifted line ONLY when acceptDriftLineItemIds includes it', async () => {
+      stubUpdateQuoteHappyPath();
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+      getTiersWithComputedPricesMock.mockResolvedValue([
+        { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 110, markup_percent: 50, created_at: '', updated_at: '' },
+      ]);
+
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [{ part_id: 'part-A', order_quantity: 10 }],
+      };
+
+      await updateQuote('quote-1', formData, { acceptDriftLineItemIds: ['li-A'] });
+
+      expect(repriceLineItemToCurrentMock).toHaveBeenCalledTimes(1);
+      expect(repriceLineItemToCurrentMock).toHaveBeenCalledWith('li-A', expect.any(Array));
+    });
+
+    it('NEVER reprices an override line, even if acceptDriftLineItemIds includes it', async () => {
+      stubUpdateQuoteHappyPath();
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: null,
+          sequence: 10,
+          quantity: 10,
+          unit_price: 999, // user-typed override
+          total_price: 9990,
+          markup_percent: null,
+          base_cost_per_unit: null,
+          is_quote_override: true,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: null, resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [{ part_id: 'part-A', order_quantity: 10 }],
+      };
+
+      await updateQuote('quote-1', formData, { acceptDriftLineItemIds: ['li-A'] });
+
+      // Override lines are frozen by design — reprice must NOT be called.
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects an update with an empty parts array', async () => {
+      stubUpdateQuoteHappyPath();
+      const formData: QuoteFormData = { ...baseFormData, parts: [] };
+      await expect(updateQuote('quote-1', formData)).rejects.toThrow(
+        'A quote must include at least one part.',
+      );
+    });
+
+    it('rejects an update with duplicate parts', async () => {
+      stubUpdateQuoteHappyPath();
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [
+          { part_id: 'part-A', order_quantity: 5 },
+          { part_id: 'part-A', order_quantity: 10 },
+        ],
+      };
+      await expect(updateQuote('quote-1', formData)).rejects.toThrow(
+        'A part can only appear once on a quote',
+      );
+    });
+  });
+
+  describe('detectQuoteLineDrift', () => {
+    beforeEach(() => {
+      getLineItemsForQuoteMock.mockReset();
+      getTiersWithComputedPricesMock.mockReset();
+      detectQuoteLineDriftCallsToDb.mockReset();
+    });
+
+    it('returns flagged line IDs when current tier differs from snapshot', async () => {
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          pricing_basis_snapshot: {
+            tiers: [{ id: 't1', quantity: 1, unit_price: 100, markup_percent: 50 }],
+            resolved_tier_id: 't1',
+            resolved_quantity: 10,
+            captured_at: '2026-05-01T00:00:00Z',
+          },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+      getTiersWithComputedPricesMock.mockResolvedValue([
+        { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 120, markup_percent: 60, created_at: '', updated_at: '' },
+      ]);
+
+      const flagged = await detectQuoteLineDrift('quote-1');
+      expect(flagged).toHaveLength(1);
+      expect(flagged[0].line_item_id).toBe('li-A');
+      expect(flagged[0].snapshotted_unit_price).toBe(100);
+      expect(flagged[0].current_unit_price).toBe(120);
+    });
+
+    it('override lines never appear in drift set', async () => {
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: null,
+          sequence: 10,
+          quantity: 10,
+          unit_price: 999,
+          total_price: 9990,
+          markup_percent: null,
+          base_cost_per_unit: null,
+          is_quote_override: true,
+          pricing_basis_snapshot: {
+            tiers: [{ id: 't1', quantity: 1, unit_price: 100, markup_percent: 50 }],
+            resolved_tier_id: null,
+            resolved_quantity: 10,
+            captured_at: '2026-05-01T00:00:00Z',
+          },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+      getTiersWithComputedPricesMock.mockResolvedValue([
+        { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 200, markup_percent: 100, created_at: '', updated_at: '' },
+      ]);
+
+      const flagged = await detectQuoteLineDrift('quote-1');
+      expect(flagged).toEqual([]);
+    });
+
+    it('basis-unknown rows use degraded comparison and surface when current resolved price differs', async () => {
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: null,
+          sequence: 10,
+          quantity: 10,
+          unit_price: 80,
+          total_price: 800,
+          markup_percent: null,
+          base_cost_per_unit: null,
+          is_quote_override: false,
+          pricing_basis_snapshot: null,
+          basis_unknown: true,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ]);
+      getTiersWithComputedPricesMock.mockResolvedValue([
+        { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 100, markup_percent: 50, created_at: '', updated_at: '' },
+      ]);
+
+      const flagged = await detectQuoteLineDrift('quote-1');
+      expect(flagged).toHaveLength(1);
+      expect(flagged[0].basis_unknown).toBe(true);
+      expect(flagged[0].snapshotted_unit_price).toBe(80);
+      expect(flagged[0].current_unit_price).toBe(100);
     });
   });
 

@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { PartPricingTier } from '@/types/partPricing';
-import { resolveTier } from '@/utils/quotePricingResolver';
+import type { PricingBasisSnapshot } from '@/types/quote';
+import {
+  resolveTier,
+  resolveTierFromSnapshot,
+  buildPricingBasisSnapshot,
+  isDrifted,
+  isDriftedDegraded,
+} from '@/utils/quotePricingResolver';
 
 function makeTier(partial: Partial<PartPricingTier>): PartPricingTier {
   return {
@@ -91,5 +98,156 @@ describe('resolveTier', () => {
     ];
     const r = resolveTier(shuffled, 50);
     expect(r!.source_tier_id).toBe('t10');
+  });
+});
+
+function makeSnapshot(
+  tiers: Array<{ id: string; quantity: number; unit_price: number; markup_percent?: number | null }>,
+  resolvedTierId: string | null,
+  resolvedQuantity: number,
+): PricingBasisSnapshot {
+  return {
+    tiers: tiers.map((t) => ({
+      id: t.id,
+      quantity: t.quantity,
+      unit_price: t.unit_price,
+      markup_percent: t.markup_percent ?? null,
+    })),
+    resolved_tier_id: resolvedTierId,
+    resolved_quantity: resolvedQuantity,
+    captured_at: '2026-06-01T00:00:00Z',
+  };
+}
+
+describe('resolveTierFromSnapshot — quantity change honors snapshotted basis', () => {
+  // Frozen basis was: [1=$100, 10=$90, 100=$80].
+  // Even if the part's CURRENT tiers have moved, edit-time qty changes
+  // must resolve against this snapshot.
+  const snap = makeSnapshot(
+    [
+      { id: 't1', quantity: 1, unit_price: 100 },
+      { id: 't10', quantity: 10, unit_price: 90 },
+      { id: 't100', quantity: 100, unit_price: 80 },
+    ],
+    't10',
+    25,
+  );
+
+  it('quantity change honors snapshotted basis', () => {
+    // User bumps qty from 25 (t10 break) to 150 (t100 break) on edit.
+    const r = resolveTierFromSnapshot(snap, 150);
+    expect(r).not.toBeNull();
+    expect(r!.source_tier_id).toBe('t100');
+    expect(r!.unit_price).toBe(80);
+  });
+
+  it('falls back to lowest tier when below the snapshot minimum', () => {
+    const r = resolveTierFromSnapshot(snap, 0.5);
+    expect(r!.source_tier_id).toBe('t1');
+    expect(r!.unit_price).toBe(100);
+    expect(r!.below_min).toBe(true);
+  });
+
+  it('returns the highest tier when qty exceeds every break', () => {
+    const r = resolveTierFromSnapshot(snap, 99999);
+    expect(r!.source_tier_id).toBe('t100');
+  });
+});
+
+describe('buildPricingBasisSnapshot', () => {
+  it('captures only priced tiers and records the resolved tier', () => {
+    const tiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 50 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: null }), // null filtered out
+      makeTier({ id: 't100', quantity: 100, unit_price: 40 }),
+    ];
+    const snap = buildPricingBasisSnapshot(tiers, 200, 't100');
+    expect(snap.tiers.map((t) => t.id)).toEqual(['t1', 't100']);
+    expect(snap.resolved_tier_id).toBe('t100');
+    expect(snap.resolved_quantity).toBe(200);
+    expect(snap.captured_at).toMatch(/T/);
+  });
+
+  it('keeps the snapshot tiers sorted by quantity ascending', () => {
+    const tiers: PartPricingTier[] = [
+      makeTier({ id: 't100', quantity: 100, unit_price: 40 }),
+      makeTier({ id: 't1', quantity: 1, unit_price: 50 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: 45 }),
+    ];
+    const snap = buildPricingBasisSnapshot(tiers, 5, 't1');
+    expect(snap.tiers.map((t) => t.quantity)).toEqual([1, 10, 100]);
+  });
+});
+
+describe('isDrifted — drift is flagged when current tier differs from basis', () => {
+  const basis = makeSnapshot(
+    [
+      { id: 't1', quantity: 1, unit_price: 100 },
+      { id: 't10', quantity: 10, unit_price: 90 },
+    ],
+    't10',
+    20,
+  );
+
+  it('drift is flagged when current tier differs from basis', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 110 }), // moved
+      makeTier({ id: 't10', quantity: 10, unit_price: 90 }),
+    ];
+    expect(isDrifted(basis, currentTiers)).toBe(true);
+  });
+
+  it('is NOT flagged when current tiers match the snapshot', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 100 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: 90 }),
+    ];
+    expect(isDrifted(basis, currentTiers)).toBe(false);
+  });
+
+  it('flags drift when a snapshotted tier id disappears', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 100 }),
+    ];
+    expect(isDrifted(basis, currentTiers)).toBe(true);
+  });
+
+  it('flags drift when a new priced tier appears', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 100 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: 90 }),
+      makeTier({ id: 't100', quantity: 100, unit_price: 80 }),
+    ];
+    expect(isDrifted(basis, currentTiers)).toBe(true);
+  });
+
+  it('absorbs sub-cent floating-point noise', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 100.001 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: 89.999 }),
+    ];
+    expect(isDrifted(basis, currentTiers)).toBe(false);
+  });
+});
+
+describe('isDriftedDegraded — basis_unknown rows', () => {
+  it('flags drift when current resolved price differs from stored unit_price', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't1', quantity: 1, unit_price: 100 }),
+      makeTier({ id: 't10', quantity: 10, unit_price: 90 }),
+    ];
+    // Stored row: qty 25 @ $80 (older price). Current resolves to $90 at qty 25.
+    expect(isDriftedDegraded(80, 25, currentTiers)).toBe(true);
+  });
+
+  it('does not flag when current resolved price matches stored unit_price', () => {
+    const currentTiers: PartPricingTier[] = [
+      makeTier({ id: 't10', quantity: 10, unit_price: 90 }),
+    ];
+    expect(isDriftedDegraded(90, 25, currentTiers)).toBe(false);
+  });
+
+  it('does not flag when the part has no priced tiers today', () => {
+    expect(isDriftedDegraded(80, 25, [])).toBe(false);
   });
 });

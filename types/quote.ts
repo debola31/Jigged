@@ -42,8 +42,49 @@ export interface Quote {
 }
 
 /**
- * Snapshotted line item on a quote. One row per (part, tier) selected at quote creation.
- * Immutable — edits to the part's pricing tiers after the snapshot do not affect the quote.
+ * Frozen JSON snapshot of the pricing tiers that produced a line item's
+ * `unit_price` at quote-create time. Stored on `quote_line_items.pricing_basis_snapshot`
+ * (migration 20260605004123).
+ *
+ * Drift detection compares this snapshot against the part's CURRENT tier
+ * table; when they differ, the line is flagged in the edit UI. Quantity
+ * changes during edit recompute the price against THIS snapshot — not
+ * current tiers — so quantity-curve movement is never confused with drift.
+ */
+export interface PricingBasisSnapshot {
+  /**
+   * The full tier table as it existed when the line was snapshotted. Sorted
+   * by quantity ascending. `unit_price` is the snapshotted price for the
+   * tier — null entries from the source `ComputedPartPricingTier` are
+   * filtered out before snapshotting (only priced tiers go in).
+   */
+  tiers: Array<{
+    id: string;
+    quantity: number;
+    unit_price: number;
+    markup_percent: number | null;
+  }>;
+  /**
+   * The tier id whose `unit_price` was used for the line. Null when the
+   * line is a quote-override (snapshot still captures the tier table for
+   * later drift comparison, but no tier was "resolved" — the user typed
+   * the price).
+   */
+  resolved_tier_id: string | null;
+  /**
+   * The order quantity at the time of snapshot. Stored so the resolver
+   * can reproduce the same tier match when the user changes quantity on
+   * edit (quantity-curve movement uses the snapshot, not current tiers).
+   */
+  resolved_quantity: number;
+  /** ISO timestamp the snapshot was captured. */
+  captured_at: string;
+}
+
+/**
+ * Snapshotted line item on a quote. Pricing is frozen at create time via
+ * `pricing_basis_snapshot`; tier-table changes after that are surfaced as
+ * drift in the edit UI but never reprice the line silently.
  */
 export interface QuoteLineItem {
   id: string;
@@ -60,8 +101,21 @@ export interface QuoteLineItem {
   /**
    * True when the salesperson typed a one-off price/markup on the quote form
    * that diverged from the source tier. UI surfaces a green "adjusted for this quote" chip.
+   * Override lines are NEVER flagged as drifted and never reprice on edit.
    */
   is_quote_override: boolean;
+  /**
+   * Frozen snapshot of the tier table + resolved tier at quote-create time.
+   * Drives drift detection and quantity-curve recomputation on edit. NULL
+   * when `basis_unknown` is true (pre-migration rows; Option C in #317).
+   */
+  pricing_basis_snapshot: PricingBasisSnapshot | null;
+  /**
+   * TRUE on rows created before migration 20260605004123. The edit UI shows
+   * a "basis unknown" chip and falls back to degraded resolved-vs-current
+   * drift comparison for these.
+   */
+  basis_unknown: boolean;
   created_at: string;
   // Optional joined part info for UI rendering
   parts?: {
@@ -134,12 +188,21 @@ export interface QuoteLineOverride {
  * commits to one Order Quantity per part; the unit price is auto-resolved
  * from the part's pricing tiers (highest tier with `tier_qty <= order_qty`)
  * unless an explicit override is supplied.
+ *
+ * `line_item_id` and `basis_unknown` are only populated on EDIT — they let
+ * the form correlate a block back to its underlying line item so it can
+ * render the drift chip and "basis unknown" chip. Create-mode payloads
+ * leave them undefined; createQuote / reconcile both ignore them.
  */
 export interface QuoteFormPartBlock {
   part_id: string;
   order_quantity: number;
   /** Optional hand-entered price+markup; bypasses tier resolution when present. */
   override?: QuoteLineOverride;
+  /** Set on edit-mode payloads so the form can look up drift / basis info. */
+  line_item_id?: string;
+  /** Set on edit-mode payloads from pre-snapshot rows (Option C, #317). */
+  basis_unknown?: boolean;
 }
 
 /**
@@ -233,6 +296,8 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
     parts: Array.from(byPart.values()).map((li) => ({
       part_id: li.part_id,
       order_quantity: li.quantity,
+      line_item_id: li.id,
+      basis_unknown: li.basis_unknown,
       ...(li.is_quote_override
         ? {
             override: {

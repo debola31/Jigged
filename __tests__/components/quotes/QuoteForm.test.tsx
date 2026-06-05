@@ -16,9 +16,11 @@ import type { QuoteFormData } from '@/types/quote';
 // Quote access — primary surface under test
 const createQuote = vi.fn();
 const updateQuote = vi.fn();
+const detectQuoteLineDrift = vi.fn();
 vi.mock('@/utils/quotesAccess', () => ({
   createQuote: (...args: unknown[]) => createQuote(...args),
   updateQuote: (...args: unknown[]) => updateQuote(...args),
+  detectQuoteLineDrift: (...args: unknown[]) => detectQuoteLineDrift(...args),
 }));
 
 // Parts: hydrating initial part_ids on edit + by-id lookup
@@ -107,6 +109,8 @@ describe('QuoteForm', () => {
     ]);
     createQuote.mockResolvedValue({ quote: { id: 'new-quote-id' } });
     updateQuote.mockResolvedValue({ id: 'edit-quote-id' });
+    // Default: no drift. Individual tests override.
+    detectQuoteLineDrift.mockResolvedValue([]);
   });
 
   it('renders the Create-quote button label in create mode', async () => {
@@ -273,5 +277,216 @@ describe('QuoteForm', () => {
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledTimes(1);
     });
+  });
+
+  // ============== Drift UI (Issue #324 / #317 §0 policy) ==============
+  //
+  // The form correlates blocks to line items via QuoteFormPartBlock.line_item_id
+  // (populated by quoteToFormData on edit). detectQuoteLineDrift returns the
+  // set of drifted line ids on mount; the form renders a non-blocking chip
+  // + per-line "Update to current price" + a top-of-list "Update all flagged"
+  // bulk control. Forced-choice was DROPPED in the #325 decision — saving is
+  // never blocked by an unresolved drift choice.
+
+  const driftedInitial: QuoteFormData = {
+    ...initialPopulated,
+    parts: [
+      {
+        part_id: 'part-1',
+        order_quantity: 5,
+        line_item_id: 'li-1',
+        basis_unknown: false,
+      },
+    ],
+  };
+
+  it('edit-time drift uses non-blocking chip only — save is enabled without making a drift choice', async () => {
+    detectQuoteLineDrift.mockResolvedValueOnce([
+      {
+        line_item_id: 'li-1',
+        basis_unknown: false,
+        snapshotted_unit_price: 50,
+        current_unit_price: 75,
+      },
+    ]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={driftedInitial} />);
+
+    // The drift chip renders and the save button stays enabled. No modal,
+    // no error, no required-action gate.
+    await waitFor(() => {
+      expect(screen.getByTestId('quote-drift-summary')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+  });
+
+  it('renders per-line drift chip and Update-all bulk control on flagged lines', async () => {
+    detectQuoteLineDrift.mockResolvedValueOnce([
+      {
+        line_item_id: 'li-1',
+        basis_unknown: false,
+        snapshotted_unit_price: 50,
+        current_unit_price: 75,
+      },
+    ]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={driftedInitial} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('drift-chip-0')).toBeInTheDocument();
+    });
+    // Per-line and "Update all flagged" controls both present.
+    expect(screen.getByTestId('drift-update-0')).toBeInTheDocument();
+    expect(screen.getByTestId('quote-drift-update-all')).toBeInTheDocument();
+  });
+
+  it('untouched drifted line saves without sending its id in acceptDriftLineItemIds (keeps snapshotted price)', async () => {
+    detectQuoteLineDrift.mockResolvedValueOnce([
+      {
+        line_item_id: 'li-1',
+        basis_unknown: false,
+        snapshotted_unit_price: 50,
+        current_unit_price: 75,
+      },
+    ]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={driftedInitial} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(updateQuote).toHaveBeenCalledTimes(1);
+    });
+    const opts = updateQuote.mock.calls[0][2];
+    expect(opts).toBeDefined();
+    expect(opts.acceptDriftLineItemIds).toEqual([]);
+  });
+
+  it('per-line update marks line for reprice — drift id flows into acceptDriftLineItemIds on save', async () => {
+    detectQuoteLineDrift.mockResolvedValueOnce([
+      {
+        line_item_id: 'li-1',
+        basis_unknown: false,
+        snapshotted_unit_price: 50,
+        current_unit_price: 75,
+      },
+    ]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={driftedInitial} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('drift-update-0')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('drift-update-0'));
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(updateQuote).toHaveBeenCalledTimes(1);
+    });
+    const opts = updateQuote.mock.calls[0][2];
+    expect(opts.acceptDriftLineItemIds).toEqual(['li-1']);
+  });
+
+  it('Update-all bulk control opts every flagged line in at once', async () => {
+    const twoDrifted: QuoteFormData = {
+      ...initialPopulated,
+      parts: [
+        { part_id: 'part-1', order_quantity: 5, line_item_id: 'li-1' },
+        { part_id: 'part-2', order_quantity: 10, line_item_id: 'li-2' },
+      ],
+    };
+    detectQuoteLineDrift.mockResolvedValueOnce([
+      {
+        line_item_id: 'li-1',
+        basis_unknown: false,
+        snapshotted_unit_price: 50,
+        current_unit_price: 75,
+      },
+      {
+        line_item_id: 'li-2',
+        basis_unknown: false,
+        snapshotted_unit_price: 80,
+        current_unit_price: 90,
+      },
+    ]);
+    getPartsForSelectByIds.mockResolvedValue([
+      hydratedPart,
+      { ...hydratedPart, id: 'part-2', part_name: 'NUT-001' },
+    ]);
+    getTiersWithComputedPrices.mockResolvedValue([
+      { id: 't1', part_id: 'part-1', qty_break: 1, markup_percent: 25, unit_price: 50 },
+    ]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={twoDrifted} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('quote-drift-update-all')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('quote-drift-update-all'));
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(updateQuote).toHaveBeenCalledTimes(1);
+    });
+    const opts = updateQuote.mock.calls[0][2];
+    expect(opts.acceptDriftLineItemIds.sort()).toEqual(['li-1', 'li-2']);
+  });
+
+  it('basis-unknown chip renders on pre-snapshot lines', async () => {
+    const basisUnknownInitial: QuoteFormData = {
+      ...initialPopulated,
+      parts: [
+        {
+          part_id: 'part-1',
+          order_quantity: 5,
+          line_item_id: 'li-1',
+          basis_unknown: true,
+        },
+      ],
+    };
+    detectQuoteLineDrift.mockResolvedValueOnce([]);
+
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={basisUnknownInitial} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('basis-unknown-chip-0')).toBeInTheDocument();
+    });
+  });
+
+  it('override line never renders drift chip', async () => {
+    // detectQuoteLineDrift filters override lines server-side and returns
+    // an empty array even when the override line's tier has moved.
+    const overrideInitial: QuoteFormData = {
+      ...initialPopulated,
+      parts: [
+        {
+          part_id: 'part-1',
+          order_quantity: 5,
+          line_item_id: 'li-override',
+          override: { unit_price: 999, markup_percent: null },
+        },
+      ],
+    };
+    detectQuoteLineDrift.mockResolvedValueOnce([]);
+
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={overrideInitial} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+    // No drift chip, no summary alert.
+    expect(screen.queryByTestId('drift-chip-0')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('quote-drift-summary')).not.toBeInTheDocument();
   });
 });

@@ -322,9 +322,12 @@ test.describe('Quote edit — reload contract', () => {
     });
 
     // Diagnostic: confirm the snapshot was actually persisted (catches
-    // the "snapshot column silently dropped" failure mode early).
-    const createdQuoteIdSpec2 = page.url().match(/\/quotes\/([0-9a-f-]{36})/)?.[1];
-    expect(createdQuoteIdSpec2, 'failed to parse quote id from URL').toBeTruthy();
+    // the "snapshot column silently dropped" failure mode early). Use a
+    // looser regex than UUID-strict — the post-create URL can be
+    // /quotes/{id}?from=... or have other trailing bits.
+    const urlSpec2 = page.url();
+    const createdQuoteIdSpec2 = urlSpec2.match(/\/quotes\/([^/?#]+)/)?.[1];
+    expect(createdQuoteIdSpec2, `failed to parse quote id from URL "${urlSpec2}"`).toBeTruthy();
     await assertSnapshotPersisted(createdQuoteIdSpec2!);
 
     // Step B: simulate drift by SETTING the tier markup to a new
@@ -420,8 +423,9 @@ test.describe('Quote edit — reload contract', () => {
     await expect(page).toHaveURL(/\/quotes\/[^/]+$/, { timeout: 15_000 });
 
     // Same diagnostic as spec 2.
-    const createdQuoteIdSpec3 = page.url().match(/\/quotes\/([0-9a-f-]{36})/)?.[1];
-    expect(createdQuoteIdSpec3, 'failed to parse quote id from URL').toBeTruthy();
+    const urlSpec3 = page.url();
+    const createdQuoteIdSpec3 = urlSpec3.match(/\/quotes\/([^/?#]+)/)?.[1];
+    expect(createdQuoteIdSpec3, `failed to parse quote id from URL "${urlSpec3}"`).toBeTruthy();
     await assertSnapshotPersisted(createdQuoteIdSpec3!);
 
     // Set tier markup to drifted value — absolute, not delta, so prior

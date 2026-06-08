@@ -377,66 +377,37 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('SHIPPING ADDRESS');
   });
 
-  it('renders a separate Pricing Tiers section for multi-tier parts', async () => {
-    const tierMockModule = await import('@/utils/partPricingTiersAccess');
-    const getTiersMock = vi.mocked(tierMockModule.getTiersWithComputedPrices);
-    getTiersMock.mockResolvedValueOnce([
-      {
-        id: 't1', part_id: 'part-1', company_id: 'company-1', sequence: 1, quantity: 1,
-        markup_percent: 40, unit_price: 70,
-        created_at: '', updated_at: '',
-      },
-      {
-        id: 't10', part_id: 'part-1', company_id: 'company-1', sequence: 2, quantity: 10,
-        markup_percent: 40, unit_price: 65,
-        created_at: '', updated_at: '',
-      },
-    ]);
-
-    const quoteWithTier: QuoteWithRelations = {
+  it('renders ONE table with the part spanning its quantity rows (no grand total) for an options quote', async () => {
+    // Two quantities for the SAME part → a price-options quote.
+    const optionsQuote: QuoteWithRelations = {
       ...baseQuote,
       line_items: [
-        { ...baseQuote.line_items![0], source_tier_id: 't10' },
+        { ...baseQuote.line_items![0], id: 'li-1', sequence: 10, quantity: 5, unit_price: 80, total_price: 400 },
+        { ...baseQuote.line_items![0], id: 'li-2', sequence: 20, quantity: 25, unit_price: 60, total_price: 1500 },
       ],
     };
 
-    await generateQuotePdf(quoteWithTier, baseCompany);
+    await generateQuotePdf(optionsQuote, baseCompany);
+
+    // A single unified table (firm-style head) — NOT separate per-part tables.
+    expect(autoTableFn).toHaveBeenCalledTimes(1);
+    const config = autoTableFn.mock.calls[0][1];
+    expect(config.head).toEqual([['Part', 'Description', 'Order qty', 'Unit price', 'Total']]);
+
+    // Two body rows; the part name + description span both quantities (rowSpan
+    // on the first row), and the first row also carries the first quantity.
+    expect(config.body).toHaveLength(2);
+    expect(config.body[0][0]).toMatchObject({ content: 'BRKT-001', rowSpan: 2 });
+    expect(config.body[0][2]).toBe('5'); // [part, desc, qty, unit, total]
+    expect(config.body[1][0]).toBe('25'); // continuation row: [qty, unit, total]
 
     const docInstance = jsPDFCtor.mock.results[0].value;
     const rendered = docInstance.text.mock.calls
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    // Section header is drawn outside autoTable
-    expect(rendered.some((t: string) => t.includes('PRICING TIERS'))).toBe(true);
-
-    // The tier sub-table is rendered as the SECOND autoTable call
-    expect(autoTableFn.mock.calls.length).toBeGreaterThanOrEqual(2);
-    const tierCall = autoTableFn.mock.calls[1];
-    const tierBody = tierCall[1].body;
-    // Each row shape: [marker, qty, "{price} each", caption]
-    const rowFor10 = tierBody.find((r: string[]) => r[1] === '10');
-    expect(rowFor10).toBeDefined();
-    expect(rowFor10[2]).toMatch(/each$/);
-    expect(rowFor10[0]).toBe('>');
-
-    getTiersMock.mockReset();
-  });
-
-  it('does not render a Pricing Tiers section for an overridden line', async () => {
-    const overrideQuote: QuoteWithRelations = {
-      ...baseQuote,
-      line_items: [{ ...baseQuote.line_items![0], is_quote_override: true }],
-    };
-
-    await generateQuotePdf(overrideQuote, baseCompany);
-
-    const docInstance = jsPDFCtor.mock.results[0].value;
-    const rendered = docInstance.text.mock.calls
-      .map((c: unknown[]) => c[0])
-      .filter((t: unknown): t is string => typeof t === 'string');
-
-    expect(rendered.some((t: string) => t.includes('PRICING TIERS'))).toBe(false);
+    // No grand-total "Total" line is drawn for a price-options quote.
+    expect(rendered.some((t: string) => t === 'Total')).toBe(false);
   });
 });
 

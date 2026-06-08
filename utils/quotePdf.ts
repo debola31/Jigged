@@ -6,12 +6,10 @@
  * can get it, and how to accept — nothing more.
  */
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import autoTable, { type RowInput } from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
-import type { ComputedPartPricingTier } from '@/types/partPricing';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
-import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 
 const MARGIN = 40;
 
@@ -101,27 +99,6 @@ function findContactById(
 }
 
 /**
- * Human-readable label for a contact role. Single source of truth shared
- * with the quote form's option label so the form and the PDF can't drift.
- */
-function formatContactRoleLabel(role: string): string {
-  switch (role) {
-    case 'accounts_payable':
-      return 'Accounts Payable';
-    case 'shipping_receiving':
-      return 'Shipping & Receiving';
-    case 'buyer':
-      return 'Buyer';
-    case 'engineering':
-      return 'Engineering';
-    case 'quality':
-      return 'Quality';
-    default:
-      return 'Other';
-  }
-}
-
-/**
  * Build the printed address lines for the Shipping Address block.
  * Surfaces ATTN: from customer_addresses.attention_to when set. No
  * contact lines or contact info — the Customer Contact has its own
@@ -151,25 +128,6 @@ function buildShippingAddressLines(
   return lines;
 }
 
-/** Pre-fetch master tier lists for every part that appears on the quote. */
-async function loadTiersForQuote(
-  quote: QuoteWithRelations,
-): Promise<Record<string, ComputedPartPricingTier[]>> {
-  const partIds = Array.from(new Set((quote.line_items ?? []).map((li) => li.part_id)));
-  const out: Record<string, ComputedPartPricingTier[]> = {};
-  await Promise.all(
-    partIds.map(async (id) => {
-      try {
-        out[id] = await getTiersWithComputedPrices(id);
-      } catch (err) {
-        console.warn('Quote PDF: failed to load tiers for part', id, err);
-        out[id] = [];
-      }
-    }),
-  );
-  return out;
-}
-
 /**
  * Filename used both when downloading and when attaching to email.
  * Single source of truth so the preview dialog, download button, and email
@@ -197,7 +155,6 @@ export async function generateQuotePdf(
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  const tiersByPart = await loadTiersForQuote(quote);
   const expired = isQuoteExpired(quote);
   const daysLeft = daysUntilExpiration(quote.expiration_date);
 
@@ -275,10 +232,11 @@ export async function generateQuotePdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- CREATED BY (left) + BILL TO (right) ----------
-  const colWidth = (pageWidth - MARGIN * 2) / 2;
-  const leftX = MARGIN;
-  const rightX = MARGIN + colWidth + 8;
+  // ---------- CREATED BY · CUSTOMER CONTACT · SHIPPING ADDRESS (3 columns) ----------
+  const usableWidth = pageWidth - MARGIN * 2;
+  const col1X = MARGIN;
+  const col2X = MARGIN + usableWidth * 0.33;
+  const col3X = MARGIN + usableWidth * 0.66;
 
   const createdByName = quote.created_by_member?.name ?? null;
   const createdByEmail = quote.created_by_member?.email ?? null;
@@ -291,93 +249,110 @@ export async function generateQuotePdf(
   // future invoicing flow but is NOT rendered on the quote document.
   const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
   const contact = findContactById(quote.customers?.customer_contacts, quote.contact_id);
-
   const shippingLines = buildShippingAddressLines(quote.customers ?? null, shippingAddress);
 
-  // Section labels — left: CREATED BY, right: SHIPPING ADDRESS.
+  // Build each column's body lines as { text, bold }. The lead line of each
+  // column (creator/contact name, customer name) is bold; the rest plain.
+  const createdByLines: Array<{ text: string; bold: boolean }> = [];
+  if (createdByName) createdByLines.push({ text: createdByName, bold: true });
+  if (createdByEmail) createdByLines.push({ text: createdByEmail, bold: false });
+
+  const contactLines: Array<{ text: string; bold: boolean }> = [];
+  if (contact) {
+    contactLines.push({ text: contact.name, bold: true });
+    if (contact.email) contactLines.push({ text: contact.email, bold: false });
+    if (contact.phone) contactLines.push({ text: contact.phone, bold: false });
+  }
+
+  const shippingBody: Array<{ text: string; bold: boolean }> = shippingLines.map(
+    (line: string, i: number) => ({ text: line, bold: i === 0 }),
+  );
+
+  const infoColumns: Array<{
+    x: number;
+    label: string | null;
+    lines: Array<{ text: string; bold: boolean }>;
+  }> = [
+    { x: col1X, label: createdByLines.length > 0 ? 'CREATED BY' : null, lines: createdByLines },
+    { x: col2X, label: contactLines.length > 0 ? 'CUSTOMER CONTACT' : null, lines: contactLines },
+    { x: col3X, label: 'SHIPPING ADDRESS', lines: shippingBody },
+  ];
+
+  // Column labels on one row.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  if (createdByName || createdByEmail) {
-    doc.text('CREATED BY', leftX, cursorY);
-  }
-  doc.text('SHIPPING ADDRESS', rightX, cursorY);
-
-  // Left column: Created by name + email
-  doc.setFontSize(11);
-  doc.setTextColor(40);
-  let leftLineCount = 0;
-  if (createdByName) {
-    doc.setFont('helvetica', 'bold');
-    doc.text(createdByName, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
-  }
-  if (createdByEmail) {
-    doc.setFont('helvetica', 'normal');
-    doc.text(createdByEmail, leftX, cursorY + 16 + leftLineCount * 13);
-    leftLineCount += 1;
+  for (const col of infoColumns) {
+    if (col.label) doc.text(col.label, col.x, cursorY);
   }
 
-  // Right column: Shipping address. First line is the customer name
-  // (bold); subsequent lines (Attn:, address, city/state/zip, country)
-  // render plain.
-  shippingLines.forEach((line: string, i: number) => {
-    doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
-    doc.setFontSize(11);
-    doc.setTextColor(40);
-    doc.text(line, rightX, cursorY + 16 + i * 13);
-  });
-
-  const rightBlockLines = shippingLines.length;
-  const blockLines = Math.max(leftLineCount, rightBlockLines);
-  cursorY = cursorY + 16 + blockLines * 13 + 16;
-
-  // ---------- Customer Contact section ----------
-  // Sourced from quotes.contact_id. Defaults at quote creation to the
-  // customer's primary contact (see migration 20260522). Renders name,
-  // role, email, phone — only the fields the contact actually has.
-  if (contact) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('CUSTOMER CONTACT', MARGIN, cursorY);
-    cursorY += 14;
-
-    doc.setFontSize(11);
-    doc.setTextColor(40);
-    doc.setFont('helvetica', 'bold');
-    doc.text(contact.name, MARGIN, cursorY);
-    cursorY += 13;
-
-    doc.setFont('helvetica', 'normal');
-    doc.text(formatContactRoleLabel(contact.role), MARGIN, cursorY);
-    cursorY += 13;
-
-    if (contact.email) {
-      doc.text(contact.email, MARGIN, cursorY);
-      cursorY += 13;
-    }
-    if (contact.phone) {
-      doc.text(contact.phone, MARGIN, cursorY);
-      cursorY += 13;
-    }
-
-    cursorY += 6;
+  // Column bodies; advance the cursor past the tallest column.
+  let maxInfoLines = 0;
+  for (const col of infoColumns) {
+    col.lines.forEach((ln, i) => {
+      doc.setFont('helvetica', ln.bold ? 'bold' : 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(40);
+      doc.text(ln.text, col.x, cursorY + 16 + i * 13);
+    });
+    maxInfoLines = Math.max(maxInfoLines, col.lines.length);
   }
+
+  cursorY = cursorY + 16 + maxInfoLines * 13 + 16;
 
   // ---------- Line items ----------
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
 
-  const body =
-    lineItems.length > 0
-      ? lineItems.map((li) => [
-          li.parts?.part_name ?? 'Part',
-          li.parts?.description?.trim() ?? '',
+  // Group by part (first-appearance order). Both firm and price-options quotes
+  // render as ONE table; a part with 2+ quantities spans its name/description
+  // across its quantity rows. Firm quotes (every part one quantity) add a grand
+  // total; price-options quotes omit it (the customer picks a quantity).
+  const partGroups: { part_name: string; description: string; items: typeof lineItems }[] = [];
+  const groupIndex = new Map<string, number>();
+  for (const li of lineItems) {
+    let gi = groupIndex.get(li.part_id);
+    if (gi === undefined) {
+      gi = partGroups.length;
+      groupIndex.set(li.part_id, gi);
+      partGroups.push({
+        part_name: li.parts?.part_name ?? 'Part',
+        description: li.parts?.description?.trim() ?? '',
+        items: [],
+      });
+    }
+    partGroups[gi].items.push(li);
+  }
+  const isFirmQuote = partGroups.length > 0 && partGroups.every((g) => g.items.length === 1);
+
+  // One table for the whole quote. A part with several quantities shows its
+  // name + description once (a cell spanning its quantity rows) and one line
+  // per quantity; a single-quantity part is a plain one-line row.
+  const body: RowInput[] = [];
+  if (lineItems.length > 0) {
+    for (const group of partGroups) {
+      const rows = [...group.items].sort((a, b) => a.quantity - b.quantity);
+      rows.forEach((li, i) => {
+        const qtyCells = [
           String(li.quantity),
           formatCurrency(li.unit_price),
           formatCurrency(li.total_price ?? li.unit_price * li.quantity),
-        ])
-      : [['', '', '', '', '']];
+        ];
+        if (rows.length === 1) {
+          body.push([group.part_name, group.description, ...qtyCells]);
+        } else if (i === 0) {
+          body.push([
+            { content: group.part_name, rowSpan: rows.length },
+            { content: group.description, rowSpan: rows.length },
+            ...qtyCells,
+          ]);
+        } else {
+          body.push(qtyCells);
+        }
+      });
+    }
+  } else {
+    body.push(['', '', '', '', '']);
+  }
 
   autoTable(doc, {
     startY: cursorY,
@@ -389,6 +364,7 @@ export async function generateQuotePdf(
       fontSize: 10,
       cellPadding: 7,
       textColor: [40, 40, 40],
+      valign: 'top',
     },
     headStyles: {
       fillColor: [240, 240, 240],
@@ -408,11 +384,12 @@ export async function generateQuotePdf(
   });
 
   const afterTableY =
-    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 60;
+    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+    cursorY + 60;
 
-  // ---------- Grand total ----------
+  // ---------- Grand total (firm quotes only) ----------
   cursorY = afterTableY + 20;
-  if (lineItems.length > 0) {
+  if (isFirmQuote && lineItems.length > 0) {
     const grandTotal = lineItems.reduce(
       (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
       0,
@@ -423,89 +400,6 @@ export async function generateQuotePdf(
     doc.text('Total', pageWidth - MARGIN - 100, cursorY, { align: 'right' });
     doc.text(formatCurrency(grandTotal), pageWidth - MARGIN, cursorY, { align: 'right' });
     cursorY += 20;
-  }
-
-  // ---------- Pricing tiers (separate appendix-style table) ----------
-  const partsWithTiers = lineItems.filter((li) => {
-    if (li.is_quote_override) return false;
-    const tiers = tiersByPart[li.part_id] ?? [];
-    return tiers.length > 1;
-  });
-
-  if (partsWithTiers.length > 0) {
-    cursorY += 10;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('PRICING TIERS', MARGIN, cursorY);
-    cursorY += 12;
-
-    for (const li of partsWithTiers) {
-      // Page-break guard.
-      const reservedBottom = 160;
-      if (cursorY + 50 > pageHeight - reservedBottom) {
-        doc.addPage();
-        cursorY = MARGIN;
-      }
-
-      const tiers = [...(tiersByPart[li.part_id] ?? [])].sort(
-        (a, b) => a.quantity - b.quantity,
-      );
-      const matchedId = li.source_tier_id;
-
-      // Part header
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(50);
-      const partLabel = li.parts?.part_name ?? 'Part';
-      const desc = li.parts?.description?.trim();
-      doc.text(desc ? `${partLabel}  —  ${desc}` : partLabel, MARGIN, cursorY + 10);
-      cursorY += 16;
-
-      // Tier sub-table: marker / order qty / unit price (with "each") / note.
-      const tierBody = tiers.map((tier) => {
-        const isMatched = tier.id === matchedId;
-        return [
-          isMatched ? '>' : '',
-          String(tier.quantity),
-          `${formatCurrency(tier.unit_price)} each`,
-          isMatched ? `your order of ${li.quantity}` : '',
-        ];
-      });
-
-      autoTable(doc, {
-        startY: cursorY,
-        margin: { left: MARGIN + 8, right: MARGIN },
-        body: tierBody,
-        styles: {
-          font: 'helvetica',
-          fontSize: 9,
-          cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
-          textColor: [80, 80, 80],
-          lineColor: [240, 240, 240],
-          lineWidth: 0.4,
-        },
-        columnStyles: {
-          0: { cellWidth: 14, halign: 'center', fontStyle: 'bold', textColor: [30, 30, 30] },
-          1: { cellWidth: 60, halign: 'right' },
-          2: { cellWidth: 100, halign: 'right' },
-          3: { cellWidth: 'auto', textColor: [120, 120, 120], fontStyle: 'italic' },
-        },
-        didParseCell: (data) => {
-          const markerCell = data.row.cells[0];
-          if (markerCell && markerCell.raw === '>') {
-            data.cell.styles.fontStyle = 'bold';
-            data.cell.styles.textColor = [30, 30, 30];
-          }
-        },
-        theme: 'plain',
-      });
-
-      const tierEndY =
-        (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY;
-      cursorY = tierEndY + 10;
-    }
   }
 
   // ---------- Acceptance block (compact) ----------

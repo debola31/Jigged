@@ -54,7 +54,7 @@ Success looks like:
 | Operation Type | A category of operation (e.g., Machining, QC). |
 | Part | A company-wide product with name and description. Cost derived from routing when one exists. Not tied to a specific customer. |
 | Pricing Tier | A quantity break-point on a part with its own markup % (e.g., "Qty 4 @ 25%"). Unit price is derived live as `base_cost × (1 + markup/100)`. |
-| Quote | A cost-plus price estimate. Multi-part, multi-tier; line items snapshot selected pricing tiers (with optional per-quote overrides). Convert produces one job per (part, selected tier). |
+| Quote | A cost-plus price estimate. Multi-part; the salesperson quotes one or more quantities per part (each a snapshotted line item, with optional per-line overrides), and each quantity's price is resolved from the part's tiers. Firm (one qty/part → grand total) or price-options (2+ qtys → per-part break tables, no total) is implicit by quantity count. Convert produces one job, one work cell per (part, selected quantity). |
 
 ### 2. Users and Use Cases
 
@@ -260,7 +260,7 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - **Inventory Transaction**: id, item_id, quantity_change, unit, transaction_type (add/deplete/adjust), work_order_id, user_id, notes, created_at
 
-- **Part**: id, company_id, part_name, description, created_at, updated_at (company-wide entity, no customer_id). Pricing is cost-plus and lives on `part_pricing_tiers`: each tier carries its own quantity + markup %; unit price is derived live as `base_cost × (1 + markup/100)` against the routing. Quotes snapshot tiers as immutable `quote_line_items` and may carry per-quote price overrides.
+- **Part**: id, company_id, part_name, description, created_at, updated_at (company-wide entity, no customer_id). Pricing is cost-plus and lives on `part_pricing_tiers`: each tier carries its own quantity + markup %; unit price is derived live as `base_cost × (1 + markup/100)` against the routing. Quotes snapshot one `quote_line_items` row per quoted (part, quantity) — the price resolved from these tiers and frozen by default — and may carry per-line price overrides.
 
 - **Part Pricing Tier**: id, part_id, company_id, sequence, quantity, base_cost_per_unit, markup_percent, unit_price, created_at, updated_at. Markup % is the source of truth; typing a unit price back-calculates markup. No per-tier "lock" — for stable customer prices, override at the quote line item.
 
@@ -290,7 +290,7 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 
 - Part → Company (many-to-one; parts are company-wide, not customer-specific)
 
-- Quote → Quote Line Item (one-to-many; immutable snapshots of selected pricing tiers)
+- Quote → Quote Line Item (one-to-many; one snapshot per (part, quantity), reconciled on edit with pricing frozen by default)
 
 - Quote Line Item → Job (one-to-one on conversion via `jobs.source_quote_line_item_id`)
 

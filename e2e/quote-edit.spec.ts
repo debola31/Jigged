@@ -221,11 +221,11 @@ test.describe('Quote edit — reload contract', () => {
     // The second order-qty input is the new block's.
     await orderQtyInputs.nth(1).fill('2');
     // Open custom price for the SECOND block only — both blocks render a
-    // "Use custom price" button, so the unscoped locator hits strict-mode
-    // violation. nth(1) targets the new block.
+    // single part-level "Use custom price" button, so the unscoped locator
+    // hits a strict-mode violation. nth(1) targets the new block.
     await page.getByRole('button', { name: /Use custom price/i }).nth(1).click();
-    // The Unit price input only exists after override is opened.
-    await page.getByRole('textbox', { name: /^Unit price$/i }).fill('25');
+    // The "Custom unit price" input only exists after override is opened.
+    await page.getByRole('textbox', { name: /^Custom unit price$/i }).fill('25');
 
     // Wait for the Save button to become enabled before clicking. With
     // qty + override price filled, validation passes; the button enables
@@ -306,10 +306,11 @@ test.describe('Quote edit — reload contract', () => {
       .click();
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
 
-    // Capture the snapshotted unit price. The QuoteForm renders
-    // "Tier N ea · $XX.YY / unit" inline — the dollar amount depends on
-    // the routing cost rollup, so we just grab whatever number is shown.
-    const unitPriceLocator = page.getByText(/\$[\d.,]+ \/ unit/);
+    // Capture the snapshotted unit price. The compact quantity table shows
+    // the unit price as a standalone "$XX.YY" cell (with a "Tier N ea"
+    // caption); the amount depends on the routing cost rollup. At qty 1 the
+    // unit price and extended are equal, so the first dollar cell is fine.
+    const unitPriceLocator = page.getByText(/^\$[\d.,]+$/);
     await expect(unitPriceLocator.first()).toBeVisible({ timeout: 10_000 });
     const snapshottedUnitPriceText = await unitPriceLocator.first().textContent();
     const snapshottedDollar = (snapshottedUnitPriceText ?? '').match(/\$[\d.,]+/)?.[0];
@@ -422,7 +423,7 @@ test.describe('Quote edit — reload contract', () => {
       .first()
       .click();
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
-    const unitPriceLocator = page.getByText(/\$[\d.,]+ \/ unit/);
+    const unitPriceLocator = page.getByText(/^\$[\d.,]+$/);
     await expect(unitPriceLocator.first()).toBeVisible({ timeout: 10_000 });
     const snapshottedDollarText = (await unitPriceLocator.first().textContent()) ?? '';
     const snapshottedDollar = snapshottedDollarText.match(/\$[\d.,]+/)?.[0];

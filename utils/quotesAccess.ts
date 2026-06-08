@@ -327,13 +327,10 @@ export async function createQuote(
   if (!formData.parts || formData.parts.length === 0) {
     throw new Error('A quote must include at least one part.');
   }
-  const seenPartsForValidation = new Set<string>();
+  // A part may appear more than once now — each (part, quantity) entry is its
+  // own line item (a price-options quote). Only validate each entry in isolation.
   for (const block of formData.parts) {
     if (!block.part_id) throw new Error('Every part selection must reference a real part.');
-    if (seenPartsForValidation.has(block.part_id)) {
-      throw new Error('A part can only appear once on a quote — adjust the order quantity instead of duplicating it.');
-    }
-    seenPartsForValidation.add(block.part_id);
     if (!Number.isFinite(block.order_quantity) || block.order_quantity <= 0) {
       throw new Error('Every part needs an order quantity greater than zero.');
     }
@@ -385,12 +382,22 @@ export async function createQuote(
     throw error;
   }
 
-  // Snapshot one line item per part (auto-resolving the tier from order qty)
-  // and write per-part cost snapshots.
-  let sequence = 10;
+  // Snapshot one line item per (part, quantity) entry (auto-resolving the
+  // tier from order qty). A price-options quote contributes several entries
+  // for one part; tiers are fetched once per part and reused across its
+  // quantities.
+  const tiersCache = new Map<string, ComputedPartPricingTier[]>();
+  const ensureTiers = async (partId: string): Promise<ComputedPartPricingTier[]> => {
+    const cached = tiersCache.get(partId);
+    if (cached) return cached;
+    const tiers = await getTiersWithComputedPrices(partId);
+    tiersCache.set(partId, tiers);
+    return tiers;
+  };
 
+  let sequence = 10;
   for (const block of formData.parts) {
-    const tiers = await getTiersWithComputedPrices(block.part_id);
+    const tiers = await ensureTiers(block.part_id);
     await insertLineItemForPart(
       quote.id,
       companyId,
@@ -401,16 +408,25 @@ export async function createQuote(
       block.override,
     );
     sequence += 10;
+  }
 
+  // Cost snapshots (quote_operations / quote_materials) are keyed by
+  // (quote_id, part_id), so they're written ONCE per part — never once per
+  // quantity. A price-options quote has no single "the" quantity, so we
+  // snapshot at the lowest quoted quantity (deterministic; the per-unit
+  // material cost depends on qty via procurement tiers).
+  const lowestQtyByPart = new Map<string, number>();
+  for (const block of formData.parts) {
+    const current = lowestQtyByPart.get(block.part_id);
+    if (current === undefined || block.order_quantity < current) {
+      lowestQtyByPart.set(block.part_id, block.order_quantity);
+    }
+  }
+  for (const [partId, qty] of lowestQtyByPart) {
     try {
-      await writeCostSnapshotsForPart(
-        quote.id,
-        companyId,
-        block.part_id,
-        block.order_quantity,
-      );
+      await writeCostSnapshotsForPart(quote.id, companyId, partId, qty);
     } catch (snapshotError) {
-      console.warn('Failed to write cost snapshot for part:', block.part_id, snapshotError);
+      console.warn('Failed to write cost snapshot for part:', partId, snapshotError);
       Sentry.captureException(snapshotError, { level: 'warning' });
     }
   }
@@ -461,20 +477,14 @@ export async function updateQuote(
 
   const companyId = existing.company_id;
 
-  // Same shape validation as createQuote — duplicate parts and bad
-  // quantities are caught here before we issue any DB writes.
+  // Same shape validation as createQuote. A part may appear more than once
+  // now — each (part, quantity) entry is its own line item (a price-options
+  // quote). Only validate each entry in isolation before any DB writes.
   if (!formData.parts || formData.parts.length === 0) {
     throw new Error('A quote must include at least one part.');
   }
-  const seenPartsForValidation = new Set<string>();
   for (const block of formData.parts) {
     if (!block.part_id) throw new Error('Every part selection must reference a real part.');
-    if (seenPartsForValidation.has(block.part_id)) {
-      throw new Error(
-        'A part can only appear once on a quote — adjust the order quantity instead of duplicating it.',
-      );
-    }
-    seenPartsForValidation.add(block.part_id);
     if (!Number.isFinite(block.order_quantity) || block.order_quantity <= 0) {
       throw new Error('Every part needs an order quantity greater than zero.');
     }
@@ -533,21 +543,29 @@ async function reconcileQuoteLineItems(
   options: { acceptDriftLineItemIds?: string[] },
 ): Promise<void> {
   const existingItems = await getLineItemsForQuote(quoteId);
-  const byPartId = new Map(existingItems.map((li) => [li.part_id, li]));
-  const formPartIds = new Set(formData.parts.map((p) => p.part_id));
+  // Each (part, quantity) entry is its own line item, so reconcile by
+  // line_item_id — NOT by part_id (a part can now own several lines). Form
+  // entries with no line_item_id are new lines (add-quantity / new part);
+  // existing lines whose id is absent from the payload were removed.
+  const byId = new Map(existingItems.map((li) => [li.id, li]));
+  const formLineIds = new Set(
+    formData.parts
+      .map((p) => p.line_item_id)
+      .filter((id): id is string => !!id),
+  );
 
-  // 1. Delete lines whose parts were removed on the form.
+  // 1. Delete lines absent from the form payload (removed quantity or part).
   for (const li of existingItems) {
-    if (!formPartIds.has(li.part_id)) {
+    if (!formLineIds.has(li.id)) {
       await deleteLineItem(li.id);
     }
   }
 
-  // 2. Insert / update remaining parts. We need fresh tiers for any
-  //    add-line (basis snapshot must use the part's CURRENT tier table at
+  // 2. Insert new lines / update existing ones. We need fresh tiers for any
+  //    insert (basis snapshot must use the part's CURRENT tier table at
   //    add-line time) and for any line the user opted in to reprice.
-  //    Cache per-partId lookups so a quote with N parts only hits the
-  //    tiers query N times.
+  //    Cache per-partId lookups so a quote with N distinct parts only hits
+  //    the tiers query N times.
   const tiersCache = new Map<string, ComputedPartPricingTier[]>();
   const ensureTiers = async (partId: string): Promise<ComputedPartPricingTier[]> => {
     const cached = tiersCache.get(partId);
@@ -567,10 +585,12 @@ async function reconcileQuoteLineItems(
       : Math.max(...existingItems.map((li) => li.sequence)) + 10;
 
   for (const block of formData.parts) {
-    const existing = byPartId.get(block.part_id);
+    const existing = block.line_item_id ? byId.get(block.line_item_id) : undefined;
 
     if (!existing) {
-      // New part on this edit — snapshot from current tiers.
+      // New line on this edit (add-quantity or new part) — snapshot from
+      // current tiers. A stale/unknown line_item_id also falls through here
+      // and is treated as a fresh insert, which is safe.
       const tiers = await ensureTiers(block.part_id);
       await insertLineItemForPart(
         quoteId,
@@ -587,10 +607,7 @@ async function reconcileQuoteLineItems(
 
     // Existing line — reprice only if explicitly accepted; never on
     // override lines. Quantity changes recompute against the snapshot.
-    if (
-      !existing.is_quote_override &&
-      acceptDriftIds.has(existing.id)
-    ) {
+    if (!existing.is_quote_override && acceptDriftIds.has(existing.id)) {
       const tiers = await ensureTiers(block.part_id);
       await repriceLineItemToCurrent(existing.id, tiers);
     }
@@ -888,6 +905,15 @@ export interface ConvertToJobOptions {
    * NULL/empty is allowed for shops that don't track customer POs.
    */
   customerPoNumber?: string | null;
+  /**
+   * Which quote line items to convert — one per part. A price-options quote
+   * offers several quantities per part with no single committed quantity, so
+   * the salesperson picks the accepted quantity (line item) per part at
+   * conversion. When omitted, ALL line items convert (the firm-quote path —
+   * each part already has exactly one line). Whichever set is used, it must
+   * resolve to exactly one line per part_id or the conversion is rejected.
+   */
+  selectedLineItemIds?: string[];
 }
 
 export interface ConvertToJobResult {
@@ -905,9 +931,12 @@ export interface ConvertToJobResult {
 }
 
 /**
- * Convert a quote into a single job that owns one job_part per quote_line_item.
- * The job number mirrors the quote number (Q-NNNN → J-NNNN). Each part's routing
- * is cloned into job_operations + job_materials via the
+ * Convert a quote into a single job that owns one job_part per converted line
+ * item (one per part). For a price-options quote the caller passes
+ * `options.selectedLineItemIds` to pick the accepted quantity per part; a firm
+ * quote converts all its lines. Either way the set must resolve to exactly one
+ * line per part_id. The job number mirrors the quote number (Q-NNNN → J-NNNN).
+ * Each part's routing is cloned into job_operations + job_materials via the
  * `create_job_part_operations_from_routing` RPC.
  *
  * The flow is sequential because Supabase doesn't expose multi-statement
@@ -948,8 +977,32 @@ export async function convertQuoteToJob(
     throw new Error('This quote has no line items to convert.');
   }
 
+  // Resolve which line items become job parts. A price-options quote offers
+  // several quantities per part, so the caller picks one line per part via
+  // selectedLineItemIds; a firm quote (one line per part) converts them all.
+  const selectedIds = options.selectedLineItemIds;
+  const lineItemsToConvert =
+    selectedIds && selectedIds.length > 0
+      ? lineItems.filter((li) => selectedIds.includes(li.id))
+      : lineItems;
+  if (lineItemsToConvert.length === 0) {
+    throw new Error('No matching line items selected to convert.');
+  }
+  // Exactly one line per part — converting two quantities of the same part
+  // would silently create duplicate job parts. Reject instead (this also
+  // hard-guards any caller that forgot to pick a quantity).
+  const partLineCounts = new Map<string, number>();
+  for (const li of lineItemsToConvert) {
+    partLineCounts.set(li.part_id, (partLineCounts.get(li.part_id) ?? 0) + 1);
+  }
+  if (Array.from(partLineCounts.values()).some((n) => n > 1)) {
+    throw new Error(
+      'This is a price-options quote. Pick a single quantity per part before converting.',
+    );
+  }
+
   // Pre-flight: every part must have a routing. Fail fast before writing anything.
-  const partIds = Array.from(new Set(lineItems.map((li) => li.part_id)));
+  const partIds = Array.from(new Set(lineItemsToConvert.map((li) => li.part_id)));
   const { data: routings, error: routingsErr } = await supabase
     .from('routings')
     .select('id, part_id')
@@ -1025,7 +1078,7 @@ export async function convertQuoteToJob(
   const partsCreated: ConvertToJobResult['job']['parts'] = [];
 
   let sequence = 10;
-  for (const li of lineItems) {
+  for (const li of lineItemsToConvert) {
     const routingId = routingByPart.get(li.part_id);
     if (!routingId) {
       // Should be impossible after the pre-flight, but guard anyway.

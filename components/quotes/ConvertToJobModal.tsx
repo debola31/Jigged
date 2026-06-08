@@ -67,7 +67,7 @@ export default function ConvertToJobModal({
   // Customer PO is captured at conversion (when the customer has accepted
   // and issued a PO), not at quote-creation. Stored on jobs.customer_po_number
   // (migration 20260526), so the modal always starts empty — the quote
-  // never carries one.
+  // never carries one. REQUIRED to convert (the work-order authorization).
   const [customerPoInput, setCustomerPoInput] = useState<string>('');
 
   const lineItems = useMemo(
@@ -93,8 +93,6 @@ export default function ConvertToJobModal({
     return groups;
   }, [lineItems]);
 
-  const isOptionsQuote = partGroups.some((g) => g.items.length > 1);
-
   // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
   // multi-quantity parts start empty so the user must pick deliberately.
   const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
@@ -113,6 +111,7 @@ export default function ConvertToJobModal({
   }, [open, quote.lead_time_days, partGroups]);
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
+  const poValid = customerPoInput.trim() !== '';
 
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
 
@@ -180,12 +179,6 @@ export default function ConvertToJobModal({
             One job will be created with one work cell per part. Each part&apos;s routing will be
             cloned into its own operations + materials list.
           </Typography>
-
-          {isOptionsQuote && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              This is a price-options quote. Pick the quantity the customer accepted for each part.
-            </Alert>
-          )}
 
           {partGroups.length > 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 1 }}>
@@ -275,10 +268,16 @@ export default function ConvertToJobModal({
               label="Customer PO #"
               size="small"
               fullWidth
+              required
               value={customerPoInput}
               onChange={(e) => setCustomerPoInput(e.target.value)}
               disabled={loading}
-              helperText="The PO number the customer referenced when accepting this quote. Optional."
+              error={!poValid}
+              helperText={
+                poValid
+                  ? 'The PO number the customer referenced when accepting this quote.'
+                  : 'Customer PO is required to create a job.'
+              }
             />
           </Box>
         </Box>
@@ -290,7 +289,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen}
+          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen || !poValid}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating…' : `Create ${expectedJobNumber}`}

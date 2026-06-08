@@ -13,6 +13,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import CheckIcon from '@mui/icons-material/Check';
 
 import type { JobOperation } from '@/types/job';
+import { parseOptionalNumber } from '@/lib/validators';
 
 interface CompleteOperationModalProps {
   open: boolean;
@@ -54,18 +55,14 @@ export default function CompleteOperationModal({
       notes?: string;
     } = {};
 
-    if (actualSetupMinutes.trim()) {
-      const parsed = parseFloat(actualSetupMinutes);
-      if (!isNaN(parsed) && parsed >= 0) {
-        data.actual_setup_minutes = parsed;
-      }
+    const setupParsed = parseOptionalNumber(actualSetupMinutes);
+    if (setupParsed !== null && setupParsed >= 0) {
+      data.actual_setup_minutes = setupParsed;
     }
 
-    if (actualRunMinutes.trim()) {
-      const parsed = parseFloat(actualRunMinutes);
-      if (!isNaN(parsed) && parsed >= 0) {
-        data.actual_run_minutes = parsed;
-      }
+    const runParsed = parseOptionalNumber(actualRunMinutes);
+    if (runParsed !== null && runParsed >= 0) {
+      data.actual_run_minutes = runParsed;
     }
 
     if (notes.trim()) {
@@ -104,7 +101,7 @@ export default function CompleteOperationModal({
             helperText={`Estimated: ${operation.estimated_setup_minutes || 0} min`}
             size="small"
             fullWidth
-            inputProps={{ min: 0, step: 1 }}
+            inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
           />
           <TextField
             label="Actual Run (min)"
@@ -115,7 +112,7 @@ export default function CompleteOperationModal({
             helperText={`Estimated: ${operation.estimated_run_minutes_per_unit || 0} min/unit`}
             size="small"
             fullWidth
-            inputProps={{ min: 0, step: 1 }}
+            inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
           />
         </Box>
 

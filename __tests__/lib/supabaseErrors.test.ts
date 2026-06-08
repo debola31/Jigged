@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { isAuthError, redirectToSessionExpiry, consumeSessionExpiry } from '@/lib/supabaseErrors';
+import {
+  isAuthError,
+  redirectToSessionExpiry,
+  consumeSessionExpiry,
+  friendlyErrorMessage,
+} from '@/lib/supabaseErrors';
 
 describe('isAuthError', () => {
   it('returns true for PGRST301 (JWT expired)', () => {
@@ -146,5 +151,54 @@ describe('redirectToSessionExpiry / consumeSessionExpiry', () => {
 
   it('consumeSessionExpiry returns null when nothing stored', () => {
     expect(consumeSessionExpiry()).toBeNull();
+  });
+});
+
+describe('friendlyErrorMessage', () => {
+  it('translates a FK violation, naming the referencing table from the message', () => {
+    const error = {
+      code: '23503',
+      message:
+        'update or delete on table "customer_addresses" violates foreign key constraint "quotes_billing_address_id_fkey" on table "quotes"',
+    };
+    expect(friendlyErrorMessage(error, { entity: 'address' })).toBe(
+      "This address can't be deleted because it's still referenced by quotes. Remove or reassign those first.",
+    );
+  });
+
+  it('honors an explicit references override', () => {
+    const error = { code: '23503', message: 'fk violation' };
+    expect(friendlyErrorMessage(error, { entity: 'part', references: 'quotes or jobs' })).toBe(
+      "This part can't be deleted because it's still referenced by quotes or jobs. Remove or reassign those first.",
+    );
+  });
+
+  it('translates a unique violation', () => {
+    expect(friendlyErrorMessage({ code: '23505' }, { entity: 'unit' })).toBe(
+      'That unit already exists — use a different value.',
+    );
+  });
+
+  it('translates a permission/RLS error', () => {
+    expect(friendlyErrorMessage({ code: '42501', message: 'permission denied' })).toBe(
+      "You don't have permission to do that.",
+    );
+    expect(
+      friendlyErrorMessage({ message: 'new row violates row-level security policy' }),
+    ).toBe("You don't have permission to do that.");
+  });
+
+  it('maps auth errors to a session-expired message', () => {
+    expect(friendlyErrorMessage({ code: 'PGRST301', message: 'JWT expired' })).toBe(
+      'Your session has expired. Please sign in again.',
+    );
+  });
+
+  it('uses the fallback (or a generic) for unknown errors — never raw DB text', () => {
+    expect(friendlyErrorMessage({ code: 'XX999', message: 'boom' }, { fallback: 'Failed to delete address' })).toBe(
+      'Failed to delete address',
+    );
+    expect(friendlyErrorMessage(new Error('weird'))).toBe('Something went wrong. Please try again.');
+    expect(friendlyErrorMessage(null)).toBe('Something went wrong. Please try again.');
   });
 });

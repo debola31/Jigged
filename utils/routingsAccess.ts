@@ -10,6 +10,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 12 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Insert payload for routing_operations, minus the columns the callers
@@ -280,7 +281,9 @@ export async function deleteRouting(routingId: string): Promise<void> {
   const { error } = await supabase.from('routings').delete().eq('id', routingId);
   if (error) {
     console.error('Error deleting routing:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'routing', fallback: 'Failed to delete routing.' }),
+    );
   }
 }
 
@@ -382,7 +385,12 @@ export async function deleteRoutingOperation(operationId: string): Promise<void>
   const { error } = await supabase.from('routing_operations').delete().eq('id', operationId);
   if (error) {
     console.error('Error deleting routing operation:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'operation',
+        fallback: 'Failed to delete operation.',
+      }),
+    );
   }
 }
 

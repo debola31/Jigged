@@ -12,6 +12,7 @@ import Link from 'next/link';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartUnitConversions } from '@/utils/partsAccess';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 export type { PartSelectOption };
 
@@ -164,16 +165,20 @@ export default function MaterialRowEditor({
     }));
   };
 
-  const canSave = useMemo(() => {
-    if (!value.childPart) return false;
+  // What's still blocking the save, surfaced inline so the user knows which
+  // field needs attention. Mirrors the canSave checks below.
+  const missingItems = useMemo(() => {
+    const items: string[] = [];
+    if (!value.childPart) items.push('Select a material part');
     const qty = parseFloat(value.quantity);
-    if (!Number.isFinite(qty) || qty <= 0) return false;
-    if (!value.unit?.trim()) return false;
-    // The unit must match one of the resolvable options (primary_unit + any
-    // parts_unit_conversions rows for the child).
-    if (!unitOptions.includes(value.unit)) return false;
-    return true;
+    if (!Number.isFinite(qty) || qty <= 0) items.push('Enter a quantity greater than zero');
+    if (value.childPart && (!value.unit?.trim() || !unitOptions.includes(value.unit))) {
+      items.push('Choose a unit');
+    }
+    return items;
   }, [value, unitOptions]);
+
+  const canSave = missingItems.length === 0;
 
   return (
     <Box
@@ -205,7 +210,7 @@ export default function MaterialRowEditor({
           value={value.quantity}
           onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
           required
-          inputProps={{ min: 0, step: 'any' }}
+          inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
           size="small"
           disabled={saving}
           sx={{ width: 120 }}
@@ -279,6 +284,8 @@ export default function MaterialRowEditor({
           {error}
         </Typography>
       )}
+
+      <MissingFieldsNotice items={missingItems} />
 
       {/* Footer button row mirrors the operations editor: text buttons at
           the bottom, not icon controls inline with the inputs. Save label

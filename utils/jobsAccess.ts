@@ -4,6 +4,7 @@
 // this also keeps the diff small for review. See CLAUDE.md "Typed
 // Supabase client (incremental adoption)" for the rollout contract.
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Update payloads for tables this file mutates conditionally. The typed
@@ -300,7 +301,9 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 
   if (error) {
     console.error('Error deleting job:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete job.' }),
+    );
   }
 }
 
@@ -325,7 +328,9 @@ export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promi
 
     if (error) {
       console.error('Error bulk deleting jobs:', error);
-      throw new Error(error.message || 'Failed to delete jobs');
+      throw new Error(
+        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete jobs.' }),
+      );
     }
   }
 }

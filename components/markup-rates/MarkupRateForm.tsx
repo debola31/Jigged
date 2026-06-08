@@ -39,6 +39,7 @@ import {
   deleteMarkupRate,
   checkMarkupRateNameExists,
 } from '@/utils/markupRatesAccess';
+import { parseOptionalInteger } from '@/lib/validators';
 
 interface MarkupRateFormProps {
   companyId: string;
@@ -62,12 +63,15 @@ function toRowDrafts(formData: MarkupRateFormData): RowDraft[] {
   }));
 }
 
+// A breakpoint quantity must be a positive integer. Built on the shared
+// integer parser plus the markup-specific `> 0` rule.
 function parseInteger(s: string): number | null {
-  const n = Number(s);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.floor(n);
+  const n = parseOptionalInteger(s);
+  return n !== null && n > 0 ? n : null;
 }
 
+// Markup percent: any finite number; a blank field counts as 0% (not null), so
+// this keeps its own Number()-based parse rather than the shared blank→null one.
 function parseDecimal(s: string): number | null {
   const n = Number(s);
   return Number.isFinite(n) ? n : null;

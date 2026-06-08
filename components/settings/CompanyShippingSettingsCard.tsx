@@ -17,6 +17,7 @@ import {
   getCompany,
   updateCompanyShippingSettings,
 } from '@/utils/companyAccess';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 interface CompanyShippingSettingsCardProps {
   companyId: string;
@@ -147,6 +148,10 @@ export default function CompanyShippingSettingsCard({ companyId }: CompanyShippi
             minRows={3}
             fullWidth
             helperText="Last step in the CoC cascade (shipment → customer → company → omit)."
+          />
+
+          <MissingFieldsNotice
+            items={!formatValid ? ['Packing-slip format must include {seq} or {seq:0000}'] : []}
           />
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>

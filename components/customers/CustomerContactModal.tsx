@@ -31,6 +31,7 @@ import {
   createCustomerContact,
   updateCustomerContact,
 } from '@/utils/customerContactsAccess';
+import { isValidEmail, isValidPhone } from '@/lib/validators';
 
 interface CustomerContactModalProps {
   open: boolean;
@@ -89,11 +90,12 @@ export default function CustomerContactModal({
       errors.name = 'Contact name is required';
     }
 
-    if (
-      formData.email.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)
-    ) {
+    if (formData.email.trim() && !isValidEmail(formData.email)) {
       errors.email = 'Invalid email format';
+    }
+
+    if (formData.phone.trim() && !isValidPhone(formData.phone)) {
+      errors.phone = 'Enter a valid phone number';
     }
 
     if (formData.role === 'other' && !formData.role_label.trim()) {
@@ -201,9 +203,12 @@ export default function CustomerContactModal({
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               fullWidth
+              type="tel"
               label="Phone"
               value={formData.phone}
               onChange={handleChange('phone')}
+              error={!!fieldErrors.phone}
+              helperText={fieldErrors.phone}
               disabled={loading}
             />
           </Grid>

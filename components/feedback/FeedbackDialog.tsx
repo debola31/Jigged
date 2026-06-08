@@ -17,6 +17,7 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getSupabase } from '@/lib/supabase';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -202,6 +203,10 @@ export default function FeedbackDialog({ open, onClose, onSuccess, userId }: Fee
           value={feedbackText}
           onChange={(e) => setFeedbackText(e.target.value)}
           disabled={submitting}
+        />
+
+        <MissingFieldsNotice
+          items={!feedbackText.trim() ? ['Enter your feedback before submitting'] : []}
         />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>

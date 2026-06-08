@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   ProcurementCostResult,
   ProcurementTier,
@@ -301,7 +302,12 @@ export async function deleteTier(tierId: string): Promise<void> {
     .eq('id', tierId);
   if (error) {
     console.error('Error deleting procurement tier:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'procurement tier',
+        fallback: 'Failed to delete procurement tier.',
+      }),
+    );
   }
 }
 

@@ -33,6 +33,7 @@ import {
 import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
+import { parseOptionalNumber } from '@/lib/validators';
 
 interface PartFormProps {
   mode: 'create' | 'edit';
@@ -119,9 +120,7 @@ export default function PartForm({
   const handleNumberChange =
     (field: 'reorder_point') =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const raw = e.target.value;
-      const parsed: number | null =
-        raw === '' ? null : Number.isFinite(Number(raw)) ? Number(raw) : null;
+      const parsed = parseOptionalNumber(e.target.value);
       setFormData((prev) => ({ ...prev, [field]: parsed }));
       if (fieldErrors[field]) {
         setFieldErrors((prev) => ({ ...prev, [field]: '' }));
@@ -379,7 +378,7 @@ export default function PartForm({
                     fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts when reached.'
                   }
                   disabled={loading}
-                  inputProps={{ min: 0, step: 'any' }}
+                  inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
                 />
               </Grid>
             )}

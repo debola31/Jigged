@@ -32,6 +32,7 @@ import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 
 import { getSupabase } from '@/lib/supabase';
+import { parseOptionalNumber, parseOptionalInteger } from '@/lib/validators';
 import type { Company } from '@/utils/companyAccess';
 import type { CustomerAddress } from '@/types/customer';
 import type {
@@ -442,8 +443,10 @@ export default function ShipmentForm({
         shippingArrangement === 'other'
           ? shippingArrangementOther.trim() || null
           : null,
-      weight_lbs: weightLbs.trim() === '' ? null : Number(weightLbs),
-      package_count: packageCount.trim() === '' ? null : Math.round(Number(packageCount)),
+      // Route through the shared parsers so non-numeric input coerces to null
+      // instead of a NaN that would blow up the insert.
+      weight_lbs: parseOptionalNumber(weightLbs),
+      package_count: parseOptionalInteger(packageCount),
       package_type: packageType.trim() || null,
       notes: notes.trim() || null,
       coc_text: cocText.trim() || null,

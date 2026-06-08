@@ -420,12 +420,10 @@ describe('procurementTiersAccess', () => {
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'tier-1');
     });
 
-    it('throws when Supabase returns an error', async () => {
+    it('throws a friendly (non-raw) error when Supabase returns an error', async () => {
+      // The raw 42501 / "forbidden" must be translated, not surfaced verbatim.
       mockQueryBuilder.error = { message: 'forbidden', code: '42501' };
-      await expect(deleteTier('tier-1')).rejects.toEqual({
-        message: 'forbidden',
-        code: '42501',
-      });
+      await expect(deleteTier('tier-1')).rejects.toThrow(/don't have permission/);
     });
   });
 

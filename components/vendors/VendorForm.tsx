@@ -31,6 +31,9 @@ import {
   updateVendor,
   checkVendorNameExists,
 } from '@/utils/vendorsAccess';
+import { isValidEmail, isValidPhone, isValidPostalCode } from '@/lib/validators';
+import CountrySelect from '@/components/common/CountrySelect';
+import StateSelect from '@/components/common/StateSelect';
 
 interface VendorFormProps {
   mode: 'create' | 'edit';
@@ -106,6 +109,13 @@ export default function VendorForm({
       errors.name = 'Vendor name is required';
     }
 
+    if (
+      formData.postal_code.trim() &&
+      !isValidPostalCode(formData.country, formData.postal_code)
+    ) {
+      errors.postal_code = 'Invalid postal code for this country';
+    }
+
     if (formData.name.trim() && !errors.name) {
       try {
         const exists = await checkVendorNameExists(
@@ -141,11 +151,12 @@ export default function VendorForm({
             'Contact name is required when adding a contact (or clear email/phone to skip)';
         }
 
-        if (
-          contactData.email.trim() &&
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactData.email)
-        ) {
+        if (contactData.email.trim() && !isValidEmail(contactData.email)) {
           errors.contact_email = 'Invalid email format';
+        }
+
+        if (contactData.phone.trim() && !isValidPhone(contactData.phone)) {
+          errors.contact_phone = 'Enter a valid phone number';
         }
 
         if (
@@ -269,7 +280,7 @@ export default function VendorForm({
                 placeholder="Suite, unit, etc."
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="City"
@@ -278,32 +289,30 @@ export default function VendorForm({
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <TextField
-                fullWidth
-                label="State"
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <StateSelect
                 value={formData.state}
-                onChange={handleChange('state')}
+                onChange={(v) => setFormData((prev) => ({ ...prev, state: v }))}
+                country={formData.country}
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="Postal Code"
                 value={formData.postal_code}
                 onChange={handleChange('postal_code')}
+                error={!!fieldErrors.postal_code}
+                helperText={fieldErrors.postal_code}
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <TextField
-                fullWidth
-                label="Country"
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <CountrySelect
                 value={formData.country}
-                onChange={handleChange('country')}
+                onChange={(v) => setFormData((prev) => ({ ...prev, country: v }))}
                 disabled={loading}
-                placeholder="USA"
               />
             </Grid>
           </Grid>
@@ -394,9 +403,12 @@ export default function VendorForm({
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   fullWidth
+                  type="tel"
                   label="Phone"
                   value={contactData.phone}
                   onChange={handleContactChange('phone')}
+                  error={!!fieldErrors.contact_phone}
+                  helperText={fieldErrors.contact_phone}
                   disabled={loading}
                 />
               </Grid>

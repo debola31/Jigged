@@ -14,6 +14,7 @@
  */
 
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   CustomerAddress,
   CustomerAddressFormData,
@@ -162,6 +163,11 @@ export async function deleteCustomerAddress(addressId: string): Promise<void> {
     .eq('id', addressId);
   if (error) {
     console.error('Error deleting customer address:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'address',
+        fallback: 'Failed to delete address.',
+      }),
+    );
   }
 }

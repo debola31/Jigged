@@ -17,6 +17,7 @@ import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
+import { isValidEmail } from '@/lib/validators';
 
 export default function SignUp() {
   const [firstName, setFirstName] = useState('');
@@ -38,6 +39,13 @@ export default function SignUp() {
     // Validate names
     if (!firstName.trim() || !lastName.trim()) {
       setError('First name and last name are required');
+      setLoading(false);
+      return;
+    }
+
+    // Validate email format
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address');
       setLoading(false);
       return;
     }
@@ -156,6 +164,12 @@ export default function SignUp() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            error={email.trim() !== '' && !isValidEmail(email)}
+            helperText={
+              email.trim() !== '' && !isValidEmail(email)
+                ? 'Enter a valid email address'
+                : undefined
+            }
             disabled={loading}
             sx={{ mb: 2 }}
             autoComplete="email"

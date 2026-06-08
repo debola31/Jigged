@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/nextjs';
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -702,7 +703,13 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
 
   if (error) {
     console.error('Error deleting quote:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'quote',
+        references: 'jobs created from it',
+        fallback: 'Failed to delete quote.',
+      }),
+    );
   }
 }
 
@@ -902,9 +909,13 @@ export interface ConvertToJobOptions {
    * doesn't typically have a PO at quote creation — it's issued when they
    * accept and turn the quote into an order. Written to jobs.customer_po_number
    * (migration 20260526 — PO lives on the work order, not the quote).
-   * NULL/empty is allowed for shops that don't track customer POs.
+   *
+   * REQUIRED: the PO is the work-order authorization, so conversion rejects an
+   * empty/missing value rather than coercing it to NULL. (The DB column stays
+   * nullable for legacy rows and non-conversion writers; enforcement lives at
+   * this conversion boundary.)
    */
-  customerPoNumber?: string | null;
+  customerPoNumber: string;
   /**
    * Which quote line items to convert — one per part. A price-options quote
    * offers several quantities per part with no single committed quantity, so
@@ -946,7 +957,7 @@ export interface ConvertToJobResult {
  */
 export async function convertQuoteToJob(
   quoteId: string,
-  options: ConvertToJobOptions = {},
+  options: ConvertToJobOptions,
 ): Promise<ConvertToJobResult> {
   const supabase = getSupabase();
 
@@ -1001,6 +1012,15 @@ export async function convertQuoteToJob(
     );
   }
 
+  // Customer PO is the work-order authorization — required to convert. Reject an
+  // empty/missing value rather than coercing it to NULL (no silent fallbacks).
+  // Validated before any writes. PO lives on the job, not the quote — see
+  // migration 20260526.
+  const customerPoNumber = options.customerPoNumber?.trim();
+  if (!customerPoNumber) {
+    throw new Error('Customer PO is required to convert a quote to a job.');
+  }
+
   // Pre-flight: every part must have a routing. Fail fast before writing anything.
   const partIds = Array.from(new Set(lineItemsToConvert.map((li) => li.part_id)));
   const { data: routings, error: routingsErr } = await supabase
@@ -1046,12 +1066,6 @@ export async function convertQuoteToJob(
   // Job number mirrors the quote number (Q-0141 → J-0141). Manual jobs are
   // not supported, so this is unique by construction.
   const jobNumber = quote.quote_number.replace(/^Q-/, 'J-');
-
-  // Capture the customer PO at conversion time. Trim and treat empty as
-  // NULL so the column stays nullable for shops that don't track POs.
-  // PO lives on the job, not the quote — see migration 20260526.
-  const poTrimmed = options.customerPoNumber?.trim();
-  const customerPoNumber = poTrimmed && poTrimmed !== '' ? poTrimmed : null;
 
   const { data: job, error: jobError } = await supabase
     .from('jobs')

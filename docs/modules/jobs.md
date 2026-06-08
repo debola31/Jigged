@@ -136,9 +136,9 @@ Overdue surfaces as:
 Jobs are **only** created via quote conversion. There is no standalone "New Job" form. The `/dashboard/{companyId}/jobs/new` route and "New Job" button were removed in commit d9b7e98; the spec previously here described that flow.
 
 To create a job today:
-1. Build a quote with the desired customer / part / pricing tier.
+1. Build a quote with the desired customer / part(s) / quantities.
 2. Open the quote detail page.
-3. Use the **Convert to Job** action; one job is produced per `(part, selected tier)` line on the quote.
+3. Use the **Convert to Job** action; one job is produced, with one work cell per `(part, selected quantity)` (for a price-options quote, pick the accepted quantity per part in the convert dialog).
 
 The Convert flow lives in [Quotes](quotes.md) — see the "Convert to Job" section there for current behavior.
 

@@ -33,14 +33,12 @@ import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
 import SendQuoteEmailDialog from '@/components/quotes/SendQuoteEmailDialog';
 import EmailIcon from '@mui/icons-material/Email';
 import Snackbar from '@mui/material/Snackbar';
-import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import {
   quoteToFormData,
   isQuoteExpired,
   daysUntilExpiration,
 } from '@/types/quote';
-import type { QuoteWithRelations } from '@/types/quote';
-import type { ComputedPartPricingTier } from '@/types/partPricing';
+import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
@@ -66,8 +64,6 @@ export default function QuoteDetailPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
-  /** Tier reference data: part_id → all tiers for that part. */
-  const [tiersByPart, setTiersByPart] = useState<Record<string, ComputedPartPricingTier[]>>({});
 
   const fetchQuote = useCallback(async () => {
     try {
@@ -85,29 +81,6 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     fetchQuote();
   }, [fetchQuote]);
-
-  // Once the quote loads, fetch the master tier list for each part on it
-  // (read-only reference for the PRICING TIERS section).
-  useEffect(() => {
-    if (!quote) return;
-    const partIds = Array.from(new Set((quote.line_items ?? []).map((li) => li.part_id)));
-    const missing = partIds.filter((id) => !(id in tiersByPart));
-    if (missing.length === 0) return;
-    let cancelled = false;
-    Promise.all(missing.map((id) => getTiersWithComputedPrices(id).then((tiers) => [id, tiers] as const)))
-      .then((entries) => {
-        if (cancelled) return;
-        setTiersByPart((prev) => {
-          const next = { ...prev };
-          for (const [id, tiers] of entries) next[id] = tiers;
-          return next;
-        });
-      })
-      .catch((err) => console.warn('Failed to load tiers for quote detail page:', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [quote, tiersByPart]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -195,6 +168,32 @@ export default function QuoteDetailPage() {
     (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
     0,
   );
+
+  // Group line items by part (first-appearance order). A part with a single
+  // quantity is a firm line; 2+ quantities is a price-options menu. The whole
+  // quote is "firm" (grand total shown) only when EVERY part has one quantity.
+  const partGroups: {
+    part_id: string;
+    part_name: string;
+    description: string | null;
+    items: QuoteLineItem[];
+  }[] = [];
+  const partGroupIndex = new Map<string, number>();
+  for (const li of lineItems) {
+    let gi = partGroupIndex.get(li.part_id);
+    if (gi === undefined) {
+      gi = partGroups.length;
+      partGroupIndex.set(li.part_id, gi);
+      partGroups.push({
+        part_id: li.part_id,
+        part_name: li.parts?.part_name ?? 'Part',
+        description: li.parts?.description ?? null,
+        items: [],
+      });
+    }
+    partGroups[gi].items.push(li);
+  }
+  const isFirmQuote = partGroups.length > 0 && partGroups.every((g) => g.items.length === 1);
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -414,7 +413,14 @@ export default function QuoteDetailPage() {
                     sx={{
                       width: '100%',
                       borderCollapse: 'collapse',
-                      '& th, & td': { textAlign: 'left', py: 1, px: 1, borderBottom: '1px solid', borderColor: 'divider' },
+                      '& th, & td': {
+                        textAlign: 'left',
+                        py: 1,
+                        px: 1,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                        verticalAlign: 'top',
+                      },
                       '& th.num, & td.num': { textAlign: 'right' },
                     }}
                   >
@@ -428,74 +434,52 @@ export default function QuoteDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {lineItems.map((li) => (
-                        <tr key={li.id}>
-                          <td style={{ fontWeight: 600 }}>{li.parts?.part_name ?? 'Part'}</td>
-                          <td>{li.parts?.description ?? ''}</td>
-                          <td className="num">{li.quantity}</td>
-                          <td className="num">
-                            {formatCurrency(li.unit_price)}
-                            {li.is_quote_override && (
-                              <Chip
-                                size="small"
-                                label="custom"
-                                color="success"
-                                variant="outlined"
-                                sx={{ ml: 1, height: 18 }}
-                              />
+                      {/* One table for the whole quote. A part with several
+                          quantities shows its name + description once (spanning
+                          its quantity rows); each quantity gets its own line. */}
+                      {partGroups.map((group) => {
+                        const rows = [...group.items].sort((a, b) => a.quantity - b.quantity);
+                        return rows.map((li, i) => (
+                          <tr key={li.id}>
+                            {i === 0 && (
+                              <td rowSpan={rows.length} style={{ fontWeight: 600 }}>
+                                {group.part_name}
+                              </td>
                             )}
+                            {i === 0 && (
+                              <td rowSpan={rows.length}>{group.description ?? ''}</td>
+                            )}
+                            <td className="num">{li.quantity}</td>
+                            <td className="num">
+                              {formatCurrency(li.unit_price)}
+                              {li.is_quote_override && (
+                                <Chip
+                                  size="small"
+                                  label="custom"
+                                  color="success"
+                                  variant="outlined"
+                                  sx={{ ml: 1, height: 18 }}
+                                />
+                              )}
+                            </td>
+                            <td className="num">
+                              {formatCurrency(li.total_price ?? li.unit_price * li.quantity)}
+                            </td>
+                          </tr>
+                        ));
+                      })}
+                      {isFirmQuote && (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>
+                            Total
                           </td>
-                          <td className="num">{formatCurrency(li.total_price)}</td>
+                          <td className="num" style={{ fontWeight: 700, paddingTop: 12 }}>
+                            {formatCurrency(grandTotal)}
+                          </td>
                         </tr>
-                      ))}
-                      <tr>
-                        <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700, paddingTop: 12 }}>
-                          Total
-                        </td>
-                        <td className="num" style={{ fontWeight: 700, paddingTop: 12 }}>
-                          {formatCurrency(grandTotal)}
-                        </td>
-                      </tr>
+                      )}
                     </tbody>
                   </Box>
-                </Box>
-              )}
-
-              {/* Pricing tiers reference per part */}
-              {lineItems.some(
-                (li) => (tiersByPart[li.part_id]?.length ?? 0) > 1 && !li.is_quote_override,
-              ) && (
-                <Box sx={{ mt: 3 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                    Pricing tiers (reference)
-                  </Typography>
-                  {lineItems.map((li) => {
-                    const tiers = tiersByPart[li.part_id];
-                    if (!tiers || tiers.length <= 1) return null;
-                    if (li.is_quote_override) return null;
-                    const sorted = [...tiers].sort((a, b) => a.quantity - b.quantity);
-                    return (
-                      <Box key={li.id} sx={{ mb: 1.5 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
-                          {li.parts?.part_name ?? 'Part'}
-                        </Typography>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                          {sorted.map((tier) => {
-                            const matched = tier.id === li.source_tier_id;
-                            return (
-                              <Chip
-                                key={tier.id}
-                                size="small"
-                                label={`${tier.quantity} · ${formatCurrency(tier.unit_price)} each`}
-                                color={matched ? 'primary' : 'default'}
-                                variant={matched ? 'filled' : 'outlined'}
-                              />
-                            );
-                          })}
-                        </Box>
-                      </Box>
-                    );
-                  })}
                 </Box>
               )}
             </CardContent>

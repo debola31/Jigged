@@ -2,7 +2,9 @@ import {
   calculateUnitPriceFromMarkup,
   calculateMarkupFromUnitPrice,
   calculateTotalPrice,
+  quoteToFormData,
 } from '@/types/quote';
+import type { QuoteWithRelations } from '@/types/quote';
 
 describe('calculateUnitPriceFromMarkup', () => {
   it('calculates 0% markup correctly', () => {
@@ -107,5 +109,76 @@ describe('calculateTotalPrice', () => {
 
   it('returns null for negative quantity', () => {
     expect(calculateTotalPrice(-1, 25)).toBeNull();
+  });
+});
+
+describe('quoteToFormData', () => {
+  function makeQuote(lineItems: QuoteWithRelations['line_items']): QuoteWithRelations {
+    return {
+      id: 'quote-1',
+      company_id: 'company-1',
+      quote_number: 'Q-0001',
+      customer_id: 'customer-1',
+      billing_address_id: 'addr-1',
+      shipping_address_id: 'addr-1',
+      contact_id: 'contact-1',
+      lead_time_days: 14,
+      expiration_date: '2099-12-31',
+      status: 'active',
+      status_changed_at: null,
+      converted_at: null,
+      created_by: null,
+      created_at: '2026-06-01T00:00:00Z',
+      updated_at: '2026-06-01T00:00:00Z',
+      line_items: lineItems,
+    };
+  }
+
+  const baseLine = {
+    quote_id: 'quote-1',
+    company_id: 'company-1',
+    part_id: 'part-A',
+    source_tier_id: 't1',
+    unit_price: 100,
+    total_price: 1000,
+    markup_percent: 50,
+    base_cost_per_unit: 66.67,
+    is_quote_override: false,
+    pricing_basis_snapshot: null,
+    basis_unknown: false,
+    created_at: '2026-06-01T00:00:00Z',
+  };
+
+  it('emits one entry per line item, sorted by sequence (multiple per part for options quotes)', () => {
+    const quote = makeQuote([
+      { ...baseLine, id: 'li-2', sequence: 20, quantity: 25 },
+      { ...baseLine, id: 'li-1', sequence: 10, quantity: 5 },
+    ]);
+
+    const form = quoteToFormData(quote);
+
+    // Both entries share the same part_id; order follows sequence.
+    expect(form.parts).toHaveLength(2);
+    expect(form.parts[0]).toMatchObject({ part_id: 'part-A', order_quantity: 5, line_item_id: 'li-1' });
+    expect(form.parts[1]).toMatchObject({ part_id: 'part-A', order_quantity: 25, line_item_id: 'li-2' });
+  });
+
+  it('carries the override block through for override lines', () => {
+    const quote = makeQuote([
+      {
+        ...baseLine,
+        id: 'li-1',
+        sequence: 10,
+        quantity: 10,
+        is_quote_override: true,
+        unit_price: 999,
+        markup_percent: null,
+      },
+    ]);
+
+    const form = quoteToFormData(quote);
+
+    expect(form.parts).toHaveLength(1);
+    expect(form.parts[0].override).toEqual({ unit_price: 999, markup_percent: null });
   });
 });

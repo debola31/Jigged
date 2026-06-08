@@ -398,7 +398,28 @@ describe('quotesAccess utilities', () => {
       ).rejects.toThrow('Every part selection must reference a real part.');
     });
 
-    it('rejects duplicate part_id within the same quote', async () => {
+    it('allows the same part with multiple quantities (price-options quote)', async () => {
+      // Each (part, quantity) becomes its own line item now — no dup-part guard.
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'quotes') {
+          return {
+            insert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { id: 'quote-new', company_id: 'company-1' },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        // writeCostSnapshotsForPart hits other tables; the default chainable
+        // builder (data: null) lets it no-op, and it's wrapped in try/catch.
+        return mockQueryBuilder;
+      });
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
       await expect(
         createQuote('company-1', {
           ...baseForm,
@@ -407,7 +428,12 @@ describe('quotesAccess utilities', () => {
             { part_id: 'part-1', order_quantity: 10 },
           ],
         }),
-      ).rejects.toThrow('A part can only appear once on a quote');
+      ).resolves.toBeDefined();
+
+      // One line item inserted per quantity (same part_id).
+      expect(insertLineItemForPartMock).toHaveBeenCalledTimes(2);
+      expect(insertLineItemForPartMock.mock.calls[0][3]).toBe(5);
+      expect(insertLineItemForPartMock.mock.calls[1][3]).toBe(10);
     });
 
     it('rejects order_quantity <= 0', async () => {
@@ -701,6 +727,32 @@ describe('quotesAccess utilities', () => {
         'This quote has no line items to convert.',
       );
     });
+
+    it('rejects an options quote (2+ quantities for one part) without a selection', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        ...mockQueryBuilder,
+        select: vi.fn().mockReturnValue({
+          ...mockQueryBuilder,
+          eq: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            single: vi.fn().mockReturnValue({
+              data: {
+                ...mockQuote,
+                converted_at: null,
+                line_items: [
+                  { id: 'li-1', part_id: 'part-A', sequence: 10, quantity: 5, unit_price: 20, total_price: 100 },
+                  { id: 'li-2', part_id: 'part-A', sequence: 20, quantity: 10, unit_price: 18, total_price: 180 },
+                ],
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }));
+
+      // No selectedLineItemIds → both lines for part-A would convert → guard fires.
+      await expect(convertQuoteToJob('quote-1')).rejects.toThrow('price-options quote');
+    });
   });
 
   // ============== updateQuote reconcile + drift detection ==============
@@ -807,11 +859,12 @@ describe('quotesAccess utilities', () => {
         },
       ]);
 
-      // Form keeps part-A (qty bumped to 25), drops part-B, adds part-C.
+      // Form keeps part-A (qty bumped to 25, carries its line_item_id), drops
+      // part-B (absent → delete), adds part-C (no line_item_id → insert).
       const formData: QuoteFormData = {
         ...baseFormData,
         parts: [
-          { part_id: 'part-A', order_quantity: 25 },
+          { part_id: 'part-A', order_quantity: 25, line_item_id: 'li-A' },
           { part_id: 'part-C', order_quantity: 1 },
         ],
       };
@@ -860,7 +913,7 @@ describe('quotesAccess utilities', () => {
 
       const formData: QuoteFormData = {
         ...baseFormData,
-        parts: [{ part_id: 'part-A', order_quantity: 10 }], // unchanged qty
+        parts: [{ part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' }], // unchanged qty
       };
 
       await updateQuote('quote-1', formData);
@@ -900,7 +953,7 @@ describe('quotesAccess utilities', () => {
 
       const formData: QuoteFormData = {
         ...baseFormData,
-        parts: [{ part_id: 'part-A', order_quantity: 10 }],
+        parts: [{ part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' }],
       };
 
       await updateQuote('quote-1', formData, { acceptDriftLineItemIds: ['li-A'] });
@@ -933,7 +986,7 @@ describe('quotesAccess utilities', () => {
 
       const formData: QuoteFormData = {
         ...baseFormData,
-        parts: [{ part_id: 'part-A', order_quantity: 10 }],
+        parts: [{ part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' }],
       };
 
       await updateQuote('quote-1', formData, { acceptDriftLineItemIds: ['li-A'] });
@@ -950,18 +1003,46 @@ describe('quotesAccess utilities', () => {
       );
     });
 
-    it('rejects an update with duplicate parts', async () => {
+    it('allows multiple quantities for one part — adds the new quantity as a line', async () => {
       stubUpdateQuoteHappyPath();
+      // DB has one line for part-A at qty 10.
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      // Keep the existing qty-10 line and add a second quantity (25) for the
+      // same part — a price-options quote. The new entry has no line_item_id.
       const formData: QuoteFormData = {
         ...baseFormData,
         parts: [
-          { part_id: 'part-A', order_quantity: 5 },
-          { part_id: 'part-A', order_quantity: 10 },
+          { part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' },
+          { part_id: 'part-A', order_quantity: 25 },
         ],
       };
-      await expect(updateQuote('quote-1', formData)).rejects.toThrow(
-        'A part can only appear once on a quote',
-      );
+
+      await updateQuote('quote-1', formData);
+
+      // The new quantity is inserted as its own line; nothing deleted.
+      expect(insertLineItemForPartMock).toHaveBeenCalledTimes(1);
+      expect(insertLineItemForPartMock.mock.calls[0][2]).toBe('part-A');
+      expect(insertLineItemForPartMock.mock.calls[0][3]).toBe(25);
+      expect(deleteLineItemMock).not.toHaveBeenCalled();
     });
   });
 

@@ -242,11 +242,6 @@ export default function QuotesPage() {
     }
   };
 
-  const formatCurrency = (value: number | null): string => {
-    if (value === null) return '—';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-  };
-
   const formatDate = (dateStr: string): string => {
     return new Date(dateStr).toLocaleDateString();
   };
@@ -264,22 +259,6 @@ export default function QuotesPage() {
       flex: 1,
       minWidth: 160,
       valueGetter: (params) => params.data?.customers?.name || '—',
-    },
-    {
-      colId: 'total',
-      headerName: 'Total',
-      width: 140,
-      valueGetter: (params) => {
-        const items = params.data?.line_items ?? [];
-        if (items.length === 1) {
-          return items[0].total_price ?? items[0].unit_price * items[0].quantity;
-        }
-        return null;
-      },
-      valueFormatter: (params: ValueFormatterParams) =>
-        params.value == null ? '—' : formatCurrency(params.value),
-      tooltipValueGetter: (params) =>
-        (params.data?.line_items?.length ?? 0) > 1 ? 'Multi-tier quote — pick qty to confirm total' : undefined,
     },
     {
       field: 'status',

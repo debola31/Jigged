@@ -12,7 +12,12 @@ import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
-import type { QuoteWithRelations } from '@/types/quote';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import FormLabel from '@mui/material/FormLabel';
+import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 
@@ -27,6 +32,11 @@ interface ConvertToJobModalProps {
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString();
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
 /** Today + N days as an ISO date string (yyyy-mm-dd) for the date input. */
@@ -65,12 +75,42 @@ export default function ConvertToJobModal({
     [quote.line_items],
   );
 
+  // Group line items by part (first-appearance order). A part with one
+  // quantity converts as-is; a part with several quantities (price options)
+  // needs the salesperson to pick the accepted quantity before converting.
+  const partGroups = useMemo(() => {
+    const groups: { part_id: string; part_name: string; items: QuoteLineItem[] }[] = [];
+    const index = new Map<string, number>();
+    for (const li of lineItems) {
+      let gi = index.get(li.part_id);
+      if (gi === undefined) {
+        gi = groups.length;
+        index.set(li.part_id, gi);
+        groups.push({ part_id: li.part_id, part_name: li.parts?.part_name ?? 'Part', items: [] });
+      }
+      groups[gi].items.push(li);
+    }
+    return groups;
+  }, [lineItems]);
+
+  const isOptionsQuote = partGroups.some((g) => g.items.length > 1);
+
+  // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
+  // multi-quantity parts start empty so the user must pick deliberately.
+  const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
+  const allPartsChosen = partGroups.every((g) => !!selectedByPart[g.part_id]);
+
   useEffect(() => {
     if (!open) return;
     setDueDateInput(defaultDueDateISO(quote.lead_time_days));
     setCustomerPoInput('');
     setError(null);
-  }, [open, quote.lead_time_days]);
+    const initial: Record<string, string> = {};
+    for (const g of partGroups) {
+      if (g.items.length === 1) initial[g.part_id] = g.items[0].id;
+    }
+    setSelectedByPart(initial);
+  }, [open, quote.lead_time_days, partGroups]);
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
 
@@ -80,9 +120,13 @@ export default function ConvertToJobModal({
     setLoading(true);
     setError(null);
     try {
+      const selectedLineItemIds = partGroups
+        .map((g) => selectedByPart[g.part_id])
+        .filter((id): id is string => !!id);
       const result = await convertQuoteToJob(quote.id, {
         dueDate: dueDateInput || null,
         customerPoNumber: customerPoInput,
+        selectedLineItemIds,
       });
       onConverted(result.job.id);
     } catch (err) {
@@ -127,7 +171,7 @@ export default function ConvertToJobModal({
             Customer: {quote.customers?.name || '—'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Parts: {lineItems.length}
+            Parts: {partGroups.length}
           </Typography>
 
           <Divider sx={{ my: 2 }} />
@@ -136,6 +180,61 @@ export default function ConvertToJobModal({
             One job will be created with one work cell per part. Each part&apos;s routing will be
             cloned into its own operations + materials list.
           </Typography>
+
+          {isOptionsQuote && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              This is a price-options quote. Pick the quantity the customer accepted for each part.
+            </Alert>
+          )}
+
+          {partGroups.length > 0 && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 1 }}>
+              {partGroups.map((group) =>
+                group.items.length === 1 ? (
+                  <Box key={group.part_id}>
+                    <Typography variant="body2" fontWeight={600}>
+                      {group.part_name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {group.items[0].quantity} ea @ {formatCurrency(group.items[0].unit_price)} ={' '}
+                      {formatCurrency(
+                        group.items[0].total_price ??
+                          group.items[0].unit_price * group.items[0].quantity,
+                      )}
+                    </Typography>
+                  </Box>
+                ) : (
+                  <FormControl key={group.part_id}>
+                    <FormLabel sx={{ fontWeight: 600, color: 'text.primary' }}>
+                      {group.part_name} — choose quantity
+                    </FormLabel>
+                    <RadioGroup
+                      value={selectedByPart[group.part_id] ?? ''}
+                      onChange={(e) =>
+                        setSelectedByPart((prev) => ({
+                          ...prev,
+                          [group.part_id]: e.target.value,
+                        }))
+                      }
+                    >
+                      {[...group.items]
+                        .sort((a, b) => a.quantity - b.quantity)
+                        .map((li) => (
+                          <FormControlLabel
+                            key={li.id}
+                            value={li.id}
+                            control={<Radio size="small" />}
+                            label={`${li.quantity} ea @ ${formatCurrency(
+                              li.unit_price,
+                            )} = ${formatCurrency(li.total_price ?? li.unit_price * li.quantity)}`}
+                          />
+                        ))}
+                    </RadioGroup>
+                  </FormControl>
+                ),
+              )}
+            </Box>
+          )}
 
           {lineItems.length === 0 && (
             <Alert severity="warning">
@@ -191,7 +290,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || lineItems.length === 0 || !dueDateValid}
+          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating…' : `Create ${expectedJobNumber}`}

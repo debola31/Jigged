@@ -489,4 +489,67 @@ describe('QuoteForm', () => {
     expect(screen.queryByTestId('drift-chip-0')).not.toBeInTheDocument();
     expect(screen.queryByTestId('quote-drift-summary')).not.toBeInTheDocument();
   });
+
+  // ============== Multi-quantity (price-options) behavior ==============
+
+  it('adding a second quantity turns the quote into a price-options quote (no grand total)', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    // One quantity → firm quote → grand total caption shown.
+    expect(screen.getByText('Quote total')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /add quantity/i }));
+
+    // Two quantities for one part → price-options quote, grand total hidden.
+    await waitFor(() => {
+      expect(screen.getByText('Price options quote')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Quote total')).not.toBeInTheDocument();
+  });
+
+  it('blocks save when the same quantity is entered twice for one part', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /add quantity/i }));
+
+    // First row already holds qty 5; type 5 into the new (empty) second row.
+    const qtyInputs = await screen.findAllByLabelText('Order quantity');
+    expect(qtyInputs).toHaveLength(2);
+    await user.type(qtyInputs[1], '5');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    });
+  });
+
+  it('shows a single part-level "Use custom price" control regardless of how many quantities', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    // One quantity row → exactly one custom-price toggle.
+    expect(screen.getAllByRole('button', { name: /use custom price/i })).toHaveLength(1);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /add quantity/i }));
+    await user.click(screen.getByRole('button', { name: /add quantity/i }));
+
+    // Three quantity rows → STILL exactly one custom-price toggle (per part).
+    await waitFor(() => {
+      expect(screen.getAllByLabelText('Order quantity')).toHaveLength(3);
+    });
+    expect(screen.getAllByRole('button', { name: /use custom price/i })).toHaveLength(1);
+  });
 });

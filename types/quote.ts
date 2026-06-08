@@ -184,15 +184,17 @@ export interface QuoteLineOverride {
 }
 
 /**
- * Selection shape for a single part inside the quote form. The salesperson
- * commits to one Order Quantity per part; the unit price is auto-resolved
- * from the part's pricing tiers (highest tier with `tier_qty <= order_qty`)
- * unless an explicit override is supplied.
+ * One (part, quantity) entry in the quote form payload — the flat unit the
+ * access layer consumes. A part carrying several quantities (a price-options
+ * quote) contributes several entries that share a part_id; the QuoteForm
+ * groups them into a single part block with one quantity row each. The unit
+ * price is auto-resolved from the part's pricing tiers (highest tier with
+ * `tier_qty <= order_qty`) unless an explicit override is supplied.
  *
  * `line_item_id` and `basis_unknown` are only populated on EDIT — they let
- * the form correlate a block back to its underlying line item so it can
- * render the drift chip and "basis unknown" chip. Create-mode payloads
- * leave them undefined; createQuote / reconcile both ignore them.
+ * the form correlate an entry back to its underlying line item so it can
+ * render the drift chip and "basis unknown" chip, and let reconcile match
+ * existing rows by id. Create-mode payloads leave them undefined.
  */
 export interface QuoteFormPartBlock {
   part_id: string;
@@ -274,18 +276,14 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
 
 /**
  * Convert Quote to QuoteFormData for edit forms.
- * Each existing line item maps to one part block (one row per part on the new model).
- * If multiple rows somehow exist for the same part (pre-collapse data), the lowest-qty
- * one wins to mirror the migration's choice.
+ *
+ * Emits one form entry per line item (sorted by sequence). A part carrying
+ * multiple quantities (a price-options quote) therefore produces multiple
+ * entries sharing a part_id — the QuoteForm groups them back into a single
+ * part block with one quantity row each. Firm quotes (one line per part)
+ * round-trip to one entry per part exactly as before.
  */
 export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
-  const byPart = new Map<string, QuoteLineItem>();
-  for (const li of quote.line_items || []) {
-    const existing = byPart.get(li.part_id);
-    if (!existing || li.quantity < existing.quantity) {
-      byPart.set(li.part_id, li);
-    }
-  }
   return {
     // customer_id is nullable in the schema but the form treats '' as
     // "unset" — match the same convention as contact / address IDs below.
@@ -293,20 +291,22 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
     contact_id: quote.contact_id ?? '',
     billing_address_id: quote.billing_address_id ?? '',
     shipping_address_id: quote.shipping_address_id ?? '',
-    parts: Array.from(byPart.values()).map((li) => ({
-      part_id: li.part_id,
-      order_quantity: li.quantity,
-      line_item_id: li.id,
-      basis_unknown: li.basis_unknown,
-      ...(li.is_quote_override
-        ? {
-            override: {
-              unit_price: li.unit_price,
-              markup_percent: li.markup_percent,
-            },
-          }
-        : {}),
-    })),
+    parts: [...(quote.line_items || [])]
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((li) => ({
+        part_id: li.part_id,
+        order_quantity: li.quantity,
+        line_item_id: li.id,
+        basis_unknown: li.basis_unknown,
+        ...(li.is_quote_override
+          ? {
+              override: {
+                unit_price: li.unit_price,
+                markup_percent: li.markup_percent,
+              },
+            }
+          : {}),
+      })),
     lead_time_days: quote.lead_time_days !== null ? String(quote.lead_time_days) : '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,

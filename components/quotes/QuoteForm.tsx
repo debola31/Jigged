@@ -68,19 +68,38 @@ interface CustomerOption {
   isCreateNew?: boolean;
 }
 
+/**
+ * One quoted quantity within a part block. A block with a single row is a firm
+ * line; a block with several rows is a price-options menu for that part. Each
+ * row carries (on edit) its own line item id + drift state, because each
+ * (part, quantity) is an independent quote_line_items row. The custom-price
+ * override is part-level (see PartBlockState), not per row.
+ */
+interface QtyRowState {
+  /** Stable React key for the row (mirrors RoutingOperationsList temp ids). */
+  rowKey: string;
+  /** Working-copy string so the input can be empty mid-edit. */
+  quantity: string;
+  /** Set on edit-mode rows; absent on newly-added or create-mode rows. */
+  line_item_id?: string;
+  /** Pre-snapshot Option C — renders the "basis unknown" chip. */
+  basis_unknown?: boolean;
+}
+
 interface PartBlockState {
   part: PartSelectOption | null;
-  /** Working-copy string so the input can be empty mid-edit. */
-  order_quantity: string;
+  /** One row per quoted quantity; always at least one row. */
+  rows: QtyRowState[];
+  /**
+   * Part-level custom price. When open, the typed unit price applies to
+   * EVERY quantity row of this part (bypassing tier resolution) and is
+   * written as an override onto each resulting line item.
+   */
   override_open: boolean;
   override_unit_price: string;
   tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
-  /** Set on edit-mode blocks; absent on newly-added or create-mode blocks. */
-  line_item_id?: string;
-  /** Pre-snapshot Option C — renders the "basis unknown" chip. */
-  basis_unknown?: boolean;
 }
 
 const CREATE_NEW_CUSTOMER: CustomerOption = {
@@ -98,10 +117,19 @@ function formatCurrency(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+const newRowKey = () => `temp-qty-${crypto.randomUUID()}`;
+
+function emptyRow(): QtyRowState {
+  return {
+    rowKey: newRowKey(),
+    quantity: '',
+  };
+}
+
 function emptyBlock(): PartBlockState {
   return {
     part: null,
-    order_quantity: '',
+    rows: [emptyRow()],
     override_open: false,
     override_unit_price: '',
     tiers: [],
@@ -110,21 +138,50 @@ function emptyBlock(): PartBlockState {
   };
 }
 
-function blockFromInitial(
-  p: QuoteFormData['parts'][number],
-  hydrated: PartSelectOption | undefined,
-): PartBlockState {
+function rowFromInitial(p: QuoteFormData['parts'][number]): QtyRowState {
   return {
-    part: hydrated ?? null,
-    order_quantity: String(p.order_quantity),
-    override_open: !!p.override,
-    override_unit_price: p.override ? String(p.override.unit_price) : '',
-    tiers: [],
-    loading: false,
-    error: null,
+    rowKey: newRowKey(),
+    quantity: String(p.order_quantity),
     line_item_id: p.line_item_id,
     basis_unknown: p.basis_unknown,
   };
+}
+
+/**
+ * Group the flat form payload (one entry per (part, quantity)) into one block
+ * per part, preserving first-seen order, with one quantity row per entry. The
+ * part is a stub carrying only the id; loadData replaces it with the hydrated
+ * option (the form renders a spinner until then, so the stub is never shown).
+ *
+ * The custom-price override is part-level: if any entry carries an override,
+ * the whole part is treated as overridden at that unit price (on save every
+ * entry for the part is written with the same override).
+ */
+function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
+  const blocks: PartBlockState[] = [];
+  const indexByPart = new Map<string, number>();
+  for (const p of parts) {
+    let idx = indexByPart.get(p.part_id);
+    if (idx === undefined) {
+      idx = blocks.length;
+      indexByPart.set(p.part_id, idx);
+      blocks.push({
+        part: { id: p.part_id } as PartSelectOption,
+        rows: [],
+        override_open: false,
+        override_unit_price: '',
+        tiers: [],
+        loading: false,
+        error: null,
+      });
+    }
+    if (p.override && !blocks[idx].override_open) {
+      blocks[idx].override_open = true;
+      blocks[idx].override_unit_price = String(p.override.unit_price);
+    }
+    blocks[idx].rows.push(rowFromInitial(p));
+  }
+  return blocks;
 }
 
 export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave }: QuoteFormProps) {
@@ -133,8 +190,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const companyId = params.companyId as string;
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
-  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(
-    initialData.parts.map((p) => blockFromInitial(p, undefined)),
+  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() =>
+    groupPartsIntoBlocks(initialData.parts),
   );
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -176,7 +233,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const loadData = useCallback(async () => {
     try {
       setLoadingData(true);
-      const initialPartIds = initialData.parts.map((p) => p.part_id).filter(Boolean);
+      // Dedupe ids — a price-options quote repeats a part_id across rows.
+      const initialPartIds = Array.from(
+        new Set(initialData.parts.map((p) => p.part_id).filter(Boolean)),
+      );
       const [customersData, hydratedParts] = await Promise.all([
         getAllCustomers(companyId),
         initialPartIds.length > 0
@@ -190,11 +250,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       setCustomersById(new Map(customersData.map((c) => [c.id, c])));
       if (hydratedParts.length > 0) {
         const byId = new Map(hydratedParts.map((p) => [p.id, p]));
+        // Replace each block's stub part (carrying only the id) with the
+        // hydrated option, matched by part_id (blocks no longer align by
+        // index with the flat initialData.parts payload).
         setPartBlocks((prev) =>
-          prev.map((block, idx) => {
-            if (block.part) return block;
-            const initialId = initialData.parts[idx]?.part_id;
-            const hydrated = initialId ? byId.get(initialId) : undefined;
+          prev.map((block) => {
+            const partId = block.part?.id;
+            const hydrated = partId ? byId.get(partId) : undefined;
             return hydrated ? { ...block, part: hydrated } : block;
           }),
         );
@@ -413,13 +475,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const removePartBlock = (idx: number) => {
     setPartBlocks((prev) => {
       const removed = prev[idx];
-      if (removed?.line_item_id) {
-        // Drop any accept-drift selection that referenced this line — the
-        // user removed the whole part, so the per-line opt-in is moot.
+      // Drop any accept-drift selections referencing this part's rows — the
+      // user removed the whole part, so those per-line opt-ins are moot.
+      const ids = (removed?.rows ?? [])
+        .map((r) => r.line_item_id)
+        .filter((id): id is string => !!id);
+      if (ids.length > 0) {
         setAcceptedDriftIds((cur) => {
-          if (!cur.has(removed.line_item_id!)) return cur;
+          if (!ids.some((id) => cur.has(id))) return cur;
           const next = new Set(cur);
-          next.delete(removed.line_item_id!);
+          for (const id of ids) next.delete(id);
           return next;
         });
       }
@@ -430,15 +495,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const updatePartInBlock = (idx: number, option: PartSelectOption | null) => {
     setPartBlocks((prev) => {
       const next = [...prev];
-      // Re-selecting a part on an existing line means the user wants a
-      // different part on that slot — drop the line_item_id correlation
-      // and any accept-drift selection so reconcile treats it as new.
+      // Re-selecting a part on an existing block means the user wants a
+      // different part there — drop the line_item_id correlations and any
+      // accept-drift selections so reconcile treats every row as new.
       const previous = next[idx];
-      if (previous?.line_item_id) {
+      const ids = (previous?.rows ?? [])
+        .map((r) => r.line_item_id)
+        .filter((id): id is string => !!id);
+      if (ids.length > 0) {
         setAcceptedDriftIds((cur) => {
-          if (!cur.has(previous.line_item_id!)) return cur;
+          if (!ids.some((id) => cur.has(id))) return cur;
           const nextIds = new Set(cur);
-          nextIds.delete(previous.line_item_id!);
+          for (const id of ids) nextIds.delete(id);
           return nextIds;
         });
       }
@@ -458,15 +526,65 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setPartModalOpen(true);
   };
 
-  const updateBlockField = (
-    idx: number,
+  const addRow = (blockIdx: number) => {
+    setPartBlocks((prev) => {
+      const block = prev[blockIdx];
+      if (!block) return prev;
+      const next = [...prev];
+      next[blockIdx] = { ...block, rows: [...block.rows, emptyRow()] };
+      return next;
+    });
+  };
+
+  const removeRow = (blockIdx: number, rowIdx: number) => {
+    setPartBlocks((prev) => {
+      const block = prev[blockIdx];
+      if (!block || block.rows.length <= 1) return prev;
+      const removed = block.rows[rowIdx];
+      if (removed?.line_item_id) {
+        setAcceptedDriftIds((cur) => {
+          if (!cur.has(removed.line_item_id!)) return cur;
+          const nextIds = new Set(cur);
+          nextIds.delete(removed.line_item_id!);
+          return nextIds;
+        });
+      }
+      const next = [...prev];
+      next[blockIdx] = { ...block, rows: block.rows.filter((_, i) => i !== rowIdx) };
+      return next;
+    });
+  };
+
+  const updateRow = (
+    blockIdx: number,
+    rowIdx: number,
+    patch: Partial<QtyRowState> | ((prev: QtyRowState) => Partial<QtyRowState>),
+  ) => {
+    setPartBlocks((prev) => {
+      const block = prev[blockIdx];
+      if (!block) return prev;
+      const current = block.rows[rowIdx];
+      if (!current) return prev;
+      const delta = typeof patch === 'function' ? patch(current) : patch;
+      const rows = [...block.rows];
+      rows[rowIdx] = { ...current, ...delta };
+      const next = [...prev];
+      next[blockIdx] = { ...block, rows };
+      return next;
+    });
+  };
+
+  /** Patch block-level fields (the part-level custom-price override). */
+  const updateBlock = (
+    blockIdx: number,
     patch: Partial<PartBlockState> | ((prev: PartBlockState) => Partial<PartBlockState>),
   ) => {
     setPartBlocks((prev) => {
+      const block = prev[blockIdx];
+      if (!block) return prev;
+      const delta = typeof patch === 'function' ? patch(block) : patch;
       const next = [...prev];
-      const current = next[idx];
-      const delta = typeof patch === 'function' ? patch(current) : patch;
-      next[idx] = { ...current, ...delta };
+      next[blockIdx] = { ...block, ...delta };
       return next;
     });
   };
@@ -515,48 +633,66 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
   };
 
-  /** Per-block live preview of the resolved tier + total. */
+  /** Per-row live preview of the resolved tier + total: blockPreviews[block][row].
+   *  A part-level custom price (block.override_*) applies to every row. */
   const blockPreviews = useMemo(() => {
     return partBlocks.map((block) => {
-      const orderQty = Number(block.order_quantity);
-      if (!Number.isFinite(orderQty) || orderQty <= 0) {
-        return { resolved: null as ReturnType<typeof resolveTier>, total: null as number | null };
-      }
-      if (block.override_open && block.override_unit_price.trim() !== '') {
-        const overridePrice = Number(block.override_unit_price);
-        if (Number.isFinite(overridePrice) && overridePrice >= 0) {
+      const overridePrice =
+        block.override_open && block.override_unit_price.trim() !== ''
+          ? Number(block.override_unit_price)
+          : null;
+      const overrideValid =
+        overridePrice !== null && Number.isFinite(overridePrice) && overridePrice >= 0;
+      return block.rows.map((row) => {
+        const orderQty = Number(row.quantity);
+        if (!Number.isFinite(orderQty) || orderQty <= 0) {
           return {
-            resolved: null,
-            total: Math.round(overridePrice * orderQty * 100) / 100,
-            overridePrice,
+            resolved: null as ReturnType<typeof resolveTier>,
+            total: null as number | null,
           };
         }
-      }
-      const resolved = resolveTier(block.tiers, orderQty);
-      return {
-        resolved,
-        total: resolved ? Math.round(resolved.unit_price * orderQty * 100) / 100 : null,
-      };
+        if (overrideValid) {
+          return {
+            resolved: null as ReturnType<typeof resolveTier>,
+            total: Math.round((overridePrice as number) * orderQty * 100) / 100,
+          };
+        }
+        const resolved = resolveTier(block.tiers, orderQty);
+        return {
+          resolved,
+          total: resolved ? Math.round(resolved.unit_price * orderQty * 100) / 100 : null,
+        };
+      });
     });
   }, [partBlocks]);
 
-  /** Quote total = sum of every part block that has a computable total. */
+  /**
+   * Firm order = every part has exactly one quantity → show a grand total.
+   * Any part with 2+ quantities makes this a price-options quote (no total).
+   */
+  const isFirmQuote = useMemo(
+    () => partBlocks.length > 0 && partBlocks.every((b) => b.rows.length === 1),
+    [partBlocks],
+  );
+
+  /** Grand total (firm quotes only) = sum of every row with a computable total. */
   const quoteTotal = useMemo(() => {
     let sum = 0;
     let allComputable = true;
-    for (let i = 0; i < partBlocks.length; i++) {
-      const block = partBlocks[i];
+    partBlocks.forEach((block, bIdx) => {
       if (!block.part) {
         allComputable = false;
-        continue;
+        return;
       }
-      const total = blockPreviews[i]?.total;
-      if (total === null || total === undefined) {
-        allComputable = false;
-      } else {
-        sum += total;
-      }
-    }
+      block.rows.forEach((_row, rIdx) => {
+        const total = blockPreviews[bIdx]?.[rIdx]?.total;
+        if (total === null || total === undefined) {
+          allComputable = false;
+        } else {
+          sum += total;
+        }
+      });
+    });
     return { sum: Math.round(sum * 100) / 100, allComputable };
   }, [partBlocks, blockPreviews]);
 
@@ -577,26 +713,41 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     ) {
       return 'Enter a lead time (whole number of days).';
     }
-    const seen = new Set<string>();
+    const seenParts = new Set<string>();
     for (const block of partBlocks) {
       if (!block.part) return 'Every part block must have a part selected.';
-      if (seen.has(block.part.id)) return 'A part can only appear once on a quote.';
-      seen.add(block.part.id);
-      const orderQty = Number(block.order_quantity);
-      if (!Number.isFinite(orderQty) || orderQty <= 0) {
-        return 'Every part needs an order quantity greater than zero.';
+      // A part lives in ONE block; multiple quantities are rows within it.
+      if (seenParts.has(block.part.id)) {
+        return 'A part can only appear in one block — add its quantities as rows in a single block.';
       }
-      if (!Number.isInteger(orderQty)) return 'Order quantity must be a whole number.';
+      seenParts.add(block.part.id);
+      if (block.loading) return 'Loading pricing tiers…';
+      if (block.rows.length === 0) return 'Every part needs at least one quantity.';
+      // Part-level custom price: validate once; when active it covers every row.
       if (block.override_open) {
         const overridePrice = Number(block.override_unit_price);
-        if (!Number.isFinite(overridePrice) || overridePrice < 0) {
-          return 'Override unit price must be a non-negative number.';
+        if (
+          block.override_unit_price.trim() === '' ||
+          !Number.isFinite(overridePrice) ||
+          overridePrice < 0
+        ) {
+          return 'Custom unit price must be a non-negative number.';
         }
-      } else {
-        if (block.loading) return 'Loading pricing tiers…';
-        const resolved = resolveTier(block.tiers, orderQty);
-        if (!resolved) {
-          return 'At least one part has no priced tiers — add tiers on the part page or use a custom price.';
+      }
+      const seenQty = new Set<number>();
+      for (const row of block.rows) {
+        const orderQty = Number(row.quantity);
+        if (!Number.isFinite(orderQty) || orderQty <= 0) {
+          return 'Every quantity must be greater than zero.';
+        }
+        if (!Number.isInteger(orderQty)) return 'Quantity must be a whole number.';
+        if (seenQty.has(orderQty)) return 'Each quantity can appear only once per part.';
+        seenQty.add(orderQty);
+        if (!block.override_open) {
+          const resolved = resolveTier(block.tiers, orderQty);
+          if (!resolved) {
+            return 'At least one part has no priced tiers — add tiers on the part page or use a custom price.';
+          }
         }
       }
     }
@@ -609,23 +760,27 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
     const payload: QuoteFormData = {
       ...formData,
-      parts: partBlocks.map((b) => {
-        const orderQty = Number(b.order_quantity);
-        const block: QuoteFormData['parts'][number] = {
-          part_id: b.part?.id ?? '',
-          order_quantity: orderQty,
-        };
-        if (b.line_item_id) block.line_item_id = b.line_item_id;
-        if (b.basis_unknown) block.basis_unknown = b.basis_unknown;
-        if (b.override_open && b.override_unit_price.trim() !== '') {
-          const unitPrice = Number(b.override_unit_price);
-          block.override = {
-            unit_price: unitPrice,
-            // Markup % is no longer a quote-form input — leave it null on overrides.
-            markup_percent: null,
+      parts: partBlocks.flatMap((b) => {
+        const overrideActive = b.override_open && b.override_unit_price.trim() !== '';
+        const overrideUnitPrice = overrideActive ? Number(b.override_unit_price) : null;
+        return b.rows.map((r) => {
+          const orderQty = Number(r.quantity);
+          const entry: QuoteFormData['parts'][number] = {
+            part_id: b.part?.id ?? '',
+            order_quantity: orderQty,
           };
-        }
-        return block;
+          if (r.line_item_id) entry.line_item_id = r.line_item_id;
+          if (r.basis_unknown) entry.basis_unknown = r.basis_unknown;
+          if (overrideUnitPrice !== null) {
+            // Part-level custom price → same override on every row of the part.
+            entry.override = {
+              unit_price: overrideUnitPrice,
+              // Markup % is no longer a quote-form input — leave it null on overrides.
+              markup_percent: null,
+            };
+          }
+          return entry;
+        });
       }),
     };
 
@@ -843,7 +998,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           {mode === 'edit' &&
             (() => {
               const flagged = partBlocks
-                .map((b) => (b.line_item_id ? driftByLineId.get(b.line_item_id) : undefined))
+                .flatMap((b) => b.rows)
+                .map((r) => (r.line_item_id ? driftByLineId.get(r.line_item_id) : undefined))
                 .filter((d): d is QuoteLineDriftInfo => !!d);
               const pendingFlagged = flagged.filter(
                 (d) => !acceptedDriftIds.has(d.line_item_id),
@@ -887,12 +1043,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           )}
 
           {partBlocks.map((block, idx) => {
-            const preview = blockPreviews[idx];
-            const orderQtyNum = Number(block.order_quantity);
-            const hasOrderQty =
-              block.order_quantity !== '' && Number.isFinite(orderQtyNum) && orderQtyNum > 0;
-            const matched = preview?.resolved ?? null;
-            const isOverride = block.override_open && block.override_unit_price.trim() !== '';
             // A tier with unit_price=null exists in the DB when
             // `replaceTiersForPart` couldn't compute a cost — e.g. a BOM
             // material has no priced procurement tier. Treat that as the
@@ -900,14 +1050,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // fires and the user isn't trapped typing a quantity that
             // can't resolve to a line price.
             const hasUsableTier = block.tiers.some((t) => t.unit_price !== null);
-            // Drift state for this block, if any. Override lines never
-            // appear here (detectQuoteLineDrift filters them out).
-            const drift = block.line_item_id
-              ? driftByLineId.get(block.line_item_id) ?? null
-              : null;
-            const isAcceptedDrift = !!(
-              block.line_item_id && acceptedDriftIds.has(block.line_item_id)
-            );
+            // Part-level custom price — when active it overrides every row.
+            const blockOverrideActive =
+              block.override_open && block.override_unit_price.trim() !== '';
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -957,202 +1102,260 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
                 {!block.loading && block.part && (
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                      <TextField
-                        size="small"
-                        label="Order quantity"
-                        value={block.order_quantity}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v !== '' && !/^\d+$/.test(v)) return;
-                          updateBlockField(idx, { order_quantity: v });
-                        }}
-                        inputMode="numeric"
-                        sx={{ width: 160 }}
-                        helperText={
-                          hasOrderQty && matched && matched.below_min
-                            ? `Below minimum break (${matched.matched_tier_quantity} ea) — using lowest tier price`
-                            : ' '
-                        }
-                        error={hasOrderQty && matched?.below_min === true}
-                      />
-                      {hasOrderQty && (
-                        <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 200 }}>
-                          {isOverride ? (
-                            <>
-                              <Typography variant="body2">
-                                Custom price{' '}
-                                <Box component="span" sx={{ fontWeight: 600 }}>
-                                  {formatCurrency(Number(block.override_unit_price))}
-                                </Box>{' '}
-                                / unit
-                              </Typography>
-                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                Total {formatCurrency(preview?.total ?? null)}
-                              </Typography>
-                            </>
-                          ) : matched ? (
-                            <>
-                              <Typography variant="body2">
-                                Tier {matched.matched_tier_quantity} ea ·{' '}
-                                <Box component="span" sx={{ fontWeight: 600 }}>
-                                  {formatCurrency(matched.unit_price)}
-                                </Box>{' '}
-                                / unit
-                              </Typography>
-                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                Total {formatCurrency(preview?.total ?? null)}
-                              </Typography>
-                            </>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              No priced tier matches — add a tier or use a custom price.
-                            </Typography>
-                          )}
-                          {isOverride && (
-                            <Chip
-                              size="small"
-                              label="adjusted for this quote"
-                              color="success"
-                              variant="outlined"
-                              sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
-                            />
-                          )}
-                          {block.basis_unknown && (
-                            <Chip
-                              size="small"
-                              label="basis unknown"
-                              color="default"
-                              variant="outlined"
-                              data-testid={`basis-unknown-chip-${idx}`}
-                              sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
-                            />
-                          )}
-                          {drift && !isOverride && (
-                            <Box
-                              sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 0.5 }}
-                              data-testid={`drift-chip-${idx}`}
-                            >
-                              <Chip
-                                size="small"
-                                label={
-                                  isAcceptedDrift
-                                    ? `Will update to ${formatCurrency(drift.current_unit_price)} / unit`
-                                    : `Tier price changed: was ${formatCurrency(
-                                        drift.snapshotted_unit_price,
-                                      )}, now ${formatCurrency(drift.current_unit_price)}`
-                                }
-                                color={isAcceptedDrift ? 'primary' : 'warning'}
-                                variant="outlined"
-                                sx={{ height: 'auto', py: 0.5, alignSelf: 'flex-start' }}
-                              />
-                              {!isAcceptedDrift && drift.current_unit_price !== null && (
-                                <Button
-                                  size="small"
-                                  variant="text"
-                                  data-testid={`drift-update-${idx}`}
-                                  onClick={() => {
-                                    if (!block.line_item_id) return;
-                                    setAcceptedDriftIds((cur) => {
-                                      const next = new Set(cur);
-                                      next.add(block.line_item_id!);
-                                      return next;
-                                    });
-                                  }}
-                                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
-                                >
-                                  Update to current price
-                                </Button>
-                              )}
-                              {isAcceptedDrift && (
-                                <Button
-                                  size="small"
-                                  variant="text"
-                                  data-testid={`drift-cancel-${idx}`}
-                                  onClick={() => {
-                                    if (!block.line_item_id) return;
-                                    setAcceptedDriftIds((cur) => {
-                                      if (!cur.has(block.line_item_id!)) return cur;
-                                      const next = new Set(cur);
-                                      next.delete(block.line_item_id!);
-                                      return next;
-                                    });
-                                  }}
-                                  sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
-                                >
-                                  Keep original price
-                                </Button>
-                              )}
-                            </Box>
-                          )}
-                        </Box>
-                      )}
-                    </Box>
-
-                    {/* Pricing tiers reference (only when at least one tier
-                        has a usable unit price — a tier with unit_price=null
-                        rendered as "1 · — each" before, which contradicted
-                        the warning above). */}
-                    {hasUsableTier && (
-                      <Box>
+                    {/* Compact quantity-break table — column labels appear once
+                        as a header, then one tight row per quantity. */}
+                    <Box>
+                      <Box
+                        sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 0.5, pb: 0.5 }}
+                      >
+                        <Typography variant="caption" color="text.secondary" sx={{ width: 110 }}>
+                          Qty
+                        </Typography>
                         <Typography
                           variant="caption"
                           color="text.secondary"
-                          sx={{ display: 'block', mb: 0.5 }}
+                          sx={{ flex: 1, minWidth: 120 }}
                         >
-                          Pricing tiers
+                          Unit price
                         </Typography>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                          {[...block.tiers]
-                            .sort((a, b) => a.quantity - b.quantity)
-                            .map((tier) => {
-                              const isMatched =
-                                matched?.source_tier_id === tier.id && !isOverride;
-                              return (
-                                <Chip
-                                  key={tier.id}
-                                  size="small"
-                                  label={`${tier.quantity} · ${formatCurrency(tier.unit_price)} each`}
-                                  color={isMatched ? 'primary' : 'default'}
-                                  variant={isMatched ? 'filled' : 'outlined'}
-                                />
-                              );
-                            })}
-                        </Box>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ width: 110, textAlign: 'right' }}
+                        >
+                          Total
+                        </Typography>
+                        <Box sx={{ width: 34 }} />
                       </Box>
-                    )}
 
-                    {/* Override toggle */}
+                      {block.rows.map((row, rowIdx) => {
+                        const preview = blockPreviews[idx]?.[rowIdx];
+                        const orderQtyNum = Number(row.quantity);
+                        const hasOrderQty =
+                          row.quantity !== '' && Number.isFinite(orderQtyNum) && orderQtyNum > 0;
+                        const matched = preview?.resolved ?? null;
+                        // Override is part-level — it applies to every row.
+                        const isOverride = blockOverrideActive;
+                        // Drift state for this row, if any. Override lines never
+                        // appear here (detectQuoteLineDrift filters them out).
+                        const drift = row.line_item_id
+                          ? driftByLineId.get(row.line_item_id) ?? null
+                          : null;
+                        const isAcceptedDrift = !!(
+                          row.line_item_id && acceptedDriftIds.has(row.line_item_id)
+                        );
+
+                        return (
+                          <Box
+                            key={row.rowKey}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 2,
+                              px: 0.5,
+                              py: 0.75,
+                              borderTop: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
+                            <TextField
+                              size="small"
+                              value={row.quantity}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v !== '' && !/^\d+$/.test(v)) return;
+                                updateRow(idx, rowIdx, { quantity: v });
+                              }}
+                              placeholder="Qty"
+                              inputProps={{ 'aria-label': 'Order quantity', inputMode: 'numeric' }}
+                              sx={{ width: 110 }}
+                              error={hasOrderQty && !isOverride && matched?.below_min === true}
+                            />
+
+                            <Box sx={{ flex: 1, minWidth: 120 }}>
+                              {!hasOrderQty ? (
+                                <Typography variant="body2" color="text.secondary">
+                                  —
+                                </Typography>
+                              ) : isOverride ? (
+                                <>
+                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                    {formatCurrency(Number(block.override_unit_price))}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    custom price
+                                  </Typography>
+                                </>
+                              ) : matched ? (
+                                <>
+                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                    {formatCurrency(matched.unit_price)}
+                                  </Typography>
+                                  <Typography
+                                    variant="caption"
+                                    color={matched.below_min ? 'warning.main' : 'text.secondary'}
+                                  >
+                                    {matched.below_min
+                                      ? `Below min · Tier ${matched.matched_tier_quantity} ea`
+                                      : `Tier ${matched.matched_tier_quantity} ea`}
+                                  </Typography>
+                                </>
+                              ) : (
+                                <Typography variant="caption" color="warning.main">
+                                  No priced tier — add a tier or use a custom price
+                                </Typography>
+                              )}
+                              {row.basis_unknown && (
+                                <Chip
+                                  size="small"
+                                  label="basis unknown"
+                                  color="default"
+                                  variant="outlined"
+                                  data-testid={`basis-unknown-chip-${idx}`}
+                                  sx={{ height: 20, alignSelf: 'flex-start', mt: 0.5 }}
+                                />
+                              )}
+                              {drift && !isOverride && (
+                                <Box
+                                  sx={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: 0.5,
+                                    mt: 0.5,
+                                  }}
+                                  data-testid={`drift-chip-${idx}`}
+                                >
+                                  <Chip
+                                    size="small"
+                                    label={
+                                      isAcceptedDrift
+                                        ? `Will update to ${formatCurrency(drift.current_unit_price)} / unit`
+                                        : `Tier price changed: was ${formatCurrency(
+                                            drift.snapshotted_unit_price,
+                                          )}, now ${formatCurrency(drift.current_unit_price)}`
+                                    }
+                                    color={isAcceptedDrift ? 'primary' : 'warning'}
+                                    variant="outlined"
+                                    sx={{ height: 'auto', py: 0.5, alignSelf: 'flex-start' }}
+                                  />
+                                  {!isAcceptedDrift && drift.current_unit_price !== null && (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      data-testid={`drift-update-${idx}`}
+                                      onClick={() => {
+                                        if (!row.line_item_id) return;
+                                        setAcceptedDriftIds((cur) => {
+                                          const next = new Set(cur);
+                                          next.add(row.line_item_id!);
+                                          return next;
+                                        });
+                                      }}
+                                      sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                                    >
+                                      Update to current price
+                                    </Button>
+                                  )}
+                                  {isAcceptedDrift && (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      data-testid={`drift-cancel-${idx}`}
+                                      onClick={() => {
+                                        if (!row.line_item_id) return;
+                                        setAcceptedDriftIds((cur) => {
+                                          if (!cur.has(row.line_item_id!)) return cur;
+                                          const next = new Set(cur);
+                                          next.delete(row.line_item_id!);
+                                          return next;
+                                        });
+                                      }}
+                                      sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+                                    >
+                                      Keep original price
+                                    </Button>
+                                  )}
+                                </Box>
+                              )}
+                            </Box>
+
+                            <Typography
+                              variant="body2"
+                              sx={{ width: 110, textAlign: 'right', fontWeight: 600 }}
+                            >
+                              {hasOrderQty ? formatCurrency(preview?.total ?? null) : '—'}
+                            </Typography>
+
+                            <IconButton
+                              color="error"
+                              size="small"
+                              onClick={() => removeRow(idx, rowIdx)}
+                              aria-label="Remove quantity"
+                              disabled={block.rows.length === 1}
+                            >
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+
+                    {/* Part-level controls: add a quantity, and one custom-price
+                        toggle for the whole part (not per row). */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <Button size="small" startIcon={<AddIcon />} onClick={() => addRow(idx)}>
+                        Add quantity
+                      </Button>
+                      <Box sx={{ flex: 1 }} />
+                      {blockOverrideActive && (
+                        <Chip
+                          size="small"
+                          label="adjusted for this quote"
+                          color="success"
+                          variant="outlined"
+                          sx={{ height: 20 }}
+                        />
+                      )}
                       <Button
                         size="small"
                         onClick={() =>
-                          updateBlockField(idx, (prev) => ({
-                            override_open: !prev.override_open,
-                            override_unit_price:
-                              !prev.override_open && prev.override_unit_price === '' && matched
-                                ? String(matched.unit_price)
-                                : prev.override_unit_price,
-                          }))
+                          updateBlock(idx, (prev) => {
+                            const firstResolved =
+                              (blockPreviews[idx] ?? [])
+                                .map((p) => p?.resolved)
+                                .find(Boolean) ?? null;
+                            return {
+                              override_open: !prev.override_open,
+                              override_unit_price:
+                                !prev.override_open &&
+                                prev.override_unit_price === '' &&
+                                firstResolved
+                                  ? String(firstResolved.unit_price)
+                                  : prev.override_unit_price,
+                            };
+                          })
                         }
                       >
                         {block.override_open ? 'Cancel custom price' : '✏ Use custom price'}
                       </Button>
                     </Box>
                     {block.override_open && (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                         <TextField
                           size="small"
-                          label="Unit price"
+                          label="Custom unit price"
                           value={block.override_unit_price}
                           onChange={(e) => {
                             const v = e.target.value;
                             if (v !== '' && !/^\d*\.?\d*$/.test(v)) return;
-                            updateBlockField(idx, { override_unit_price: v });
+                            updateBlock(idx, { override_unit_price: v });
                           }}
-                          sx={{ width: 160 }}
+                          sx={{ width: 180 }}
                           inputMode="decimal"
                         />
+                        <Typography variant="caption" color="text.secondary">
+                          Applies to every quantity of this part
+                        </Typography>
                       </Box>
                     )}
                   </Box>
@@ -1216,16 +1419,29 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         }}
       >
         <Box>
-          <Typography variant="caption" color="text.secondary">
-            Quote total
-          </Typography>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            {partBlocks.length === 0
-              ? '—'
-              : quoteTotal.allComputable
-                ? formatCurrency(quoteTotal.sum)
-                : `${formatCurrency(quoteTotal.sum)} (incomplete)`}
-          </Typography>
+          {isFirmQuote ? (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Quote total
+              </Typography>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                {partBlocks.length === 0
+                  ? '—'
+                  : quoteTotal.allComputable
+                    ? formatCurrency(quoteTotal.sum)
+                    : `${formatCurrency(quoteTotal.sum)} (incomplete)`}
+              </Typography>
+            </>
+          ) : (
+            <>
+              <Typography variant="caption" color="text.secondary">
+                Price options quote
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                Prices shown per quantity — no grand total
+              </Typography>
+            </>
+          )}
         </Box>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button onClick={handleCancel} disabled={loading}>

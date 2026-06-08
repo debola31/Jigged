@@ -20,7 +20,6 @@ import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
-import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 interface ConvertToJobModalProps {
   open: boolean;
@@ -94,8 +93,6 @@ export default function ConvertToJobModal({
     return groups;
   }, [lineItems]);
 
-  const isOptionsQuote = partGroups.some((g) => g.items.length > 1);
-
   // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
   // multi-quantity parts start empty so the user must pick deliberately.
   const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
@@ -117,14 +114,6 @@ export default function ConvertToJobModal({
   const poValid = customerPoInput.trim() !== '';
 
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
-
-  // Reasons the Create button is disabled, surfaced inline (touch-friendly) so
-  // the user knows what's still blocking conversion. Mirrors the disabled prop.
-  const missingItems: string[] = [];
-  if (lineItems.length === 0) missingItems.push('Add at least one line item to the quote');
-  if (!allPartsChosen) missingItems.push('Choose the accepted quantity for every part');
-  if (!dueDateValid) missingItems.push('Enter a valid due date');
-  if (!poValid) missingItems.push('Enter the customer PO number');
 
   const handleConvert = async () => {
     setLoading(true);
@@ -190,12 +179,6 @@ export default function ConvertToJobModal({
             One job will be created with one work cell per part. Each part&apos;s routing will be
             cloned into its own operations + materials list.
           </Typography>
-
-          {isOptionsQuote && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              This is a price-options quote. Pick the quantity the customer accepted for each part.
-            </Alert>
-          )}
 
           {partGroups.length > 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 1 }}>
@@ -297,8 +280,6 @@ export default function ConvertToJobModal({
               }
             />
           </Box>
-
-          <MissingFieldsNotice items={missingItems} />
         </Box>
       </DialogContent>
       <DialogActions>

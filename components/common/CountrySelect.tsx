@@ -3,12 +3,12 @@
 import { SyntheticEvent } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
-import { COUNTRIES } from '@/lib/geo';
+import { COUNTRIES, resolveCountryName } from '@/lib/geo';
 
 interface CountrySelectProps {
-  /** Stored country value — a display name (e.g. "United States") or free text. */
+  /** Stored country value — a display name, a code, or legacy free text. */
   value: string;
-  /** Receives the selected country display name (or typed free-text). */
+  /** Receives the selected country display name (or '' when cleared). */
   onChange: (value: string) => void;
   label?: string;
   disabled?: boolean;
@@ -21,10 +21,15 @@ interface CountrySelectProps {
 const COUNTRY_NAMES = COUNTRIES.map((c) => c.name);
 
 /**
- * Country picker over the ISO 3166 list. Stores the display name (matching the
- * existing free-text `country` columns) rather than the code, and uses
- * `freeSolo` so a previously-saved value that isn't in the list (or a country we
- * don't list) still displays and remains editable instead of being blanked.
+ * Country picker over the ISO 3166 list.
+ *
+ * Type-to-search (so users find their country quickly, tolerating typos), but —
+ * unlike a `freeSolo` field — only a real list entry can be committed, so new
+ * input can't persist garbage like ",mex". A previously-saved value that isn't
+ * in the list (legacy free text, or a code/alias we recognize) still displays:
+ * recognized aliases (e.g. "USA") resolve to their canonical name, and anything
+ * truly unrecognized is surfaced as a one-off option with a nudge to re-pick.
+ * This matches the autocomplete-resolves-to-canonical pattern Baymard recommends.
  */
 export default function CountrySelect({
   value,
@@ -36,28 +41,40 @@ export default function CountrySelect({
   fullWidth = true,
   helperText,
 }: CountrySelectProps) {
+  const trimmed = value.trim();
+  const canonical = resolveCountryName(value); // canonical name, or null if unknown
+  const isKnown = trimmed === '' || canonical !== null;
+  // The value shown in the field: the canonical name when we recognize it,
+  // otherwise the raw stored string (so legacy values aren't blanked).
+  const display = canonical ?? (trimmed === '' ? null : value);
+  // Include the raw legacy value as a selectable option when unrecognized, so
+  // MUI can render it without an "out of range" warning.
+  const options = isKnown ? COUNTRY_NAMES : [value, ...COUNTRY_NAMES];
+
   const handleChange = (_e: SyntheticEvent, newValue: string | null) => {
     onChange(newValue ?? '');
   };
 
   return (
     <Autocomplete
-      freeSolo
-      autoHighlight
-      handleHomeEndKeys
-      options={COUNTRY_NAMES}
-      value={value || null}
+      options={options}
+      value={display}
       onChange={handleChange}
-      onInputChange={(_e, newInput) => onChange(newInput)}
       disabled={disabled}
       fullWidth={fullWidth}
+      autoHighlight
+      handleHomeEndKeys
+      isOptionEqualToValue={(option, val) => option === val}
       renderInput={(params) => (
         <TextField
           {...params}
           label={label}
           required={required}
           size={size}
-          helperText={helperText}
+          error={!isKnown}
+          helperText={
+            !isKnown ? 'Not a recognized country — pick from the list' : helperText
+          }
         />
       )}
     />

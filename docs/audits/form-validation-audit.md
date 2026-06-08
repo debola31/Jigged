@@ -75,12 +75,25 @@ country-format enforcement.
 
 ### Address (was free-text city/country)
 `CountrySelect` (ISO 3166) + `StateSelect` (US states / CA provinces, free-text
-fallback) replace free-text country/state in `CustomerAddressModal`, `VendorForm`,
-`CompanyProfileCard`. **City stays free text** (full city lists need an external
-dataset — out of scope). Postal codes validated per country via
-`isValidPostalCode` (US ZIP / ZIP+4, CA `A1A 1A1`, permissive elsewhere). Selects
-use `freeSolo` so existing saved values that aren't in the list still display and
-remain editable.
+fallback for countries without a known list) replace free-text country/state in
+`CustomerAddressModal`, `VendorForm`, `CompanyProfileCard`. **City stays free
+text** (full city lists need an external dataset — out of scope). Postal codes
+validated per country via `isValidPostalCode`.
+
+**Canonical-only with legacy tolerance** (matches Baymard's autocomplete-resolves-
+to-canonical guidance): the selects are type-to-search but, unlike a `freeSolo`
+field, only a real list entry can be committed — new input can't persist garbage
+like `,mex` or `ca`. Existing/recognized values still display: aliases and codes
+resolve to canonical names (`USA` → "United States", state `IL` → "Illinois") via
+`resolveCountryCode` / `resolveSubdivisionName` in `lib/geo`; anything truly
+unrecognized is surfaced as a one-off option with an inline nudge to re-pick.
+`isValidPostalCode` resolves the country (name/alias/code) to a canonical code
+first, so US/CA ZIP validation fires regardless of how the country is stored.
+
+**Not changed (deliberate):** phone validation stays lenient — accepting
+`8174484963` and `817-448-4963` both is correct per industry guidance (users type
+inconsistently). We validate shape but do **not** normalize to E.164 on save;
+that's noted as future work below.
 
 ### Numeric
 Deduped the per-file parsers (`RoutingOperationRowEditor`, `MarkupRateForm`) onto
@@ -98,4 +111,9 @@ correct mobile keyboards.
   free text.
 - **International postal formats** beyond US/CA — `isValidPostalCode` is permissive
   for other countries rather than guessing.
+- **Phone normalization** — we accept varied formats (correct) but store the raw
+  string. Industry standard is to normalize to E.164 on save (e.g. via
+  `libphonenumber-js`) and display formatted, so the same number can't exist as
+  two different strings. Deferred per product decision; revisit if phone-based
+  dedup/search matters.
 - **Phone formatting/masking** — we validate but don't reformat as the user types.

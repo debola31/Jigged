@@ -7,6 +7,8 @@
  * import from here rather than re-implementing.
  */
 
+import { resolveCountryCode } from './geo';
+
 // ---------------------------------------------------------------------------
 // Email
 // ---------------------------------------------------------------------------
@@ -69,13 +71,17 @@ const CA_POSTAL = /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
  *   rules for every country, so we accept any non-empty value and let the user
  *   proceed rather than blocking valid foreign codes.
  *
+ * Accepts a country code OR a free-text/display name (e.g. "US", "USA",
+ * "United States") — it resolves to a canonical code first, so US/CA validation
+ * fires regardless of how the country is stored.
+ *
  * Empty string is treated as valid here (the field's own `required` flag governs
  * presence); callers that need a value should check emptiness separately.
  */
-export function isValidPostalCode(countryCode: string | null | undefined, code: string): boolean {
+export function isValidPostalCode(country: string | null | undefined, code: string): boolean {
   const trimmed = code.trim();
   if (!trimmed) return true; // presence is enforced elsewhere
-  switch ((countryCode ?? '').toUpperCase()) {
+  switch (resolveCountryCode(country)) {
     case 'US':
       return US_ZIP.test(trimmed);
     case 'CA':

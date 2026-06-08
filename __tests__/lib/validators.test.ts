@@ -59,6 +59,13 @@ describe('isValidPostalCode', () => {
     expect(isValidPostalCode('CA', 'K1A0B1')).toBe(true);
     expect(isValidPostalCode('CA', '12345')).toBe(false);
   });
+  it('resolves country names and aliases, not just codes', () => {
+    // Forms store the display name / legacy alias, not the ISO code — validation
+    // must still fire.
+    expect(isValidPostalCode('United States', '90210')).toBe(true);
+    expect(isValidPostalCode('USA', '9021')).toBe(false);
+    expect(isValidPostalCode('Canada', 'K1A 0B1')).toBe(true);
+  });
   it('is permissive for unknown countries and empty values', () => {
     expect(isValidPostalCode('FR', '75008')).toBe(true);
     expect(isValidPostalCode(null, 'anything')).toBe(true);

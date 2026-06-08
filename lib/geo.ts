@@ -92,21 +92,69 @@ export const CA_PROVINCES: Subdivision[] = [
   { code: 'YT', name: 'Yukon' },
 ];
 
+// Common free-text spellings that should resolve to a canonical country. Keyed
+// by lowercased input → ISO alpha-2 code. The full name and the code itself are
+// always accepted too (see resolveCountryCode); this only covers extra aliases.
+const COUNTRY_ALIASES: Record<string, string> = {
+  usa: 'US',
+  'u.s.': 'US',
+  'u.s.a.': 'US',
+  'united states of america': 'US',
+  america: 'US',
+  can: 'CA',
+};
+
+/**
+ * Resolve a free-text / code / name country value to its ISO alpha-2 code, or
+ * `null` when it doesn't match anything we know. Case-insensitive; tolerates the
+ * common legacy spellings (e.g. "USA", "United States of America").
+ */
+export function resolveCountryCode(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  for (const c of COUNTRIES) {
+    if (c.code.toLowerCase() === v || c.name.toLowerCase() === v) return c.code;
+  }
+  return COUNTRY_ALIASES[v] ?? null;
+}
+
+/** Canonical display name for a country value, or `null` when unrecognized. */
+export function resolveCountryName(value: string | null | undefined): string | null {
+  const code = resolveCountryCode(value);
+  if (!code) return null;
+  return COUNTRIES.find((c) => c.code === code)?.name ?? null;
+}
+
 /**
  * Returns the subdivision list for a country, or `null` when we don't have one
  * (the State field then falls back to free text). Accepts a country code OR the
  * country display name, since stored records may hold either.
  */
 export function subdivisionsForCountry(country: string | null | undefined): Subdivision[] | null {
-  if (!country) return null;
-  const c = country.trim().toUpperCase();
-  if (c === 'US' || c === 'USA' || c === 'UNITED STATES' || c === 'UNITED STATES OF AMERICA') {
-    return US_STATES;
-  }
-  if (c === 'CA' || c === 'CAN' || c === 'CANADA') {
-    return CA_PROVINCES;
-  }
+  const code = resolveCountryCode(country);
+  if (code === 'US') return US_STATES;
+  if (code === 'CA') return CA_PROVINCES;
   return null;
+}
+
+/**
+ * Canonical subdivision display name for a value within a country, matching by
+ * name OR postal code (case-insensitive). Returns `null` when the country has no
+ * known list or the value matches nothing (legacy/free-text). Lets a stored
+ * code like "CA" or "il" resolve to "California" / "Illinois" for display.
+ */
+export function resolveSubdivisionName(
+  country: string | null | undefined,
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  const subs = subdivisionsForCountry(country);
+  if (!subs) return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  const match = subs.find((s) => s.name.toLowerCase() === v || s.code.toLowerCase() === v);
+  return match ? match.name : null;
 }
 
 export const COUNTRIES: Country[] = [

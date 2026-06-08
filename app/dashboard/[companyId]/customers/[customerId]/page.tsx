@@ -43,7 +43,7 @@ import {
 import { roleDisplayLabel } from '@/types/customerContact';
 import type { CustomerContact } from '@/types/customerContact';
 import type { CustomerAddress, CustomerWithRelations } from '@/types/customer';
-import { CustomerContactModal, CustomerAddressModal } from '@/components/customers';
+import { CustomerContactModal, CustomerAddressForm } from '@/components/customers';
 import CustomerShippingDefaultsCard from '@/components/customers/CustomerShippingDefaultsCard';
 
 function formatAddressLines(a: CustomerAddress): string {
@@ -82,8 +82,8 @@ export default function CustomerDetailPage() {
   );
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
 
-  // Address modal state.
-  const [addressModalOpen, setAddressModalOpen] = useState(false);
+  // Inline address add/edit form state (rendered in place, not a modal).
+  const [addressFormOpen, setAddressFormOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<CustomerAddress | undefined>(
     undefined,
   );
@@ -179,11 +179,16 @@ export default function CustomerDetailPage() {
 
   const handleAddAddress = () => {
     setEditingAddress(undefined);
-    setAddressModalOpen(true);
+    setAddressFormOpen(true);
   };
   const handleEditAddress = (a: CustomerAddress) => {
     setEditingAddress(a);
-    setAddressModalOpen(true);
+    setAddressFormOpen(true);
+  };
+  const handleAddressSaved = async () => {
+    setAddressFormOpen(false);
+    setEditingAddress(undefined);
+    await refreshAddresses();
   };
   const handleDeleteAddress = async () => {
     if (!deleteAddressId) return;
@@ -487,7 +492,7 @@ export default function CustomerDetailPage() {
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   Addresses ({addresses.length})
                 </Typography>
-                {addresses.length > 0 && (
+                {addresses.length > 0 && !addressFormOpen && (
                   <Button
                     size="small"
                     variant="outlined"
@@ -501,7 +506,17 @@ export default function CustomerDetailPage() {
               </Box>
               <Divider sx={{ mb: 2 }} />
 
-              {addresses.length === 0 ? (
+              {addressFormOpen ? (
+                <CustomerAddressForm
+                  customerId={customerId}
+                  existing={editingAddress}
+                  onSaved={handleAddressSaved}
+                  onCancel={() => {
+                    setAddressFormOpen(false);
+                    setEditingAddress(undefined);
+                  }}
+                />
+              ) : addresses.length === 0 ? (
                 <Box sx={{ textAlign: 'center', py: 4 }}>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     No addresses yet.
@@ -633,15 +648,6 @@ export default function CustomerDetailPage() {
         customerId={customerId}
         existing={editingContact}
         onSaved={refreshContacts}
-      />
-
-      {/* Address modal */}
-      <CustomerAddressModal
-        open={addressModalOpen}
-        onClose={() => setAddressModalOpen(false)}
-        customerId={customerId}
-        existing={editingAddress}
-        onSaved={refreshAddresses}
       />
 
       {/* Delete contact confirmation */}

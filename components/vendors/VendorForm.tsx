@@ -280,7 +280,7 @@ export default function VendorForm({
                 placeholder="Suite, unit, etc."
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="City"
@@ -289,7 +289,7 @@ export default function VendorForm({
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <StateSelect
                 value={formData.state}
                 onChange={(v) => setFormData((prev) => ({ ...prev, state: v }))}
@@ -297,7 +297,7 @@ export default function VendorForm({
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="Postal Code"
@@ -308,7 +308,7 @@ export default function VendorForm({
                 disabled={loading}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <CountrySelect
                 value={formData.country}
                 onChange={(v) => setFormData((prev) => ({ ...prev, country: v }))}

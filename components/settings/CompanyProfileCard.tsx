@@ -206,7 +206,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   autoComplete="address-line2"
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 5 }}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   label="City"
                   value={form.city}
@@ -216,7 +216,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   autoComplete="address-level2"
                 />
               </Grid>
-              <Grid size={{ xs: 6, sm: 2 }}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <StateSelect
                   value={form.state}
                   onChange={(v) => {
@@ -227,7 +227,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   size="small"
                 />
               </Grid>
-              <Grid size={{ xs: 6, sm: 2 }}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   label="ZIP"
                   value={form.postal_code}
@@ -239,7 +239,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   helperText={postalInvalid ? 'Invalid for country' : undefined}
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 3 }}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <CountrySelect
                   value={form.country}
                   onChange={(v) => {

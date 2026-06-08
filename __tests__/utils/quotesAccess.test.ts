@@ -703,7 +703,7 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow(
         'This quote has already been converted to a job',
       );
     });
@@ -723,7 +723,7 @@ describe('quotesAccess utilities', () => {
         }),
       }));
 
-      await expect(convertQuoteToJob('quote-1')).rejects.toThrow(
+      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow(
         'This quote has no line items to convert.',
       );
     });
@@ -751,7 +751,40 @@ describe('quotesAccess utilities', () => {
       }));
 
       // No selectedLineItemIds → both lines for part-A would convert → guard fires.
-      await expect(convertQuoteToJob('quote-1')).rejects.toThrow('price-options quote');
+      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow('price-options quote');
+    });
+
+    it('rejects conversion when no customer PO is provided', async () => {
+      // A firm, convertible quote (one line per part, not yet converted) — the
+      // only thing missing is the customer PO, which is now required.
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+        ...mockQueryBuilder,
+        select: vi.fn().mockReturnValue({
+          ...mockQueryBuilder,
+          eq: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            single: vi.fn().mockReturnValue({
+              data: {
+                ...mockQuote,
+                converted_at: null,
+                line_items: [
+                  { id: 'li-1', part_id: 'part-A', sequence: 10, quantity: 5, unit_price: 20, total_price: 100 },
+                ],
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }));
+
+      // No customerPoNumber → guard fires before any write.
+      await expect(
+        convertQuoteToJob('quote-1', { customerPoNumber: '' }),
+      ).rejects.toThrow('Customer PO is required');
+      // Whitespace-only is also rejected.
+      await expect(
+        convertQuoteToJob('quote-1', { customerPoNumber: '   ' }),
+      ).rejects.toThrow('Customer PO is required');
     });
   });
 

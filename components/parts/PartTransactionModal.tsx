@@ -271,7 +271,7 @@ export default function PartTransactionModal({
               setFormData((prev) => ({ ...prev, quantity: parseFloat(e.target.value) || 0 }))
             }
             disabled={loading}
-            inputProps={{ min: 0, step: 0.01 }}
+            inputProps={{ min: 0, step: 0.01, inputMode: 'decimal' }}
             sx={{ flex: 2 }}
             autoFocus
           />

@@ -20,6 +20,7 @@ import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 interface ConvertToJobModalProps {
   open: boolean;
@@ -67,7 +68,7 @@ export default function ConvertToJobModal({
   // Customer PO is captured at conversion (when the customer has accepted
   // and issued a PO), not at quote-creation. Stored on jobs.customer_po_number
   // (migration 20260526), so the modal always starts empty — the quote
-  // never carries one.
+  // never carries one. REQUIRED to convert (the work-order authorization).
   const [customerPoInput, setCustomerPoInput] = useState<string>('');
 
   const lineItems = useMemo(
@@ -113,8 +114,17 @@ export default function ConvertToJobModal({
   }, [open, quote.lead_time_days, partGroups]);
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
+  const poValid = customerPoInput.trim() !== '';
 
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
+
+  // Reasons the Create button is disabled, surfaced inline (touch-friendly) so
+  // the user knows what's still blocking conversion. Mirrors the disabled prop.
+  const missingItems: string[] = [];
+  if (lineItems.length === 0) missingItems.push('Add at least one line item to the quote');
+  if (!allPartsChosen) missingItems.push('Choose the accepted quantity for every part');
+  if (!dueDateValid) missingItems.push('Enter a valid due date');
+  if (!poValid) missingItems.push('Enter the customer PO number');
 
   const handleConvert = async () => {
     setLoading(true);
@@ -275,12 +285,20 @@ export default function ConvertToJobModal({
               label="Customer PO #"
               size="small"
               fullWidth
+              required
               value={customerPoInput}
               onChange={(e) => setCustomerPoInput(e.target.value)}
               disabled={loading}
-              helperText="The PO number the customer referenced when accepting this quote. Optional."
+              error={!poValid}
+              helperText={
+                poValid
+                  ? 'The PO number the customer referenced when accepting this quote.'
+                  : 'Customer PO is required to create a job.'
+              }
             />
           </Box>
+
+          <MissingFieldsNotice items={missingItems} />
         </Box>
       </DialogContent>
       <DialogActions>
@@ -290,7 +308,7 @@ export default function ConvertToJobModal({
         <Button
           variant="contained"
           onClick={handleConvert}
-          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen}
+          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen || !poValid}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
           {loading ? 'Creating…' : `Create ${expectedJobNumber}`}

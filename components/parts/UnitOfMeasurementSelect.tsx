@@ -27,6 +27,7 @@ import {
   addCompanyCustomUnit,
 } from '@/utils/unitsAccess';
 import type { CompanyCustomUnit } from '@/types/units';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 /**
  * Internal option shape. The Autocomplete renders one of three kinds:
@@ -385,6 +386,7 @@ export default function UnitOfMeasurementSelect({
           <TextField
             autoFocus
             fullWidth
+            required
             label="Unit name"
             value={newUnitName}
             onChange={(e) => {
@@ -400,6 +402,9 @@ export default function UnitOfMeasurementSelect({
                 handleSaveNewUnit();
               }
             }}
+          />
+          <MissingFieldsNotice
+            items={!newUnitName.trim() ? ['Enter a unit name'] : []}
           />
         </DialogContent>
         <DialogActions>

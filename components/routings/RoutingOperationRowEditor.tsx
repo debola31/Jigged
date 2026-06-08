@@ -10,6 +10,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { WorkCenterKind } from '@/types/workCenter';
+import { parseOptionalNumber, numberToInputString } from '@/lib/validators';
 
 /**
  * Picker option shape supplied to the editor — matches the shape returned by
@@ -48,14 +49,7 @@ interface RoutingOperationRowEditorProps {
   index?: number;
 }
 
-const numToStr = (n: number | null | undefined): string =>
-  n === null || n === undefined ? '' : String(n);
-
-const parseOptionalNumber = (s: string): number | null => {
-  if (s === '') return null;
-  const v = parseFloat(s);
-  return Number.isFinite(v) ? v : null;
-};
+const numToStr = numberToInputString;
 
 export default function RoutingOperationRowEditor({
   workCenters,

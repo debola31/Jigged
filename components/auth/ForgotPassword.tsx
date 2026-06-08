@@ -13,6 +13,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
 import MuiLink from '@mui/material/Link';
 import { getSupabase } from '@/lib/supabase';
+import { isValidEmail } from '@/lib/validators';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -22,6 +23,10 @@ export default function ForgotPassword() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address');
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -94,6 +99,12 @@ export default function ForgotPassword() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            error={email.trim() !== '' && !isValidEmail(email)}
+            helperText={
+              email.trim() !== '' && !isValidEmail(email)
+                ? 'Enter a valid email address'
+                : undefined
+            }
             disabled={loading}
             sx={{ mb: 3 }}
             autoComplete="email"

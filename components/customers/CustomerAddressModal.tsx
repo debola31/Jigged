@@ -24,6 +24,9 @@ import {
   createCustomerAddress,
   updateCustomerAddress,
 } from '@/utils/customerAddressesAccess';
+import CountrySelect from '@/components/common/CountrySelect';
+import StateSelect from '@/components/common/StateSelect';
+import { isValidPostalCode } from '@/lib/validators';
 
 interface CustomerAddressModalProps {
   open: boolean;
@@ -88,7 +91,13 @@ export default function CustomerAddressModal({
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
+  const postalValid = isValidPostalCode(formData.country, formData.postal_code);
+
   const handleSave = async () => {
+    if (!postalValid) {
+      setError('Enter a valid postal code for the selected country.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -146,11 +155,10 @@ export default function CustomerAddressModal({
             />
           </Grid>
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="State"
+            <StateSelect
               value={formData.state}
-              onChange={handleChange('state')}
+              onChange={(v) => setFormData((prev) => ({ ...prev, state: v }))}
+              country={formData.country}
               disabled={loading}
             />
           </Grid>
@@ -160,15 +168,15 @@ export default function CustomerAddressModal({
               label="Postal Code"
               value={formData.postal_code}
               onChange={handleChange('postal_code')}
+              error={!postalValid}
+              helperText={!postalValid ? 'Invalid postal code for this country' : undefined}
               disabled={loading}
             />
           </Grid>
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <TextField
-              fullWidth
-              label="Country"
+            <CountrySelect
               value={formData.country}
-              onChange={handleChange('country')}
+              onChange={(v) => setFormData((prev) => ({ ...prev, country: v }))}
               disabled={loading}
             />
           </Grid>

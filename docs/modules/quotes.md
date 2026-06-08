@@ -264,14 +264,14 @@ Clamp
   100 ea @ $9.00 = $900.00     (single quantity — auto-included)
 ```
 
-Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **Due date** (defaulting to today + the quote's lead time) and an optional **Customer PO #** are captured here.
+Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **Due date** (defaulting to today + the quote's lead time) and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it.
 
 **Actions:**
 
 - Create J-NNNN → calls `convertQuoteToJob(quoteId, { dueDate, customerPoNumber, selectedLineItemIds })`, where `selectedLineItemIds` is the one chosen line per part. Conversion creates **one job** with one `job_part` per selected line, clones each part's routing via the `create_job_part_operations_from_routing` RPC, sets `quote.converted_at`, and redirects to the new job. The quote stays intact as the record of all options offered.
 - Cancel → closes the modal without changes.
 
-The Create button stays disabled until **every** multi-quantity part has a quantity selected (and the due date is valid). `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
+The Create button stays disabled until **every** multi-quantity part has a quantity selected, the due date is valid, **and a Customer PO is entered**. A `MissingFieldsNotice` above the button lists whatever is still blocking conversion. `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
 
 ---
 
@@ -462,7 +462,7 @@ If the salesperson quotes this part at quantities 1, 2, and 4, three `quote_line
 1. Refuse if `converted_at` is already set, or if the quote has no line items.
 2. Resolve which lines to convert: `selectedLineItemIds` when provided (a price-options quote — one chosen line per part), else all lines (a firm quote). **Reject if the resolved set has more than one line for any `part_id`** ("This is a price-options quote. Pick a single quantity per part before converting.").
 3. Pre-flight: every part must have a routing, else fail before any write.
-4. Resolve the due date (explicit override > today + the quote's `lead_time_days` > null) and capture the optional `customer_po_number`.
+4. Resolve the due date (explicit override > today + the quote's `lead_time_days` > null). **Reject if no `customer_po_number` is provided** ("Customer PO is required to convert a quote to a job.") — the PO is captured as a required, non-empty value, never coerced to NULL.
 5. Insert **one** `jobs` row (job number Q-NNNN → J-NNNN) carrying `quote_id`, `customer_id`, `due_date`, `lead_time_days`, `customer_po_number`, `production_status = 'not_started'`.
 6. For each resolved line, insert a `job_parts` row (`part_id`, `quantity = line.quantity`, `source_quote_line_item_id = line.id`) and clone the part's routing via the `create_job_part_operations_from_routing(job_part_id, routing_id)` RPC.
 7. Set `quote.converted_at` (status unchanged); the quote keeps all its line items as the record of every option offered.
@@ -530,6 +530,8 @@ This follows the same pattern as Customers, Parts, and Operations:
 - [ ] A single-quantity part is auto-included (no radio to pick)
 
 - [ ] Convert button stays disabled until every multi-quantity part has a quantity selected
+
+- [ ] Convert button stays disabled until a Customer PO is entered; `convertQuoteToJob` rejects an empty/missing PO ("Customer PO is required to convert a quote to a job.")
 
 - [ ] `convertQuoteToJob` rejects a set that resolves to more than one line for any part (options-quote guard)
 

@@ -29,6 +29,7 @@ import {
 } from '@/utils/workCentersAccess';
 import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
+import { parseOptionalNumber } from '@/lib/validators';
 
 interface WorkCenterFormProps {
   mode: 'create' | 'edit';
@@ -98,8 +99,8 @@ export default function WorkCenterForm({
     }
 
     if (formData.kind === 'internal' && formData.labor_rate.trim()) {
-      const rate = parseFloat(formData.labor_rate);
-      if (Number.isNaN(rate) || rate < 0) {
+      const rate = parseOptionalNumber(formData.labor_rate);
+      if (rate === null || rate < 0) {
         errors.labor_rate = 'Labor rate must be a non-negative number';
       }
     }
@@ -259,7 +260,7 @@ export default function WorkCenterForm({
                   helperText={fieldErrors.labor_rate || 'Optional. Hourly rate in dollars.'}
                   disabled={loading}
                   type="number"
-                  inputProps={{ min: 0, step: '0.01' }}
+                  inputProps={{ min: 0, step: '0.01', inputMode: 'decimal' }}
                   slotProps={{
                     input: {
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,

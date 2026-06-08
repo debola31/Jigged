@@ -19,6 +19,7 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
+import { isValidEmail } from '@/lib/validators';
 
 interface LoginProps {
   expired?: boolean;
@@ -49,6 +50,10 @@ export default function Login({ expired, returnTo }: LoginProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address');
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -113,6 +118,12 @@ export default function Login({ expired, returnTo }: LoginProps) {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            error={email.trim() !== '' && !isValidEmail(email)}
+            helperText={
+              email.trim() !== '' && !isValidEmail(email)
+                ? 'Enter a valid email address'
+                : undefined
+            }
             disabled={loading}
             sx={{ mb: 2 }}
             autoComplete="email"

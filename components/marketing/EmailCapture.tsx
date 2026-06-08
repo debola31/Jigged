@@ -18,6 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import Box from '@mui/material/Box';
 import MenuItem from '@mui/material/MenuItem';
 import { SHOP_SIZES } from '@/lib/constants/marketing';
+import { isValidEmail } from '@/lib/validators';
 
 interface EmailCaptureProps {
   source?: string;
@@ -54,6 +55,11 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !name || !companyName) return;
+    if (!isValidEmail(email)) {
+      setStatus('error');
+      setMessage('Enter a valid email address.');
+      return;
+    }
 
     setStatus('loading');
     try {
@@ -187,6 +193,12 @@ export default function EmailCapture({ source = 'landing_page' }: EmailCapturePr
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  error={email.trim() !== '' && !isValidEmail(email)}
+                  helperText={
+                    email.trim() !== '' && !isValidEmail(email)
+                      ? 'Enter a valid email address'
+                      : undefined
+                  }
                   disabled={status === 'loading'}
                   fullWidth
                   sx={{ '& .MuiInputBase-root': { minHeight: 48 } }}

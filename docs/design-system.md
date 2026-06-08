@@ -222,6 +222,32 @@ text: {
 />
 ```
 
+### Form validation & required-field feedback
+
+When a submit/save button is disabled because the form is incomplete, **tell the
+user what's still missing** — a greyed-out button with no explanation is a dead
+end. The standard is an inline notice, **not** a hover tooltip: the app runs on
+shop-floor tablets where hover isn't available.
+
+- **`components/common/MissingFieldsNotice`** — render it just above the submit
+  button with an `items: string[]` of the blocking reasons (it returns `null`
+  when the array is empty). Compute the list from the same conditions that drive
+  the button's `disabled` prop. This is the canonical pattern; see
+  `ConvertToJobModal`, `MaterialRowEditor`, `CompanyShippingSettingsCard`.
+- **Field-level markers** — also set `required` and `error`/`helperText` on the
+  specific blocking inputs so the error is visible at the field, not only in the
+  summary notice.
+- **Typed inputs** — validate with the shared helpers in **`lib/validators`**
+  (`isValidEmail`, `isValidPhone`, `isValidPostalCode`, `parseOptionalNumber`,
+  `parseOptionalInteger`). Don't re-implement email regexes or number parsers per
+  form. Phone fields use `type="tel"`; numeric fields set `inputMode`
+  (`'numeric'` for integers, `'decimal'` for decimals) for the right mobile
+  keyboard.
+- **Addresses** — use **`components/common/CountrySelect`** and **`StateSelect`**
+  (US states / CA provinces, free-text fallback for other countries) instead of
+  free-text country/state. City stays free text. Validate postal codes per
+  country.
+
 ### Cards
 
 ```javascript

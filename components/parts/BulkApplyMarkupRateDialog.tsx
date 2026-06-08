@@ -21,6 +21,7 @@ import Link from 'next/link';
 
 import { getAllMarkupRates, bulkApplyMarkupRate } from '@/utils/markupRatesAccess';
 import { summarizeBreakpoints, type MarkupRate } from '@/types/markupRates';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 interface BulkApplyMarkupRateDialogProps {
   open: boolean;
@@ -189,6 +190,9 @@ export default function BulkApplyMarkupRateDialog({
             })}
           </List>
         )}
+        <MissingFieldsNotice
+          items={!loadingRates && !selectedRateId ? ['Select a markup rate to apply'] : []}
+        />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2.5 }}>
         <Button onClick={handleClose} disabled={applying} color="inherit" size="large">

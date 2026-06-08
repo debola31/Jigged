@@ -20,6 +20,7 @@ import AddIcon from '@mui/icons-material/Add';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { completeJob, getJobPartMaterialsForCompletion } from '@/utils/operatorAccess';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import { formatDuration } from '@/types/operator';
 import type { MaterialConfirmation } from '@/types/operator';
 
@@ -381,6 +382,10 @@ export default function JobCompleteModal({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Any issues or comments about this operation..."
+        />
+
+        <MissingFieldsNotice
+          items={!operatorId ? ['Log in as an operator to complete this step'] : []}
         />
       </DialogContent>
 

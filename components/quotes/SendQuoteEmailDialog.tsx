@@ -20,6 +20,7 @@ import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 import { generateQuotePdf, quotePdfFilename } from '@/utils/quotePdf';
 import { sendQuoteEmail } from '@/utils/quoteEmail';
+import { isValidEmail } from '@/lib/validators';
 
 interface SendQuoteEmailDialogProps {
   open: boolean;
@@ -103,6 +104,14 @@ export default function SendQuoteEmailDialog({
       setError('Recipient email is required.');
       return;
     }
+    if (!isValidEmail(to)) {
+      setError('Enter a valid recipient email address.');
+      return;
+    }
+    if (cc.trim() && !isValidEmail(cc)) {
+      setError('Enter a valid CC email address (or clear it).');
+      return;
+    }
     setSending(true);
     try {
       const doc = await generateQuotePdf(quote, company);
@@ -137,6 +146,10 @@ export default function SendQuoteEmailDialog({
             onChange={(e) => setTo(e.target.value)}
             type="email"
             required
+            error={to.trim() !== '' && !isValidEmail(to)}
+            helperText={
+              to.trim() !== '' && !isValidEmail(to) ? 'Enter a valid email address' : undefined
+            }
             disabled={sending}
             placeholder="customer@example.com"
             fullWidth
@@ -146,6 +159,10 @@ export default function SendQuoteEmailDialog({
             value={cc}
             onChange={(e) => setCc(e.target.value)}
             type="email"
+            error={cc.trim() !== '' && !isValidEmail(cc)}
+            helperText={
+              cc.trim() !== '' && !isValidEmail(cc) ? 'Enter a valid email address' : undefined
+            }
             disabled={sending}
             placeholder="optional"
             fullWidth

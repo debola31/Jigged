@@ -16,6 +16,7 @@ import Box from '@mui/material/Box';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import DownloadIcon from '@mui/icons-material/Download';
 import type { ConflictDialogProps } from './types';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 function escapeCsvField(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -219,6 +220,13 @@ export default function ConflictDialog<
             </TableContainer>
           </>
         )}
+        <MissingFieldsNotice
+          items={
+            validRowsCount === 0
+              ? ['No valid rows to import — resolve the conflicts above first']
+              : []
+          }
+        />
       </DialogContent>
       <DialogActions sx={{ p: 3, pt: 0 }}>
         <Button onClick={onCancel} color="inherit">

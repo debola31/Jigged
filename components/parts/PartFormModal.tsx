@@ -27,6 +27,7 @@ import { createPart, checkPartNameExists } from '@/utils/partsAccess';
 import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 import UnitOfMeasurementSelect from './UnitOfMeasurementSelect';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 interface PartFormModalProps {
   open: boolean;
@@ -317,6 +318,9 @@ export default function PartFormModal({
               />
             </Box>
           )}
+          <MissingFieldsNotice
+            items={!formData.part_name.trim() ? ['Enter a part name'] : []}
+          />
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 2.5 }}>

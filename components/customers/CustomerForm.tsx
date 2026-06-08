@@ -37,6 +37,7 @@ import {
   softDeleteCustomer,
   checkCustomerNameExists,
 } from '@/utils/customerAccess';
+import { isValidEmail, isValidPhone } from '@/lib/validators';
 
 interface CustomerFormProps {
   mode: 'create' | 'edit';
@@ -131,11 +132,11 @@ export default function CustomerForm({
           errors.contact_name =
             'Contact name is required when adding a contact (or clear email/phone to skip)';
         }
-        if (
-          contactData.email.trim() &&
-          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactData.email)
-        ) {
+        if (contactData.email.trim() && !isValidEmail(contactData.email)) {
           errors.contact_email = 'Invalid email format';
+        }
+        if (contactData.phone.trim() && !isValidPhone(contactData.phone)) {
+          errors.contact_phone = 'Enter a valid phone number';
         }
         if (
           contactData.role === 'other' &&
@@ -336,9 +337,12 @@ export default function CustomerForm({
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   fullWidth
+                  type="tel"
                   label="Phone"
                   value={contactData.phone}
                   onChange={handleContactChange('phone')}
+                  error={!!fieldErrors.contact_phone}
+                  helperText={fieldErrors.contact_phone}
                   disabled={loading}
                 />
               </Grid>

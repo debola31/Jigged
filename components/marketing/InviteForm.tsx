@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { submitWaitlist } from '@/app/actions/waitlist';
 import { SHOP_SIZES } from '@/lib/constants/marketing';
+import { isValidEmail } from '@/lib/validators';
 import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -34,6 +35,7 @@ export default function InviteForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !name || !companyName) return;
+    if (!isValidEmail(email)) return;
 
     setStatus('loading');
     try {
@@ -149,6 +151,12 @@ export default function InviteForm() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    error={email.trim() !== '' && !isValidEmail(email)}
+                    helperText={
+                      email.trim() !== '' && !isValidEmail(email)
+                        ? 'Enter a valid email address'
+                        : undefined
+                    }
                     disabled={status === 'loading'}
                     fullWidth
                     sx={{ '& .MuiInputBase-root': { minHeight: 48 } }}

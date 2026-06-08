@@ -114,6 +114,10 @@ test.describe('Quote to Job workflow', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/Convert .* to/i)).toBeVisible();
 
+    // Customer PO is required to convert — the Create button stays disabled
+    // until it's filled. Enter any PO so the conversion can proceed.
+    await dialog.getByRole('textbox', { name: /Customer PO/i }).fill('PO-E2E-001');
+
     // The Create button is "Create J-NNNN" (the assigned job number).
     await dialog.getByRole('button', { name: /^Create J-\d+/i }).click();
 

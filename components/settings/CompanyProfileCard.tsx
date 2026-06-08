@@ -17,6 +17,9 @@ import {
   updateCompanyProfile,
   type CompanyProfilePatch,
 } from '@/utils/companyAccess';
+import CountrySelect from '@/components/common/CountrySelect';
+import StateSelect from '@/components/common/StateSelect';
+import { isValidEmail, isValidPhone, isValidPostalCode } from '@/lib/validators';
 
 interface CompanyProfileCardProps {
   companyId: string;
@@ -82,7 +85,17 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
     setSuccess(false);
   };
 
+  // All fields are optional (blank = omit from PDF), so only validate
+  // format when a value is present.
+  const phoneInvalid = form.phone.trim() !== '' && !isValidPhone(form.phone);
+  const emailInvalid = form.email.trim() !== '' && !isValidEmail(form.email);
+  const postalInvalid = !isValidPostalCode(form.country, form.postal_code);
+
   const handleSave = async () => {
+    if (phoneInvalid || emailInvalid || postalInvalid) {
+      setError('Fix the highlighted fields before saving.');
+      return;
+    }
     setError(null);
     setSuccess(false);
     setSaving(true);
@@ -137,7 +150,10 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   onChange={handleChange('phone')}
                   fullWidth
                   size="small"
+                  type="tel"
                   autoComplete="tel"
+                  error={phoneInvalid}
+                  helperText={phoneInvalid ? 'Enter a valid phone number' : undefined}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 4 }}>
@@ -149,6 +165,8 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   size="small"
                   type="email"
                   autoComplete="email"
+                  error={emailInvalid}
+                  helperText={emailInvalid ? 'Enter a valid email address' : undefined}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 4 }}>
@@ -199,13 +217,14 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                 />
               </Grid>
               <Grid size={{ xs: 6, sm: 2 }}>
-                <TextField
-                  label="State"
+                <StateSelect
                   value={form.state}
-                  onChange={handleChange('state')}
-                  fullWidth
+                  onChange={(v) => {
+                    setForm((prev) => ({ ...prev, state: v }));
+                    setSuccess(false);
+                  }}
+                  country={form.country}
                   size="small"
-                  autoComplete="address-level1"
                 />
               </Grid>
               <Grid size={{ xs: 6, sm: 2 }}>
@@ -216,16 +235,18 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   fullWidth
                   size="small"
                   autoComplete="postal-code"
+                  error={postalInvalid}
+                  helperText={postalInvalid ? 'Invalid for country' : undefined}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 3 }}>
-                <TextField
-                  label="Country"
+                <CountrySelect
                   value={form.country}
-                  onChange={handleChange('country')}
-                  fullWidth
+                  onChange={(v) => {
+                    setForm((prev) => ({ ...prev, country: v }));
+                    setSuccess(false);
+                  }}
                   size="small"
-                  autoComplete="country-name"
                 />
               </Grid>
             </Grid>

@@ -1381,7 +1381,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 required
                 value={formData.lead_time_days}
                 onChange={(e) => handleFieldChange('lead_time_days', e.target.value)}
-                inputProps={{ min: 0, step: 1 }}
+                inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>

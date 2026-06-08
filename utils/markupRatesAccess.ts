@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database, Json } from '@/types/database';
 import type {
   MarkupRate,
@@ -373,7 +374,13 @@ export async function deleteMarkupRate(rateId: string): Promise<void> {
 
   if (error) {
     console.error('Error deleting markup rate:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'markup rate',
+        references: 'parts that use it',
+        fallback: 'Failed to delete markup rate.',
+      }),
+    );
   }
 }
 
@@ -385,7 +392,13 @@ export async function bulkDeleteMarkupRates(rateIds: string[]): Promise<void> {
 
   if (error) {
     console.error('Error bulk deleting markup rates:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'markup rate',
+        references: 'parts that use it',
+        fallback: 'Failed to delete markup rates.',
+      }),
+    );
   }
 }
 

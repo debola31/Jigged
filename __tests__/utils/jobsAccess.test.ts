@@ -80,9 +80,12 @@ describe('jobsAccess', () => {
       expect(inCall[1]).toEqual(['j1', 'j2']);
     });
 
-    it('throws when supabase returns an error', async () => {
+    it('throws a friendly (non-raw) error when supabase returns an error', async () => {
+      // Raw "permission denied" must be translated, not surfaced verbatim.
       mockQueryBuilder.error = { message: 'permission denied' };
-      await expect(bulkDeleteJobs(['j1'], 'co-1')).rejects.toThrow(/permission denied/);
+      await expect(bulkDeleteJobs(['j1'], 'co-1')).rejects.toThrow(
+        /don't have permission/,
+      );
     });
   });
 

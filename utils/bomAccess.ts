@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   BomLine,
   BomLineFormData,
@@ -347,6 +348,11 @@ export async function deleteBomLine(bomLineId: string): Promise<void> {
   const { error } = await supabase.from('parts_bom').delete().eq('id', bomLineId);
   if (error) {
     console.error('Error deleting BOM line:', error);
-    throw error;
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'BOM line',
+        fallback: 'Failed to delete BOM line.',
+      }),
+    );
   }
 }

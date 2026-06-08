@@ -17,6 +17,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 import { calculateActualRunMinutes } from '@/utils/sessionDuration';
 
@@ -110,7 +111,15 @@ export async function deleteOperator(operatorId: string): Promise<void> {
     .delete()
     .eq('id', operatorId);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('Error deleting operator:', error);
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'operator',
+        fallback: 'Failed to remove operator.',
+      }),
+    );
+  }
 }
 
 // ============================================================================

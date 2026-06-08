@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   PartPricingTier,
   PartPricingTierInput,
@@ -197,7 +198,15 @@ export async function setPartMarkupRate(
 export async function deleteTier(tierId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.from('part_pricing_tiers').delete().eq('id', tierId);
-  if (error) throw error;
+  if (error) {
+    console.error('Error deleting pricing tier:', error);
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'pricing tier',
+        fallback: 'Failed to delete pricing tier.',
+      }),
+    );
+  }
 }
 
 /**

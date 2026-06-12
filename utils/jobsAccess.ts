@@ -11,6 +11,7 @@ import type { Database } from '@/types/database';
 // `.update(...)` call rejects bare Record<string, unknown> because it
 // can't verify the keys against the table schema; using the generated
 // Update types preserves the column-name check.
+type JobUpdate = Database['public']['Tables']['jobs']['Update'];
 type JobPartUpdate = Database['public']['Tables']['job_parts']['Update'];
 type JobMaterialUpdate = Database['public']['Tables']['job_materials']['Update'];
 type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
@@ -202,7 +203,15 @@ export async function getJobWithRelations(
     .from('jobs')
     .select(`
       *,
-      customers!left(id, name),
+      customers!left(
+        id, name,
+        customer_contacts(id, name, role, email, phone, is_primary),
+        addresses:customer_addresses(
+          id,
+          address_line1, address_line2, city, state, postal_code, country,
+          default_billing, default_shipping, attention_to
+        )
+      ),
       quotes!jobs_quote_id_fkey(id, quote_number),
       job_parts(
         *,
@@ -240,6 +249,54 @@ export async function getJobWithRelations(
   }
 
   return job;
+}
+
+/**
+ * Update a job's billing/shipping address + contact. Each value is an
+ * address/contact id owned by the job's customer, or '' / null to clear it
+ * (translated to NULL). The enforce_job_address_contact_customer trigger
+ * rejects ids that don't belong to the job's customer.
+ */
+export async function updateJobAddressContact(
+  jobId: string,
+  companyId: string,
+  fields: {
+    billing_address_id?: string | null;
+    shipping_address_id?: string | null;
+    contact_id?: string | null;
+  },
+): Promise<Job> {
+  const supabase = getSupabase();
+
+  const toNull = (v: string | null | undefined): string | null | undefined =>
+    v === undefined ? undefined : v === '' ? null : v;
+
+  const patch: JobUpdate = {
+    billing_address_id: toNull(fields.billing_address_id),
+    shipping_address_id: toNull(fields.shipping_address_id),
+    contact_id: toNull(fields.contact_id),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(patch)
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error updating job address/contact:', error);
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'job',
+        fallback: 'Failed to update job billing/shipping details.',
+      }),
+    );
+  }
+
+  return data as Job;
 }
 
 // ============== Job Materials ==============

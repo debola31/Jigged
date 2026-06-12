@@ -35,7 +35,7 @@ import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobQRCode } from '@/components/jobs';
+import { OperationsPanel, JobQRCode, JobBillingShippingCard } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -323,6 +323,10 @@ export default function JobDetailPage() {
               <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
             </CardContent>
           </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12 }}>
+          <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} />
         </Grid>
 
         <Grid size={{ xs: 12 }}>

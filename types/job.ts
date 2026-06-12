@@ -62,6 +62,12 @@ export interface Job {
   quote_id: string | null;
   customer_id: string;
   customer_po_number: string | null;
+  // FKs into the customer's address book, copied from the source quote at
+  // conversion and editable on the job. Mirror quotes.{billing,shipping}_address_id
+  // + contact_id; a customer-match trigger enforces they belong to customer_id.
+  billing_address_id: string | null;
+  shipping_address_id: string | null;
+  contact_id: string | null;
   production_status: ProductionStatus;
   fulfillment_status: FulfillmentStatus;
   status_changed_at: string | null;
@@ -195,9 +201,32 @@ export interface JobPartWithRelations extends JobPart {
  * Job with joined relation data — used by the dashboard detail page.
  */
 export interface JobWithRelations extends Job {
+  // Customer + their full address book / contacts, so the job detail page can
+  // both resolve the job's selected billing/shipping/contact for display and
+  // offer the customer's other saved addresses/contacts in the edit dropdowns.
   customers?: {
     id: string;
     name: string;
+    customer_contacts?: Array<{
+      id: string;
+      name: string;
+      role: string;
+      email: string | null;
+      phone: string | null;
+      is_primary: boolean;
+    }>;
+    addresses?: Array<{
+      id: string;
+      address_line1: string | null;
+      address_line2: string | null;
+      city: string | null;
+      state: string | null;
+      postal_code: string | null;
+      country: string | null;
+      default_billing: boolean;
+      default_shipping: boolean;
+      attention_to: string | null;
+    }>;
   } | null;
   quotes?: {
     id: string;

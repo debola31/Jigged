@@ -1079,6 +1079,12 @@ export async function convertQuoteToJob(
       due_date: dueDate,
       lead_time_days: promisedLeadTime,
       customer_po_number: customerPoNumber,
+      // Carry the quote's billing/shipping address + contact onto the job so
+      // it has a shippable address of its own. Editable on the job afterwards
+      // (utils/jobsAccess.ts updateJobAddressContact) without touching the quote.
+      billing_address_id: quote.billing_address_id,
+      shipping_address_id: quote.shipping_address_id,
+      contact_id: quote.contact_id,
       created_by: user.id,
     })
     .select('id, job_number')

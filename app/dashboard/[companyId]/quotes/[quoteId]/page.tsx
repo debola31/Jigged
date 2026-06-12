@@ -203,6 +203,10 @@ export default function QuoteDetailPage() {
   const shippingAddress = customerAddresses.find((a) => a.id === quote.shipping_address_id) ?? null;
   const billingAddress = customerAddresses.find((a) => a.id === quote.billing_address_id) ?? null;
   const quoteContact = customerContacts.find((c) => c.id === quote.contact_id) ?? null;
+  // When billing points at the same address as shipping, don't repeat it —
+  // just flag the match.
+  const billingSameAsShipping =
+    !!quote.shipping_address_id && quote.billing_address_id === quote.shipping_address_id;
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -440,7 +444,13 @@ export default function QuoteDetailPage() {
                     <Typography variant="body2" color="text.secondary">
                       Billing address
                     </Typography>
-                    <AddressDisplay address={billingAddress} />
+                    {billingSameAsShipping ? (
+                      <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                        Same as shipping
+                      </Typography>
+                    ) : (
+                      <AddressDisplay address={billingAddress} />
+                    )}
                   </Grid>
                 </Grid>
               ) : (

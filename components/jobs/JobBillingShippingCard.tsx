@@ -64,6 +64,8 @@ export default function JobBillingShippingCard({
   const shippingAddress = addresses.find((a) => a.id === job.shipping_address_id) ?? null;
   const billingAddress = addresses.find((a) => a.id === job.billing_address_id) ?? null;
   const contact = contacts.find((c) => c.id === job.contact_id) ?? null;
+  const billingSameAsShipping =
+    !!job.shipping_address_id && job.billing_address_id === job.shipping_address_id;
 
   const customerHref = `/dashboard/${companyId}/customers/${job.customer_id}`;
 
@@ -161,7 +163,13 @@ export default function JobBillingShippingCard({
               <Typography variant="body2" color="text.secondary">
                 Billing address
               </Typography>
-              <AddressDisplay address={billingAddress} />
+              {billingSameAsShipping ? (
+                <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  Same as shipping
+                </Typography>
+              ) : (
+                <AddressDisplay address={billingAddress} />
+              )}
             </Grid>
           </Grid>
         ) : (

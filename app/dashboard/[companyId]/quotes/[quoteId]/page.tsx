@@ -42,6 +42,7 @@ import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
+import AddressDisplay from '@/components/common/AddressDisplay';
 
 export default function QuoteDetailPage() {
   const params = useParams();
@@ -194,6 +195,18 @@ export default function QuoteDetailPage() {
     partGroups[gi].items.push(li);
   }
   const isFirmQuote = partGroups.length > 0 && partGroups.every((g) => g.items.length === 1);
+
+  // Resolve the quote's frozen address/contact FKs against the customer's
+  // address book for display. These were captured at quote creation.
+  const customerAddresses = quote.customers?.addresses ?? [];
+  const customerContacts = quote.customers?.customer_contacts ?? [];
+  const shippingAddress = customerAddresses.find((a) => a.id === quote.shipping_address_id) ?? null;
+  const billingAddress = customerAddresses.find((a) => a.id === quote.billing_address_id) ?? null;
+  const quoteContact = customerContacts.find((c) => c.id === quote.contact_id) ?? null;
+  // When billing points at the same address as shipping, don't repeat it —
+  // just flag the match.
+  const billingSameAsShipping =
+    !!quote.shipping_address_id && quote.billing_address_id === quote.shipping_address_id;
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -382,13 +395,64 @@ export default function QuoteDetailPage() {
               </Typography>
               <Divider sx={{ mb: 2 }} />
               {quote.customers ? (
-                <MuiLink
-                  component={Link}
-                  href={`/dashboard/${companyId}/customers/${quote.customer_id}`}
-                  sx={{ fontWeight: 500 }}
-                >
-                  {quote.customers.name}
-                </MuiLink>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Customer
+                    </Typography>
+                    <MuiLink
+                      component={Link}
+                      href={`/dashboard/${companyId}/customers/${quote.customer_id}`}
+                      sx={{ fontWeight: 500 }}
+                    >
+                      {quote.customers.name}
+                    </MuiLink>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Contact
+                    </Typography>
+                    {quoteContact ? (
+                      <Box>
+                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                          {quoteContact.name}
+                        </Typography>
+                        {quoteContact.email && (
+                          <Typography variant="body2" color="text.secondary">
+                            {quoteContact.email}
+                          </Typography>
+                        )}
+                        {quoteContact.phone && (
+                          <Typography variant="body2" color="text.secondary">
+                            {quoteContact.phone}
+                          </Typography>
+                        )}
+                      </Box>
+                    ) : (
+                      <Typography variant="body1" color="text.secondary">
+                        Not set
+                      </Typography>
+                    )}
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Shipping address
+                    </Typography>
+                    <AddressDisplay address={shippingAddress} />
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Billing address
+                    </Typography>
+                    {billingSameAsShipping ? (
+                      <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                        Same as shipping
+                      </Typography>
+                    ) : (
+                      <AddressDisplay address={billingAddress} />
+                    )}
+                  </Grid>
+                </Grid>
               ) : (
                 <Typography color="text.secondary">Customer not found</Typography>
               )}

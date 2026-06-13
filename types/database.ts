@@ -946,8 +946,10 @@ export type Database = {
       }
       jobs: {
         Row: {
+          billing_address_id: string | null
           company_id: string
           completed_at: string | null
+          contact_id: string | null
           created_at: string | null
           created_by: string | null
           customer_id: string | null
@@ -959,13 +961,16 @@ export type Database = {
           lead_time_days: number | null
           production_status: string
           quote_id: string | null
+          shipping_address_id: string | null
           started_at: string | null
           status_changed_at: string | null
           updated_at: string | null
         }
         Insert: {
+          billing_address_id?: string | null
           company_id: string
           completed_at?: string | null
+          contact_id?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
@@ -977,13 +982,16 @@ export type Database = {
           lead_time_days?: number | null
           production_status: string
           quote_id?: string | null
+          shipping_address_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
         }
         Update: {
+          billing_address_id?: string | null
           company_id?: string
           completed_at?: string | null
+          contact_id?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
@@ -995,16 +1003,31 @@ export type Database = {
           lead_time_days?: number | null
           production_status?: string
           quote_id?: string | null
+          shipping_address_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
         }
         Relationships: [
           {
+            foreignKeyName: "jobs_billing_address_id_fkey"
+            columns: ["billing_address_id"]
+            isOneToOne: false
+            referencedRelation: "customer_addresses"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "jobs_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "customer_contacts"
             referencedColumns: ["id"]
           },
           {
@@ -1019,6 +1042,13 @@ export type Database = {
             columns: ["quote_id"]
             isOneToOne: false
             referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_shipping_address_id_fkey"
+            columns: ["shipping_address_id"]
+            isOneToOne: false
+            referencedRelation: "customer_addresses"
             referencedColumns: ["id"]
           },
         ]

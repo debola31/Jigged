@@ -31,6 +31,7 @@ import {
   getOverdueJobsCount,
   getReadyOperationsForJobs,
   searchJobsByIdentifier,
+  updateJobAddressContact,
 } from '@/utils/jobsAccess';
 
 describe('jobsAccess', () => {
@@ -158,6 +159,42 @@ describe('jobsAccess', () => {
       });
       const result = await getReadyOperationsForJobs(['j1']);
       expect(result.size).toBe(0);
+    });
+  });
+
+  describe('updateJobAddressContact', () => {
+    it('writes the three FKs scoped to job + company, translating "" to null', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      mockQueryBuilder.error = null;
+      await updateJobAddressContact('j1', 'co-1', {
+        shipping_address_id: 'addr-ship',
+        billing_address_id: '',
+        contact_id: 'contact-1',
+      });
+      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch.shipping_address_id).toBe('addr-ship');
+      expect(patch.billing_address_id).toBeNull();
+      expect(patch.contact_id).toBe('contact-1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'j1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    });
+
+    it('omits keys left undefined so a partial update does not clobber other FKs', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      mockQueryBuilder.error = null;
+      await updateJobAddressContact('j1', 'co-1', { contact_id: 'contact-2' });
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch.contact_id).toBe('contact-2');
+      expect(patch.shipping_address_id).toBeUndefined();
+      expect(patch.billing_address_id).toBeUndefined();
+    });
+
+    it('throws a friendly (non-raw) error when supabase returns an error', async () => {
+      mockQueryBuilder.error = { message: 'permission denied' };
+      await expect(
+        updateJobAddressContact('j1', 'co-1', { contact_id: 'c1' }),
+      ).rejects.toThrow(/don't have permission/);
     });
   });
 

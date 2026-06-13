@@ -8,3 +8,4 @@ export { default as OperationsPanel } from "./OperationsPanel";
 export { default as CompleteOperationModal } from "./CompleteOperationModal";
 export { default as ViewRoutingModal } from "./ViewRoutingModal";
 export { default as JobQRCode } from "./JobQRCode";
+export { default as JobBillingShippingCard } from "./JobBillingShippingCard";

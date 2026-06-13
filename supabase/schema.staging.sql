@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-05T02:07:01Z
+-- Generated: 2026-06-12T19:17:13Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -239,6 +239,9 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "production_status" text NOT NULL,
     "fulfillment_status" text NOT NULL,
     "customer_po_number" text,
+    "billing_address_id" uuid,
+    "shipping_address_id" uuid,
+    "contact_id" uuid,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -2109,7 +2112,13 @@ ALTER TABLE "public"."job_parts"
     ADD CONSTRAINT "job_parts_source_quote_line_item_id_fkey" FOREIGN KEY (source_quote_line_item_id) REFERENCES quote_line_items(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."jobs"
+    ADD CONSTRAINT "jobs_billing_address_id_fkey" FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."jobs"
+    ADD CONSTRAINT "jobs_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
@@ -2119,6 +2128,9 @@ ALTER TABLE "public"."jobs"
 
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."jobs"
+    ADD CONSTRAINT "jobs_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -3129,6 +3141,43 @@ BEGIN
     END LOOP;
 
     RETURN v_shipment_id;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enforce_job_address_contact_customer()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    IF NEW.billing_address_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_addresses
+         WHERE id = NEW.billing_address_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'jobs.billing_address_id % does not belong to customer %',
+                NEW.billing_address_id, NEW.customer_id;
+        END IF;
+    END IF;
+    IF NEW.shipping_address_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_addresses
+         WHERE id = NEW.shipping_address_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'jobs.shipping_address_id % does not belong to customer %',
+                NEW.shipping_address_id, NEW.customer_id;
+        END IF;
+    END IF;
+    IF NEW.contact_id IS NOT NULL THEN
+        PERFORM 1 FROM public.customer_contacts
+         WHERE id = NEW.contact_id AND customer_id = NEW.customer_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+                'jobs.contact_id % does not belong to customer %',
+                NEW.contact_id, NEW.customer_id;
+        END IF;
+    END IF;
+    RETURN NEW;
 END $function$
 
 ;
@@ -4656,6 +4705,9 @@ CREATE TRIGGER trigger_sync_job_production_status_from_parts_ins AFTER INSERT ON
 
 DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_upd" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_production_status_from_parts_upd AFTER UPDATE OF production_status ON public.job_parts FOR EACH ROW WHEN ((old.production_status IS DISTINCT FROM new.production_status)) EXECUTE FUNCTION sync_job_production_status_from_parts();
+
+DROP TRIGGER IF EXISTS "enforce_job_address_contact_customer_trg" ON "public"."jobs";
+CREATE TRIGGER enforce_job_address_contact_customer_trg BEFORE INSERT OR UPDATE OF billing_address_id, shipping_address_id, contact_id, customer_id ON public.jobs FOR EACH ROW EXECUTE FUNCTION enforce_job_address_contact_customer();
 
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

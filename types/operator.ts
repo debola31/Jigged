@@ -120,8 +120,6 @@ export interface OperatorJobDetail {
   // Per-part operation progress
   operations_total: number;
   operations_completed: number;
-  // Material requirements scoped to this part.
-  materials: Array<{ name: string; quantity: number; unit: string }>;
   /**
    * True when this operation has earlier (lower-sequence) steps on the part
    * that are not yet completed. Only the traveler/operation-detail path sets
@@ -231,28 +229,6 @@ export interface JobStartRequest {
  */
 export interface JobStopRequest {
   notes?: string;
-}
-
-/**
- * Material confirmation data for job completion.
- * Pre-filled from routing, operator confirms or adjusts.
- */
-export interface MaterialConfirmation {
-  inventory_item_id: string;
-  item_name: string;
-  expected_quantity: number;
-  confirmed_quantity: number;
-  unit: string;
-  current_stock: number;
-  primary_unit: string;
-}
-
-/**
- * Request body for completing a job operation.
- */
-export interface JobCompleteRequest {
-  notes?: string;
-  materials?: MaterialConfirmation[];
 }
 
 /**

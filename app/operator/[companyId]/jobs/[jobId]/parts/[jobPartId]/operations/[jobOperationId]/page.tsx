@@ -11,12 +11,8 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
 import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
-import InventoryIcon from '@mui/icons-material/Inventory';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
@@ -26,10 +22,10 @@ import {
   getCurrentOperator,
   startJob,
   stopJob,
+  completeJob,
 } from '@/utils/operatorAccess';
 import type { OperatorJobDetail } from '@/types/operator';
 import { formatDuration } from '@/types/operator';
-import JobCompleteModal from '@/components/operator/JobCompleteModal';
 
 function SessionTimer({ startedAt }: { startedAt: string }) {
   const [elapsed, setElapsed] = useState(0);
@@ -128,7 +124,6 @@ export default function OperatorOperationActionPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showCompleteModal, setShowCompleteModal] = useState(false);
 
   useEffect(() => {
     async function loadOperator() {
@@ -193,11 +188,23 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  const handleComplete = () => setShowCompleteModal(true);
-
-  const handleCompleteConfirm = async () => {
-    setShowCompleteModal(false);
-    router.push(travelerHref);
+  // Completion is a direct action — no confirmation dialog. Job notes live at
+  // the job level (the traveler) and material consumption is driven by the part
+  // BOM, so there's nothing to confirm here.
+  const handleComplete = async () => {
+    if (!currentOperatorId) {
+      setError('Operator not found. Please log in again.');
+      return;
+    }
+    setActionLoading(true);
+    setError(null);
+    try {
+      await completeJob(jobPartId, currentOperatorId);
+      router.push(travelerHref);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to complete operation');
+      setActionLoading(false);
+    }
   };
 
   const isWorking =
@@ -315,37 +322,6 @@ export default function OperatorOperationActionPage() {
         </Card>
       )}
 
-      {job.materials && job.materials.length > 0 && (
-        <Card
-          elevation={2}
-          sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
-        >
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-              <InventoryIcon fontSize="small" color="action" />
-              <Typography variant="h6" color="text.secondary">
-                Related Materials
-              </Typography>
-            </Box>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Confirm what you used when you mark this part complete.
-            </Typography>
-            <List dense disablePadding>
-              {job.materials.map((mat, idx) => (
-                <ListItem key={idx} disableGutters sx={{ py: 0.25 }}>
-                  <ListItemText
-                    primary={mat.name}
-                    secondary={`${mat.quantity} ${mat.unit}`}
-                    primaryTypographyProps={{ variant: 'body2' }}
-                    secondaryTypographyProps={{ variant: 'caption' }}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          </CardContent>
-        </Card>
-      )}
-
       {isCompleted && (
         <Alert severity="success" sx={{ mb: 3 }}>
           This step is already complete.
@@ -414,21 +390,10 @@ export default function OperatorOperationActionPage() {
             disabled={actionLoading}
             sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
           >
-            MARK COMPLETE
+            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
           </Button>
         </Paper>
       )}
-
-      <JobCompleteModal
-        open={showCompleteModal}
-        onClose={() => setShowCompleteModal(false)}
-        onConfirm={handleCompleteConfirm}
-        jobPartId={jobPartId}
-        operatorId={currentOperatorId}
-        sessionStartedAt={job.session_started_at}
-        jobOperationId={job.operation_id}
-        companyId={companyId}
-      />
     </Box>
   );
 }

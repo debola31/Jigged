@@ -34,14 +34,11 @@ import type {
   Station,
   JobStartRequest,
   JobStopRequest,
-  JobCompleteRequest,
   JobCompleteResponse,
-  MaterialConfirmation,
   JobTraveler,
   JobTravelerOperation,
   JobNote,
 } from '@/types/operator';
-import { removePartStockGraceful } from '@/utils/partsAccess';
 
 // Operator type from user_company_access. role and created_at are
 // nullable in the DB schema (text DEFAULT 'operator'; timestamptz
@@ -458,30 +455,6 @@ async function assembleJobPartDetail(
   const operationsTotal = allRows.length;
   const operationsCompleted = allRows.filter((op) => op.status === 'completed').length;
 
-  // Materials are scoped to this job_part.
-  let materials: Array<{ name: string; quantity: number; unit: string }> = [];
-  const { data: jobMats } = await supabase
-    .from('job_materials')
-    .select('expected_quantity, unit, material_part:parts!job_materials_material_part_id_fkey(part_name)')
-    .eq('job_part_id', jobPartId)
-    .order('created_at', { ascending: true });
-
-  type JobMatRow = {
-    expected_quantity: number;
-    unit: string;
-    material_part: { part_name: string } | { part_name: string }[] | null;
-  };
-  if (jobMats) {
-    materials = (jobMats as JobMatRow[])
-      .map((m) => {
-        const part = Array.isArray(m.material_part) ? m.material_part[0] : m.material_part;
-        return part
-          ? { name: part.part_name, quantity: Number(m.expected_quantity), unit: m.unit }
-          : null;
-      })
-      .filter((m): m is { name: string; quantity: number; unit: string } => m !== null);
-  }
-
   return {
     id: header.id,
     job_id: header.job_id,
@@ -500,65 +473,14 @@ async function assembleJobPartDetail(
     current_operator_name: currentOperatorName,
     operations_total: operationsTotal,
     operations_completed: operationsCompleted,
-    materials,
   };
 }
 
 /**
- * Detailed view for a single job_part. Optionally filter the "current
- * operation" lookup by operation_type_id (if the operator scanned a station
- * QR and is asking "what's next at THIS station on this part").
- */
-export async function getOperatorJobPartDetail(
-  jobPartId: string,
-  companyId: string,
-  operationTypeId?: string,
-): Promise<OperatorJobDetail | null> {
-  const supabase = getSupabase();
-
-  const header = await loadPartHeader(jobPartId, companyId);
-  if (!header) return null;
-
-  let opsQuery = supabase
-    .from('job_operations')
-    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, routing_operation_id')
-    .eq('job_part_id', jobPartId)
-    .order('sequence', { ascending: true });
-
-  if (operationTypeId) {
-    opsQuery = opsQuery.eq('work_center_id', operationTypeId);
-  }
-
-  const { data: ops } = await opsQuery;
-
-  type OpRow = {
-    id: string;
-    sequence: number;
-    operation_name: string;
-    status: string;
-    estimated_setup_minutes: number | null;
-    estimated_run_minutes_per_unit: number | null;
-    work_center_id: string;
-    routing_operation_id: string | null;
-  };
-  const opRows = (ops ?? []) as OpRow[];
-
-  let currentOp: OpRow | null =
-    opRows.find((op) => op.status === 'pending' || op.status === 'in_progress') ?? null;
-
-  if (currentOp && currentOp.status === 'pending') {
-    const ready = await isJobOperationReady(currentOp.id);
-    if (!ready) currentOp = null;
-  }
-
-  return assembleJobPartDetail(header, currentOp);
-}
-
-/**
- * Detail view for ONE specific job_operation (the traveler taps a step). Unlike
- * getOperatorJobPartDetail, this never resolves by station or sequence and never
- * gates on readiness — the operator chose this exact step, and shops may run out
- * of order. Returns the same OperatorJobDetail shape so the action UI is reused.
+ * Detail view for ONE specific job_operation (the traveler taps a step). It
+ * never resolves by station or sequence and never gates on readiness — the
+ * operator chose this exact step, and shops may run out of order. Returns an
+ * OperatorJobDetail so the action UI has a single shape to render.
  */
 export async function getOperatorOperationDetail(
   jobOperationId: string,
@@ -876,67 +798,18 @@ export async function stopJob(
 }
 
 /**
- * Get expected materials for a job_part for the completion confirmation step.
- */
-export async function getJobPartMaterialsForCompletion(
-  jobPartId: string,
-): Promise<MaterialConfirmation[]> {
-  const supabase = getSupabase();
-
-  const { data: jobMats, error } = await supabase
-    .from('job_materials')
-    .select(`
-      id, material_part_id, expected_quantity, actual_quantity, unit, status,
-      material_part:parts!job_materials_material_part_id_fkey(part_name, primary_unit, quantity)
-    `)
-    .eq('job_part_id', jobPartId)
-    .order('created_at', { ascending: true });
-
-  if (error || !jobMats) return [];
-
-  type MatRow = {
-    id: string;
-    material_part_id: string;
-    expected_quantity: number;
-    actual_quantity: number | null;
-    unit: string;
-    status: string;
-    material_part:
-      | { part_name: string; primary_unit: string | null; quantity: number }
-      | { part_name: string; primary_unit: string | null; quantity: number }[]
-      | null;
-  };
-
-  return (jobMats as MatRow[])
-    .map((m) => {
-      const part = Array.isArray(m.material_part) ? m.material_part[0] : m.material_part;
-      if (!part) return null;
-      return {
-        // MaterialConfirmation type still uses inventory_item_id as the legacy
-        // field name; the value is now a part_id (the unified item master).
-        inventory_item_id: m.material_part_id,
-        item_name: part.part_name,
-        expected_quantity: Number(m.expected_quantity),
-        confirmed_quantity:
-          m.actual_quantity != null ? Number(m.actual_quantity) : Number(m.expected_quantity),
-        unit: m.unit,
-        current_stock: Number(part.quantity),
-        primary_unit: part.primary_unit ?? '',
-      } as MaterialConfirmation;
-    })
-    .filter((m): m is MaterialConfirmation => m !== null);
-}
-
-/**
  * Mark the current operation on a job_part complete. Closes the operator
  * session, computes actual run minutes, marks the operation completed, and
  * — if it was the last op on the part — flips the job_part to 'completed'
  * (the database trigger then aggregates that into jobs.production_status).
+ *
+ * No completion notes or material-consumption confirmation: job notes now live
+ * at the job level (job_notes) and material consumption is driven by the part
+ * BOM, not tracked here. This is a direct action with no confirmation dialog.
  */
 export async function completeJob(
   jobPartId: string,
   operatorId: string,
-  request: JobCompleteRequest,
 ): Promise<JobCompleteResponse> {
   const supabase = getSupabase();
 
@@ -963,10 +836,7 @@ export async function completeJob(
 
   await supabase
     .from('operator_sessions')
-    .update({
-      ended_at: now,
-      notes: request.notes || null,
-    })
+    .update({ ended_at: now })
     .eq('id', session.id);
 
   let actualRunMinutes: number | null = null;
@@ -995,7 +865,7 @@ export async function completeJob(
       .eq('id', session.job_operation_id);
   }
 
-  // 4. Per-part rollup: are all ops on THIS part now done?
+  // Per-part rollup: are all ops on THIS part now done?
   const { data: remaining } = await supabase
     .from('job_operations')
     .select('id')
@@ -1017,7 +887,7 @@ export async function completeJob(
       .not('production_status', 'in', '("cancelled")');
   }
 
-  // 5. After the part flips, check if EVERY part on the job is done — for the
+  // After the part flips, check if EVERY part on the job is done — for the
   // "job_completed" return flag. The DB trigger has already cascaded the
   // production_status; we just read it back.
   let jobCompleted = false;
@@ -1028,47 +898,6 @@ export async function completeJob(
       .eq('id', part.job_id)
       .single();
     jobCompleted = jobRow?.production_status === 'completed';
-  }
-
-  // 6. Deplete inventory at part-completion time. Each part owns its own
-  // job_materials rows; we never deplete twice for the same part.
-  if (partCompleted && request.materials && request.materials.length > 0) {
-    for (const material of request.materials) {
-      if (material.confirmed_quantity > 0) {
-        // material.inventory_item_id holds the part_id under its legacy name.
-        await removePartStockGraceful(
-          material.inventory_item_id,
-          material.confirmed_quantity,
-          material.unit,
-          'Job part completion',
-          part.job_id,
-          session.job_operation_id || undefined,
-          operatorId,
-          operatorId,
-        );
-
-        const { data: jobMatRows } = await supabase
-          .from('job_materials')
-          .select('id')
-          .eq('job_part_id', jobPartId)
-          .eq('material_part_id', material.inventory_item_id)
-          .eq('unit', material.unit)
-          .eq('status', 'pending')
-          .limit(1);
-
-        if (jobMatRows && jobMatRows.length > 0) {
-          await supabase
-            .from('job_materials')
-            .update({
-              actual_quantity: material.confirmed_quantity,
-              status: 'consumed',
-              consumed_at: now,
-              consumed_by: operatorId,
-            })
-            .eq('id', jobMatRows[0].id);
-        }
-      }
-    }
   }
 
   // DB DEFAULT now() on started_at; never null at read time. See note
@@ -1226,65 +1055,6 @@ export async function getStationName(
     .single();
 
   return data?.name || null;
-}
-
-/**
- * Stations available for a job_part. An operation_type is "available" when
- * its operation on this part is in_progress, OR is pending and DAG-ready
- * (no earlier-sequence op left in_progress/pending on the same part).
- */
-export async function getStationsForJobPart(
-  jobPartId: string,
-  companyId: string,
-): Promise<Array<{ id: string; name: string }>> {
-  const supabase = getSupabase();
-
-  const { data: part } = await supabase
-    .from('job_parts')
-    .select('id, jobs!inner(company_id)')
-    .eq('id', jobPartId)
-    .single();
-  type PartShape = { id: string; jobs: { company_id: string } | { company_id: string }[] | null };
-  const partRow = part as PartShape | null;
-  const jobsJoin = partRow ? (Array.isArray(partRow.jobs) ? partRow.jobs[0] : partRow.jobs) : null;
-  if (!jobsJoin || jobsJoin.company_id !== companyId) return [];
-
-  const { data: ops } = await supabase
-    .from('job_operations')
-    .select('id, work_center_id, status, sequence, work_center:work_centers(name)')
-    .eq('job_part_id', jobPartId)
-    .in('status', ['pending', 'in_progress'])
-    .order('sequence', { ascending: true });
-
-  if (!ops || ops.length === 0) return [];
-
-  type OpRow = {
-    id: string;
-    work_center_id: string | null;
-    status: string;
-    sequence: number;
-    work_center: { name: string } | { name: string }[] | null;
-  };
-
-  const seen = new Set<string>();
-  const stations: Array<{ id: string; name: string }> = [];
-  for (const op of ops as OpRow[]) {
-    if (!op.work_center_id || seen.has(op.work_center_id)) continue;
-
-    if (op.status === 'pending') {
-      const ready = await isJobOperationReady(op.id);
-      if (!ready) continue;
-    }
-
-    seen.add(op.work_center_id);
-    const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
-    stations.push({
-      id: op.work_center_id,
-      name: wcJoin?.name || 'Unknown Station',
-    });
-  }
-
-  return stations;
 }
 
 // ============================================================================

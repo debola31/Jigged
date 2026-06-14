@@ -35,7 +35,7 @@ import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobQRCode, JobBillingShippingCard } from '@/components/jobs';
+import { OperationsPanel, JobQRCode, JobBillingShippingCard, JobPartMaterialsCard } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -417,6 +417,9 @@ export default function JobDetailPage() {
                             No operations on this part.
                           </Typography>
                         )}
+                        <Box sx={{ mt: 2 }}>
+                          <JobPartMaterialsCard partId={part.part_id} />
+                        </Box>
                       </Box>
                     );
                   })}

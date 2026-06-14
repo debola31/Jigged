@@ -220,17 +220,15 @@ SCHEMA_CONTEXT = """
 - assigned_to: UUID, completed_by: UUID
 - instructions: TEXT, notes: TEXT
 
-### job_materials (materials snapshot for a specific job_part — NO company_id, join via jobs)
+### job_materials (expected-BOM snapshot for a specific job_part — NO company_id, join via jobs)
 - id: UUID (PK)
 - job_id: UUID (FK -> jobs.id)
 - job_part_id: UUID (FK -> job_parts.id)
 - parts_bom_id: UUID (FK -> parts_bom.id, nullable if source deleted)
-- material_part_id: UUID (FK -> parts.id) -- the material consumed
+- material_part_id: UUID (FK -> parts.id) -- the material
 - expected_quantity: NUMERIC (>=0)
-- actual_quantity: NUMERIC (nullable until consumed)
 - unit: TEXT
-- status: TEXT -- one of: 'pending', 'consumed', 'skipped'
-- consumed_at: TIMESTAMPTZ, consumed_by: UUID
+-- Consumption is no longer tracked here; the part BOM (parts_bom) is the source of truth.
 
 ### work_centers (REPLACES operation_types; e.g. 'CNC Mill #1', 'Outside Plating')
 - id: UUID (PK)
@@ -292,7 +290,7 @@ SCHEMA_CONTEXT = """
 - job_operation_id: UUID (FK -> job_operations.id, nullable)
 - work_center_id: UUID (FK -> work_centers.id) -- was operation_type_id
 - started_at: TIMESTAMPTZ, ended_at: TIMESTAMPTZ (null = currently active)
-- notes: TEXT, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)

@@ -34,7 +34,6 @@ export interface OperatorSession {
   operation_type_id: string;
   started_at: string;
   ended_at: string | null;
-  notes: string | null;
   duration_seconds?: number;
   // Enriched fields (joined from related tables)
   job_number?: string | null;
@@ -53,7 +52,6 @@ export interface ActiveSession {
   operation_name: string | null;
   operation_type_id: string;
   started_at: string;
-  notes: string | null;
 }
 
 // ============================================================================
@@ -222,13 +220,6 @@ export interface JobNote {
 export interface JobStartRequest {
   operation_type_id?: string;
   job_operation_id?: string;
-}
-
-/**
- * Request body for stopping work on a job.
- */
-export interface JobStopRequest {
-  notes?: string;
 }
 
 /**

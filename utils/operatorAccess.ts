@@ -37,6 +37,9 @@ import type {
   JobCompleteRequest,
   JobCompleteResponse,
   MaterialConfirmation,
+  JobTraveler,
+  JobTravelerOperation,
+  JobNote,
 } from '@/types/operator';
 import { removePartStockGraceful } from '@/utils/partsAccess';
 
@@ -326,19 +329,37 @@ export async function getOperatorJobs(
 // PER-PART JOB DETAIL (the page where Start/Stop/Complete lives)
 // ============================================================================
 
+// Header fields shared by the per-part and per-operation detail views.
+interface PartHeaderForDetail {
+  id: string;
+  job_id: string;
+  quantity: number;
+  production_status: string;
+  job_number: string;
+  customer_name: string | null;
+  part_name: string | null;
+}
+
+// The single operation an operator detail view is built around.
+interface CurrentOpForDetail {
+  id: string;
+  operation_name: string;
+  status: string;
+  estimated_setup_minutes: number | null;
+  estimated_run_minutes_per_unit: number | null;
+}
+
 /**
- * Detailed view for a single job_part. Optionally filter the "current
- * operation" lookup by operation_type_id (if the operator scanned a station
- * QR and is asking "what's next at THIS station on this part").
+ * Load the job_part header (job/customer/part) scoped to a company. Shared by
+ * the per-part and per-operation detail views.
  */
-export async function getOperatorJobPartDetail(
+async function loadPartHeader(
   jobPartId: string,
   companyId: string,
-  operationTypeId?: string,
-): Promise<OperatorJobDetail | null> {
+): Promise<PartHeaderForDetail | null> {
   const supabase = getSupabase();
 
-  const { data: part, error: partError } = await supabase
+  const { data: part, error } = await supabase
     .from('job_parts')
     .select(`
       id, job_id, production_status, quantity,
@@ -349,7 +370,7 @@ export async function getOperatorJobPartDetail(
     .eq('jobs.company_id', companyId)
     .single();
 
-  if (partError || !part) return null;
+  if (error || !part) return null;
 
   type PartRow = {
     id: string;
@@ -366,37 +387,29 @@ export async function getOperatorJobPartDetail(
     ? Array.isArray(jobJoin.customers) ? jobJoin.customers[0] : jobJoin.customers
     : null;
 
-  let opsQuery = supabase
-    .from('job_operations')
-    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, routing_operation_id')
-    .eq('job_part_id', jobPartId)
-    .order('sequence', { ascending: true });
-
-  if (operationTypeId) {
-    opsQuery = opsQuery.eq('work_center_id', operationTypeId);
-  }
-
-  const { data: ops } = await opsQuery;
-
-  type OpRow = {
-    id: string;
-    sequence: number;
-    operation_name: string;
-    status: string;
-    estimated_setup_minutes: number | null;
-    estimated_run_minutes_per_unit: number | null;
-    work_center_id: string;
-    routing_operation_id: string | null;
+  return {
+    id: p.id,
+    job_id: p.job_id,
+    quantity: p.quantity,
+    production_status: p.production_status,
+    job_number: jobJoin?.job_number ?? '',
+    customer_name: customerJoin?.name ?? null,
+    part_name: partsJoin?.part_name ?? null,
   };
-  const opRows = (ops ?? []) as OpRow[];
+}
 
-  let currentOp: OpRow | null =
-    opRows.find((op) => op.status === 'pending' || op.status === 'in_progress') ?? null;
-
-  if (currentOp && currentOp.status === 'pending') {
-    const ready = await isJobOperationReady(currentOp.id);
-    if (!ready) currentOp = null;
-  }
+/**
+ * Assemble the OperatorJobDetail (session, estimate, progress, materials)
+ * around a resolved part header + a single "current" operation. Shared by
+ * getOperatorJobPartDetail (resolves the op by station/sequence) and
+ * getOperatorOperationDetail (resolves a specific op by id).
+ */
+async function assembleJobPartDetail(
+  header: PartHeaderForDetail,
+  currentOp: CurrentOpForDetail | null,
+): Promise<OperatorJobDetail> {
+  const supabase = getSupabase();
+  const jobPartId = header.id;
 
   let activeSessionId: string | null = null;
   let sessionStartedAt: string | null = null;
@@ -470,13 +483,13 @@ export async function getOperatorJobPartDetail(
   }
 
   return {
-    id: p.id,
-    job_id: p.job_id,
-    job_number: jobJoin?.job_number ?? '',
-    customer_name: customerJoin?.name ?? null,
-    part_name: partsJoin?.part_name ?? null,
-    part_quantity: p.quantity,
-    production_status: p.production_status,
+    id: header.id,
+    job_id: header.job_id,
+    job_number: header.job_number,
+    customer_name: header.customer_name,
+    part_name: header.part_name,
+    part_quantity: header.quantity,
+    production_status: header.production_status,
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
@@ -489,6 +502,93 @@ export async function getOperatorJobPartDetail(
     operations_completed: operationsCompleted,
     materials,
   };
+}
+
+/**
+ * Detailed view for a single job_part. Optionally filter the "current
+ * operation" lookup by operation_type_id (if the operator scanned a station
+ * QR and is asking "what's next at THIS station on this part").
+ */
+export async function getOperatorJobPartDetail(
+  jobPartId: string,
+  companyId: string,
+  operationTypeId?: string,
+): Promise<OperatorJobDetail | null> {
+  const supabase = getSupabase();
+
+  const header = await loadPartHeader(jobPartId, companyId);
+  if (!header) return null;
+
+  let opsQuery = supabase
+    .from('job_operations')
+    .select('id, sequence, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, routing_operation_id')
+    .eq('job_part_id', jobPartId)
+    .order('sequence', { ascending: true });
+
+  if (operationTypeId) {
+    opsQuery = opsQuery.eq('work_center_id', operationTypeId);
+  }
+
+  const { data: ops } = await opsQuery;
+
+  type OpRow = {
+    id: string;
+    sequence: number;
+    operation_name: string;
+    status: string;
+    estimated_setup_minutes: number | null;
+    estimated_run_minutes_per_unit: number | null;
+    work_center_id: string;
+    routing_operation_id: string | null;
+  };
+  const opRows = (ops ?? []) as OpRow[];
+
+  let currentOp: OpRow | null =
+    opRows.find((op) => op.status === 'pending' || op.status === 'in_progress') ?? null;
+
+  if (currentOp && currentOp.status === 'pending') {
+    const ready = await isJobOperationReady(currentOp.id);
+    if (!ready) currentOp = null;
+  }
+
+  return assembleJobPartDetail(header, currentOp);
+}
+
+/**
+ * Detail view for ONE specific job_operation (the traveler taps a step). Unlike
+ * getOperatorJobPartDetail, this never resolves by station or sequence and never
+ * gates on readiness — the operator chose this exact step, and shops may run out
+ * of order. Returns the same OperatorJobDetail shape so the action UI is reused.
+ */
+export async function getOperatorOperationDetail(
+  jobOperationId: string,
+  companyId: string,
+): Promise<OperatorJobDetail | null> {
+  const supabase = getSupabase();
+
+  const { data: op, error } = await supabase
+    .from('job_operations')
+    .select('id, job_part_id, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit')
+    .eq('id', jobOperationId)
+    .single();
+
+  if (error || !op) return null;
+
+  const header = await loadPartHeader(op.job_part_id, companyId);
+  if (!header) return null; // not this company's job
+
+  const currentOp: CurrentOpForDetail = {
+    id: op.id,
+    operation_name: op.operation_name,
+    status: op.status,
+    estimated_setup_minutes: op.estimated_setup_minutes,
+    estimated_run_minutes_per_unit: op.estimated_run_minutes_per_unit,
+  };
+
+  const detail = await assembleJobPartDetail(header, currentOp);
+  // Surface (but don't enforce) sequence: warn if earlier steps aren't done.
+  detail.predecessors_incomplete = !(await isJobOperationReady(op.id));
+  return detail;
 }
 
 /**
@@ -617,27 +717,36 @@ export async function startJob(
     throw new Error('Job part not found.');
   }
 
-  // 1. Find the matching job_operation on this part for the chosen station.
-  // The operator API still calls the field `operation_type_id` on the request
-  // for source-compatibility; the value is now a work_center_id.
-  const { data: jobOp, error: opError } = await supabase
+  // 1. Resolve the job_operation to start. When the traveler taps a specific
+  // step, request.job_operation_id pins the exact operation (two steps can
+  // share a work center, so resolving by work center alone is ambiguous).
+  // Otherwise (station-QR flow) resolve by work center as before. The request
+  // field is named `operation_type_id` for source-compatibility; its value is
+  // a work_center_id.
+  if (!request.job_operation_id && !request.operation_type_id) {
+    throw new Error('A station or operation is required to start work.');
+  }
+
+  let opQuery = supabase
     .from('job_operations')
     .select('*')
     .eq('job_part_id', jobPartId)
-    .eq('work_center_id', request.operation_type_id)
-    .in('status', ['pending', 'in_progress'])
-    .single();
+    .in('status', ['pending', 'in_progress']);
+
+  opQuery = request.job_operation_id
+    ? opQuery.eq('id', request.job_operation_id)
+    : opQuery.eq('work_center_id', request.operation_type_id as string);
+
+  const { data: jobOp, error: opError } = await opQuery.single();
 
   if (opError || !jobOp) {
     throw new Error('No pending operation found for this part and station');
   }
 
-  if (jobOp.status === 'pending') {
-    const ready = await isJobOperationReady(jobOp.id);
-    if (!ready) {
-      throw new Error('Cannot start this operation: predecessor operations on this part are not yet completed');
-    }
-  }
+  // NOTE: we intentionally do NOT block on predecessor readiness. Shops work
+  // out of order, so an operator may start any pending/in-progress step from
+  // the traveler. The UI surfaces a non-blocking "earlier steps not complete"
+  // warning instead of preventing the start.
 
   // 2. Auto-stop any existing active session for this operator.
   const { data: existing } = await supabase
@@ -653,7 +762,13 @@ export async function startJob(
       .eq('id', existing[0].id);
   }
 
-  // 3. Create new session.
+  // 3. Create new session. Prefer the resolved operation's own work center
+  // (correct when the traveler pinned a specific step); fall back to the
+  // requested station for the work-center-resolution path.
+  const sessionWorkCenterId = jobOp.work_center_id ?? request.operation_type_id;
+  if (!sessionWorkCenterId) {
+    throw new Error('This operation has no work center assigned and cannot be started.');
+  }
   const now = new Date().toISOString();
   const { data: session, error: sessionError } = await supabase
     .from('operator_sessions')
@@ -662,7 +777,7 @@ export async function startJob(
       operator_id: operatorId,
       job_id: part.job_id,
       job_operation_id: jobOp.id,
-      work_center_id: request.operation_type_id,
+      work_center_id: sessionWorkCenterId,
       started_at: now,
     })
     .select()
@@ -692,7 +807,7 @@ export async function startJob(
     operator_id: operatorId,
     job_id: part.job_id,
     job_operation_id: jobOp.id,
-    operation_type_id: request.operation_type_id, // OperatorSession type holds the work_center id under this legacy field name
+    operation_type_id: sessionWorkCenterId, // OperatorSession type holds the work_center id under this legacy field name
     started_at: now,
     ended_at: null,
     notes: null,
@@ -1170,4 +1285,225 @@ export async function getStationsForJobPart(
   }
 
   return stations;
+}
+
+// ============================================================================
+// JOB TRAVELER (all operations for a job_part) + JOB NOTES
+// ============================================================================
+
+/**
+ * The full traveler for a single job_part: header info plus EVERY operation in
+ * sequence (not just the "current" one). Backs the operator traveler view the
+ * operator lands on when they scan a job QR — they pick which step to action.
+ */
+export async function getJobPartTraveler(
+  jobPartId: string,
+  companyId: string,
+): Promise<JobTraveler | null> {
+  const supabase = getSupabase();
+
+  const { data: part, error } = await supabase
+    .from('job_parts')
+    .select(`
+      id, job_id, production_status, quantity,
+      parts(part_name, description),
+      jobs!inner(id, job_number, due_date, customer_po_number, company_id, customers(name))
+    `)
+    .eq('id', jobPartId)
+    .eq('jobs.company_id', companyId)
+    .single();
+
+  if (error || !part) return null;
+
+  type PartRow = {
+    id: string;
+    job_id: string;
+    production_status: string;
+    quantity: number;
+    parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
+    jobs: {
+      id: string;
+      job_number: string;
+      due_date: string | null;
+      customer_po_number: string | null;
+      customers: { name: string } | { name: string }[] | null;
+    } | null;
+  };
+  const p = part as PartRow;
+  const partsJoin = Array.isArray(p.parts) ? p.parts[0] : p.parts;
+  const jobJoin = p.jobs;
+  const customerJoin = jobJoin
+    ? Array.isArray(jobJoin.customers) ? jobJoin.customers[0] : jobJoin.customers
+    : null;
+
+  const { data: ops } = await supabase
+    .from('job_operations')
+    .select('id, sequence, operation_name, instructions, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name)')
+    .eq('job_part_id', jobPartId)
+    .order('sequence', { ascending: true });
+
+  type OpRow = {
+    id: string;
+    sequence: number;
+    operation_name: string;
+    instructions: string | null;
+    status: string;
+    estimated_setup_minutes: number | null;
+    estimated_run_minutes_per_unit: number | null;
+    work_center_id: string | null;
+    work_center: { name: string } | { name: string }[] | null;
+  };
+  const opRows = (ops ?? []) as OpRow[];
+
+  // Resolve "in progress by {name}" for the operations that have an open session.
+  const inProgressOpIds = opRows.filter((o) => o.status === 'in_progress').map((o) => o.id);
+  const operatorNameByOp = new Map<string, string>();
+  if (inProgressOpIds.length > 0) {
+    const { data: sessions } = await supabase
+      .from('operator_sessions')
+      .select('job_operation_id, operator_id')
+      .in('job_operation_id', inProgressOpIds)
+      .is('ended_at', null);
+    type SessRow = { job_operation_id: string | null; operator_id: string };
+    const opByOperator = (sessions ?? []) as SessRow[];
+    const operatorIds = Array.from(new Set(opByOperator.map((s) => s.operator_id)));
+    const nameById = new Map<string, string>();
+    if (operatorIds.length > 0) {
+      const { data: names } = await supabase
+        .from('user_company_access')
+        .select('id, name')
+        .in('id', operatorIds);
+      type NameRow = { id: string; name: string | null };
+      for (const n of (names ?? []) as NameRow[]) {
+        if (n.name) nameById.set(n.id, n.name);
+      }
+    }
+    for (const s of opByOperator) {
+      if (s.job_operation_id) {
+        operatorNameByOp.set(s.job_operation_id, nameById.get(s.operator_id) ?? '');
+      }
+    }
+  }
+
+  const operations: JobTravelerOperation[] = opRows.map((op) => {
+    const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
+    return {
+      id: op.id,
+      sequence: op.sequence,
+      operation_name: op.operation_name,
+      instructions: op.instructions,
+      work_center_id: op.work_center_id,
+      work_center_name: wcJoin?.name ?? null,
+      status: op.status,
+      setup_minutes: Number(op.estimated_setup_minutes) || 0,
+      cycle_minutes: Number(op.estimated_run_minutes_per_unit) || 0,
+      active_operator_name: operatorNameByOp.get(op.id) || null,
+    };
+  });
+
+  return {
+    job_part_id: p.id,
+    job_id: p.job_id,
+    job_number: jobJoin?.job_number ?? '',
+    customer_name: customerJoin?.name ?? null,
+    part_name: partsJoin?.part_name ?? null,
+    part_description: partsJoin?.description ?? null,
+    quantity: p.quantity,
+    due_date: jobJoin?.due_date ?? null,
+    customer_po_number: jobJoin?.customer_po_number ?? null,
+    production_status: p.production_status,
+    operations,
+  };
+}
+
+/**
+ * Job-level notes feed (newest first). General notes about the job, not tied to
+ * any operation. Authored by operators/admins over time.
+ */
+export async function getJobNotes(
+  jobId: string,
+  companyId: string,
+): Promise<JobNote[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_notes')
+    .select('id, job_id, body, created_at, author:user_company_access(name)')
+    .eq('job_id', jobId)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  type NoteRow = {
+    id: string;
+    job_id: string;
+    body: string;
+    created_at: string;
+    author: { name: string | null } | { name: string | null }[] | null;
+  };
+
+  return ((data ?? []) as NoteRow[]).map((n) => {
+    const author = Array.isArray(n.author) ? n.author[0] : n.author;
+    return {
+      id: n.id,
+      job_id: n.job_id,
+      body: n.body,
+      created_at: n.created_at,
+      author_name: author?.name ?? null,
+    };
+  });
+}
+
+/**
+ * Append a job-level note. `authorId` is the author's user_company_access id
+ * (from getCurrentOperator); RLS requires it to match the caller's access row.
+ */
+export async function addJobNote(
+  jobId: string,
+  companyId: string,
+  authorId: string,
+  body: string,
+): Promise<JobNote> {
+  const supabase = getSupabase();
+
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Note cannot be empty.');
+
+  const { data, error } = await supabase
+    .from('job_notes')
+    .insert({
+      company_id: companyId,
+      job_id: jobId,
+      author_id: authorId,
+      body: trimmed,
+    })
+    .select('id, job_id, body, created_at, author:user_company_access(name)')
+    .single();
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Failed to add note.',
+      }),
+    );
+  }
+
+  type NoteRow = {
+    id: string;
+    job_id: string;
+    body: string;
+    created_at: string;
+    author: { name: string | null } | { name: string | null }[] | null;
+  };
+  const n = data as NoteRow;
+  const author = Array.isArray(n.author) ? n.author[0] : n.author;
+  return {
+    id: n.id,
+    job_id: n.job_id,
+    body: n.body,
+    created_at: n.created_at,
+    author_name: author?.name ?? null,
+  };
 }

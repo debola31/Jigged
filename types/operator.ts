@@ -122,6 +122,13 @@ export interface OperatorJobDetail {
   operations_completed: number;
   // Material requirements scoped to this part.
   materials: Array<{ name: string; quantity: number; unit: string }>;
+  /**
+   * True when this operation has earlier (lower-sequence) steps on the part
+   * that are not yet completed. Only the traveler/operation-detail path sets
+   * this; it drives a non-blocking "earlier steps incomplete" warning. Starting
+   * is still allowed (shops work out of order).
+   */
+  predecessors_incomplete?: boolean;
 }
 
 /**
@@ -144,15 +151,79 @@ export interface OperatorJobPartSummary {
   operations_completed: number;
 }
 
+/**
+ * One operation/step row on the job traveler (mirrors a row in the printed
+ * job-traveler step table: Step #, Work Center, Description, Setup, Cycle).
+ */
+export interface JobTravelerOperation {
+  /** job_operation_id — navigation key into the action view. */
+  id: string;
+  /** Step number (job_operations.sequence). */
+  sequence: number;
+  operation_name: string;
+  instructions: string | null;
+  /** Work center / station name. */
+  work_center_id: string | null;
+  work_center_name: string | null;
+  /** 'pending' | 'in_progress' | 'completed'. */
+  status: string;
+  /** estimated_setup_minutes (the traveler's "Setup" column). */
+  setup_minutes: number;
+  /** estimated_run_minutes_per_unit (the traveler's "Cycle" column). */
+  cycle_minutes: number;
+  /** Name of the operator with an active session on this op, if any. */
+  active_operator_name: string | null;
+}
+
+/**
+ * The job traveler for a single job_part — header info plus every operation,
+ * shown when an operator scans/opens a job. Replicates the printed shop
+ * traveler (e.g. Tangle's Work Order PDF).
+ */
+export interface JobTraveler {
+  /** job_part_id. */
+  job_part_id: string;
+  job_id: string;
+  job_number: string;
+  customer_name: string | null;
+  part_name: string | null;
+  part_description: string | null;
+  quantity: number;
+  due_date: string | null;
+  customer_po_number: string | null;
+  production_status: string;
+  operations: JobTravelerOperation[];
+}
+
+/**
+ * One job-level note in the traveler's notes feed. Notes are general (not tied
+ * to an operation) and append-only — many notes by different people over time.
+ */
+export interface JobNote {
+  id: string;
+  job_id: string;
+  body: string;
+  created_at: string;
+  /** Author display name (from user_company_access.name); null if unknown. */
+  author_name: string | null;
+}
+
 // ============================================================================
 // REQUEST TYPES
 // ============================================================================
 
 /**
- * Request body for starting work on a job.
+ * Request body for starting work on a job. At least one of the two fields must
+ * be supplied:
+ * - `operation_type_id` (a work_center_id): the station-QR flow — resolves the
+ *   matching pending/in-progress operation on the part by work center.
+ * - `job_operation_id`: the traveler flow — pins the exact operation to start
+ *   (important when two steps share a work center). The operation's own work
+ *   center is used for the session, so `operation_type_id` is optional here.
  */
 export interface JobStartRequest {
-  operation_type_id: string;
+  operation_type_id?: string;
+  job_operation_id?: string;
 }
 
 /**

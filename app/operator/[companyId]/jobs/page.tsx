@@ -108,8 +108,12 @@ export default function OperatorJobsPage() {
     };
   }, [companyId, stationId, operatorId]);
 
-  const handlePartClick = (jobIdParam: string, jobPartId: string) => {
-    router.push(`/operator/${companyId}/jobs/${jobIdParam}/parts/${jobPartId}`);
+  // From the station-scoped list the operator is already at a station, so jump
+  // straight to that station's operation (skip the traveler). Fall back to the
+  // traveler if the row has no resolved operation.
+  const handlePartClick = (row: OperatorJob) => {
+    const base = `/operator/${companyId}/jobs/${row.job_id}/parts/${row.id}`;
+    router.push(row.operation_id ? `${base}/operations/${row.operation_id}` : base);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'success' | 'warning' | 'error' => {
@@ -216,7 +220,7 @@ export default function OperatorJobsPage() {
             sx={{ bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
           >
             <CardActionArea
-              onClick={() => handlePartClick(row.job_id, row.id)}
+              onClick={() => handlePartClick(row)}
               sx={{ minHeight: 100 }}
             >
               <CardContent>

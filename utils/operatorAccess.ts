@@ -33,7 +33,6 @@ import type {
   ActiveSession,
   Station,
   JobStartRequest,
-  JobStopRequest,
   JobCompleteResponse,
   JobTraveler,
   JobTravelerOperation,
@@ -732,7 +731,6 @@ export async function startJob(
     operation_type_id: sessionWorkCenterId, // OperatorSession type holds the work_center id under this legacy field name
     started_at: now,
     ended_at: null,
-    notes: null,
   };
 }
 
@@ -743,7 +741,6 @@ export async function startJob(
 export async function stopJob(
   jobPartId: string,
   operatorId: string,
-  request?: JobStopRequest,
 ): Promise<OperatorSession> {
   const supabase = getSupabase();
 
@@ -770,10 +767,7 @@ export async function stopJob(
 
   await supabase
     .from('operator_sessions')
-    .update({
-      ended_at: now,
-      notes: request?.notes || null,
-    })
+    .update({ ended_at: now })
     .eq('id', session.id);
 
   // operator_sessions.started_at has DEFAULT now() in the schema, so
@@ -792,7 +786,6 @@ export async function stopJob(
     operation_type_id: session.work_center_id,
     started_at: startedAt,
     ended_at: now,
-    notes: request?.notes || null,
     duration_seconds: durationSeconds,
   };
 }
@@ -926,7 +919,7 @@ export async function getActiveSession(
   const { data: session } = await supabase
     .from('operator_sessions')
     .select(`
-      id, job_id, job_operation_id, work_center_id, started_at, notes,
+      id, job_id, job_operation_id, work_center_id, started_at,
       jobs(job_number),
       job_operations(operation_name)
     `)
@@ -954,7 +947,6 @@ export async function getActiveSession(
     // DB DEFAULT now() — non-null in practice; fall back to '' for the
     // theoretical case where a row was inserted with explicit NULL.
     started_at: session.started_at ?? '',
-    notes: session.notes,
   };
 }
 
@@ -968,7 +960,7 @@ export async function getOperatorSessions(
     .from('operator_sessions')
     .select(`
       id, operator_id, job_id, job_operation_id, work_center_id,
-      started_at, ended_at, notes,
+      started_at, ended_at,
       jobs(job_number),
       job_operations(operation_name)
     `)
@@ -989,7 +981,6 @@ export async function getOperatorSessions(
     // fall back to '' for the theoretical NULL case.
     started_at: string | null;
     ended_at: string | null;
-    notes: string | null;
     jobs: { job_number: string } | { job_number: string }[] | null;
     job_operations: { operation_name: string } | { operation_name: string }[] | null;
   }
@@ -1012,7 +1003,6 @@ export async function getOperatorSessions(
       operation_type_id: s.work_center_id,
       started_at: s.started_at ?? '',
       ended_at: s.ended_at,
-      notes: s.notes,
       duration_seconds: durationSeconds,
       job_number: jobJoin?.job_number || null,
       operation_name: opJoin?.operation_name || null,

@@ -5,6 +5,7 @@ export { default as ShipmentHistoryCard } from "./ShipmentHistoryCard";
 export { default as OperationStatusChip } from "./OperationStatusChip";
 export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";
+export { default as JobPartMaterialsCard } from "./JobPartMaterialsCard";
 export { default as CompleteOperationModal } from "./CompleteOperationModal";
 export { default as ViewRoutingModal } from "./ViewRoutingModal";
 export { default as JobQRCode } from "./JobQRCode";

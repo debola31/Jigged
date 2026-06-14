@@ -688,9 +688,6 @@ export type Database = {
       }
       job_materials: {
         Row: {
-          actual_quantity: number | null
-          consumed_at: string | null
-          consumed_by: string | null
           created_at: string
           expected_quantity: number
           id: string
@@ -698,14 +695,10 @@ export type Database = {
           job_part_id: string
           material_part_id: string
           parts_bom_id: string | null
-          status: string
           unit: string
           updated_at: string
         }
         Insert: {
-          actual_quantity?: number | null
-          consumed_at?: string | null
-          consumed_by?: string | null
           created_at?: string
           expected_quantity?: number
           id?: string
@@ -713,14 +706,10 @@ export type Database = {
           job_part_id: string
           material_part_id: string
           parts_bom_id?: string | null
-          status?: string
           unit: string
           updated_at?: string
         }
         Update: {
-          actual_quantity?: number | null
-          consumed_at?: string | null
-          consumed_by?: string | null
           created_at?: string
           expected_quantity?: number
           id?: string
@@ -728,7 +717,6 @@ export type Database = {
           job_part_id?: string
           material_part_id?: string
           parts_bom_id?: string | null
-          status?: string
           unit?: string
           updated_at?: string
         }
@@ -1148,7 +1136,6 @@ export type Database = {
           id: string
           job_id: string
           job_operation_id: string | null
-          notes: string | null
           operator_id: string
           started_at: string | null
           updated_at: string | null
@@ -1161,7 +1148,6 @@ export type Database = {
           id?: string
           job_id: string
           job_operation_id?: string | null
-          notes?: string | null
           operator_id: string
           started_at?: string | null
           updated_at?: string | null
@@ -1174,7 +1160,6 @@ export type Database = {
           id?: string
           job_id?: string
           job_operation_id?: string | null
-          notes?: string | null
           operator_id?: string
           started_at?: string | null
           updated_at?: string | null

@@ -157,35 +157,9 @@ export interface CurrentOperationInfo {
 }
 
 /**
- * Material expected/consumed for a (job, part). Snapshot from parts_bom at
- * job-part creation time.
- */
-export type JobMaterialStatus = 'pending' | 'consumed' | 'skipped';
-
-export interface JobMaterial {
-  id: string;
-  job_id: string;
-  job_part_id: string;
-  parts_bom_id: string | null;
-  material_part_id: string;
-  expected_quantity: number;
-  actual_quantity: number | null;
-  unit: string;
-  status: JobMaterialStatus;
-  consumed_at: string | null;
-  consumed_by: string | null;
-  created_at: string;
-  updated_at: string;
-  material_part?: {
-    id: string;
-    part_name: string;
-    primary_unit: string | null;
-    quantity: number;
-  } | null;
-}
-
-/**
- * Hydrated JobPart with its part metadata, operations, and materials.
+ * Hydrated JobPart with its part metadata and operations. Materials are no
+ * longer read off the job_materials snapshot in the app — the Job page reads
+ * the part BOM live (see JobPartMaterialsCard / getBomForPart).
  */
 export interface JobPartWithRelations extends JobPart {
   parts?: {
@@ -194,7 +168,6 @@ export interface JobPartWithRelations extends JobPart {
     description: string | null;
   } | null;
   job_operations?: JobOperation[];
-  job_materials?: JobMaterial[];
 }
 
 /**

@@ -13,7 +13,6 @@ import type { Database } from '@/types/database';
 // Update types preserves the column-name check.
 type JobUpdate = Database['public']['Tables']['jobs']['Update'];
 type JobPartUpdate = Database['public']['Tables']['job_parts']['Update'];
-type JobMaterialUpdate = Database['public']['Tables']['job_materials']['Update'];
 type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
 import type {
   Job,
@@ -21,7 +20,6 @@ import type {
   JobFilters,
   ProductionStatus,
   JobOperation,
-  JobMaterial,
   CompleteOperationData,
   OperationUpdateResult,
   CurrentOperationInfo,
@@ -219,10 +217,6 @@ export async function getJobWithRelations(
         job_operations(
           *,
           work_center:work_centers!left(id, name, labor_rate, kind)
-        ),
-        job_materials(
-          *,
-          material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity)
         )
       )
     `)
@@ -300,45 +294,6 @@ export async function updateJobAddressContact(
 }
 
 // ============== Job Materials ==============
-
-/**
- * Update a job material (e.g., record actual quantity, mark consumed).
- * Pass status='consumed' to also stamp consumed_at/consumed_by.
- */
-export async function updateJobMaterial(
-  materialId: string,
-  updates: Partial<Pick<JobMaterial, 'actual_quantity' | 'unit' | 'status' | 'expected_quantity'>>,
-): Promise<JobMaterial> {
-  const supabase = getSupabase();
-
-  const patch: JobMaterialUpdate = {
-    ...updates,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (updates.status === 'consumed') {
-    patch.consumed_at = new Date().toISOString();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) patch.consumed_by = user.id;
-  }
-
-  const { data, error } = await supabase
-    .from('job_materials')
-    .update(patch)
-    .eq('id', materialId)
-    .select(`
-      *,
-      material_part:parts!job_materials_material_part_id_fkey(id, part_name, primary_unit, quantity)
-    `)
-    .single();
-
-  if (error) {
-    console.error('Error updating job material:', error);
-    throw error;
-  }
-
-  return data as JobMaterial;
-}
 
 // ============== Job Lifecycle ==============
 

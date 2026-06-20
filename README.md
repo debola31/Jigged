@@ -2,7 +2,7 @@
 
 > A data platform for small precision manufacturing shops.
 
-Jigged centralizes jobs, parts, quotes, inventory, and shop-floor status into focused consoles, with AI-assisted insights and gamified operator workflows that encourage consistent data capture.
+Jigged centralizes jobs, parts, quotes, inventory, and shop-floor status into focused consoles, with AI-assisted insights and gamified operator workflows that encourage consistent data capture
 
 ## Tech Stack
 

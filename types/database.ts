@@ -1454,6 +1454,213 @@ export type Database = {
           },
         ]
       }
+      quickbooks_connections: {
+        Row: {
+          access_expires_at: string
+          access_token: string
+          company_id: string
+          connected_by: string | null
+          created_at: string
+          default_income_account_id: string | null
+          default_item_id: string | null
+          environment: string
+          id: string
+          qb_company_name: string | null
+          realm_id: string
+          reconnect_required: boolean
+          refresh_expires_at: string | null
+          refresh_token: string
+          token_version: number
+          updated_at: string
+        }
+        Insert: {
+          access_expires_at: string
+          access_token: string
+          company_id: string
+          connected_by?: string | null
+          created_at?: string
+          default_income_account_id?: string | null
+          default_item_id?: string | null
+          environment?: string
+          id?: string
+          qb_company_name?: string | null
+          realm_id: string
+          reconnect_required?: boolean
+          refresh_expires_at?: string | null
+          refresh_token: string
+          token_version?: number
+          updated_at?: string
+        }
+        Update: {
+          access_expires_at?: string
+          access_token?: string
+          company_id?: string
+          connected_by?: string | null
+          created_at?: string
+          default_income_account_id?: string | null
+          default_item_id?: string | null
+          environment?: string
+          id?: string
+          qb_company_name?: string | null
+          realm_id?: string
+          reconnect_required?: boolean
+          refresh_expires_at?: string | null
+          refresh_token?: string
+          token_version?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_connections_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_connections_connected_by_fkey"
+            columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_customer_map: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          id: string
+          linked_by: string | null
+          qb_customer_id: string
+          qb_display_name: string | null
+          realm_id: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          id?: string
+          linked_by?: string | null
+          qb_customer_id: string
+          qb_display_name?: string | null
+          realm_id: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          id?: string
+          linked_by?: string | null
+          qb_customer_id?: string
+          qb_display_name?: string | null
+          realm_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_customer_map_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_customer_map_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_customer_map_linked_by_fkey"
+            columns: ["linked_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_invoice_links: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          job_id: string | null
+          pushed_by: string | null
+          qb_invoice_doc_number: string | null
+          qb_invoice_id: string | null
+          qb_invoice_sync_token: string | null
+          qb_request_id: string
+          quote_id: string
+          realm_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          pushed_by?: string | null
+          qb_invoice_doc_number?: string | null
+          qb_invoice_id?: string | null
+          qb_invoice_sync_token?: string | null
+          qb_request_id: string
+          quote_id: string
+          realm_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          pushed_by?: string | null
+          qb_invoice_doc_number?: string | null
+          qb_invoice_id?: string | null
+          qb_invoice_sync_token?: string | null
+          qb_request_id?: string
+          quote_id?: string
+          realm_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_invoice_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_invoice_links_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_invoice_links_pushed_by_fkey"
+            columns: ["pushed_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_invoice_links_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_line_items: {
         Row: {
           base_cost_per_unit: number | null

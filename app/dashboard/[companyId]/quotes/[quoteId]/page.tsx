@@ -43,7 +43,9 @@ import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
 import PushToQuickBooksDialog from '@/components/quotes/PushToQuickBooksDialog';
+import { getQuickBooksInvoiceLink, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import AddressDisplay from '@/components/common/AddressDisplay';
 
 export default function QuoteDetailPage() {
@@ -69,6 +71,7 @@ export default function QuoteDetailPage() {
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
+  const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
 
   const fetchQuote = useCallback(async () => {
     try {
@@ -86,6 +89,23 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     fetchQuote();
   }, [fetchQuote]);
+
+  // Once converted, surface a "View in QuickBooks" deep link if the quote was pushed.
+  useEffect(() => {
+    if (!quote?.converted_at) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const link = await getQuickBooksInvoiceLink(companyId, quoteId);
+        if (!cancelled) setQbInvoiceLink(link);
+      } catch {
+        /* non-fatal: the View link just won't show */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [quote?.converted_at, companyId, quoteId]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -363,6 +383,18 @@ export default function QuoteDetailPage() {
             </Tooltip>
           )}
 
+          {qbInvoiceLink && (
+            <Button
+              variant="outlined"
+              startIcon={<OpenInNewIcon />}
+              href={qbInvoiceLink.url}
+              target="_blank"
+              rel="noopener"
+            >
+              View in QuickBooks
+            </Button>
+          )}
+
           <Box sx={{ flex: 1 }} />
 
           <Tooltip title="Delete Quote">
@@ -628,6 +660,9 @@ export default function QuoteDetailPage() {
         onPushed={(message) => {
           setPushDialogOpen(false);
           setPushSuccess(message);
+          getQuickBooksInvoiceLink(companyId, quote.id)
+            .then(setQbInvoiceLink)
+            .catch(() => {});
         }}
       />
 

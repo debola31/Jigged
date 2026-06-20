@@ -43,6 +43,7 @@ export interface PreflightLine {
 export interface PreflightResult {
   connected: boolean;
   already_pushed?: boolean;
+  invoice_url?: string | null;
   customer?: PreflightCustomer;
   lines_preview?: PreflightLine[];
 }
@@ -55,8 +56,15 @@ export interface PushCustomerDecision {
 export interface PushResult {
   qb_invoice_id?: string;
   doc_number?: string | null;
+  url?: string | null;
   already_existed?: boolean;
   in_progress?: boolean;
+}
+
+export interface QuickBooksInvoiceLink {
+  invoiceId: string | null;
+  docNumber: string | null;
+  url: string;
 }
 
 /** Error carrying the HTTP status and any structured `detail.code` from the backend. */
@@ -153,4 +161,31 @@ export function pushQuoteToQuickBooks(
     method: 'POST',
     body: { customer },
   });
+}
+
+/**
+ * The created QuickBooks invoice for a quote, if any — read directly from the
+ * member-readable link table (no backend round-trip) to show a "View in
+ * QuickBooks" deep link on the quote page.
+ */
+export async function getQuickBooksInvoiceLink(
+  companyId: string,
+  quoteId: string,
+): Promise<QuickBooksInvoiceLink | null> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from('quickbooks_invoice_links')
+    .select('qb_invoice_id, qb_invoice_doc_number, qb_invoice_url')
+    .eq('company_id', companyId)
+    .eq('quote_id', quoteId)
+    .eq('status', 'created')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.qb_invoice_url) return null;
+  return {
+    invoiceId: data.qb_invoice_id,
+    docNumber: data.qb_invoice_doc_number,
+    url: data.qb_invoice_url,
+  };
 }

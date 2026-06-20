@@ -140,7 +140,23 @@ export default function PushToQuickBooksDialog({
               </Alert>
             )}
             {alreadyPushed && (
-              <Alert severity="success" sx={{ mb: 2 }}>
+              <Alert
+                severity="success"
+                sx={{ mb: 2 }}
+                action={
+                  preflight?.invoice_url ? (
+                    <Button
+                      color="inherit"
+                      size="small"
+                      href={preflight.invoice_url}
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      View in QuickBooks
+                    </Button>
+                  ) : undefined
+                }
+              >
                 This quote has already been pushed to QuickBooks.
               </Alert>
             )}

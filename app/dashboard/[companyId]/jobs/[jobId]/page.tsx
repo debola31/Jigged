@@ -25,6 +25,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import PrintIcon from '@mui/icons-material/Print';
 
 import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
@@ -35,7 +36,7 @@ import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobQRCode, JobBillingShippingCard, JobPartMaterialsCard } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -60,6 +61,7 @@ export default function JobDetailPage() {
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
+  const [travelerPart, setTravelerPart] = useState<{ id: string; name: string | null } | null>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -256,7 +258,7 @@ export default function JobDetailPage() {
       )}
 
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
@@ -309,18 +311,6 @@ export default function JobDetailPage() {
                   </Box>
                 )}
               </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Job QR Code
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <JobQRCode jobId={jobId} jobNumber={job.job_number} companyId={companyId} />
             </CardContent>
           </Card>
         </Grid>
@@ -388,7 +378,7 @@ export default function JobDetailPage() {
                               </Typography>
                             )}
                           </Box>
-                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                             <ProductionStatusChip
                               status={part.production_status}
                               size="small"
@@ -399,6 +389,16 @@ export default function JobDetailPage() {
                                 size="small"
                               />
                             )}
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<PrintIcon />}
+                              onClick={() =>
+                                setTravelerPart({ id: part.id, name: part.parts?.part_name ?? null })
+                              }
+                            >
+                              Print Traveler
+                            </Button>
                           </Box>
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
@@ -499,6 +499,15 @@ export default function JobDetailPage() {
           onCreated={handleCreated}
         />
       )}
+
+      <JobTravelerPreviewDialog
+        open={travelerPart !== null}
+        jobPartId={travelerPart?.id ?? null}
+        jobId={jobId}
+        companyId={companyId}
+        partName={travelerPart?.name ?? null}
+        onClose={() => setTravelerPart(null)}
+      />
     </Box>
   );
 }

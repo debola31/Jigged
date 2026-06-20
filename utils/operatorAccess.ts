@@ -1065,9 +1065,9 @@ export async function getJobPartTraveler(
   const { data: part, error } = await supabase
     .from('job_parts')
     .select(`
-      id, job_id, production_status, quantity,
+      id, job_id, part_id, production_status, quantity,
       parts(part_name, description),
-      jobs!inner(id, job_number, due_date, customer_po_number, company_id, customers(name))
+      jobs!inner(id, job_number, created_at, due_date, customer_po_number, company_id, customers(name))
     `)
     .eq('id', jobPartId)
     .eq('jobs.company_id', companyId)
@@ -1078,12 +1078,14 @@ export async function getJobPartTraveler(
   type PartRow = {
     id: string;
     job_id: string;
+    part_id: string;
     production_status: string;
     quantity: number;
     parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
     jobs: {
       id: string;
       job_number: string;
+      created_at: string | null;
       due_date: string | null;
       customer_po_number: string | null;
       customers: { name: string } | { name: string }[] | null;
@@ -1164,11 +1166,13 @@ export async function getJobPartTraveler(
   return {
     job_part_id: p.id,
     job_id: p.job_id,
+    part_id: p.part_id,
     job_number: jobJoin?.job_number ?? '',
     customer_name: customerJoin?.name ?? null,
     part_name: partsJoin?.part_name ?? null,
     part_description: partsJoin?.description ?? null,
     quantity: p.quantity,
+    order_date: jobJoin?.created_at ?? null,
     due_date: jobJoin?.due_date ?? null,
     customer_po_number: jobJoin?.customer_po_number ?? null,
     production_status: p.production_status,

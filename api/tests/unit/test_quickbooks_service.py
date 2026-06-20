@@ -105,11 +105,12 @@ class _FakeDB:
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, json_data=None, text=""):
+    def __init__(self, status_code: int, json_data=None, text="", headers=None):
         self.status_code = status_code
         self._json = json_data
         self.text = text or (json.dumps(json_data) if json_data is not None else "")
         self.content = self.text.encode()
+        self.headers = headers if headers is not None else {"intuit_tid": "tid-test"}
 
     def json(self):
         if self._json is None:
@@ -392,6 +393,15 @@ def test_refresh_detects_invalid_grant(monkeypatch):
     monkeypatch.setattr(qb.httpx, "Client", lambda *a, **k: _FakeClient(resp))
     with pytest.raises(qb._InvalidGrant):
         qb.refresh_tokens("dead-token")
+
+
+def test_api_error_captures_intuit_tid(monkeypatch):
+    resp = _FakeResponse(500, json_data={"error": "server_error"}, headers={"intuit_tid": "tid-xyz"})
+    monkeypatch.setattr(qb.httpx, "Client", lambda *a, **k: _FakeClient(resp))
+    with pytest.raises(qb.QuickBooksApiError) as exc:
+        qb.refresh_tokens("rt")
+    assert exc.value.tid == "tid-xyz"
+    assert exc.value.status == 500
 
 
 # ───────────────────────── customer resolution ─────────────────────────

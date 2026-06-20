@@ -65,10 +65,11 @@ class QuickBooksNotConnected(RuntimeError):
 class QuickBooksApiError(RuntimeError):
     """A QBO API call returned a non-2xx response -> HTTP 502."""
 
-    def __init__(self, message: str, status: int | None = None, fault: Any = None):
+    def __init__(self, message: str, status: int | None = None, fault: Any = None, tid: str | None = None):
         super().__init__(message)
         self.status = status
         self.fault = fault
+        self.tid = tid  # Intuit transaction id (intuit_tid) for support troubleshooting
 
 
 class _InvalidGrant(RuntimeError):
@@ -169,6 +170,7 @@ def _token_request(body: dict) -> TokenBundle:
             resp = client.post(TOKEN_URL, data=body, headers=headers)
     except httpx.HTTPError as exc:
         raise QuickBooksApiError(f"QuickBooks token request failed: {exc}") from exc
+    tid = _capture_tid(resp, "OAuth token")
     if resp.status_code == 400 and "invalid_grant" in resp.text:
         raise _InvalidGrant("invalid_grant")
     if resp.status_code >= 400:
@@ -176,6 +178,7 @@ def _token_request(body: dict) -> TokenBundle:
             f"QuickBooks token request failed ({resp.status_code})",
             status=resp.status_code,
             fault=_safe_json(resp),
+            tid=tid,
         )
     return _parse_token_response(resp.json())
 
@@ -345,6 +348,16 @@ def _safe_json(resp: httpx.Response) -> Any:
         return resp.text
 
 
+def _capture_tid(resp: httpx.Response, label: str) -> str | None:
+    """Capture Intuit's transaction id (intuit_tid) from the response headers and
+    log it. Intuit support uses this value to locate the exact request/response in
+    their logs when troubleshooting, so we always log it on errors."""
+    tid = resp.headers.get("intuit_tid")
+    log = logger.warning if resp.status_code >= 400 else logger.info
+    log("QuickBooks %s -> HTTP %s (intuit_tid=%s)", label, resp.status_code, tid)
+    return tid
+
+
 def qb_request(
     db: Client,
     company_id: str,
@@ -382,6 +395,7 @@ def _do_qb_request(
     except httpx.HTTPError as exc:
         raise QuickBooksApiError(f"QuickBooks request failed: {exc}") from exc
 
+    tid = _capture_tid(resp, f"{method.upper()} {path}")
     if resp.status_code == 401 and retry_on_401:
         access_token, realm_id = _force_refresh(db, company_id)
         return _do_qb_request(
@@ -392,6 +406,7 @@ def _do_qb_request(
             f"QuickBooks API error ({resp.status_code})",
             status=resp.status_code,
             fault=_safe_json(resp),
+            tid=tid,
         )
     return resp.json() if resp.content else {}
 

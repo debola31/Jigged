@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-12T19:17:13Z
+-- Generated: 2026-06-20T16:23:03Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -327,6 +327,77 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text, 'operator'::text])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."job_notes"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "job_id" uuid NOT NULL,
+    "author_id" uuid,
+    "body" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_notes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_notes_body_not_blank" CHECK ((length(btrim(body)) > 0))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "realm_id" text NOT NULL,
+    "environment" text NOT NULL DEFAULT 'sandbox'::text,
+    "access_token" text NOT NULL,
+    "access_expires_at" timestamp with time zone NOT NULL,
+    "refresh_token" text NOT NULL,
+    "refresh_expires_at" timestamp with time zone,
+    "token_version" integer NOT NULL DEFAULT 0,
+    "reconnect_required" boolean NOT NULL DEFAULT false,
+    "qb_company_name" text,
+    "default_item_id" text,
+    "default_income_account_id" text,
+    "connected_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "quickbooks_connections_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quickbooks_connections_company_id_key" UNIQUE (company_id),
+    CONSTRAINT "quickbooks_connections_environment_check" CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quickbooks_customer_map"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "customer_id" uuid NOT NULL,
+    "realm_id" text NOT NULL,
+    "qb_customer_id" text NOT NULL,
+    "qb_display_name" text,
+    "linked_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "quickbooks_customer_map_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quickbooks_customer_map_unique" UNIQUE (company_id, customer_id, realm_id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_links"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "quote_id" uuid NOT NULL,
+    "job_id" uuid,
+    "realm_id" text NOT NULL,
+    "qb_request_id" uuid NOT NULL,
+    "qb_invoice_id" text,
+    "qb_invoice_doc_number" text,
+    "qb_invoice_sync_token" text,
+    "status" text NOT NULL DEFAULT 'pending'::text,
+    "pushed_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "qb_invoice_url" text,
+    CONSTRAINT "quickbooks_invoice_links_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quickbooks_invoice_links_quote_realm_key" UNIQUE (quote_id, realm_id),
+    CONSTRAINT "quickbooks_invoice_links_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'created'::text, 'error'::text])))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."user_preferences"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -499,17 +570,11 @@ CREATE TABLE IF NOT EXISTS "public"."job_materials"
     "parts_bom_id" uuid,
     "material_part_id" uuid NOT NULL,
     "expected_quantity" numeric NOT NULL DEFAULT 0,
-    "actual_quantity" numeric,
     "unit" text NOT NULL,
-    "status" text NOT NULL DEFAULT 'pending'::text,
-    "consumed_at" timestamp with time zone,
-    "consumed_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "job_materials_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_materials_actual_quantity_check" CHECK (((actual_quantity IS NULL) OR (actual_quantity >= (0)::numeric))),
-    CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric)),
-    CONSTRAINT "job_materials_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'consumed'::text, 'skipped'::text])))
+    CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quote_materials"
@@ -699,7 +764,6 @@ CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
     "work_center_id" uuid NOT NULL,
     "started_at" timestamp with time zone DEFAULT now(),
     "ended_at" timestamp with time zone,
-    "notes" text,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     CONSTRAINT "operator_sessions_pkey" PRIMARY KEY (id)
@@ -722,6 +786,7 @@ ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_fulfillment_audit" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
@@ -732,6 +797,9 @@ ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts_bom" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts_unit_conversions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quickbooks_connections" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quickbooks_customer_map" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quickbooks_invoice_links" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_line_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_operations" ENABLE ROW LEVEL SECURITY;
@@ -1048,6 +1116,24 @@ CREATE POLICY "ai_readonly_select"
     USING ((EXISTS ( SELECT 1
    FROM jobs
   WHERE ((jobs.id = job_materials.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Authors and admins can delete job_notes" ON "public"."job_notes";
+CREATE POLICY "Authors and admins can delete job_notes"
+    ON "public"."job_notes"
+    FOR DELETE
+    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+
+DROP POLICY IF EXISTS "Users can insert own job_notes" ON "public"."job_notes";
+CREATE POLICY "Users can insert own job_notes"
+    ON "public"."job_notes"
+    FOR INSERT
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
+
+DROP POLICY IF EXISTS "Users can view job_notes" ON "public"."job_notes";
+CREATE POLICY "Users can view job_notes"
+    ON "public"."job_notes"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "Users can delete job_operations" ON "public"."job_operations";
 CREATE POLICY "Users can delete job_operations"
@@ -1439,6 +1525,18 @@ CREATE POLICY "ai_readonly_select"
     USING ((EXISTS ( SELECT 1
    FROM parts
   WHERE ((parts.id = parts_unit_conversions.part_id) AND (parts.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Users can view their company's qb customer map" ON "public"."quickbooks_customer_map";
+CREATE POLICY "Users can view their company's qb customer map"
+    ON "public"."quickbooks_customer_map"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view their company's qb invoice links" ON "public"."quickbooks_invoice_links";
+CREATE POLICY "Users can view their company's qb invoice links"
+    ON "public"."quickbooks_invoice_links"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."quote_line_items";
 CREATE POLICY "ai_readonly_select"
@@ -2067,9 +2165,6 @@ ALTER TABLE "public"."job_fulfillment_audit"
     ADD CONSTRAINT "job_fulfillment_audit_triggering_user_id_fkey" FOREIGN KEY (triggering_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."job_materials"
-    ADD CONSTRAINT "job_materials_consumed_by_fkey" FOREIGN KEY (consumed_by) REFERENCES auth.users(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_materials"
@@ -2080,6 +2175,15 @@ ALTER TABLE "public"."job_materials"
 
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_parts_bom_id_fkey" FOREIGN KEY (parts_bom_id) REFERENCES parts_bom(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."job_notes"
+    ADD CONSTRAINT "job_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."job_notes"
+    ADD CONSTRAINT "job_notes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_notes"
+    ADD CONSTRAINT "job_notes_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_assigned_to_fkey" FOREIGN KEY (assigned_to) REFERENCES auth.users(id);
@@ -2176,6 +2280,33 @@ ALTER TABLE "public"."parts_bom"
 
 ALTER TABLE "public"."parts_unit_conversions"
     ADD CONSTRAINT "parts_unit_conversions_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_connections"
+    ADD CONSTRAINT "quickbooks_connections_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_connections"
+    ADD CONSTRAINT "quickbooks_connections_connected_by_fkey" FOREIGN KEY (connected_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quickbooks_customer_map"
+    ADD CONSTRAINT "quickbooks_customer_map_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_customer_map"
+    ADD CONSTRAINT "quickbooks_customer_map_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_customer_map"
+    ADD CONSTRAINT "quickbooks_customer_map_linked_by_fkey" FOREIGN KEY (linked_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quickbooks_invoice_links"
+    ADD CONSTRAINT "quickbooks_invoice_links_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_invoice_links"
+    ADD CONSTRAINT "quickbooks_invoice_links_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quickbooks_invoice_links"
+    ADD CONSTRAINT "quickbooks_invoice_links_pushed_by_fkey" FOREIGN KEY (pushed_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."quickbooks_invoice_links"
+    ADD CONSTRAINT "quickbooks_invoice_links_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quote_line_items"
     ADD CONSTRAINT "quote_line_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2330,6 +2461,7 @@ CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING b
 CREATE INDEX IF NOT EXISTS idx_job_materials_job_part_id ON public.job_materials USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_material_part ON public.job_materials USING btree (material_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_parts_bom ON public.job_materials USING btree (parts_bom_id);
+CREATE INDEX IF NOT EXISTS idx_job_notes_job_created ON public.job_notes USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_operations_job_part_id ON public.job_operations USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_assigned ON public.job_operations USING btree (assigned_to) WHERE (assigned_to IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_job ON public.job_operations USING btree (job_id);
@@ -2370,6 +2502,7 @@ CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btre
 CREATE INDEX IF NOT EXISTS idx_parts_bom_child ON public.parts_bom USING btree (child_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_parent ON public.parts_bom USING btree (parent_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_unit_conversions_part ON public.parts_unit_conversions USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_quote ON public.quickbooks_invoice_links USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_company ON public.quote_line_items USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_part ON public.quote_line_items USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_quote ON public.quote_line_items USING btree (quote_id, sequence);
@@ -4736,6 +4869,15 @@ CREATE TRIGGER parts_bom_no_cycles BEFORE INSERT OR UPDATE OF parent_part_id, ch
 DROP TRIGGER IF EXISTS "parts_bom_updated_at" ON "public"."parts_bom";
 CREATE TRIGGER parts_bom_updated_at BEFORE UPDATE ON public.parts_bom FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "quickbooks_connections_updated_at" ON "public"."quickbooks_connections";
+CREATE TRIGGER quickbooks_connections_updated_at BEFORE UPDATE ON public.quickbooks_connections FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "quickbooks_customer_map_updated_at" ON "public"."quickbooks_customer_map";
+CREATE TRIGGER quickbooks_customer_map_updated_at BEFORE UPDATE ON public.quickbooks_customer_map FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "quickbooks_invoice_links_updated_at" ON "public"."quickbooks_invoice_links";
+CREATE TRIGGER quickbooks_invoice_links_updated_at BEFORE UPDATE ON public.quickbooks_invoice_links FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS "enforce_quote_address_contact_customer_trg" ON "public"."quotes";
 CREATE TRIGGER enforce_quote_address_contact_customer_trg BEFORE INSERT OR UPDATE OF billing_address_id, shipping_address_id, contact_id, customer_id ON public.quotes FOR EACH ROW EXECUTE FUNCTION enforce_quote_address_contact_customer();
 
@@ -5063,9 +5205,6 @@ COMMENT ON COLUMN "public"."job_materials"."material_part_id"
 
 COMMENT ON COLUMN "public"."job_materials"."expected_quantity"
     IS 'Quantity expected to be consumed (snapshot from parts_bom.quantity at job-creation time, in `unit`).';
-
-COMMENT ON COLUMN "public"."job_materials"."actual_quantity"
-    IS 'Quantity actually consumed, recorded by the operator on completion. NULL until consumed.';
 
 COMMENT ON COLUMN "public"."job_operations"."operation_name"
     IS 'Snapshot of the work_center name at job-creation time. Immune to mid-job renames.';

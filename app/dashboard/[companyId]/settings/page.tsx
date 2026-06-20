@@ -19,6 +19,7 @@ import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 import CompanyShippingSettingsCard from '@/components/settings/CompanyShippingSettingsCard';
+import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 
 export default function SettingsPage() {
   const params = useParams();
@@ -48,6 +49,9 @@ export default function SettingsPage() {
 
       {/* Packing-slip number format + default CoC text */}
       <CompanyShippingSettingsCard companyId={companyId} />
+
+      {/* QuickBooks Online connection + invoice push settings */}
+      <QuickBooksIntegrationCard companyId={companyId} />
 
       {/* Demo Mode Section */}
       <Card elevation={2}>

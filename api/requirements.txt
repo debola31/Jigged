@@ -20,6 +20,9 @@ sentry-sdk[fastapi]>=2.0.0
 
 # Outbound email (quote-to-customer, future invitation emails)
 resend>=0.17.0
+# Outbound HTTP for the QuickBooks OAuth + API calls (also present transitively
+# via supabase, but services/quickbooks.py imports it directly).
+httpx>=0.27.0
 # FastAPI multipart uploads (used by /api/quotes/{id}/email for the PDF blob).
 python-multipart>=0.0.9
 

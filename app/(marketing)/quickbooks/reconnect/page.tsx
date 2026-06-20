@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import Container from '@mui/material/Container';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -29,7 +28,7 @@ export default function QuickBooksReconnectPage() {
           Reconnecting only re-establishes the link between Jigged and your QuickBooks company —
           your existing QuickBooks data is never changed.
         </Typography>
-        <Button component={Link} href="/login" variant="contained" size="large">
+        <Button href="/login" variant="contained" size="large">
           Sign in to Jigged
         </Button>
       </Stack>

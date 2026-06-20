@@ -11,10 +11,6 @@ import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -24,10 +20,7 @@ import {
   getQuickBooksStatus,
   startQuickBooksConnect,
   disconnectQuickBooks,
-  getQuickBooksConfig,
-  setQuickBooksConfig,
   type QuickBooksStatus,
-  type QuickBooksConfig,
 } from '@/utils/quickbooksAccess';
 
 interface QuickBooksIntegrationCardProps {
@@ -44,11 +37,6 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
-
-  const [config, setConfig] = useState<QuickBooksConfig | null>(null);
-  const [configLoading, setConfigLoading] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState('');
-  const [savingConfig, setSavingConfig] = useState(false);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -112,41 +100,11 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     try {
       await disconnectQuickBooks(companyId);
       setSuccess('QuickBooks disconnected.');
-      setConfig(null);
       await loadStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect QuickBooks.');
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleLoadConfig = async () => {
-    setError(null);
-    setConfigLoading(true);
-    try {
-      const c = await getQuickBooksConfig(companyId);
-      setConfig(c);
-      setSelectedItemId(c.default_item_id ?? '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load QuickBooks items.');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  const handleSaveItem = async () => {
-    if (!selectedItemId) return;
-    setSavingConfig(true);
-    setError(null);
-    try {
-      await setQuickBooksConfig(companyId, { default_item_id: selectedItemId });
-      setSuccess('Invoice item saved.');
-      await loadStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save invoice item.');
-    } finally {
-      setSavingConfig(false);
     }
   };
 
@@ -215,56 +173,11 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               </Alert>
             )}
 
-            <Typography variant="body2" sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ mb: 3 }}>
               {status?.qb_company_name
                 ? <>Connected to <strong>{status.qb_company_name}</strong>.</>
                 : 'QuickBooks is connected.'}
             </Typography>
-
-            {/* Invoice item: the single QuickBooks Product/Service every line uses. */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                Invoice item
-              </Typography>
-              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
-                Every pushed invoice line uses one QuickBooks item (the part name goes in the
-                line description). Left unset, Jigged auto-selects a Services item on the first push.
-              </Typography>
-              {config ? (
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <FormControl size="small" sx={{ minWidth: 260 }}>
-                    <InputLabel id="qb-item-label">QuickBooks item</InputLabel>
-                    <Select
-                      labelId="qb-item-label"
-                      label="QuickBooks item"
-                      value={selectedItemId}
-                      onChange={(e) => setSelectedItemId(e.target.value)}
-                    >
-                      {config.items.map((it) => (
-                        <MenuItem key={it.id} value={it.id}>
-                          {it.name ?? it.id}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <Button
-                    variant="outlined"
-                    onClick={handleSaveItem}
-                    disabled={savingConfig || !selectedItemId || selectedItemId === status?.default_item_id}
-                    startIcon={savingConfig ? <CircularProgress size={16} /> : undefined}
-                  >
-                    Save item
-                  </Button>
-                </Box>
-              ) : (
-                <Button variant="text" onClick={handleLoadConfig} disabled={configLoading}
-                  startIcon={configLoading ? <CircularProgress size={16} /> : undefined}>
-                  {status?.default_item_id ? 'Change invoice item' : 'Choose invoice item'}
-                </Button>
-              )}
-            </Box>
-
-            <Divider sx={{ mb: 3 }} />
 
             <Button variant="outlined" color="error" onClick={() => setDisconnectOpen(true)} disabled={busy}>
               Disconnect

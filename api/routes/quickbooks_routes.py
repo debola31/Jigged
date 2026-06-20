@@ -195,7 +195,6 @@ class StatusResponse(BaseModel):
     realm_id: str | None = None
     environment: str | None = None
     qb_company_name: str | None = None
-    default_item_id: str | None = None
     connected_at: str | None = None
 
 
@@ -211,55 +210,8 @@ async def status(company_id: str, request: Request):
         realm_id=conn.get("realm_id"),
         environment=conn.get("environment"),
         qb_company_name=conn.get("qb_company_name"),
-        default_item_id=conn.get("default_item_id"),
         connected_at=conn.get("created_at"),
     )
-
-
-class ConfigBody(BaseModel):
-    default_item_id: str | None = None
-    default_income_account_id: str | None = None
-
-
-@router.get("/{company_id}/config")
-async def get_config(company_id: str, request: Request):
-    await _verify_company_access(request, company_id, require_admin=True)
-    db = _service_client()
-    conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn):
-        raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
-    try:
-        items = qb.qb_query(
-            db, company_id, "select * from Item where Type = 'Service' and Active = true MAXRESULTS 50"
-        ).get("Item", [])
-        accounts = qb.qb_query(
-            db, company_id, "select * from Account where AccountType = 'Income' and Active = true MAXRESULTS 50"
-        ).get("Account", [])
-    except Exception as exc:  # noqa: BLE001
-        raise _map_qb_error(exc)
-    return {
-        "default_item_id": conn.get("default_item_id"),
-        "default_income_account_id": conn.get("default_income_account_id"),
-        "items": [{"id": i["Id"], "name": i.get("Name")} for i in items],
-        "income_accounts": [{"id": a["Id"], "name": a.get("Name")} for a in accounts],
-    }
-
-
-@router.put("/{company_id}/config")
-async def set_config(company_id: str, request: Request, body: ConfigBody):
-    await _verify_company_access(request, company_id, require_admin=True)
-    db = _service_client()
-    conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn):
-        raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
-    update: dict = {}
-    if body.default_item_id is not None:
-        update["default_item_id"] = body.default_item_id
-    if body.default_income_account_id is not None:
-        update["default_income_account_id"] = body.default_income_account_id
-    if update:
-        db.table("quickbooks_connections").update(update).eq("company_id", company_id).execute()
-    return {"ok": True}
 
 
 @router.post("/{company_id}/disconnect")

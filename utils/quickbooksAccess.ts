@@ -15,15 +15,7 @@ export interface QuickBooksStatus {
   realm_id?: string | null;
   environment?: string | null;
   qb_company_name?: string | null;
-  default_item_id?: string | null;
   connected_at?: string | null;
-}
-
-export interface QuickBooksConfig {
-  default_item_id: string | null;
-  default_income_account_id: string | null;
-  items: { id: string; name: string | null }[];
-  income_accounts: { id: string; name: string | null }[];
 }
 
 export interface CustomerCandidate {
@@ -140,17 +132,6 @@ export async function startQuickBooksConnect(companyId: string): Promise<string>
 
 export async function disconnectQuickBooks(companyId: string): Promise<void> {
   await qbRequest(`/${companyId}/disconnect`, { method: 'POST', body: {} });
-}
-
-export function getQuickBooksConfig(companyId: string): Promise<QuickBooksConfig> {
-  return qbRequest<QuickBooksConfig>(`/${companyId}/config`);
-}
-
-export async function setQuickBooksConfig(
-  companyId: string,
-  body: { default_item_id?: string; default_income_account_id?: string },
-): Promise<void> {
-  await qbRequest(`/${companyId}/config`, { method: 'PUT', body });
 }
 
 export function preflightQuotePush(

@@ -48,6 +48,9 @@ REFRESH_BUFFER_SECONDS = 120
 # POST. Older than this means the original worker died -> safe to resume.
 PENDING_STALE_SECONDS = 90
 DEFAULT_MINOR_VERSION = "75"
+# The single QBO Product/Service that every pushed invoice line posts under
+# (a bucket for the income account; the part name lives in the line Description).
+DEFAULT_ITEM_NAME = "Machined Parts"
 
 
 # ───────────────────────── Exceptions ─────────────────────────
@@ -423,17 +426,17 @@ def resolve_income_account(db: Client, company_id: str, conn: dict | None = None
 
 
 def resolve_default_item(db: Client, company_id: str, conn: dict | None = None) -> str:
-    """The single shared Product/Service item every invoice line references.
-    Uses the configured item, else discovers an active Service item, else creates one."""
+    """The single QBO item every invoice line posts under. Reuse-or-create a
+    DEDICATED item by name (DEFAULT_ITEM_NAME) so behaviour is deterministic across
+    companies — never an arbitrary existing item. Resolved lazily on first push and
+    cached on the connection; the shop can re-point its income account in QBO."""
     conn = conn or get_connection(db, company_id)
     if conn and conn.get("default_item_id"):
         return conn["default_item_id"]
-    qr = qb_query(
-        db, company_id, "select * from Item where Type = 'Service' and Active = true MAXRESULTS 5"
-    )
-    items = qr.get("Item", [])
-    if items:
-        item_id = items[0]["Id"]
+    name = _escape_qb_literal(DEFAULT_ITEM_NAME)
+    existing = qb_query(db, company_id, f"select * from Item where Name = '{name}'").get("Item", [])
+    if existing:
+        item_id = existing[0]["Id"]
     else:
         income = resolve_income_account(db, company_id, conn)
         created = qb_request(
@@ -442,7 +445,7 @@ def resolve_default_item(db: Client, company_id: str, conn: dict | None = None) 
             "POST",
             "item",
             json_body={
-                "Name": "Machined Parts",
+                "Name": DEFAULT_ITEM_NAME,
                 "Type": "Service",
                 "IncomeAccountRef": {"value": income},
             },

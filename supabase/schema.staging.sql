@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-20T12:29:36Z
+-- Generated: 2026-06-20T16:23:03Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -392,6 +392,7 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_links"
     "pushed_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "qb_invoice_url" text,
     CONSTRAINT "quickbooks_invoice_links_pkey" PRIMARY KEY (id),
     CONSTRAINT "quickbooks_invoice_links_quote_realm_key" UNIQUE (quote_id, realm_id),
     CONSTRAINT "quickbooks_invoice_links_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'created'::text, 'error'::text])))

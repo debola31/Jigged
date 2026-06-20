@@ -246,22 +246,26 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         d1 = r1.json()
         assert d1["already_existed"] is False
         assert d1["qb_invoice_id"] == "INV-1"
+        # A QBO deep link is returned + stored (sandbox connection -> sandbox host).
+        assert d1["url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
 
         r2 = await _post(seeded_user_a["access_token"], path, body)
         assert r2.status_code == 200
         d2 = r2.json()
         assert d2["already_existed"] is True
         assert d2["qb_invoice_id"] == "INV-1"
+        assert d2["url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
 
         assert calls["n"] == 1  # QBO invoice created exactly once
         links = (
             supabase_admin.table("quickbooks_invoice_links")
-            .select("status")
+            .select("status, qb_invoice_url")
             .eq("quote_id", seed["quote_id"])
             .execute()
             .data
         )
         assert len(links) == 1 and links[0]["status"] == "created"
+        assert links[0]["qb_invoice_url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
     finally:
         _cleanup(supabase_admin, cid)
 

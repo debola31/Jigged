@@ -262,7 +262,7 @@ async def preflight(company_id: str, quote_id: str, request: Request):
 
     link = (
         db.table("quickbooks_invoice_links")
-        .select("status")
+        .select("status, qb_invoice_url")
         .eq("quote_id", quote_id)
         .eq("realm_id", realm)
         .limit(1)
@@ -270,6 +270,7 @@ async def preflight(company_id: str, quote_id: str, request: Request):
         .data
     )
     already_pushed = bool(link and link[0]["status"] == "created")
+    invoice_url = link[0].get("qb_invoice_url") if already_pushed else None
 
     customer = (
         db.table("customers").select("id, name").eq("id", quote["customer_id"]).limit(1).execute().data
@@ -314,6 +315,7 @@ async def preflight(company_id: str, quote_id: str, request: Request):
     return {
         "connected": True,
         "already_pushed": already_pushed,
+        "invoice_url": invoice_url,
         "customer": customer_res,
         "lines_preview": preview,
     }
@@ -379,6 +381,7 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
             return {
                 "qb_invoice_id": row["qb_invoice_id"],
                 "doc_number": row["qb_invoice_doc_number"],
+                "url": row.get("qb_invoice_url"),
                 "already_existed": True,
             }
         if row["status"] == "pending" and _pending_is_fresh(row):
@@ -445,11 +448,12 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
         payload = qb.quote_to_invoice_payload(
             customer_ref=customer_ref,
             item_ref=item_ref,
-            doc_number=quote.get("quote_number"),
+            quote_number=quote.get("quote_number"),
             bill_addr=bill_addr,
             lines=lines,
         )
         result = qb.create_invoice(db, company_id, payload, request_id)
+        invoice_url = qb.invoice_deep_link(conn.get("environment", ""), result["id"])
     except HTTPException:
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
         raise
@@ -464,11 +468,13 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
             "qb_invoice_id": result["id"],
             "qb_invoice_doc_number": result["doc_number"],
             "qb_invoice_sync_token": result["sync_token"],
+            "qb_invoice_url": invoice_url,
         }
     ).eq("id", link_id).execute()
 
     return {
         "qb_invoice_id": result["id"],
         "doc_number": result["doc_number"],
+        "url": invoice_url,
         "already_existed": False,
     }

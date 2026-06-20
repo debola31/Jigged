@@ -587,17 +587,27 @@ def load_firm_invoice_lines(db: Client, company_id: str, job: dict) -> tuple[lis
 
 
 # ───────────────────────── Mapping + invoice creation ─────────────────────────
+def invoice_deep_link(environment: str, invoice_id: str) -> str:
+    """Deep link into the QBO web app for a specific invoice."""
+    base = "https://app.qbo.intuit.com" if environment == "production" else "https://app.sandbox.qbo.intuit.com"
+    return f"{base}/app/invoice?txnId={invoice_id}"
+
+
 def quote_to_invoice_payload(
     *,
     customer_ref: str,
     item_ref: str,
-    doc_number: str | None,
+    quote_number: str | None,
     bill_addr: dict | None,
     lines: list[dict],
 ) -> dict:
     """Pure transform: firm lines -> QBO Invoice JSON. Every line references the one
     shared item; the part identity lives in the Description. TaxCodeRef=NON because an
-    omitted code is TAXABLE on Automated-Sales-Tax companies, which would inflate the total."""
+    omitted code is TAXABLE on Automated-Sales-Tax companies, which would inflate the total.
+
+    DocNumber is intentionally omitted -> QBO auto-assigns the next invoice number, so
+    Jigged never collides with the shop's existing/manual/previous-system numbering. The
+    Jigged quote number is stamped into PrivateNote for traceability + QBO-side search."""
     qb_lines: list[dict] = []
     for ln in lines:
         unit_price = ln.get("unit_price")
@@ -624,8 +634,8 @@ def quote_to_invoice_payload(
             }
         )
     payload: dict = {"CustomerRef": {"value": customer_ref}, "Line": qb_lines}
-    if doc_number:
-        payload["DocNumber"] = doc_number[:21]
+    if quote_number:
+        payload["PrivateNote"] = f"Jigged quote {quote_number}"
     if bill_addr:
         payload["BillAddr"] = bill_addr
     return payload

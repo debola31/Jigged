@@ -1594,6 +1594,7 @@ export type Database = {
           qb_invoice_doc_number: string | null
           qb_invoice_id: string | null
           qb_invoice_sync_token: string | null
+          qb_invoice_url: string | null
           qb_request_id: string
           quote_id: string
           realm_id: string
@@ -1609,6 +1610,7 @@ export type Database = {
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
+          qb_invoice_url?: string | null
           qb_request_id: string
           quote_id: string
           realm_id: string
@@ -1624,6 +1626,7 @@ export type Database = {
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
+          qb_invoice_url?: string | null
           qb_request_id?: string
           quote_id?: string
           realm_id?: string

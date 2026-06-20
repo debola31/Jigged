@@ -42,6 +42,8 @@ import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
+import PushToQuickBooksDialog from '@/components/quotes/PushToQuickBooksDialog';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import AddressDisplay from '@/components/common/AddressDisplay';
 
 export default function QuoteDetailPage() {
@@ -65,6 +67,8 @@ export default function QuoteDetailPage() {
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
+  const [pushDialogOpen, setPushDialogOpen] = useState(false);
+  const [pushSuccess, setPushSuccess] = useState<string | null>(null);
 
   const fetchQuote = useCallback(async () => {
     try {
@@ -339,6 +343,26 @@ export default function QuoteDetailPage() {
             </Button>
           )}
 
+          {convertedLocked ? (
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<ReceiptLongIcon />}
+              onClick={() => setPushDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Push to QuickBooks
+            </Button>
+          ) : (
+            <Tooltip title="Convert this quote to a job first">
+              <span>
+                <Button variant="outlined" startIcon={<ReceiptLongIcon />} disabled>
+                  Push to QuickBooks
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+
           <Box sx={{ flex: 1 }} />
 
           <Tooltip title="Delete Quote">
@@ -592,6 +616,27 @@ export default function QuoteDetailPage() {
         onConverted={(jobId) => {
           router.push(`/dashboard/${companyId}/jobs/${jobId}`);
         }}
+      />
+
+      {/* Push to QuickBooks Dialog */}
+      <PushToQuickBooksDialog
+        open={pushDialogOpen}
+        companyId={companyId}
+        quoteId={quote.id}
+        quoteNumber={quote.quote_number || 'Quote'}
+        onClose={() => setPushDialogOpen(false)}
+        onPushed={(message) => {
+          setPushDialogOpen(false);
+          setPushSuccess(message);
+        }}
+      />
+
+      <Snackbar
+        open={!!pushSuccess}
+        autoHideDuration={5000}
+        onClose={() => setPushSuccess(null)}
+        message={pushSuccess ?? ''}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
 
       {/* Delete Confirmation Dialog */}

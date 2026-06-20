@@ -39,7 +39,7 @@ import { resolveAttentionLine } from '@/utils/shipmentsAccess';
 const MARGIN = 40;
 const ADDRESS_COMBINE_MAX_CHARS = 50;
 
-function formatDate(value: string | null | undefined): string {
+export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   // ship_date is stored as a date scalar (YYYY-MM-DD). Parse the parts
   // directly so US-Pacific viewers don't see "1 day earlier" because of
@@ -68,7 +68,7 @@ function formatNumber(value: number | null | undefined, fractionDigits = 2): str
   });
 }
 
-function buildShopHeaderLines(company: Company): string[] {
+export function buildShopHeaderLines(company: Company): string[] {
   const lines: string[] = [];
   const a1 = company.address_line1?.trim();
   const a2 = company.address_line2?.trim();
@@ -137,7 +137,7 @@ export function packingSlipPdfFilename(shipment: Pick<ShipmentWithRelations, 'pa
  * silently on any failure — the layout falls back to the company name
  * in plain bold text (mirrors the quote PDF).
  */
-async function loadLogoAsDataUrl(
+export async function loadLogoAsDataUrl(
   logoPath: string | null | undefined,
   supabaseClient: SupabaseLike | null,
 ): Promise<string | null> {
@@ -161,7 +161,7 @@ async function loadLogoAsDataUrl(
   }
 }
 
-interface SupabaseLike {
+export interface SupabaseLike {
   storage: {
     from: (bucket: string) => {
       createSignedUrl: (path: string, expiresIn: number) => Promise<{

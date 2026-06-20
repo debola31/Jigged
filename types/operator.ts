@@ -180,11 +180,15 @@ export interface JobTraveler {
   /** job_part_id. */
   job_part_id: string;
   job_id: string;
+  /** The made part this job_part produces (job_parts.part_id). */
+  part_id: string;
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
   part_description: string | null;
   quantity: number;
+  /** Order date — sourced from jobs.created_at (no dedicated order_date column). */
+  order_date: string | null;
   due_date: string | null;
   customer_po_number: string | null;
   production_status: string;

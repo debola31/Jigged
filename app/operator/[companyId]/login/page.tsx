@@ -33,6 +33,7 @@ export default function OperatorLoginPage() {
   const companyId = params.companyId as string;
   const stationId = searchParams.get('station') || undefined;
   const jobId = searchParams.get('job') || undefined;
+  const partId = searchParams.get('part') || undefined;
 
   const [companyName, setCompanyName] = useState<string>('');
   const [email, setEmail] = useState('');
@@ -71,7 +72,9 @@ export default function OperatorLoginPage() {
             sessionStorage.setItem('jigged_operator_station', stationId);
           }
 
-          if (jobId) {
+          if (jobId && partId) {
+            router.push(`/operator/${companyId}/jobs/${jobId}/parts/${partId}`);
+          } else if (jobId) {
             router.push(`/operator/${companyId}/jobs/${jobId}`);
           } else {
             router.push(`/operator/${companyId}/jobs`);
@@ -84,7 +87,7 @@ export default function OperatorLoginPage() {
     };
 
     checkSession();
-  }, [companyId, router, stationId, jobId, supabase]);
+  }, [companyId, router, stationId, jobId, partId, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,8 +143,11 @@ export default function OperatorLoginPage() {
         sessionStorage.setItem('jigged_operator_station', stationId);
       }
 
-      // 5. Redirect to job detail (if scanned from job QR) or jobs list
-      if (jobId) {
+      // 5. Redirect to the scanned part's traveler (if a per-part QR), the
+      // job's parts hub (legacy per-job QR), or the jobs list.
+      if (jobId && partId) {
+        router.push(`/operator/${companyId}/jobs/${jobId}/parts/${partId}`);
+      } else if (jobId) {
         router.push(`/operator/${companyId}/jobs/${jobId}`);
       } else {
         router.push(`/operator/${companyId}/jobs`);

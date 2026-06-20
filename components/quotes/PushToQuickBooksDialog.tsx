@@ -122,7 +122,7 @@ export default function PushToQuickBooksDialog({
 
   return (
     <Dialog open={open} onClose={pushing ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Push {quoteNumber} to QuickBooks</DialogTitle>
+      <DialogTitle>Create QuickBooks invoice for {quoteNumber}</DialogTitle>
       <DialogContent dividers>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -247,7 +247,7 @@ export default function PushToQuickBooksDialog({
           disabled={!canPush}
           startIcon={pushing ? <CircularProgress size={16} color="inherit" /> : undefined}
         >
-          {pushing ? 'Pushing…' : 'Push to QuickBooks'}
+          {pushing ? 'Creating…' : 'Create Invoice'}
         </Button>
       </DialogActions>
     </Dialog>

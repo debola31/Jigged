@@ -72,6 +72,7 @@ export default function QuoteDetailPage() {
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
+  const [qbLinkChecked, setQbLinkChecked] = useState(false);
 
   const fetchQuote = useCallback(async () => {
     try {
@@ -100,6 +101,8 @@ export default function QuoteDetailPage() {
         if (!cancelled) setQbInvoiceLink(link);
       } catch {
         /* non-fatal: the View link just won't show */
+      } finally {
+        if (!cancelled) setQbLinkChecked(true);
       }
     })();
     return () => {
@@ -363,27 +366,8 @@ export default function QuoteDetailPage() {
             </Button>
           )}
 
-          {convertedLocked ? (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<ReceiptLongIcon />}
-              onClick={() => setPushDialogOpen(true)}
-              disabled={actionLoading}
-            >
-              Push to QuickBooks
-            </Button>
-          ) : (
-            <Tooltip title="Convert this quote to a job first">
-              <span>
-                <Button variant="outlined" startIcon={<ReceiptLongIcon />} disabled>
-                  Push to QuickBooks
-                </Button>
-              </span>
-            </Tooltip>
-          )}
-
-          {qbInvoiceLink && (
+          {/* Create XOR View — once an invoice exists, only the link shows. */}
+          {convertedLocked && qbInvoiceLink ? (
             <Button
               variant="outlined"
               startIcon={<OpenInNewIcon />}
@@ -391,8 +375,26 @@ export default function QuoteDetailPage() {
               target="_blank"
               rel="noopener"
             >
-              View in QuickBooks
+              View invoice
             </Button>
+          ) : convertedLocked ? (
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<ReceiptLongIcon />}
+              onClick={() => setPushDialogOpen(true)}
+              disabled={actionLoading || !qbLinkChecked}
+            >
+              Create Invoice in QuickBooks
+            </Button>
+          ) : (
+            <Tooltip title="Convert this quote to a job first">
+              <span>
+                <Button variant="outlined" startIcon={<ReceiptLongIcon />} disabled>
+                  Create Invoice in QuickBooks
+                </Button>
+              </span>
+            </Tooltip>
           )}
 
           <Box sx={{ flex: 1 }} />

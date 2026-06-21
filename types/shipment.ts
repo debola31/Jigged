@@ -160,23 +160,6 @@ export interface ShipmentFilters {
   voided?: boolean;
 }
 
-/**
- * Row shape for the top-level Shipments list page (Phase 1.5 / FR-NEW-4).
- * Adds the distinct list of job numbers covered by the shipment, a
- * line-item count, and the resolved created_by member to the bare
- * Shipment row.
- */
-export interface ShipmentListRow extends Shipment {
-  customer_name: string | null;
-  job_numbers: string[];
-  line_item_count: number;
-  created_by_member: {
-    user_id: string;
-    name: string | null;
-    email: string | null;
-  } | null;
-}
-
 export type ProductionStatus =
   | 'not_started'
   | 'in_progress'

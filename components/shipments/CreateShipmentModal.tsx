@@ -25,9 +25,9 @@ export interface CreateShipmentModalProps {
 }
 
 /**
- * Job-detail entry point for shipment creation (Flow B). Thin wrapper
- * around ShipmentForm running in `job` mode; the multi-job wizard at
- * /shipments/new uses the same form in `customer` mode.
+ * Job-detail entry point for shipment creation — the single way to create
+ * a shipment now that a packing slip belongs to one job. Thin wrapper
+ * around ShipmentForm running in `job` mode.
  */
 export default function CreateShipmentModal({
   open,

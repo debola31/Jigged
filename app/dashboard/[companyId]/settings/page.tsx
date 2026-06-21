@@ -18,7 +18,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
-import CompanyShippingSettingsCard from '@/components/settings/CompanyShippingSettingsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 
 export default function SettingsPage() {
@@ -46,9 +45,6 @@ export default function SettingsPage() {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
-
-      {/* Packing-slip number format + default CoC text */}
-      <CompanyShippingSettingsCard companyId={companyId} />
 
       {/* QuickBooks Online connection + invoice push settings */}
       <QuickBooksIntegrationCard companyId={companyId} />

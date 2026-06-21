@@ -17,7 +17,6 @@ import type {
   CustomerContactFormData,
   CustomerContactRole,
 } from '@/types/customerContact';
-import type { ShippingArrangement } from '@/types/shipment';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
 
 /**
@@ -32,20 +31,6 @@ import { createCustomerContact } from '@/utils/customerContactsAccess';
  * as the primary after the parent row is created — mirrors VendorForm's
  * "Initial Contact (optional)" accordion behavior.
  */
-
-/**
- * Cast a DB row to Customer. The DB stores `default_shipping_arrangement`
- * as text with a CHECK constraint pinning it to ShippingArrangement values
- * (see schema.prod.sql ~line 109); the generated Database type only sees
- * `string`. Centralized here so the assertion is documented once instead
- * of scattered across read sites. Same pattern as asQuote() in
- * utils/quotesAccess.ts.
- */
-function asCustomer<T extends { default_shipping_arrangement: string | null }>(
-  row: T,
-): T & { default_shipping_arrangement: ShippingArrangement | null } {
-  return row as T & { default_shipping_arrangement: ShippingArrangement | null };
-}
 
 /** Joined customer + primary contact shape returned by the list queries. */
 type CustomerWithPrimaryContactRow = Customer & {
@@ -199,10 +184,10 @@ export async function getCustomer(
 
   if (!data) return null;
 
-  return asCustomer({
+  return {
     ...data,
     addresses: (data.addresses ?? []) as CustomerAddress[],
-  });
+  };
 }
 
 /**
@@ -333,7 +318,7 @@ export async function createCustomer(
     }
   }
 
-  return asCustomer(customer);
+  return customer;
 }
 
 export async function updateCustomer(
@@ -358,37 +343,7 @@ export async function updateCustomer(
     throw error;
   }
 
-  return asCustomer(data);
-}
-
-/**
- * Update the per-customer shipping defaults surfaced in PR 7's
- * CustomerShippingDefaultsCard. Empty strings are stored as NULL so
- * the CoC cascade (shipment → customer → company → omit) and the
- * shipping-arrangement CHECK constraint behave predictably.
- */
-export async function updateCustomerShippingDefaults(
-  customerId: string,
-  patch: {
-    default_shipping_arrangement: import('@/types/shipment').ShippingArrangement | null;
-    default_carrier: string | null;
-    default_coc_text: string | null;
-  },
-): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('customers')
-    .update({
-      default_shipping_arrangement: patch.default_shipping_arrangement,
-      default_carrier: patch.default_carrier?.trim() ? patch.default_carrier.trim() : null,
-      default_coc_text: patch.default_coc_text?.trim() ? patch.default_coc_text.trim() : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', customerId);
-  if (error) {
-    console.error('Error updating customer shipping defaults:', error);
-    throw new Error(`Failed to update shipping defaults: ${error.message}`);
-  }
+  return data;
 }
 
 export async function softDeleteCustomer(customerId: string): Promise<void> {

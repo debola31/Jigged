@@ -44,7 +44,6 @@ import { roleDisplayLabel } from '@/types/customerContact';
 import type { CustomerContact } from '@/types/customerContact';
 import type { CustomerAddress, CustomerWithRelations } from '@/types/customer';
 import { CustomerContactModal, CustomerAddressForm } from '@/components/customers';
-import CustomerShippingDefaultsCard from '@/components/customers/CustomerShippingDefaultsCard';
 
 function formatAddressLines(a: CustomerAddress): string {
   const parts = [
@@ -607,11 +606,6 @@ export default function CustomerDetailPage() {
               )}
             </CardContent>
           </Card>
-        </Grid>
-
-        {/* Shipping defaults — prefill packing-slip fields on new shipments. */}
-        <Grid size={{ xs: 12 }}>
-          <CustomerShippingDefaultsCard customer={customer} onSaved={fetchAll} />
         </Grid>
 
         {/* Related entities */}

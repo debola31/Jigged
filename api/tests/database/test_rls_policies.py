@@ -469,6 +469,7 @@ class TestShipmentsRLS:
                 {
                     "company_id": seeded_company_b_graph["company_id"],
                     "customer_id": seeded_company_b_graph["customer_id"],
+                    "job_id": seeded_company_b_graph["job_id"],
                     "packing_slip_number": "PS-RLS-ATTACK",
                 }
             )

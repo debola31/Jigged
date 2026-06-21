@@ -14,33 +14,33 @@
 
 import type { CustomerAddress } from '@/types/customer';
 
-export type ShippingArrangement =
-  | 'prepaid_and_add'
-  | 'prepaid'
-  | 'collect'
-  | 'third_party_account'
+export type ShippingMethod =
   | 'customer_pickup'
-  | 'customer_arranged_freight'
-  | 'other';
+  | 'personal_delivery'
+  | 'shipment'
+  | 'dropship'
+  | 'restock';
+
+/** Carriers offered when shipping_method === 'shipment'. The UI adds an
+ *  "Other" choice that reveals a free-text field; the typed-in value is
+ *  stored directly in shipments.carrier, so the column itself is free text. */
+export const CARRIER_OPTIONS = ['UPS', 'FedEx', 'USPS'] as const;
 
 export interface Shipment {
   id: string;
   company_id: string;
   customer_id: string;
+  /** The single job this packing slip belongs to (one job per slip). */
+  job_id: string;
   shipping_address_id: string | null;
   /** Reserved for Phase 3 ad-hoc shipping. Null when shipping_address_id is set (XOR). */
   one_time_address: Record<string, unknown> | null;
   packing_slip_number: string;
   ship_date: string;
+  /** UPS / FedEx / USPS or a free-text "Other" carrier; only set when shipping_method === 'shipment'. */
   carrier: string | null;
-  tracking_number: string | null;
-  shipping_arrangement: ShippingArrangement | null;
-  shipping_arrangement_other: string | null;
-  weight_lbs: number | null;
-  package_count: number | null;
-  package_type: string | null;
+  shipping_method: ShippingMethod | null;
   notes: string | null;
-  coc_text: string | null;
   created_by: string | null;
   created_at: string;
   voided_at: string | null;
@@ -135,14 +135,8 @@ export interface CreateShipmentPayload {
   one_time_address?: Record<string, unknown> | null;
   ship_date: string;
   carrier?: string | null;
-  tracking_number?: string | null;
-  shipping_arrangement?: ShippingArrangement | null;
-  shipping_arrangement_other?: string | null;
-  weight_lbs?: number | null;
-  package_count?: number | null;
-  package_type?: string | null;
+  shipping_method?: ShippingMethod | null;
   notes?: string | null;
-  coc_text?: string | null;
   line_items: Array<{
     job_part_id: string;
     quantity: number;
@@ -164,23 +158,6 @@ export interface ShipmentFilters {
   startDate?: string;
   endDate?: string;
   voided?: boolean;
-}
-
-/**
- * Row shape for the top-level Shipments list page (Phase 1.5 / FR-NEW-4).
- * Adds the distinct list of job numbers covered by the shipment, a
- * line-item count, and the resolved created_by member to the bare
- * Shipment row.
- */
-export interface ShipmentListRow extends Shipment {
-  customer_name: string | null;
-  job_numbers: string[];
-  line_item_count: number;
-  created_by_member: {
-    user_id: string;
-    name: string | null;
-    email: string | null;
-  } | null;
 }
 
 export type ProductionStatus =
@@ -224,25 +201,22 @@ export interface OpenJobPartFilter {
 }
 
 /**
- * Display config for shipping_arrangement values. Single source of truth
- * for the human-readable label — both CreateShipmentModal and
- * CustomerShippingDefaultsCard (PR 7) and the packing-slip PDF read from
- * this map. Adding a new arrangement adds it here once.
+ * Display config for shipping_method values. Single source of truth for the
+ * human-readable label — the shipment form, the shipments list, and the
+ * packing-slip PDF all read from this map. Adding a method adds it here once.
  */
-export const SHIPPING_ARRANGEMENT_LABELS: Record<ShippingArrangement, string> = {
-  prepaid_and_add: 'Prepaid & Add',
-  prepaid: 'Prepaid',
-  collect: 'Collect',
-  third_party_account: 'Third Party Account',
+export const SHIPPING_METHOD_LABELS: Record<ShippingMethod, string> = {
   customer_pickup: 'Customer Pickup',
-  customer_arranged_freight: 'Customer-arranged Freight',
-  other: 'Other',
+  personal_delivery: 'Personal Delivery',
+  shipment: 'Shipment',
+  dropship: 'DropShip',
+  restock: 'Restock',
 };
 
-export const SHIPPING_ARRANGEMENT_OPTIONS: Array<{
-  value: ShippingArrangement;
+export const SHIPPING_METHOD_OPTIONS: Array<{
+  value: ShippingMethod;
   label: string;
-}> = (Object.keys(SHIPPING_ARRANGEMENT_LABELS) as ShippingArrangement[]).map((value) => ({
+}> = (Object.keys(SHIPPING_METHOD_LABELS) as ShippingMethod[]).map((value) => ({
   value,
-  label: SHIPPING_ARRANGEMENT_LABELS[value],
+  label: SHIPPING_METHOD_LABELS[value],
 }));

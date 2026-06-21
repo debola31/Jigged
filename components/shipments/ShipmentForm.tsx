@@ -32,20 +32,23 @@ import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 
 import { getSupabase } from '@/lib/supabase';
-import { parseOptionalNumber, parseOptionalInteger } from '@/lib/validators';
 import type { Company } from '@/utils/companyAccess';
 import type { CustomerAddress } from '@/types/customer';
 import type {
   CreateShipmentPayload,
   OpenJobPartRow,
-  ShippingArrangement,
+  ShippingMethod,
 } from '@/types/shipment';
-import { SHIPPING_ARRANGEMENT_OPTIONS } from '@/types/shipment';
+import { CARRIER_OPTIONS, SHIPPING_METHOD_OPTIONS } from '@/types/shipment';
 import {
   createShipment,
   getJobPartShipmentSummaries,
   getOpenJobPartsForCustomer,
 } from '@/utils/shipmentsAccess';
+
+/** UI-only carrier selection. 'other' reveals a free-text field whose value
+ *  is what actually gets stored in shipments.carrier. */
+type CarrierChoice = '' | (typeof CARRIER_OPTIONS)[number] | 'other';
 
 function todayLocalISODate(): string {
   const d = new Date();
@@ -63,9 +66,6 @@ function todayLocalISODate(): string {
 interface CustomerContext {
   id: string;
   name: string;
-  default_carrier: string | null;
-  default_shipping_arrangement: ShippingArrangement | null;
-  default_coc_text: string | null;
   addresses: CustomerAddress[];
 }
 
@@ -122,15 +122,10 @@ export default function ShipmentForm({
 
   const [shipDate, setShipDate] = useState<string>(todayLocalISODate());
   const [shippingAddressId, setShippingAddressId] = useState<string | null>(null);
-  const [carrier, setCarrier] = useState('');
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [shippingArrangement, setShippingArrangement] = useState<ShippingArrangement | ''>('');
-  const [shippingArrangementOther, setShippingArrangementOther] = useState('');
-  const [weightLbs, setWeightLbs] = useState('');
-  const [packageCount, setPackageCount] = useState('');
-  const [packageType, setPackageType] = useState('');
+  const [shippingMethod, setShippingMethod] = useState<ShippingMethod | ''>('');
+  const [carrierChoice, setCarrierChoice] = useState<CarrierChoice>('');
+  const [carrierOther, setCarrierOther] = useState('');
   const [notes, setNotes] = useState('');
-  const [cocText, setCocText] = useState('');
 
   const [lines, setLines] = useState<LineRow[]>([]);
 
@@ -155,7 +150,7 @@ export default function ShipmentForm({
         const { data: companyRow, error: companyErr } = await supabase
           .from('companies')
           .select(
-            'id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website, default_coc_text, packing_slip_number_format, settings',
+            'id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website, settings',
           )
           .eq('id', companyId)
           .single();
@@ -174,7 +169,6 @@ export default function ShipmentForm({
               `id, job_number, company_id,
                customer:customers!left (
                  id, name,
-                 default_carrier, default_shipping_arrangement, default_coc_text,
                  addresses:customer_addresses (
                    id, customer_id, address_line1, address_line2, city, state,
                    postal_code, country, default_billing, default_shipping, attention_to
@@ -246,7 +240,7 @@ export default function ShipmentForm({
           const { data: customerRow, error: customerErr } = await supabase
             .from('customers')
             .select(
-              `id, name, default_carrier, default_shipping_arrangement, default_coc_text,
+              `id, name,
                addresses:customer_addresses (
                  id, customer_id, address_line1, address_line2, city, state,
                  postal_code, country, default_billing, default_shipping, attention_to
@@ -286,17 +280,6 @@ export default function ShipmentForm({
         setCustomer(ctx);
         setCompany(companyRow as unknown as Company);
         setLines(initialLines);
-
-        // Form defaults from customer (carrier/arrangement/coc) +
-        // company fallback for coc.
-        setCarrier(ctx.default_carrier ?? '');
-        setShippingArrangement(ctx.default_shipping_arrangement ?? '');
-        setShippingArrangementOther('');
-        setCocText(
-          ctx.default_coc_text?.trim()
-            || (companyRow as unknown as Company).default_coc_text?.trim()
-            || '',
-        );
 
         // Default shipping address: default_shipping → default_billing → null.
         const defaultShip = ctx.addresses?.find((a) => a.default_shipping)
@@ -365,6 +348,8 @@ export default function ShipmentForm({
   // ---------- Validation ----------
   type Validation = {
     contributing: Array<{ job_part_id: string; quantity: number; warn: boolean; row: LineRow }>;
+    /** The single job being shipped (null when none, or >1 — a blocking error). */
+    selectedJobId: string | null;
     canSubmit: boolean;
     warnings: string[];
     blockingMessages: string[];
@@ -385,6 +370,10 @@ export default function ShipmentForm({
         return c.quantity > 0;
       });
 
+    // One packing slip belongs to exactly one job.
+    const jobIds = Array.from(new Set(contributing.map((c) => c.row.job_id)));
+    const selectedJobId = jobIds.length === 1 ? jobIds[0] : null;
+
     const warnings: string[] = [];
     const blockingMessages: string[] = [];
 
@@ -402,20 +391,33 @@ export default function ShipmentForm({
           : 'At least one line item must have a non-zero quantity.',
       );
     }
+    if (jobIds.length > 1) {
+      blockingMessages.push(
+        'A packing slip can only cover one job — deselect lines from the other job(s).',
+      );
+    }
     if (!shippingAddressId) {
       blockingMessages.push('Shipping address is required.');
     }
-    if (shippingArrangement === 'other' && !shippingArrangementOther.trim()) {
-      blockingMessages.push('Provide free-text detail when selecting "Other" arrangement.');
+    if (shippingMethod === '') {
+      blockingMessages.push('Select a shipping method.');
+    }
+    if (shippingMethod === 'shipment') {
+      if (carrierChoice === '') {
+        blockingMessages.push('Select a carrier for the shipment.');
+      } else if (carrierChoice === 'other' && !carrierOther.trim()) {
+        blockingMessages.push('Enter the carrier name.');
+      }
     }
 
     return {
       contributing,
+      selectedJobId,
       canSubmit: blockingMessages.length === 0,
       warnings,
       blockingMessages,
     };
-  }, [lines, isCustomerMode, shippingAddressId, shippingArrangement, shippingArrangementOther]);
+  }, [lines, isCustomerMode, shippingAddressId, shippingMethod, carrierChoice, carrierOther]);
 
   // ---------- Helpers to mutate a single line by id ----------
   const patchLine = useCallback((jobPartId: string, patch: Partial<LineRow>) => {
@@ -431,25 +433,20 @@ export default function ShipmentForm({
     setSubmitting(true);
     setError(null);
 
+    // Carrier only applies to a true shipment; "Other" stores the typed name.
+    const resolvedCarrier =
+      shippingMethod === 'shipment'
+        ? (carrierChoice === 'other' ? carrierOther.trim() : carrierChoice) || null
+        : null;
+
     const payload: CreateShipmentPayload = {
       customer_id: customer.id,
       shipping_address_id: shippingAddressId,
       one_time_address: null,
       ship_date: shipDate || todayLocalISODate(),
-      carrier: carrier.trim() || null,
-      tracking_number: trackingNumber.trim() || null,
-      shipping_arrangement: shippingArrangement === '' ? null : shippingArrangement,
-      shipping_arrangement_other:
-        shippingArrangement === 'other'
-          ? shippingArrangementOther.trim() || null
-          : null,
-      // Route through the shared parsers so non-numeric input coerces to null
-      // instead of a NaN that would blow up the insert.
-      weight_lbs: parseOptionalNumber(weightLbs),
-      package_count: parseOptionalInteger(packageCount),
-      package_type: packageType.trim() || null,
+      carrier: resolvedCarrier,
+      shipping_method: shippingMethod === '' ? null : shippingMethod,
       notes: notes.trim() || null,
-      coc_text: cocText.trim() || null,
       line_items: validation.contributing.map((c) => ({
         job_part_id: c.job_part_id,
         quantity: c.quantity,
@@ -469,9 +466,8 @@ export default function ShipmentForm({
       setSubmitting(false);
     }
   }, [
-    customer, validation, shippingAddressId, shipDate, carrier, trackingNumber,
-    shippingArrangement, shippingArrangementOther, weightLbs, packageCount,
-    packageType, notes, cocText, companyId, onCreated,
+    customer, validation, shippingAddressId, shipDate, carrierChoice, carrierOther,
+    shippingMethod, notes, companyId, onCreated,
   ]);
 
   // ---------- Render ----------
@@ -553,72 +549,58 @@ export default function ShipmentForm({
 
       <Divider />
 
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        <TextField
-          label="Carrier"
-          value={carrier}
-          onChange={(e) => setCarrier(e.target.value)}
-          fullWidth
-        />
-        <TextField
-          label="Tracking Number"
-          value={trackingNumber}
-          onChange={(e) => setTrackingNumber(e.target.value)}
-          fullWidth
-        />
-      </Stack>
-
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="flex-start">
-        <FormControl fullWidth>
-          <InputLabel id="shipping-arrangement-label">Shipping Arrangement</InputLabel>
+        <FormControl fullWidth required>
+          <InputLabel id="shipping-method-label">Shipping Method</InputLabel>
           <Select
-            labelId="shipping-arrangement-label"
-            label="Shipping Arrangement"
-            value={shippingArrangement}
-            onChange={(e) =>
-              setShippingArrangement(e.target.value as ShippingArrangement | '')
-            }
+            labelId="shipping-method-label"
+            label="Shipping Method"
+            value={shippingMethod}
+            onChange={(e) => {
+              const next = e.target.value as ShippingMethod | '';
+              setShippingMethod(next);
+              // Carrier only applies to a true shipment — clear it otherwise.
+              if (next !== 'shipment') {
+                setCarrierChoice('');
+                setCarrierOther('');
+              }
+            }}
           >
             <MenuItem value="">
-              <em>None</em>
+              <em>Select…</em>
             </MenuItem>
-            {SHIPPING_ARRANGEMENT_OPTIONS.map((opt) => (
+            {SHIPPING_METHOD_OPTIONS.map((opt) => (
               <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
             ))}
           </Select>
         </FormControl>
-        {shippingArrangement === 'other' && (
+        {shippingMethod === 'shipment' && (
+          <FormControl fullWidth required>
+            <InputLabel id="carrier-label">Carrier</InputLabel>
+            <Select
+              labelId="carrier-label"
+              label="Carrier"
+              value={carrierChoice}
+              onChange={(e) => setCarrierChoice(e.target.value as CarrierChoice)}
+            >
+              <MenuItem value="">
+                <em>Select…</em>
+              </MenuItem>
+              {CARRIER_OPTIONS.map((c) => (
+                <MenuItem key={c} value={c}>{c}</MenuItem>
+              ))}
+              <MenuItem value="other">Other</MenuItem>
+            </Select>
+          </FormControl>
+        )}
+        {shippingMethod === 'shipment' && carrierChoice === 'other' && (
           <TextField
-            label='Arrangement detail (required for "Other")'
-            value={shippingArrangementOther}
-            onChange={(e) => setShippingArrangementOther(e.target.value)}
+            label="Carrier name"
+            value={carrierOther}
+            onChange={(e) => setCarrierOther(e.target.value)}
             fullWidth
           />
         )}
-      </Stack>
-
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        <TextField
-          label="Weight (lbs)"
-          value={weightLbs}
-          onChange={(e) => setWeightLbs(e.target.value)}
-          inputProps={{ inputMode: 'decimal' }}
-          fullWidth
-        />
-        <TextField
-          label="Package Count"
-          value={packageCount}
-          onChange={(e) => setPackageCount(e.target.value)}
-          inputProps={{ inputMode: 'numeric' }}
-          fullWidth
-        />
-        <TextField
-          label="Package Type"
-          value={packageType}
-          onChange={(e) => setPackageType(e.target.value)}
-          placeholder="e.g., box, pallet"
-          fullWidth
-        />
       </Stack>
 
       <Divider />
@@ -665,8 +647,14 @@ export default function ShipmentForm({
           </Stack>
         )}
 
+        {isCustomerMode && (
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+            One packing slip per job — selecting a line locks the slip to that job.
+          </Typography>
+        )}
+
         {isCustomerMode
-          ? renderCustomerLineGroups(linesByJob ?? [], patchLine)
+          ? renderCustomerLineGroups(linesByJob ?? [], patchLine, validation.selectedJobId)
           : renderJobLineTable(filteredLines, patchLine, validation)}
 
         {validation.warnings.length > 0 && (
@@ -691,16 +679,6 @@ export default function ShipmentForm({
         multiline
         minRows={2}
         fullWidth
-      />
-
-      <TextField
-        label="Certificate of Conformance"
-        value={cocText}
-        onChange={(e) => setCocText(e.target.value)}
-        multiline
-        minRows={3}
-        fullWidth
-        helperText="Defaults to customer.default_coc_text, falling back to company.default_coc_text. Leave empty to omit."
       />
 
       {!validation.canSubmit && validation.blockingMessages.length > 0 && (
@@ -731,7 +709,7 @@ export default function ShipmentForm({
 
       {company === null && (
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          Note: company defaults could not be loaded; carrier/CoC defaults may be blank.
+          Note: company profile could not be loaded; the packing-slip header may be blank.
         </Typography>
       )}
     </Stack>
@@ -803,6 +781,7 @@ function renderJobLineTable(
 function renderCustomerLineGroups(
   groups: Array<{ job_number: string; customer_po_number: string | null; rows: LineRow[] }>,
   patchLine: (id: string, patch: Partial<LineRow>) => void,
+  selectedJobId: string | null,
 ) {
   if (groups.length === 0) {
     return (
@@ -814,81 +793,93 @@ function renderCustomerLineGroups(
   }
   return (
     <Stack spacing={2}>
-      {groups.map((group) => (
-        <Box key={group.job_number}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              Job {group.job_number}
-            </Typography>
-            {group.customer_po_number && (
-              <Chip
-                size="small"
-                label={`PO ${group.customer_po_number}`}
-                variant="outlined"
-              />
-            )}
-          </Stack>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox" />
-                <TableCell>Part</TableCell>
-                <TableCell align="right">Ordered</TableCell>
-                <TableCell align="right">Shipped</TableCell>
-                <TableCell align="right">Remaining</TableCell>
-                <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {group.rows.map((row) => {
-                const disabled = row.qty_remaining === 0;
-                return (
-                  <TableRow key={row.job_part_id} hover>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={row.selected && !disabled}
-                        disabled={disabled}
-                        onChange={(e) =>
-                          patchLine(row.job_part_id, { selected: e.target.checked })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Stack spacing={0}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {row.part_name}
-                        </Typography>
-                        {disabled && (
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            Already shipped in full
+      {groups.map((group) => {
+        const groupJobId = group.rows[0]?.job_id ?? null;
+        // One slip per job: once a job is selected, lines from other jobs
+        // are locked out until the selection is cleared.
+        const lockedOut = selectedJobId !== null && groupJobId !== selectedJobId;
+        return (
+          <Box key={group.job_number} sx={{ opacity: lockedOut ? 0.5 : 1 }}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Job {group.job_number}
+              </Typography>
+              {group.customer_po_number && (
+                <Chip
+                  size="small"
+                  label={`PO ${group.customer_po_number}`}
+                  variant="outlined"
+                />
+              )}
+              {lockedOut && (
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Locked — another job is selected
+                </Typography>
+              )}
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox" />
+                  <TableCell>Part</TableCell>
+                  <TableCell align="right">Ordered</TableCell>
+                  <TableCell align="right">Shipped</TableCell>
+                  <TableCell align="right">Remaining</TableCell>
+                  <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {group.rows.map((row) => {
+                  const fullyShipped = row.qty_remaining === 0;
+                  const rowDisabled = fullyShipped || lockedOut;
+                  return (
+                    <TableRow key={row.job_part_id} hover>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={row.selected && !fullyShipped}
+                          disabled={rowDisabled}
+                          onChange={(e) =>
+                            patchLine(row.job_part_id, { selected: e.target.checked })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Stack spacing={0}>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {row.part_name}
                           </Typography>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    <TableCell align="right">{row.qty_ordered}</TableCell>
-                    <TableCell align="right">{row.qty_shipped_prior}</TableCell>
-                    <TableCell align="right">{row.qty_remaining}</TableCell>
-                    <TableCell align="right">
-                      <TextField
-                        value={row.qty_input}
-                        onChange={(e) =>
-                          patchLine(row.job_part_id, { qty_input: e.target.value })
-                        }
-                        size="small"
-                        disabled={disabled || !row.selected}
-                        inputProps={{
-                          inputMode: 'decimal',
-                          style: { textAlign: 'right' },
-                        }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Box>
-      ))}
+                          {fullyShipped && (
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              Already shipped in full
+                            </Typography>
+                          )}
+                        </Stack>
+                      </TableCell>
+                      <TableCell align="right">{row.qty_ordered}</TableCell>
+                      <TableCell align="right">{row.qty_shipped_prior}</TableCell>
+                      <TableCell align="right">{row.qty_remaining}</TableCell>
+                      <TableCell align="right">
+                        <TextField
+                          value={row.qty_input}
+                          onChange={(e) =>
+                            patchLine(row.job_part_id, { qty_input: e.target.value })
+                          }
+                          size="small"
+                          disabled={rowDisabled || !row.selected}
+                          inputProps={{
+                            inputMode: 'decimal',
+                            style: { textAlign: 'right' },
+                          }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+        );
+      })}
     </Stack>
   );
 }

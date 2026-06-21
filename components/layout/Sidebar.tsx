@@ -16,7 +16,6 @@ import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import FactoryIcon from '@mui/icons-material/Factory';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import PercentIcon from '@mui/icons-material/Percent';
@@ -47,7 +46,6 @@ interface MenuItem {
 const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
-  { name: 'Shipments', path: '/shipments', icon: LocalShippingIcon, featureFlag: 'shipments' },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },

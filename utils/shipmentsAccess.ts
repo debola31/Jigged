@@ -1,13 +1,13 @@
 /**
  * Shipments access layer.
  *
- * createShipment routes through the create_shipment_with_line_items RPC
- * (migration 20260524) which:
- *   1. takes a sorted per-job advisory lock (deadlock-free under concurrent calls),
- *   2. snapshots pre-cascade fulfillment_status for every affected job,
- *   3. mints the packing-slip number via next_packing_slip_number (row-locked counter),
- *   4. inserts the shipment + line items (triggers cascade fulfillment),
- *   5. writes audit rows for every job that transitioned forward into fully_shipped.
+ * createShipment routes through the create_shipment_with_line_items RPC which:
+ *   1. derives the single job behind the line items (one slip = one job),
+ *   2. takes a per-job advisory lock (collision-free packing-slip sequence),
+ *   3. snapshots pre-cascade fulfillment_status for the job,
+ *   4. mints the job-derived packing-slip number PS-{jobBase}-{n} (n from 1),
+ *   5. inserts the shipment + line items (triggers cascade fulfillment),
+ *   6. writes an audit row if the job transitioned forward into fully_shipped.
  *
  * Reads use plain PostgREST joins. Voids are scaffolded but throw — Phase 3.
  */
@@ -24,7 +24,6 @@ import type {
   ResolvedAttention,
   Shipment,
   ShipmentFilters,
-  ShipmentListRow,
   ShipmentWithRelations,
 } from '@/types/shipment';
 
@@ -48,14 +47,11 @@ export async function createShipment(
 
   const supabase = getSupabase();
 
-  // The SQL function (create_shipment_with_line_items, schema.prod.sql
-  // line ~3042) accepts NULL for every optional shipping field — its body
-  // does `COALESCE(p_ship_date, current_date)` and similar fallbacks.
-  // The typed RPC signature reflects only the parameter type (e.g. text)
-  // without DEFAULT NULL, so the generated client type rejects null
-  // arguments. The right long-term fix is a migration that declares
-  // DEFAULT NULL on the optional params; until then we cast at the call
-  // site with this note.
+  // The SQL function (create_shipment_with_line_items) derives the single
+  // job behind the line items, mints the PS-{jobBase}-{n} number, and
+  // accepts NULL for every optional field. The typed RPC signature reflects
+  // only the parameter type (e.g. text) without DEFAULT NULL, so the
+  // generated client type rejects null arguments; we cast at the call site.
   const rpcArgs = {
     p_company_id: companyId,
     p_customer_id: payload.customer_id,
@@ -63,14 +59,8 @@ export async function createShipment(
     p_one_time_address: payload.one_time_address ?? null,
     p_ship_date: payload.ship_date,
     p_carrier: payload.carrier ?? null,
-    p_tracking_number: payload.tracking_number ?? null,
-    p_shipping_arrangement: payload.shipping_arrangement ?? null,
-    p_shipping_arrangement_other: payload.shipping_arrangement_other ?? null,
-    p_weight_lbs: payload.weight_lbs ?? null,
-    p_package_count: payload.package_count ?? null,
-    p_package_type: payload.package_type ?? null,
+    p_shipping_method: payload.shipping_method ?? null,
     p_notes: payload.notes ?? null,
-    p_coc_text: payload.coc_text ?? null,
     p_line_items: payload.line_items,
   };
   const { data: shipmentId, error } = await supabase.rpc(
@@ -297,101 +287,6 @@ export async function listShipmentsForCompany(
 }
 
 /**
- * List shipments for a company with job-number chips, line-item count,
- * and resolved created-by member. Powers the top-level Shipments list
- * page (Phase 1.5 / FR-NEW-4). Done in two round trips: one PostgREST
- * fetch with a nested join through line items → job_parts → jobs, then
- * a batched user_company_access read for the created_by display name.
- *
- * Default ordering is most-recent ship_date first.
- */
-export async function listShipmentsForCompanyWithJobs(
-  companyId: string,
-  filters: ShipmentFilters = {},
-): Promise<ShipmentListRow[]> {
-  const supabase = getSupabase();
-
-  let query = supabase
-    .from('shipments')
-    .select(
-      `*,
-       customer:customers (id, name),
-       shipment_line_items (
-         job_part:job_parts (
-           job:jobs (job_number)
-         )
-       )`,
-    )
-    .eq('company_id', companyId)
-    .order('ship_date', { ascending: false })
-    .order('created_at', { ascending: false });
-
-  if (filters.customerId) query = query.eq('customer_id', filters.customerId);
-  if (filters.startDate) query = query.gte('ship_date', filters.startDate);
-  if (filters.endDate) query = query.lte('ship_date', filters.endDate);
-  if (filters.voided === false) query = query.is('voided_at', null);
-  else if (filters.voided === true) query = query.not('voided_at', 'is', null);
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('listShipmentsForCompanyWithJobs failed:', error);
-    throw new Error(`Failed to list shipments: ${error.message}`);
-  }
-
-  type RawRow = Shipment & {
-    customer: { id: string; name: string } | null;
-    shipment_line_items: Array<{
-      job_part: { job: { job_number: string } | null } | null;
-    }> | null;
-  };
-  const rows = (data ?? []) as unknown as RawRow[];
-  if (rows.length === 0) return [];
-
-  // Batch-resolve created_by members.
-  const userIds = Array.from(
-    new Set(rows.map((r) => r.created_by).filter((u): u is string => Boolean(u))),
-  );
-  const memberByUser = new Map<
-    string,
-    { user_id: string; name: string | null; email: string | null }
-  >();
-  if (userIds.length > 0) {
-    const { data: members } = await supabase
-      .from('user_company_access')
-      .select('user_id, name, email')
-      .eq('company_id', companyId)
-      .in('user_id', userIds);
-    for (const m of (members ?? []) as Array<{
-      user_id: string;
-      name: string | null;
-      email: string | null;
-    }>) {
-      memberByUser.set(m.user_id, m);
-    }
-  }
-
-  return rows.map((row) => {
-    const jobNumbers = Array.from(
-      new Set(
-        (row.shipment_line_items ?? [])
-          .map((li) => li.job_part?.job?.job_number)
-          .filter((n): n is string => Boolean(n)),
-      ),
-    ).sort();
-    const { customer, shipment_line_items, ...rest } = row;
-    return {
-      ...(rest as Shipment),
-      customer_name: customer?.name ?? null,
-      job_numbers: jobNumbers,
-      line_item_count: (shipment_line_items ?? []).length,
-      created_by_member: rest.created_by
-        ? memberByUser.get(rest.created_by) ?? null
-        : null,
-    };
-  });
-}
-
-/**
  * Per-job_part shipped summary. Used by the CreateShipmentModal to
  * prefill remaining-to-ship and by the job-detail per-part breakdown.
  *
@@ -521,8 +416,10 @@ export async function getJobShipmentSummary(
  * All open job_parts for a customer across every job they have in this
  * company, with shipped/remaining quantities computed and clamped.
  *
- * Powers the top-level /shipments/new wizard's line picker (Phase 1.5 /
- * FR-NEW-5). Pulls the customer's job_parts via a nested PostgREST
+ * NOTE: only reached by ShipmentForm's `customer` mode, which is now
+ * unwired (the standalone /shipments/new wizard was removed once a slip
+ * became one-job). Kept until the customer-mode form path is excised.
+ * Pulls the customer's job_parts via a nested PostgREST
  * filter, then sums non-voided shipment_line_items for those parts in
  * one batched query — same two-round-trip shape as
  * getJobPartShipmentSummaries, just joined on customer_id instead of

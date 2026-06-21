@@ -181,16 +181,12 @@ export type Database = {
           city: string | null
           country: string | null
           created_at: string | null
-          default_coc_text: string | null
           demo_company_id: string | null
           email: string | null
           id: string
           is_demo: boolean | null
           logo_url: string | null
           name: string
-          packing_slip_next_seq: number
-          packing_slip_number_format: string
-          packing_slip_seq_year: number | null
           phone: string | null
           postal_code: string | null
           settings: Json | null
@@ -205,16 +201,12 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_coc_text?: string | null
           demo_company_id?: string | null
           email?: string | null
           id?: string
           is_demo?: boolean | null
           logo_url?: string | null
           name: string
-          packing_slip_next_seq?: number
-          packing_slip_number_format?: string
-          packing_slip_seq_year?: number | null
           phone?: string | null
           postal_code?: string | null
           settings?: Json | null
@@ -229,16 +221,12 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_coc_text?: string | null
           demo_company_id?: string | null
           email?: string | null
           id?: string
           is_demo?: boolean | null
           logo_url?: string | null
           name?: string
-          packing_slip_next_seq?: number
-          packing_slip_number_format?: string
-          packing_slip_seq_year?: number | null
           phone?: string | null
           postal_code?: string | null
           settings?: Json | null
@@ -393,9 +381,6 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
-          default_carrier: string | null
-          default_coc_text: string | null
-          default_shipping_arrangement: string | null
           id: string
           name: string
           updated_at: string | null
@@ -404,9 +389,6 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string | null
-          default_carrier?: string | null
-          default_coc_text?: string | null
-          default_shipping_arrangement?: string | null
           id?: string
           name: string
           updated_at?: string | null
@@ -415,9 +397,6 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string | null
-          default_carrier?: string | null
-          default_coc_text?: string | null
-          default_shipping_arrangement?: string | null
           id?: string
           name?: string
           updated_at?: string | null
@@ -2144,69 +2123,54 @@ export type Database = {
       shipments: {
         Row: {
           carrier: string | null
-          coc_text: string | null
           company_id: string
           created_at: string
           created_by: string | null
           customer_id: string
           id: string
+          job_id: string
           notes: string | null
           one_time_address: Json | null
-          package_count: number | null
-          package_type: string | null
           packing_slip_number: string
           ship_date: string
           shipping_address_id: string | null
-          shipping_arrangement: string | null
-          shipping_arrangement_other: string | null
-          tracking_number: string | null
+          shipping_method: string | null
           voided_at: string | null
           voided_by: string | null
-          weight_lbs: number | null
         }
         Insert: {
           carrier?: string | null
-          coc_text?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
           customer_id: string
           id?: string
+          job_id: string
           notes?: string | null
           one_time_address?: Json | null
-          package_count?: number | null
-          package_type?: string | null
           packing_slip_number: string
           ship_date?: string
           shipping_address_id?: string | null
-          shipping_arrangement?: string | null
-          shipping_arrangement_other?: string | null
-          tracking_number?: string | null
+          shipping_method?: string | null
           voided_at?: string | null
           voided_by?: string | null
-          weight_lbs?: number | null
         }
         Update: {
           carrier?: string | null
-          coc_text?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null
           customer_id?: string
           id?: string
+          job_id?: string
           notes?: string | null
           one_time_address?: Json | null
-          package_count?: number | null
-          package_type?: string | null
           packing_slip_number?: string
           ship_date?: string
           shipping_address_id?: string | null
-          shipping_arrangement?: string | null
-          shipping_arrangement_other?: string | null
-          tracking_number?: string | null
+          shipping_method?: string | null
           voided_at?: string | null
           voided_by?: string | null
-          weight_lbs?: number | null
         }
         Relationships: [
           {
@@ -2221,6 +2185,13 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
             referencedColumns: ["id"]
           },
           {
@@ -2571,25 +2542,15 @@ export type Database = {
       create_shipment_with_line_items: {
         Args: {
           p_carrier: string
-          p_coc_text: string
           p_company_id: string
           p_customer_id: string
           p_line_items: Json
           p_notes: string
           p_one_time_address: Json
-          p_package_count: number
-          p_package_type: string
           p_ship_date: string
           p_shipping_address_id: string
-          p_shipping_arrangement: string
-          p_shipping_arrangement_other: string
-          p_tracking_number: string
-          p_weight_lbs: number
+          p_shipping_method: string
         }
-        Returns: string
-      }
-      format_packing_slip_number: {
-        Args: { p_format: string; p_seq: number; p_year: number }
         Returns: string
       }
       generate_quote_number: { Args: { company_uuid: string }; Returns: string }
@@ -2639,10 +2600,6 @@ export type Database = {
       job_last_ship_date: { Args: { p_job_id: string }; Returns: string }
       job_part_last_ship_date: {
         Args: { p_job_part_id: string }
-        Returns: string
-      }
-      next_packing_slip_number: {
-        Args: { p_company_id: string }
         Returns: string
       }
       reset_demo_company: {

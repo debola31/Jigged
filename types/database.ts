@@ -610,6 +610,57 @@ export type Database = {
           },
         ]
       }
+      job_attachments: {
+        Row: {
+          company_id: string
+          created_at: string
+          file_name: string
+          id: string
+          job_id: string
+          mime_type: string | null
+          size_bytes: number | null
+          storage_path: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          file_name: string
+          id?: string
+          job_id: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          job_id?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_attachments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_attachments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_fulfillment_audit: {
         Row: {
           company_id: string
@@ -887,6 +938,8 @@ export type Database = {
           source_quote_line_item_id: string | null
           started_at: string | null
           status_changed_at: string | null
+          total_price: number | null
+          unit_price: number | null
           updated_at: string
         }
         Insert: {
@@ -904,6 +957,8 @@ export type Database = {
           source_quote_line_item_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
+          total_price?: number | null
+          unit_price?: number | null
           updated_at?: string
         }
         Update: {
@@ -921,6 +976,8 @@ export type Database = {
           source_quote_line_item_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
+          total_price?: number | null
+          unit_price?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -1543,14 +1600,14 @@ export type Database = {
           company_id: string
           created_at: string
           id: string
-          job_id: string | null
+          job_id: string
           pushed_by: string | null
           qb_invoice_doc_number: string | null
           qb_invoice_id: string | null
           qb_invoice_sync_token: string | null
           qb_invoice_url: string | null
           qb_request_id: string
-          quote_id: string
+          quote_id: string | null
           realm_id: string
           status: string
           updated_at: string
@@ -1559,14 +1616,14 @@ export type Database = {
           company_id: string
           created_at?: string
           id?: string
-          job_id?: string | null
+          job_id: string
           pushed_by?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
           qb_invoice_url?: string | null
           qb_request_id: string
-          quote_id: string
+          quote_id?: string | null
           realm_id: string
           status?: string
           updated_at?: string
@@ -1575,14 +1632,14 @@ export type Database = {
           company_id?: string
           created_at?: string
           id?: string
-          job_id?: string | null
+          job_id?: string
           pushed_by?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
           qb_invoice_url?: string | null
           qb_request_id?: string
-          quote_id?: string
+          quote_id?: string | null
           realm_id?: string
           status?: string
           updated_at?: string
@@ -2551,6 +2608,10 @@ export type Database = {
           p_shipping_address_id: string
           p_shipping_method: string
         }
+        Returns: string
+      }
+      generate_po_job_number: {
+        Args: { company_uuid: string }
         Returns: string
       }
       generate_quote_number: { Args: { company_uuid: string }; Returns: string }

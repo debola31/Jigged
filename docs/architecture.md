@@ -201,7 +201,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - quotes, quote_line_items - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
 
-- jobs, job_parts, job_operations, job_materials - Multi-part work orders. A `job` mirrors a quote 1:1 (`J-NNNN ↔ Q-NNNN`) and owns customer/due-date/aggregate-status. Each part on the source quote becomes a `job_part` carrying its own status + cloned routing operations + materials. `jobs.status` is derived from the aggregate of `job_parts.status` via a Postgres trigger.
+- jobs, job_parts, job_operations, job_materials - Multi-part work orders. A `job` is created either by converting a quote (`J-NNNN ↔ Q-NNNN`, `quote_id` set) **or** directly from a customer PO with no quote (`quote_id` null, job number `PO-J-NNNN`); it owns customer/due-date/aggregate-status. Each part becomes a `job_part` carrying its own status, the agreed `unit_price`/`total_price`, and cloned routing operations + materials. `jobs.status` is derived from the aggregate of `job_parts.status` via a Postgres trigger. **QuickBooks invoicing is job-keyed** (`quickbooks_invoice_links.job_id`), so quote- and PO-sourced jobs invoice identically.
 
 **Status Workflows:**
 
@@ -379,7 +379,7 @@ routings             -- Process routings (1:1 with parts, unique part_id)
 routing_nodes        -- Linear, sequence-ordered list of operations per routing
 routing_materials    -- Routing-level materials list (inventory_item_id, quantity, unit)
 quotes               -- Customer quotes (no routing_id)
-jobs                 -- Project header; mirrors a quote 1:1 (J-NNNN ↔ Q-NNNN); aggregate status derived from job_parts
+jobs                 -- Project header; from a quote (J-NNNN ↔ Q-NNNN) or directly from a PO (PO-J-NNNN, quote_id null); aggregate status derived from job_parts
 job_parts            -- One row per physical part inside a job; owns per-part status + lifecycle timestamps
 job_operations       -- Steps in jobs (keyed on job_part_id; one independent sequence per part)
 job_materials        -- Per-(job, part) materials snapshot (expected + actual consumption)

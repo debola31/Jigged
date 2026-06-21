@@ -26,6 +26,9 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import Snackbar from '@mui/material/Snackbar';
 
 import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
@@ -42,6 +45,9 @@ import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
 import { CreateShipmentModal } from '@/components/shipments';
 import { isShipmentsEnabled } from '@/lib/featureFlags';
+import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
+import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
+import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -62,6 +68,9 @@ export default function JobDetailPage() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
   const [travelerPart, setTravelerPart] = useState<{ id: string; name: string | null } | null>(null);
+  const [pushDialogOpen, setPushDialogOpen] = useState(false);
+  const [pushSuccess, setPushSuccess] = useState<string | null>(null);
+  const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -95,6 +104,20 @@ export default function JobDetailPage() {
       }
     })();
   }, [fetchJob, companyId]);
+
+  // Surface a "View invoice" deep link if this job already has a QBO invoice.
+  // Plain Supabase read (no AI), safe on mount.
+  useEffect(() => {
+    let cancelled = false;
+    getQuickBooksInvoiceLinkForJob(companyId, jobId)
+      .then((link) => {
+        if (!cancelled) setQbInvoiceLink(link);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, jobId]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -218,6 +241,27 @@ export default function JobDetailPage() {
             </Button>
           )}
 
+          {qbInvoiceLink ? (
+            <Button
+              variant="outlined"
+              startIcon={<OpenInNewIcon />}
+              href={qbInvoiceLink.url}
+              target="_blank"
+              rel="noopener"
+            >
+              View invoice
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              startIcon={<ReceiptLongIcon />}
+              onClick={() => setPushDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Create Invoice in QuickBooks
+            </Button>
+          )}
+
           <Tooltip title="Delete Job">
             <IconButton
               onClick={() => setDeleteDialogOpen(true)}
@@ -317,6 +361,10 @@ export default function JobDetailPage() {
 
         <Grid size={{ xs: 12 }}>
           <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} />
+        </Grid>
+
+        <Grid size={{ xs: 12 }}>
+          <JobAttachmentsCard jobId={jobId} companyId={companyId} />
         </Grid>
 
         <Grid size={{ xs: 12 }}>
@@ -507,6 +555,29 @@ export default function JobDetailPage() {
         companyId={companyId}
         partName={travelerPart?.name ?? null}
         onClose={() => setTravelerPart(null)}
+      />
+
+      <PushToQuickBooksDialog
+        open={pushDialogOpen}
+        companyId={companyId}
+        jobId={jobId}
+        jobNumber={job.job_number}
+        onClose={() => setPushDialogOpen(false)}
+        onPushed={(message) => {
+          setPushDialogOpen(false);
+          setPushSuccess(message);
+          getQuickBooksInvoiceLinkForJob(companyId, jobId)
+            .then(setQbInvoiceLink)
+            .catch(() => {});
+        }}
+      />
+
+      <Snackbar
+        open={!!pushSuccess}
+        autoHideDuration={5000}
+        onClose={() => setPushSuccess(null)}
+        message={pushSuccess ?? ''}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
     </Box>
   );

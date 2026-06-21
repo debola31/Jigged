@@ -5,6 +5,7 @@
 // Supabase client (incremental adoption)" for the rollout contract.
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 import type { Database } from '@/types/database';
 
 // Update payloads for tables this file mutates conditionally. The typed
@@ -12,7 +13,9 @@ import type { Database } from '@/types/database';
 // can't verify the keys against the table schema; using the generated
 // Update types preserves the column-name check.
 type JobUpdate = Database['public']['Tables']['jobs']['Update'];
+type JobInsert = Database['public']['Tables']['jobs']['Insert'];
 type JobPartUpdate = Database['public']['Tables']['job_parts']['Update'];
+type JobPartInsert = Database['public']['Tables']['job_parts']['Insert'];
 type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
 import type {
   Job,
@@ -293,17 +296,257 @@ export async function updateJobAddressContact(
   return data as Job;
 }
 
+// ============== Job Creation (direct from PO) ==============
+
+/** One line on a PO-direct job: an existing part, a quantity, an agreed price. */
+export interface CreateJobFromPoLine {
+  part_id: string;
+  quantity: number;
+  unit_price: number;
+}
+
+export interface CreateJobFromPoInput {
+  customer_id: string;
+  /** The customer's PO number — the work-order authorization. Required. */
+  customer_po_number: string;
+  /** Promised ship date (YYYY-MM-DD), or null. Entered directly (no lead time). */
+  due_date: string | null;
+  lines: CreateJobFromPoLine[];
+}
+
+export interface CreateJobFromPoResult {
+  job_id: string;
+  job_number: string;
+}
+
+/**
+ * Create a job directly from a customer Purchase Order — no source quote.
+ *
+ * Mirrors convertQuoteToJob (utils/quotesAccess.ts) but the line data comes
+ * from the PO form instead of quote line items, and the agreed price is stored
+ * straight on each job_part (quote-sourced jobs carry it too — see A4 — so the
+ * invoice read path is single-shaped). Existing parts only: every part must
+ * already have a routing, which is cloned into job_operations + job_materials
+ * by the shared create_job_part_operations_from_routing RPC.
+ *
+ * Like convertQuoteToJob, the writes are sequential (the JS client has no
+ * multi-statement transaction); on partial failure the partial job stays in
+ * place and the owner can delete + retry.
+ */
+export async function createJobFromPurchaseOrder(
+  companyId: string,
+  input: CreateJobFromPoInput,
+): Promise<CreateJobFromPoResult> {
+  const supabase = getSupabase();
+
+  // PO# is the authorization — required. Reject empty rather than coercing to
+  // NULL (no silent fallbacks), and before any writes.
+  const customerPoNumber = input.customer_po_number?.trim();
+  if (!customerPoNumber) {
+    throw new Error('Customer PO is required to create a job.');
+  }
+  if (!input.customer_id) {
+    throw new Error('Select a customer for this PO.');
+  }
+
+  const lines = input.lines ?? [];
+  if (lines.length === 0) {
+    throw new Error('Add at least one part before creating the job.');
+  }
+  for (const line of lines) {
+    if (!line.part_id) {
+      throw new Error('Every line must reference a part.');
+    }
+    if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+      throw new Error('Each part quantity must be a whole number greater than zero.');
+    }
+    if (
+      typeof line.unit_price !== 'number' ||
+      !Number.isFinite(line.unit_price) ||
+      line.unit_price < 0
+    ) {
+      throw new Error('Each part needs a valid unit price (zero or more).');
+    }
+  }
+  // Exactly one line per part — duplicate parts would silently create duplicate
+  // job parts (mirrors convertQuoteToJob's guard).
+  const partLineCounts = new Map<string, number>();
+  for (const line of lines) {
+    partLineCounts.set(line.part_id, (partLineCounts.get(line.part_id) ?? 0) + 1);
+  }
+  if (Array.from(partLineCounts.values()).some((n) => n > 1)) {
+    throw new Error('Each part can appear only once — combine duplicates into a single quantity.');
+  }
+
+  // Pre-flight: every part must already have a routing in this company. Fail
+  // fast before writing anything (this is the "existing parts only" gate).
+  const partIds = Array.from(partLineCounts.keys());
+  const { data: routings, error: routingsErr } = await supabase
+    .from('routings')
+    .select('id, part_id')
+    .eq('company_id', companyId)
+    .in('part_id', partIds);
+  if (routingsErr) {
+    console.error('Error fetching routings:', routingsErr);
+    throw routingsErr;
+  }
+  const routingByPart = new Map<string, string>();
+  for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
+    routingByPart.set(r.part_id, r.id);
+  }
+  const missingRoutingPartIds = partIds.filter((pid) => !routingByPart.has(pid));
+  if (missingRoutingPartIds.length > 0) {
+    throw new Error(
+      `No routing defined for ${missingRoutingPartIds.length} part${
+        missingRoutingPartIds.length === 1 ? '' : 's'
+      }. Add a routing on the part before creating a job from a PO.`,
+    );
+  }
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError || !user) {
+    throw new Error('Authentication required. Please log in and try again.');
+  }
+
+  // Default billing/shipping/contact from the customer's address book so the
+  // job has a shippable address of its own; editable afterwards via
+  // updateJobAddressContact. (The enforce_job_address_contact_customer trigger
+  // is satisfied because these ids belong to this customer.)
+  const { data: customer, error: customerErr } = await supabase
+    .from('customers')
+    .select(`
+      id,
+      customer_addresses(id, default_billing, default_shipping),
+      customer_contacts(id, is_primary)
+    `)
+    .eq('id', input.customer_id)
+    .eq('company_id', companyId)
+    .single();
+  if (customerErr || !customer) {
+    throw new Error('Customer not found for this company.');
+  }
+  const addresses = (customer.customer_addresses ?? []) as Array<{
+    id: string;
+    default_billing: boolean;
+    default_shipping: boolean;
+  }>;
+  const contacts = (customer.customer_contacts ?? []) as Array<{
+    id: string;
+    is_primary: boolean;
+  }>;
+  const billingAddressId = addresses.find((a) => a.default_billing)?.id ?? null;
+  const shippingAddressId = addresses.find((a) => a.default_shipping)?.id ?? null;
+  const contactId = contacts.find((c) => c.is_primary)?.id ?? null;
+
+  // Mint a PO-J- job number and insert the header. MAX+1 can race two
+  // concurrent creates onto the same number; jobs_company_id_job_number_key
+  // catches it, so re-mint and retry once.
+  let job: { id: string; job_number: string } | null = null;
+  for (let attempt = 0; attempt < 2 && !job; attempt++) {
+    const { data: jobNumber, error: numErr } = await supabase.rpc('generate_po_job_number', {
+      company_uuid: companyId,
+    });
+    if (numErr || !jobNumber) {
+      console.error('Error generating PO job number:', numErr);
+      throw numErr || new Error('Could not generate a job number.');
+    }
+
+    const insertPayload: JobInsert = {
+      company_id: companyId,
+      quote_id: null,
+      customer_id: input.customer_id,
+      job_number: jobNumber as string,
+      production_status: 'not_started',
+      fulfillment_status: 'unshipped',
+      due_date: input.due_date || null,
+      lead_time_days: null,
+      customer_po_number: customerPoNumber,
+      billing_address_id: billingAddressId,
+      shipping_address_id: shippingAddressId,
+      contact_id: contactId,
+      created_by: user.id,
+    };
+
+    const { data: inserted, error: jobError } = await supabase
+      .from('jobs')
+      .insert(insertPayload)
+      .select('id, job_number')
+      .single();
+
+    if (jobError) {
+      // 23505 = unique_violation on (company_id, job_number) — re-mint + retry.
+      if ((jobError as { code?: string }).code === '23505' && attempt === 0) {
+        continue;
+      }
+      console.error('Error creating job from PO:', jobError);
+      throw jobError;
+    }
+    job = inserted;
+  }
+  if (!job) {
+    throw new Error('Could not create the job — please try again.');
+  }
+
+  // One job_part per line carrying the agreed price; clone each part's routing
+  // into job_operations + job_materials via the shared snapshot RPC.
+  let sequence = 10;
+  for (const line of lines) {
+    const routingId = routingByPart.get(line.part_id);
+    if (!routingId) {
+      throw new Error(`Routing for part ${line.part_id} disappeared mid-create.`);
+    }
+
+    const totalPrice = Math.round(line.unit_price * line.quantity * 10000) / 10000;
+    const jobPartInsert: JobPartInsert = {
+      job_id: job.id,
+      company_id: companyId,
+      part_id: line.part_id,
+      sequence,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      total_price: totalPrice,
+      production_status: 'not_started',
+      fulfillment_status: 'unshipped',
+    };
+
+    const { data: jobPart, error: jpErr } = await supabase
+      .from('job_parts')
+      .insert(jobPartInsert)
+      .select('id')
+      .single();
+    if (jpErr) {
+      console.error('Error creating job_part:', jpErr);
+      throw jpErr;
+    }
+
+    const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+      p_job_part_id: jobPart.id,
+      p_routing_id: routingId,
+    });
+    if (rpcErr) {
+      console.error('Failed to copy operations from routing:', rpcErr);
+      throw new Error('Job created but failed to copy operations from routing.');
+    }
+
+    sequence += 10;
+  }
+
+  return { job_id: job.id, job_number: job.job_number };
+}
+
 // ============== Job Materials ==============
 
 // ============== Job Lifecycle ==============
 
 /**
- * Delete a job. Cascades remove job_parts, job_operations, and job_materials.
- * (job_attachments was dropped in the pilot cleanup migration; nothing to
- * orphan in storage.)
+ * Delete a job. Cascades remove job_parts, job_operations, job_materials, and
+ * the job_attachments rows — but the attachment files in storage don't cascade,
+ * so we clean those up first (best-effort) before deleting the job.
  */
 export async function deleteJob(jobId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
+
+  await deleteStoredFilesForJobs([jobId]);
 
   const { error } = await supabase
     .from('jobs')
@@ -332,6 +575,9 @@ export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promi
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
+    // Clean each batch's attachment files from storage before the cascade
+    // deletes their job_attachments rows (best-effort; never blocks the delete).
+    await deleteStoredFilesForJobs(batch);
     const { error } = await supabase
       .from('jobs')
       .delete()

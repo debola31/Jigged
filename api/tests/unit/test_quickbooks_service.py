@@ -210,7 +210,7 @@ def test_payload_basic_taxcode_and_item():
     payload = qb.quote_to_invoice_payload(
         customer_ref="42",
         item_ref="7",
-        quote_number="Q-2026-0001",
+        job_number="J-2026-0001",
         bill_addr={"Line1": "1 Main St", "City": "Detroit"},
         lines=[
             {"quantity": 10, "unit_price": 12.5, "part_name": "Bracket", "description": "Rev C"},
@@ -218,9 +218,9 @@ def test_payload_basic_taxcode_and_item():
         ],
     )
     assert payload["CustomerRef"] == {"value": "42"}
-    # DocNumber is omitted so QBO auto-assigns; the quote number lives in the memo.
+    # DocNumber is omitted so QBO auto-assigns; the job number lives in the memo.
     assert "DocNumber" not in payload
-    assert payload["PrivateNote"] == "Jigged quote Q-2026-0001"
+    assert payload["PrivateNote"] == "Jigged job J-2026-0001"
     assert payload["BillAddr"]["City"] == "Detroit"
     assert len(payload["Line"]) == 2
     line0 = payload["Line"][0]
@@ -242,7 +242,7 @@ def test_payload_rounding_reconciles_to_total():
         {"quantity": 7, "unit_price": 0.9999, "part_name": "B", "description": None},
     ]
     payload = qb.quote_to_invoice_payload(
-        customer_ref="1", item_ref="1", quote_number=None, bill_addr=None, lines=lines
+        customer_ref="1", item_ref="1", job_number=None, bill_addr=None, lines=lines
     )
     amounts = [ln["Amount"] for ln in payload["Line"]]
     assert amounts[0] == round(3 * 12.3456, 2)  # 37.04
@@ -256,7 +256,7 @@ def test_payload_null_price_raises():
         qb.quote_to_invoice_payload(
             customer_ref="1",
             item_ref="1",
-            quote_number=None,
+            job_number=None,
             bill_addr=None,
             lines=[{"quantity": 1, "unit_price": None, "part_name": "X", "description": None}],
         )
@@ -266,12 +266,12 @@ def test_payload_memo_and_billaddr_optional():
     payload = qb.quote_to_invoice_payload(
         customer_ref="1",
         item_ref="1",
-        quote_number="Q-0007",
+        job_number="J-0007",
         bill_addr=None,
         lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
     )
     assert "DocNumber" not in payload  # QBO auto-assigns
-    assert payload["PrivateNote"] == "Jigged quote Q-0007"
+    assert payload["PrivateNote"] == "Jigged job J-0007"
     assert "BillAddr" not in payload
 
 

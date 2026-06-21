@@ -181,7 +181,7 @@ export default function PartWorkspace({
   // pages fall back to their pathname title.
   useEffect(() => {
     if (mode === 'create' || !part) return;
-    setTitle(part.part_name);
+    setTitle(`Part Details — ${part.part_name}`);
     return () => setTitle(null);
   }, [mode, part, setTitle]);
 
@@ -314,6 +314,7 @@ export default function PartWorkspace({
     <Box>
       <PartHeaderBar
         companyId={companyId}
+        partName={part.part_name}
         partsListHref={partsListHref}
         partsListLabel={partsListLabel}
         currentChain={currentChain}
@@ -321,7 +322,6 @@ export default function PartWorkspace({
         tabs={visibleTabs}
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        onEdit={() => handleTabChange('workspace')}
         onDelete={() => setDeleteDialogOpen(true)}
         hasReferences={hasReferences}
         actionLoading={actionLoading}

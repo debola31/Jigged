@@ -92,6 +92,14 @@ export interface JobPart {
   source_quote_line_item_id: string | null;
   sequence: number;
   quantity: number;
+  /**
+   * Agreed price per unit and line total. The single source of price for
+   * invoicing (both quote- and PO-sourced jobs carry it). Quote-sourced jobs
+   * copy it from the quote line at conversion; PO-sourced jobs take it from the
+   * PO form. Nullable only for genuinely pre-snapshot legacy lines.
+   */
+  unit_price: number | null;
+  total_price: number | null;
   production_status: ProductionStatus;
   fulfillment_status: FulfillmentStatus;
   status_changed_at: string | null;
@@ -100,6 +108,23 @@ export interface JobPart {
   current_operation_sequence: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * A file attached to a job (e.g. the customer's PO PDF). The bytes live in the
+ * private storage bucket at `storage_path`; this is the metadata row. See
+ * utils/jobAttachmentsAccess.ts and components/jobs/JobAttachmentsCard.tsx.
+ */
+export interface JobAttachment {
+  id: string;
+  job_id: string;
+  company_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  created_at: string;
 }
 
 /**

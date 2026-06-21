@@ -1114,6 +1114,13 @@ export async function convertQuoteToJob(
         source_quote_line_item_id: li.id,
         sequence,
         quantity: li.quantity,
+        // Copy the quoted price onto the job_part so the invoice read path is
+        // single-shaped (job_parts.unit_price) for both quote- and PO-sourced
+        // jobs — no "quote line vs job_part" branching. Mirrors the backfill in
+        // 20260621162024_add_job_part_pricing.sql.
+        unit_price: li.unit_price,
+        total_price:
+          li.total_price ?? (li.unit_price != null ? li.unit_price * li.quantity : null),
         production_status: 'not_started',
         fulfillment_status: 'unshipped',
       })

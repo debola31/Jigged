@@ -20,8 +20,8 @@ import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import {
-  preflightQuotePush,
-  pushQuoteToQuickBooks,
+  preflightJobPush,
+  pushJobToQuickBooks,
   type PreflightResult,
   type PushCustomerDecision,
 } from '@/utils/quickbooksAccess';
@@ -31,8 +31,8 @@ const CREATE_SENTINEL = '__create__';
 interface PushToQuickBooksDialogProps {
   open: boolean;
   companyId: string;
-  quoteId: string;
-  quoteNumber: string;
+  jobId: string;
+  jobNumber: string;
   onClose: () => void;
   onPushed: (message: string) => void;
 }
@@ -44,8 +44,8 @@ function formatCurrency(n: number): string {
 export default function PushToQuickBooksDialog({
   open,
   companyId,
-  quoteId,
-  quoteNumber,
+  jobId,
+  jobNumber,
   onClose,
   onPushed,
 }: PushToQuickBooksDialogProps) {
@@ -60,7 +60,7 @@ export default function PushToQuickBooksDialog({
     setError(null);
     setPreflight(null);
     try {
-      const result = await preflightQuotePush(companyId, quoteId);
+      const result = await preflightJobPush(companyId, jobId);
       setPreflight(result);
       const c = result.customer;
       if (c) {
@@ -77,7 +77,7 @@ export default function PushToQuickBooksDialog({
     } finally {
       setLoading(false);
     }
-  }, [companyId, quoteId]);
+  }, [companyId, jobId]);
 
   useEffect(() => {
     if (open) runPreflight();
@@ -91,9 +91,9 @@ export default function PushToQuickBooksDialog({
         choice === CREATE_SENTINEL
           ? { action: 'create' }
           : { action: 'use_existing', qb_customer_id: choice };
-      const result = await pushQuoteToQuickBooks(companyId, quoteId, customer);
+      const result = await pushJobToQuickBooks(companyId, jobId, customer);
       if (result.in_progress) {
-        setError('A push for this quote is already in progress. Please refresh in a moment.');
+        setError('A push for this job is already in progress. Please refresh in a moment.');
         return;
       }
       const docRef = result.doc_number ? `Invoice ${result.doc_number}` : 'Invoice';
@@ -122,7 +122,7 @@ export default function PushToQuickBooksDialog({
 
   return (
     <Dialog open={open} onClose={pushing ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Create QuickBooks invoice for {quoteNumber}</DialogTitle>
+      <DialogTitle>Create QuickBooks invoice for {jobNumber}</DialogTitle>
       <DialogContent dividers>
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -157,7 +157,7 @@ export default function PushToQuickBooksDialog({
                   ) : undefined
                 }
               >
-                This quote has already been pushed to QuickBooks.
+                This job has already been pushed to QuickBooks.
               </Alert>
             )}
 

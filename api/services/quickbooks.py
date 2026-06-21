@@ -519,19 +519,6 @@ def create_customer(db: Client, company_id: str, display_name: str, bill_addr: d
 
 
 # ───────────────────────── Jigged data loading (firm, post-conversion) ─────────────────────────
-def get_job_for_quote(db: Client, company_id: str, quote_id: str) -> Optional[dict]:
-    resp = (
-        db.table("jobs")
-        .select("id, billing_address_id, customer_id, quote_id")
-        .eq("quote_id", quote_id)
-        .eq("company_id", company_id)
-        .order("created_at", desc=False)
-        .limit(1)
-        .execute()
-    )
-    return resp.data[0] if resp.data else None
-
-
 def _to_qb_addr(a: dict) -> Optional[dict]:
     out: dict = {}
     if a.get("address_line1"):
@@ -550,24 +537,21 @@ def _to_qb_addr(a: dict) -> Optional[dict]:
 
 
 def load_firm_invoice_lines(db: Client, company_id: str, job: dict) -> tuple[list[dict], Optional[dict]]:
-    """Firm invoice lines from the JOB (job_parts.quantity is the chosen firm qty),
-    priced from the linked quote_line_items.unit_price. Returns (lines, bill_addr)."""
+    """Firm invoice lines from the JOB. job_parts.quantity is the chosen firm qty
+    and job_parts.unit_price is the agreed price — a single read shape for both
+    quote-sourced and PO-sourced jobs (price is written onto job_parts at
+    create/convert time; historic rows were backfilled). Returns (lines, bill_addr)."""
     job_parts = (
         db.table("job_parts")
-        .select("part_id, quantity, source_quote_line_item_id, sequence")
+        .select("part_id, quantity, unit_price, sequence")
         .eq("job_id", job["id"])
         .order("sequence", desc=False)
         .execute()
         .data
         or []
     )
-    qli_ids = [r["source_quote_line_item_id"] for r in job_parts if r.get("source_quote_line_item_id")]
     part_ids = [r["part_id"] for r in job_parts if r.get("part_id")]
 
-    price_by_qli: dict[str, Any] = {}
-    if qli_ids:
-        for r in db.table("quote_line_items").select("id, unit_price").in_("id", qli_ids).execute().data or []:
-            price_by_qli[r["id"]] = r["unit_price"]
     part_by_id: dict[str, dict] = {}
     if part_ids:
         for r in db.table("parts").select("id, part_name, description").in_("id", part_ids).execute().data or []:
@@ -575,7 +559,7 @@ def load_firm_invoice_lines(db: Client, company_id: str, job: dict) -> tuple[lis
 
     lines: list[dict] = []
     for r in job_parts:
-        unit_price = price_by_qli.get(r.get("source_quote_line_item_id"))
+        unit_price = r.get("unit_price")
         part = part_by_id.get(r["part_id"], {})
         lines.append(
             {
@@ -612,7 +596,7 @@ def quote_to_invoice_payload(
     *,
     customer_ref: str,
     item_ref: str,
-    quote_number: str | None,
+    job_number: str | None,
     bill_addr: dict | None,
     lines: list[dict],
 ) -> dict:
@@ -622,7 +606,7 @@ def quote_to_invoice_payload(
 
     DocNumber is intentionally omitted -> QBO auto-assigns the next invoice number, so
     Jigged never collides with the shop's existing/manual/previous-system numbering. The
-    Jigged quote number is stamped into PrivateNote for traceability + QBO-side search."""
+    Jigged job number is stamped into PrivateNote for traceability + QBO-side search."""
     qb_lines: list[dict] = []
     for ln in lines:
         unit_price = ln.get("unit_price")
@@ -649,8 +633,8 @@ def quote_to_invoice_payload(
             }
         )
     payload: dict = {"CustomerRef": {"value": customer_ref}, "Line": qb_lines}
-    if quote_number:
-        payload["PrivateNote"] = f"Jigged quote {quote_number}"
+    if job_number:
+        payload["PrivateNote"] = f"Jigged job {job_number}"
     if bill_addr:
         payload["BillAddr"] = bill_addr
     return payload

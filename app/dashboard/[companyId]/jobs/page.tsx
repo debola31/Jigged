@@ -43,6 +43,8 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { isJobOverdue } from '@/types/job';
 import Tooltip from '@mui/material/Tooltip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import AddIcon from '@mui/icons-material/Add';
+import AcceptPurchaseOrderModal from '@/components/jobs/AcceptPurchaseOrderModal';
 import type {
   JobWithRelations,
   JobFilters,
@@ -146,6 +148,9 @@ export default function JobsPage() {
     message: '',
     severity: 'error',
   });
+
+  // "New Job from PO": accept a customer PO and create a job directly (no quote).
+  const [poModalOpen, setPoModalOpen] = useState(false);
 
   // Debounce search input
   useEffect(() => {
@@ -578,12 +583,19 @@ export default function JobsPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
+
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setPoModalOpen(true)}
+        >
+          New Job from PO
+        </Button>
       </Box>
 
-      {/* Data Grid or Empty State. Jobs are created exclusively by
-          converting an accepted quote (utils/quotesAccess#convertQuoteToJob),
-          so there's no standalone "New Job" CTA — the empty state points
-          the user at the quotes flow instead. */}
+      {/* Data Grid or Empty State. Jobs come from converting an accepted quote
+          (utils/quotesAccess#convertQuoteToJob) or directly from a customer PO
+          (New Job from PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
       {!loading && jobs.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
@@ -594,15 +606,24 @@ export default function JobsPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {searchDebounced || customerFilter || productionFilterValue || fulfillmentFilterValue || overdueOnly
                 ? 'No jobs match your filters.'
-                : 'Jobs are created by converting an accepted quote. Create a quote first, then convert it from the quote detail page.'}
+                : 'Jobs come from converting an accepted quote, or directly from a customer PO.'}
             </Typography>
             {!searchDebounced && !customerFilter && !productionFilterValue && !fulfillmentFilterValue && !overdueOnly && (
-              <Button
-                variant="contained"
-                onClick={() => router.push(`/dashboard/${companyId}/quotes`)}
-              >
-                Go to Quotes
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => setPoModalOpen(true)}
+                >
+                  New Job from PO
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => router.push(`/dashboard/${companyId}/quotes`)}
+                >
+                  Go to Quotes
+                </Button>
+              </Box>
             )}
           </CardContent>
         </Card>
@@ -715,6 +736,16 @@ export default function JobsPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      <AcceptPurchaseOrderModal
+        open={poModalOpen}
+        onClose={() => setPoModalOpen(false)}
+        companyId={companyId}
+        onCreated={(jobId) => {
+          setPoModalOpen(false);
+          router.push(`/dashboard/${companyId}/jobs/${jobId}`);
+        }}
+      />
     </Box>
   );
 }

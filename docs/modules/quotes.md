@@ -264,7 +264,7 @@ Clamp
   100 ea @ $9.00 = $900.00     (single quantity — auto-included)
 ```
 
-Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **Due date** (defaulting to today + the quote's lead time) and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it.
+Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **Due date** (defaulting to today + the quote's lead time) and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it. An **optional PO PDF** can also be attached; it uploads to the new job after conversion (see [Jobs](jobs.md) → Attachments) and is non-fatal if the upload fails.
 
 **Actions:**
 
@@ -272,6 +272,8 @@ Multi-quantity parts start with **no** radio selected; the user must pick delibe
 - Cancel → closes the modal without changes.
 
 The Create button stays disabled until **every** multi-quantity part has a quantity selected, the due date is valid, **and a Customer PO is entered**. A `MissingFieldsNotice` above the button lists whatever is still blocking conversion. `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
+
+> **Invoicing moved to Jobs.** Creating / viewing a QuickBooks invoice is no longer on the quote page — invoicing is **job-keyed** and lives on the job detail page. The quote shows only the "Converted to J-NNNN →" link. See [Jobs](jobs.md) and [Architecture](../architecture.md).
 
 ---
 

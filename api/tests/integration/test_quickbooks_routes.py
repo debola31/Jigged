@@ -150,6 +150,10 @@ def _seed_quote(admin, company_id: str, converted: bool) -> dict:
                 "source_quote_line_item_id": qli["id"],
                 "sequence": 0,
                 "quantity": 10,
+                # Invoicing reads price off job_parts now (single read shape),
+                # so the seed must carry it like convert/create-from-PO do.
+                "unit_price": 12.5,
+                "total_price": 125,
                 "production_status": "not_started",
                 "fulfillment_status": "unshipped",
             }
@@ -177,34 +181,34 @@ async def _post(token: str, path: str, body: dict):
 
 
 # ───────────────────────── gating ─────────────────────────
-async def test_preflight_rejects_unconverted_quote(supabase_admin, seeded_user_a):
+async def test_preflight_404_for_missing_job(supabase_admin, seeded_user_a):
+    # Invoicing is job-keyed now; a job is intrinsically billable, so the old
+    # "convert the quote first" gate is gone — a non-existent job just 404s.
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
     _seed_connection(supabase_admin, cid)
-    seed = _seed_quote(supabase_admin, cid, converted=False)
     try:
         resp = await _post(
-            seeded_user_a["access_token"], f"/api/quickbooks/{cid}/quotes/{seed['quote_id']}/preflight", {}
+            seeded_user_a["access_token"],
+            f"/api/quickbooks/{cid}/jobs/00000000-0000-0000-0000-000000000000/preflight",
+            {},
         )
-        assert resp.status_code == 409
-        assert resp.json()["detail"]["code"] == "not_converted"
+        assert resp.status_code == 404
     finally:
         _cleanup(supabase_admin, cid)
 
 
-async def test_invoice_rejects_unconverted_quote(supabase_admin, seeded_user_a):
+async def test_invoice_404_for_missing_job(supabase_admin, seeded_user_a):
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
     _seed_connection(supabase_admin, cid)
-    seed = _seed_quote(supabase_admin, cid, converted=False)
     try:
         resp = await _post(
             seeded_user_a["access_token"],
-            f"/api/quickbooks/{cid}/quotes/{seed['quote_id']}/invoice",
+            f"/api/quickbooks/{cid}/jobs/00000000-0000-0000-0000-000000000000/invoice",
             {"customer": {"action": "create"}},
         )
-        assert resp.status_code == 409
-        assert resp.json()["detail"]["code"] == "not_converted"
+        assert resp.status_code == 404
     finally:
         _cleanup(supabase_admin, cid)
 
@@ -215,7 +219,7 @@ async def test_preflight_reports_not_connected(supabase_admin, seeded_user_a):
     seed = _seed_quote(supabase_admin, cid, converted=True)
     try:
         resp = await _post(
-            seeded_user_a["access_token"], f"/api/quickbooks/{cid}/quotes/{seed['quote_id']}/preflight", {}
+            seeded_user_a["access_token"], f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/preflight", {}
         )
         assert resp.status_code == 200
         assert resp.json()["connected"] is False
@@ -239,7 +243,7 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
 
     monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
     body = {"customer": {"action": "use_existing", "qb_customer_id": "QB-1"}}
-    path = f"/api/quickbooks/{cid}/quotes/{seed['quote_id']}/invoice"
+    path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
     try:
         r1 = await _post(seeded_user_a["access_token"], path, body)
         assert r1.status_code == 200
@@ -260,7 +264,7 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         links = (
             supabase_admin.table("quickbooks_invoice_links")
             .select("status, qb_invoice_url")
-            .eq("quote_id", seed["quote_id"])
+            .eq("job_id", seed["job_id"])
             .execute()
             .data
         )
@@ -286,7 +290,7 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
 
     monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
     body = {"customer": {"action": "use_existing", "qb_customer_id": "QB-1"}}
-    path = f"/api/quickbooks/{cid}/quotes/{seed['quote_id']}/invoice"
+    path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(
@@ -301,7 +305,7 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
         links = (
             supabase_admin.table("quickbooks_invoice_links")
             .select("status")
-            .eq("quote_id", seed["quote_id"])
+            .eq("job_id", seed["job_id"])
             .execute()
             .data
         )

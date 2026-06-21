@@ -27,6 +27,7 @@ vi.mock('@/lib/supabase', () => ({
 import {
   deleteJob,
   bulkDeleteJobs,
+  createJobFromPurchaseOrder,
   getCustomersForSelect,
   getOverdueJobsCount,
   getReadyOperationsForJobs,
@@ -76,9 +77,12 @@ describe('jobsAccess', () => {
       // @ts-expect-error — runtime defense exercise; the function filters
       // out anything that isn't a non-empty string.
       await bulkDeleteJobs(['j1', null, '', 'j2'], 'co-1');
-      const inCall = (mockQueryBuilder.in as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(inCall[0]).toBe('id');
-      expect(inCall[1]).toEqual(['j1', 'j2']);
+      // deleteStoredFilesForJobs also issues an .in('job_id', …) for storage
+      // cleanup, so locate the jobs-delete call by its 'id' column.
+      const inCalls = (mockQueryBuilder.in as ReturnType<typeof vi.fn>).mock.calls;
+      const idCall = inCalls.find((c) => c[0] === 'id');
+      expect(idCall).toBeDefined();
+      expect(idCall![1]).toEqual(['j1', 'j2']);
     });
 
     it('throws a friendly (non-raw) error when supabase returns an error', async () => {
@@ -224,6 +228,73 @@ describe('jobsAccess', () => {
         error: { message: 'invalid query' },
       });
       await expect(searchJobsByIdentifier('co-1', 'x')).rejects.toThrow(/invalid query/);
+    });
+  });
+
+  describe('createJobFromPurchaseOrder', () => {
+    const baseInput = {
+      customer_id: 'cu-1',
+      customer_po_number: 'PO-9',
+      due_date: null as string | null,
+      lines: [{ part_id: 'part-A', quantity: 2, unit_price: 10 }],
+    };
+
+    it('requires a customer PO (no silent NULL) and writes nothing', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', { ...baseInput, customer_po_number: '   ' }),
+      ).rejects.toThrow(/Customer PO is required/);
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it('requires a customer', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', { ...baseInput, customer_id: '' }),
+      ).rejects.toThrow(/Select a customer/);
+    });
+
+    it('requires at least one line', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', { ...baseInput, lines: [] }),
+      ).rejects.toThrow(/at least one part/);
+    });
+
+    it('rejects a non-positive or non-integer quantity', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', {
+          ...baseInput,
+          lines: [{ part_id: 'part-A', quantity: 0, unit_price: 10 }],
+        }),
+      ).rejects.toThrow(/whole number greater than zero/);
+    });
+
+    it('rejects a negative unit price', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', {
+          ...baseInput,
+          lines: [{ part_id: 'part-A', quantity: 1, unit_price: -5 }],
+        }),
+      ).rejects.toThrow(/valid unit price/);
+    });
+
+    it('rejects duplicate parts before any write', async () => {
+      await expect(
+        createJobFromPurchaseOrder('co-1', {
+          ...baseInput,
+          lines: [
+            { part_id: 'part-A', quantity: 1, unit_price: 10 },
+            { part_id: 'part-A', quantity: 2, unit_price: 9 },
+          ],
+        }),
+      ).rejects.toThrow(/only once/);
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it('fails fast when a part has no routing (existing-parts-only gate)', async () => {
+      mockQueryBuilder.data = []; // routings lookup returns none
+      await expect(createJobFromPurchaseOrder('co-1', baseInput)).rejects.toThrow(
+        /No routing defined/,
+      );
+      expect(mockSupabase.from).toHaveBeenCalledWith('routings');
     });
   });
 });

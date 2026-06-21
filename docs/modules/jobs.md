@@ -12,7 +12,7 @@ The Jobs module tracks production work through the shop. A **Job** is the projec
 
 - Parts module (each `job_part` references a part; routing is auto-resolved from the part)
 
-- Quotes module (jobs are created exclusively by converting an accepted quote — no manual job creation)
+- Quotes module (a job can be created by converting an accepted quote) — jobs can also be created directly from a customer PO (see "Job Create — two paths")
 
 **Database Tables:** `jobs`, `job_parts`, `job_operations`, `job_materials`
 
@@ -66,7 +66,7 @@ Overdue surfaces as:
 |---|---|---|---|
 | id | UUID | Yes | Primary key |
 | job_number | Text | Yes | Mirrors source quote (`Q-0141` → `J-0141`); set explicitly by `convertQuoteToJob`. No manual creation, no auto-numbering trigger |
-| quote_id | UUID (FK) | Yes | Source quote (1:1 with the job) |
+| quote_id | UUID (FK) | No | Source quote when the job came from one; **null** for jobs created directly from a PO |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | status | Text | Yes | Aggregate status (`not_started` / `in_progress` / `completed` / `shipped` / `cancelled`) — DERIVED from `job_parts.status` via the `compute_job_status()` function and the `trigger_sync_job_status_from_parts_*` triggers |
 | due_date | Date | No | Date the job is due to ship |
@@ -109,7 +109,7 @@ Overdue surfaces as:
 
 - Filter dropdown: Status (All Jobs / Not Started / In Progress / Completed / Shipped / Cancelled)
 
-- No "create" button — jobs are produced exclusively by converting an accepted quote (Convert to Job button on the quote detail page)
+- **New Job from PO** button (top-right) — accept a customer PO and create a job directly, no quote. Jobs also come from the **Convert to Job** action on the quote detail page.
 
 - Click row to view detail
 
@@ -131,16 +131,15 @@ Overdue surfaces as:
 
 "No jobs yet. Create a job or convert a quote to get started."
 
-### 2. Job Create
+### 2. Job Create — two paths
 
-Jobs are **only** created via quote conversion. There is no standalone "New Job" form. The `/dashboard/{companyId}/jobs/new` route and "New Job" button were removed in commit d9b7e98; the spec previously here described that flow.
+A job can be created two ways:
 
-To create a job today:
-1. Build a quote with the desired customer / part(s) / quantities.
-2. Open the quote detail page.
-3. Use the **Convert to Job** action; one job is produced, with one work cell per `(part, selected quantity)` (for a price-options quote, pick the accepted quantity per part in the convert dialog).
+**(a) Convert a quote.** Build a quote, open its detail page, and use **Convert to Job**; one job is produced with one work cell per `(part, selected quantity)`. This flow lives in [Quotes](quotes.md).
 
-The Convert flow lives in [Quotes](quotes.md) — see the "Convert to Job" section there for current behavior.
+**(b) New Job from PO (direct).** When a customer sends a PO with no prior quote, click **New Job from PO** on the jobs list. The "Accept Purchase Order" modal (a modal, not a `/jobs/new` route) captures the customer, PO #, due date, and one-or-more **existing** parts — each with a quantity and the agreed unit price — plus an optional PO PDF. On accept, `createJobFromPurchaseOrder` (`utils/jobsAccess.ts`) creates the job (`quote_id` null, job number `J-NNNN` from the shared per-company order counter — same sequence as quotes) and clones each part's routing into operations + materials via the same `create_job_part_operations_from_routing` RPC the quote path uses. v1 is **existing parts only** — every part must already have a routing (the create fails fast otherwise).
+
+Both paths store the agreed price on each `job_part` (`unit_price` / `total_price`), so PO-sourced and quote-sourced jobs invoice identically.
 
 ### 3. Job Detail View
 
@@ -156,7 +155,15 @@ The Convert flow lives in [Quotes](quotes.md) — see the "Convert to Job" secti
 
 ▸ **Source**
 
-- From Quote: Q-0042 (link) - or "Direct entry"
+- From Quote: Q-0042 (link), or "Direct PO" (job created from a customer PO; `quote_id` is null)
+
+▸ **Attachments**
+
+- Customer PO PDFs and other reference files — listed with download + delete and an "Upload PDF" button. File bytes live in the private `attachments` bucket; metadata in `job_attachments`. Attached during PO intake / quote conversion (optional) or added here later. Backed by `utils/jobAttachmentsAccess.ts` + `components/jobs/JobAttachmentsCard.tsx`.
+
+▸ **Invoicing (QuickBooks)**
+
+- **Create Invoice in QuickBooks** / **View invoice** lives on the job — invoicing is **job-keyed** (see [Architecture](../architecture.md)). The quote page only links through to the job. Works the same for quote- and PO-sourced jobs, reading price from `job_parts.unit_price`.
 
 ▸ **Customer**
 

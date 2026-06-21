@@ -20,6 +20,8 @@ import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
+import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
+import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
 
 interface ConvertToJobModalProps {
   open: boolean;
@@ -69,6 +71,12 @@ export default function ConvertToJobModal({
   // (migration 20260526), so the modal always starts empty — the quote
   // never carries one. REQUIRED to convert (the work-order authorization).
   const [customerPoInput, setCustomerPoInput] = useState<string>('');
+  // Optional PO PDF, staged here and uploaded after the job is created.
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
+  // Set when the job converted but the PDF upload failed, so we can offer
+  // "Open Job" instead of silently navigating away.
+  const [convertedJobId, setConvertedJobId] = useState<string | null>(null);
 
   const lineItems = useMemo(
     () => [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence),
@@ -102,6 +110,9 @@ export default function ConvertToJobModal({
     if (!open) return;
     setDueDateInput(defaultDueDateISO(quote.lead_time_days));
     setCustomerPoInput('');
+    setAttachment(null);
+    setAttachmentWarning(null);
+    setConvertedJobId(null);
     setError(null);
     const initial: Record<string, string> = {};
     for (const g of partGroups) {
@@ -127,6 +138,20 @@ export default function ConvertToJobModal({
         customerPoNumber: customerPoInput,
         selectedLineItemIds,
       });
+      // Attach the PO PDF if one was staged — non-fatal. On failure keep the
+      // modal open with an "Open Job" action so the new job isn't lost.
+      if (attachment) {
+        try {
+          await uploadJobAttachment(quote.company_id, result.job.id, attachment);
+        } catch (uploadErr) {
+          console.error('PO PDF upload failed:', uploadErr);
+          setConvertedJobId(result.job.id);
+          setAttachmentWarning(
+            'The job was created, but the PDF could not be attached. Open the job to add it.',
+          );
+          return;
+        }
+      }
       onConverted(result.job.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to convert quote to job');
@@ -152,6 +177,12 @@ export default function ConvertToJobModal({
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
               {error}
+            </Alert>
+          )}
+
+          {attachmentWarning && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              {attachmentWarning}
             </Alert>
           )}
 
@@ -279,6 +310,11 @@ export default function ConvertToJobModal({
                   : 'Customer PO is required to create a job.'
               }
             />
+            <AttachmentUploadField
+              file={attachment}
+              onChange={setAttachment}
+              disabled={loading}
+            />
           </Box>
         </Box>
       </DialogContent>
@@ -286,14 +322,20 @@ export default function ConvertToJobModal({
         <Button onClick={handleClose} disabled={loading}>
           Cancel
         </Button>
-        <Button
-          variant="contained"
-          onClick={handleConvert}
-          disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen || !poValid}
-          startIcon={loading ? <CircularProgress size={20} /> : null}
-        >
-          {loading ? 'Creating…' : `Create ${expectedJobNumber}`}
-        </Button>
+        {convertedJobId ? (
+          <Button variant="contained" onClick={() => onConverted(convertedJobId)}>
+            Open Job
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={handleConvert}
+            disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen || !poValid}
+            startIcon={loading ? <CircularProgress size={20} /> : null}
+          >
+            {loading ? 'Creating…' : `Create ${expectedJobNumber}`}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

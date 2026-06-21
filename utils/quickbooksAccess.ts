@@ -142,42 +142,43 @@ export async function disconnectQuickBooks(companyId: string): Promise<void> {
   await qbRequest(`/${companyId}/disconnect`, { method: 'POST', body: {} });
 }
 
-export function preflightQuotePush(
+export function preflightJobPush(
   companyId: string,
-  quoteId: string,
+  jobId: string,
 ): Promise<PreflightResult> {
-  return qbRequest<PreflightResult>(`/${companyId}/quotes/${quoteId}/preflight`, {
+  return qbRequest<PreflightResult>(`/${companyId}/jobs/${jobId}/preflight`, {
     method: 'POST',
     body: {},
   });
 }
 
-export function pushQuoteToQuickBooks(
+export function pushJobToQuickBooks(
   companyId: string,
-  quoteId: string,
+  jobId: string,
   customer: PushCustomerDecision,
 ): Promise<PushResult> {
-  return qbRequest<PushResult>(`/${companyId}/quotes/${quoteId}/invoice`, {
+  return qbRequest<PushResult>(`/${companyId}/jobs/${jobId}/invoice`, {
     method: 'POST',
     body: { customer },
   });
 }
 
 /**
- * The created QuickBooks invoice for a quote, if any — read directly from the
+ * The created QuickBooks invoice for a job, if any — read directly from the
  * member-readable link table (no backend round-trip) to show a "View in
- * QuickBooks" deep link on the quote page.
+ * QuickBooks" deep link on the job page. Invoicing is job-keyed: this works for
+ * both quote-sourced and PO-sourced jobs.
  */
-export async function getQuickBooksInvoiceLink(
+export async function getQuickBooksInvoiceLinkForJob(
   companyId: string,
-  quoteId: string,
+  jobId: string,
 ): Promise<QuickBooksInvoiceLink | null> {
   const supabase = getSupabase();
   const { data } = await supabase
     .from('quickbooks_invoice_links')
     .select('qb_invoice_id, qb_invoice_doc_number, qb_invoice_url')
     .eq('company_id', companyId)
-    .eq('quote_id', quoteId)
+    .eq('job_id', jobId)
     .eq('status', 'created')
     .order('created_at', { ascending: false })
     .limit(1)

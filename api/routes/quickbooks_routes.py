@@ -226,31 +226,27 @@ async def disconnect(company_id: str, request: Request):
 
 
 # ───────────────────────── Push (preflight + commit) ─────────────────────────
-async def _load_gated_quote(db: Client, company_id: str, quote_id: str) -> tuple[dict, dict]:
-    """Load the quote and its job, hard-rejecting if not converted. Returns (quote, job)."""
-    quote = (
-        db.table("quotes")
-        .select("id, company_id, customer_id, quote_number, converted_at")
-        .eq("id", quote_id)
+async def _load_gated_job(db: Client, company_id: str, job_id: str) -> dict:
+    """Load the job for invoicing. A job IS the work order, so it's intrinsically
+    billable — there's no 'converted' gate (PO-sourced jobs have no quote). 404 if
+    the job is missing. Returns the job dict (incl. customer_id, job_number,
+    quote_id provenance, billing_address_id)."""
+    job = (
+        db.table("jobs")
+        .select("id, company_id, customer_id, job_number, quote_id, billing_address_id")
+        .eq("id", job_id)
         .eq("company_id", company_id)
         .limit(1)
         .execute()
         .data
     )
-    if not quote:
-        raise HTTPException(status_code=404, detail="Quote not found")
-    quote = quote[0]
-    job = qb.get_job_for_quote(db, company_id, quote_id)
-    if not quote.get("converted_at") or not job:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "not_converted", "message": "Convert this quote to a job before pushing to QuickBooks."},
-        )
-    return quote, job
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job[0]
 
 
-@router.post("/{company_id}/quotes/{quote_id}/preflight")
-async def preflight(company_id: str, quote_id: str, request: Request):
+@router.post("/{company_id}/jobs/{job_id}/preflight")
+async def preflight(company_id: str, job_id: str, request: Request):
     await _verify_company_access(request, company_id)
     db = _service_client()
     conn = qb.get_connection(db, company_id)
@@ -258,12 +254,12 @@ async def preflight(company_id: str, quote_id: str, request: Request):
         return {"connected": False}
 
     realm = conn["realm_id"]
-    quote, job = await _load_gated_quote(db, company_id, quote_id)
+    job = await _load_gated_job(db, company_id, job_id)
 
     link = (
         db.table("quickbooks_invoice_links")
         .select("status, qb_invoice_url")
-        .eq("quote_id", quote_id)
+        .eq("job_id", job_id)
         .eq("realm_id", realm)
         .limit(1)
         .execute()
@@ -273,10 +269,10 @@ async def preflight(company_id: str, quote_id: str, request: Request):
     invoice_url = link[0].get("qb_invoice_url") if already_pushed else None
 
     customer = (
-        db.table("customers").select("id, name").eq("id", quote["customer_id"]).limit(1).execute().data
+        db.table("customers").select("id, name").eq("id", job["customer_id"]).limit(1).execute().data
     )
     if not customer:
-        raise HTTPException(status_code=400, detail="Quote has no customer to invoice.")
+        raise HTTPException(status_code=400, detail="Job has no customer to invoice.")
     customer = customer[0]
 
     cmap = (
@@ -355,21 +351,21 @@ def _pending_is_fresh(row: dict) -> bool:
     return age.total_seconds() < qb.PENDING_STALE_SECONDS
 
 
-@router.post("/{company_id}/quotes/{quote_id}/invoice")
-async def push_invoice(company_id: str, quote_id: str, request: Request, body: CommitBody):
+@router.post("/{company_id}/jobs/{job_id}/invoice")
+async def push_invoice(company_id: str, job_id: str, request: Request, body: CommitBody):
     _, access = await _verify_company_access(request, company_id)
     db = _service_client()
     conn = qb.get_connection(db, company_id)
     if not _is_connected(conn) or conn.get("reconnect_required"):
         raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
     realm = conn["realm_id"]
-    quote, job = await _load_gated_quote(db, company_id, quote_id)
+    job = await _load_gated_job(db, company_id, job_id)
 
     # ── Idempotency claim (race-safe): only the insert-winner POSTs. ──
     existing = (
         db.table("quickbooks_invoice_links")
         .select("*")
-        .eq("quote_id", quote_id)
+        .eq("job_id", job_id)
         .eq("realm_id", realm)
         .limit(1)
         .execute()
@@ -398,8 +394,8 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
                 .insert(
                     {
                         "company_id": company_id,
-                        "quote_id": quote_id,
-                        "job_id": job["id"],
+                        "job_id": job_id,
+                        "quote_id": job.get("quote_id"),  # provenance only; null for PO-sourced jobs
                         "realm_id": realm,
                         "qb_request_id": request_id,
                         "status": "pending",
@@ -414,10 +410,10 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
 
     try:
         customer = (
-            db.table("customers").select("id, name").eq("id", quote["customer_id"]).limit(1).execute().data
+            db.table("customers").select("id, name").eq("id", job["customer_id"]).limit(1).execute().data
         )
         if not customer:
-            raise HTTPException(status_code=400, detail="Quote has no customer to invoice.")
+            raise HTTPException(status_code=400, detail="Job has no customer to invoice.")
         customer = customer[0]
         lines, bill_addr = qb.load_firm_invoice_lines(db, company_id, job)
 
@@ -448,7 +444,7 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
         payload = qb.quote_to_invoice_payload(
             customer_ref=customer_ref,
             item_ref=item_ref,
-            quote_number=quote.get("quote_number"),
+            job_number=job.get("job_number"),
             bill_addr=bill_addr,
             lines=lines,
         )
@@ -459,7 +455,7 @@ async def push_invoice(company_id: str, quote_id: str, request: Request, body: C
         raise
     except Exception as exc:  # noqa: BLE001
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
-        logger.exception("QuickBooks push failed for quote %s", quote_id)
+        logger.exception("QuickBooks push failed for job %s", job_id)
         raise _map_qb_error(exc)
 
     db.table("quickbooks_invoice_links").update(

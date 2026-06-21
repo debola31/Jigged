@@ -52,12 +52,12 @@ export default function UsageTab({ part, partId, companyId, currentChain }: Usag
 
   useEffect(() => {
     let cancelled = false;
-    setError(null);
     Promise.all([getJobsForPart(partId), getQuotesForPart(partId)])
       .then(([j, q]) => {
         if (!cancelled) {
           setJobs(j);
           setQuotes(q);
+          setError(null);
         }
       })
       .catch((err) => {

@@ -62,6 +62,10 @@ import {
   bulkDeleteParts,
   getJobsForPart,
   getQuotesForPart,
+  getPartNotes,
+  addPartNote,
+  deletePartNote,
+  getPartActivity,
 } from '@/utils/partsAccess';
 
 describe('partsAccess utilities', () => {
@@ -200,6 +204,159 @@ describe('partsAccess utilities', () => {
     it('throws on error rather than returning []', async () => {
       mockQueryBuilder.error = { message: 'boom' };
       await expect(getQuotesForPart('part-1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('getPartNotes', () => {
+    it('maps rows and normalizes the author shape (object or array)', async () => {
+      mockQueryBuilder.data = [
+        {
+          id: 'n1',
+          part_id: 'p1',
+          body: 'first',
+          created_at: '2026-02-01T00:00:00Z',
+          author_id: 'a1',
+          author: { name: 'Sam' }, // object form
+        },
+        {
+          id: 'n2',
+          part_id: 'p1',
+          body: 'second',
+          created_at: '2026-01-01T00:00:00Z',
+          author_id: null,
+          author: [{ name: 'Pat' }], // array form
+        },
+      ];
+
+      const notes = await getPartNotes('p1', 'c1');
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('part_notes');
+      expect(notes[0]).toMatchObject({ id: 'n1', body: 'first', author_id: 'a1', author_name: 'Sam' });
+      expect(notes[1]).toMatchObject({ id: 'n2', author_id: null, author_name: 'Pat' });
+    });
+
+    it('throws on error', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(getPartNotes('p1', 'c1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('addPartNote', () => {
+    it('rejects an empty/whitespace body before hitting the DB', async () => {
+      await expect(addPartNote('p1', 'c1', 'a1', '   ')).rejects.toThrow(/empty/i);
+      expect(mockQueryBuilder.insert).not.toHaveBeenCalled();
+    });
+
+    it('trims the body, inserts as the author, and returns the mapped note', async () => {
+      mockQueryBuilder.data = {
+        id: 'n1',
+        part_id: 'p1',
+        body: 'hi',
+        created_at: '2026-02-01T00:00:00Z',
+        author_id: 'a1',
+        author: { name: 'Sam' },
+      };
+
+      const note = await addPartNote('p1', 'c1', 'a1', '  hi  ');
+
+      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ company_id: 'c1', part_id: 'p1', author_id: 'a1', body: 'hi' }),
+      );
+      expect(note).toMatchObject({ id: 'n1', author_name: 'Sam' });
+    });
+  });
+
+  describe('deletePartNote', () => {
+    it('deletes by id (RLS enforces author/admin)', async () => {
+      await deletePartNote('n1');
+      expect(mockSupabase.from).toHaveBeenCalledWith('part_notes');
+      expect(mockQueryBuilder.delete).toHaveBeenCalled();
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
+    });
+
+    it('throws on error', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(deletePartNote('n1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('getPartActivity', () => {
+    // Per-table dispatch: each source returns its own fixture so we can assert
+    // the merge + newest-first sort across kinds.
+    const chain = [
+      'select', 'insert', 'update', 'delete', 'eq', 'neq', 'ilike', 'or', 'is',
+      'in', 'order', 'range', 'single', 'maybeSingle', 'limit',
+    ];
+    const makeResult = (rows: unknown, count: number | null = null) => {
+      const b: Record<string, unknown> = {};
+      chain.forEach((m) => {
+        b[m] = () => b;
+      });
+      b.data = rows;
+      b.error = null;
+      b.count = count;
+      return b;
+    };
+
+    it('merges notes + transactions + jobs + quotes into one newest-first feed', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        switch (table) {
+          case 'part_notes':
+            return makeResult([
+              {
+                id: 'n1', part_id: 'p1', body: 'note', created_at: '2026-04-01T00:00:00Z',
+                author_id: 'a1', author: { name: 'Sam' },
+              },
+            ]);
+          case 'inventory_transactions':
+            return makeResult(
+              [
+                {
+                  id: 't1', type: 'addition', quantity: 5, unit: 'ea',
+                  created_at: '2026-02-01T00:00:00Z', notes: null, has_discrepancy: false,
+                  jobs: null, job_operations: null,
+                },
+              ],
+              1,
+            );
+          case 'job_parts':
+            return makeResult([
+              {
+                quantity: 2,
+                jobs: {
+                  id: 'j1', job_number: 'J-1', production_status: 'in_progress',
+                  fulfillment_status: 'unshipped', due_date: null,
+                  created_at: '2026-03-01T00:00:00Z', customers: { name: 'Acme' },
+                },
+              },
+            ]);
+          case 'quote_line_items':
+            return makeResult([
+              {
+                quotes: {
+                  id: 'q1', quote_number: 'Q-1', status: 'active', expiration_date: null,
+                  created_at: '2026-01-01T00:00:00Z', customers: { name: 'Acme' },
+                },
+              },
+            ]);
+          default:
+            return makeResult([]);
+        }
+      });
+
+      const feed = await getPartActivity('p1', 'c1');
+
+      // Apr note > Mar job > Feb txn > Jan quote
+      expect(feed.map((e) => e.kind)).toEqual(['note', 'job', 'transaction', 'quote']);
+    });
+
+    it('throws if any source errors (no silent partial feed)', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        const b = makeResult([]);
+        if (table === 'part_notes') b.error = { message: 'boom' };
+        return b;
+      });
+      await expect(getPartActivity('p1', 'c1')).rejects.toBeTruthy();
     });
   });
 

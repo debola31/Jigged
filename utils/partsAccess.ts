@@ -11,6 +11,7 @@ type PartsInsert = Database['public']['Tables']['parts']['Insert'];
 import type {
   Part,
   PartFormData,
+  PartNote,
   PartUnitConversion,
   PartUnitConversionFormData,
 } from '@/types/part';
@@ -1489,4 +1490,165 @@ export async function getPartTransactions(
   }));
 
   return { transactions, total: count || 0 };
+}
+
+// ============================================================
+// PART NOTES + ACTIVITY FEED
+// ============================================================
+
+/**
+ * Notes on a part, newest-first. Mirrors getJobNotes (operatorAccess).
+ */
+export async function getPartNotes(partId: string, companyId: string): Promise<PartNote[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('part_notes')
+    .select('id, part_id, body, created_at, author_id, author:user_company_access(name)')
+    .eq('part_id', partId)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching part notes:', error);
+    throw error;
+  }
+
+  type NoteRow = {
+    id: string;
+    part_id: string;
+    body: string;
+    created_at: string;
+    author_id: string | null;
+    author: { name: string | null } | { name: string | null }[] | null;
+  };
+
+  return ((data ?? []) as NoteRow[]).map((n) => {
+    const author = Array.isArray(n.author) ? n.author[0] : n.author;
+    return {
+      id: n.id,
+      part_id: n.part_id,
+      body: n.body,
+      created_at: n.created_at,
+      author_id: n.author_id,
+      author_name: author?.name ?? null,
+    };
+  });
+}
+
+/**
+ * Append a part note. `authorId` is the author's user_company_access id (from
+ * getCurrentOperator); RLS requires it to match the caller's access row.
+ */
+export async function addPartNote(
+  partId: string,
+  companyId: string,
+  authorId: string,
+  body: string,
+): Promise<PartNote> {
+  const supabase = getSupabase();
+
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Note cannot be empty.');
+
+  const { data, error } = await supabase
+    .from('part_notes')
+    .insert({
+      company_id: companyId,
+      part_id: partId,
+      author_id: authorId,
+      body: trimmed,
+    })
+    .select('id, part_id, body, created_at, author_id, author:user_company_access(name)')
+    .single();
+
+  if (error) {
+    console.error('Error adding part note:', error);
+    throw error;
+  }
+
+  type NoteRow = {
+    id: string;
+    part_id: string;
+    body: string;
+    created_at: string;
+    author_id: string | null;
+    author: { name: string | null } | { name: string | null }[] | null;
+  };
+  const n = data as NoteRow;
+  const author = Array.isArray(n.author) ? n.author[0] : n.author;
+  return {
+    id: n.id,
+    part_id: n.part_id,
+    body: n.body,
+    created_at: n.created_at,
+    author_id: n.author_id,
+    author_name: author?.name ?? null,
+  };
+}
+
+/**
+ * Delete a part note. RLS restricts this to the author or a company admin.
+ */
+export async function deletePartNote(noteId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.from('part_notes').delete().eq('id', noteId);
+  if (error) {
+    console.error('Error deleting part note:', error);
+    throw error;
+  }
+}
+
+/**
+ * A single entry in the part activity feed — a discriminated union over the
+ * sources that accumulate against a part. `at` is the ISO timestamp used to
+ * sort the merged feed; `id` is prefixed by kind for stable React keys.
+ */
+export type PartActivityEvent =
+  | { kind: 'note'; id: string; at: string; note: PartNote }
+  | { kind: 'transaction'; id: string; at: string; txn: InventoryTransaction }
+  | { kind: 'job'; id: string; at: string; job: PartJobUsage }
+  | { kind: 'quote'; id: string; at: string; quote: PartQuoteUsage };
+
+/**
+ * Aggregate-on-read part activity feed: merges notes, stock transactions, and
+ * the jobs/quotes the part appears on into one newest-first timeline.
+ *
+ * Deliberately NOT a materialized table — that would be a second source of
+ * truth needing triggers on four tables (the no-silent-fallback anti-pattern);
+ * per-part row counts are small, so an in-memory merge is trivial. Throws if
+ * any source errors (no silent partial feed). Price-change events are out of
+ * scope: there is no price-audit source, and deriving them from updated_at
+ * would be a fabricated event.
+ */
+export async function getPartActivity(
+  partId: string,
+  companyId: string,
+): Promise<PartActivityEvent[]> {
+  const [notes, txnResult, jobs, quotes] = await Promise.all([
+    getPartNotes(partId, companyId),
+    getPartTransactions(partId, 0, 100),
+    getJobsForPart(partId),
+    getQuotesForPart(partId),
+  ]);
+
+  const events: PartActivityEvent[] = [];
+
+  for (const note of notes) {
+    events.push({ kind: 'note', id: `note-${note.id}`, at: note.created_at, note });
+  }
+  for (const txn of txnResult.transactions) {
+    if (!txn.created_at) continue;
+    events.push({ kind: 'transaction', id: `txn-${txn.id}`, at: txn.created_at, txn });
+  }
+  for (const job of jobs) {
+    if (!job.created_at) continue;
+    events.push({ kind: 'job', id: `job-${job.job_id}`, at: job.created_at, job });
+  }
+  for (const quote of quotes) {
+    if (!quote.created_at) continue;
+    events.push({ kind: 'quote', id: `quote-${quote.quote_id}`, at: quote.created_at, quote });
+  }
+
+  return events.sort((a, b) => b.at.localeCompare(a.at));
 }

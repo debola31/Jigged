@@ -31,6 +31,7 @@ import { getPartSetupStatus, type PartSetupStatus } from './partSetupStatus';
 import WorkspaceTab from './tabs/WorkspaceTab';
 import InventoryTab from './tabs/InventoryTab';
 import UsageTab from './tabs/UsageTab';
+import HistoryTab from './tabs/HistoryTab';
 
 const formatDate = (s: string | null): string => {
   if (!s) return '—';
@@ -72,10 +73,9 @@ export default function PartWorkspace() {
 
   const [chainNames, setChainNames] = useState<Map<string, string>>(new Map());
   useEffect(() => {
-    if (currentChain.length === 0) {
-      setChainNames(new Map());
-      return;
-    }
+    // Empty chain → nothing to look up; stale names are never rendered (the
+    // breadcrumb only maps over currentChain), so no synchronous reset needed.
+    if (currentChain.length === 0) return;
     let cancelled = false;
     getPartNamesByIds(currentChain)
       .then((map) => {
@@ -195,6 +195,7 @@ export default function PartWorkspace() {
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
     if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
+    tabs.push({ slug: 'history', label: 'History' });
     return tabs;
   }, [part?.is_stocked]);
 
@@ -293,6 +294,8 @@ export default function PartWorkspace() {
       {activeTab === 'usage' && (
         <UsageTab part={part} partId={partId} companyId={companyId} currentChain={currentChain} />
       )}
+
+      {activeTab === 'history' && <HistoryTab partId={partId} companyId={companyId} />}
 
       {/* Footer metadata strip — always visible below the active tab. */}
       <Box sx={{ mt: 4 }}>

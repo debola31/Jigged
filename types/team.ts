@@ -56,4 +56,10 @@ export interface InviteResponse {
   success: boolean;
   invitation_id: string;
   message: string;
+  /**
+   * Whether the invitation email was actually handed off to the provider (Resend).
+   * `false` means the invitation record was created but the email send failed —
+   * the admin must use "Resend" to try again. Absent on legacy responses.
+   */
+  email_sent?: boolean;
 }

@@ -309,15 +309,20 @@ Deno.serve(async (req) => {
         await sendInviteEmail(resendApiKey, email.toLowerCase(), companyName, actionLink);
       } catch (emailErr) {
         console.error('Email sending error:', emailErr);
+        // The invitation row exists, but the email never went out. Report this
+        // honestly via email_sent:false so the UI can warn rather than show
+        // a green "sent" confirmation the admin would trust.
         return jsonResponse({
           success: true,
+          email_sent: false,
           invitation_id: invitation.id,
-          message: `Invitation created but email could not be sent. Use "Resend" to try again.`,
+          message: `Invitation created, but the email could not be sent to ${email}. Use "Resend" on the team page to try again.`,
         });
       }
 
       return jsonResponse({
         success: true,
+        email_sent: true,
         invitation_id: invitation.id,
         message: `Invitation sent to ${email}`,
       });

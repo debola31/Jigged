@@ -40,6 +40,7 @@ export default function InviteTeamMemberPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +59,7 @@ export default function InviteTeamMemberPage() {
     setLoading(true);
     setError(null);
     setSuccess(null);
+    setWarning(null);
 
     try {
       // Get auth session for Edge Function authorization
@@ -92,6 +94,14 @@ export default function InviteTeamMemberPage() {
 
       if (!data.success) {
         throw new Error(data.message || 'Failed to send invitation');
+      }
+
+      // The invitation row can be created even when the email fails to send.
+      // Don't show a green "sent" confirmation in that case — surface a warning
+      // and keep the admin on the page so they can Resend from the team list.
+      if (data.email_sent === false) {
+        setWarning(data.message || 'Invitation created, but the email could not be sent. Use "Resend" on the team page to try again.');
+        return;
       }
 
       setSuccess(data.message || `Invitation sent to ${email}`);
@@ -131,6 +141,12 @@ export default function InviteTeamMemberPage() {
         {error && (
           <Alert severity="error" sx={{ mb: 3 }}>
             {error}
+          </Alert>
+        )}
+
+        {warning && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            {warning}
           </Alert>
         )}
 

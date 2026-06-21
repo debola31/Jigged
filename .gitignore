@@ -78,3 +78,8 @@ api/.coverage
 # mutmut mutation-testing cache (regenerated per run)
 api/.mutmut-cache
 api/mutants/
+
+# Claude Code: local settings + git worktrees (kept out of version control).
+# settings.json is re-included so shared, team-level Claude config can still be committed.
+.claude/*
+!.claude/settings.json

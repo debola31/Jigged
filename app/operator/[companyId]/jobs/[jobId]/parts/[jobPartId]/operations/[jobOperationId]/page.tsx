@@ -6,7 +6,6 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
-import Paper from '@mui/material/Paper';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -14,100 +13,34 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import UndoIcon from '@mui/icons-material/Undo';
 import {
   getOperatorOperationDetail,
   getCurrentOperator,
-  startJob,
-  stopJob,
-  completeJob,
+  completeOperation,
+  revertOperationCompletion,
 } from '@/utils/operatorAccess';
+import { useStationContext } from '@/components/operator/OperatorStationContext';
+import StationSelector from '@/components/operator/StationSelector';
 import type { OperatorJobDetail } from '@/types/operator';
-import { formatDuration } from '@/types/operator';
-
-function SessionTimer({ startedAt }: { startedAt: string }) {
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    const start = new Date(startedAt).getTime();
-    const updateElapsed = () => {
-      setElapsed(Math.floor((Date.now() - start) / 1000));
-    };
-    updateElapsed();
-    const interval = setInterval(updateElapsed, 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-
-  return (
-    <Typography
-      variant="h2"
-      component="div"
-      sx={{
-        fontFamily: 'monospace',
-        fontWeight: 700,
-        color: 'primary.main',
-        textAlign: 'center',
-      }}
-    >
-      {formatDuration(elapsed)}
-    </Typography>
-  );
-}
-
-function EstimatedComparison({
-  estimatedMinutes,
-  sessionStartedAt,
-}: {
-  estimatedMinutes: number;
-  sessionStartedAt: string;
-}) {
-  const [elapsedMinutes, setElapsedMinutes] = useState(0);
-
-  useEffect(() => {
-    const start = new Date(sessionStartedAt).getTime();
-    const update = () => {
-      setElapsedMinutes((Date.now() - start) / (1000 * 60));
-    };
-    update();
-    const interval = setInterval(update, 10000);
-    return () => clearInterval(interval);
-  }, [sessionStartedAt]);
-
-  const progress = Math.min((elapsedMinutes / estimatedMinutes) * 100, 100);
-  const overEstimate = elapsedMinutes > estimatedMinutes;
-
-  const fmt = (min: number) => {
-    if (min < 60) return `${Math.round(min)} min`;
-    return `${(min / 60).toFixed(1)} hrs`;
-  };
-
-  return (
-    <Box sx={{ mt: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-        <Typography variant="caption" color="text.secondary">
-          Elapsed: {fmt(elapsedMinutes)}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Estimated: {fmt(estimatedMinutes)}
-        </Typography>
-      </Box>
-      <LinearProgress
-        variant="determinate"
-        value={progress}
-        color={overEstimate ? 'warning' : 'primary'}
-        sx={{ height: 8, borderRadius: 1 }}
-      />
-    </Box>
-  );
-}
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
- * step on the traveler, or directly from the station-scoped jobs list. Holds the
- * Start / Exit / Mark-complete flow. Loads by job_operation_id so the exact step
- * the operator chose is the one actioned — no station-context resolution.
+ * step on the traveler, or directly from the station-scoped jobs list.
+ *
+ * Operators have a single deliberate action: MARK COMPLETE — one tap, no
+ * "start", no pause/exit, and no on-job timer (shop operators don't reliably
+ * start/pause/resume, so we don't pretend to track that time; see
+ * operatorAccess.completeOperation). A completed step shows an UNDO so an
+ * accidental completion can be reverted on the spot. Loads by job_operation_id
+ * so the exact step the operator chose is the one actioned.
+ *
+ * Station guard: completing requires a selected station (StationSelector prompts
+ * when none is set). If the step's work center doesn't match the operator's
+ * station — the likely signature of a wrong QR scan — Mark Complete is replaced
+ * by a guide with a one-tap "switch & complete" (for legit cross-station work)
+ * and a way back to the traveler.
  */
 export default function OperatorOperationActionPage() {
   const params = useParams();
@@ -118,6 +51,8 @@ export default function OperatorOperationActionPage() {
   const jobOperationId = params.jobOperationId as string;
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
+
+  const { stationId, stationName, setStation } = useStationContext();
 
   const [job, setJob] = useState<OperatorJobDetail | null>(null);
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
@@ -150,47 +85,9 @@ export default function OperatorOperationActionPage() {
     loadJob();
   }, [loadJob]);
 
-  const handleStart = async () => {
-    if (!currentOperatorId) {
-      setError('Operator not found. Please log in again.');
-      return;
-    }
-    setActionLoading(true);
-    setError(null);
-    try {
-      // Pin the exact step. The operation's own work center is used for the
-      // session, so we don't pass operation_type_id here.
-      await startJob(jobPartId, currentOperatorId, companyId, {
-        job_operation_id: jobOperationId,
-      });
-      await loadJob();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start job');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleStop = async () => {
-    if (!currentOperatorId) {
-      setError('Operator not found. Please log in again.');
-      return;
-    }
-    setActionLoading(true);
-    setError(null);
-    try {
-      await stopJob(jobPartId, currentOperatorId);
-      await loadJob();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop job');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Completion is a direct action — no confirmation dialog. Job notes live at
-  // the job level (the traveler) and material consumption is driven by the part
-  // BOM, so there's nothing to confirm here.
+  // Completion is a direct, single-tap action — no confirmation. We stay on the
+  // page and re-load into the completed state so a mistaken completion can be
+  // undone immediately.
   const handleComplete = async () => {
     if (!currentOperatorId) {
       setError('Operator not found. Please log in again.');
@@ -199,19 +96,44 @@ export default function OperatorOperationActionPage() {
     setActionLoading(true);
     setError(null);
     try {
-      await completeJob(jobPartId, currentOperatorId);
-      router.push(travelerHref);
+      await completeOperation(jobOperationId);
+      await loadJob();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete operation');
+    } finally {
       setActionLoading(false);
     }
   };
 
-  const isWorking =
-    job?.active_session_id && job?.current_operator_id === currentOperatorId;
-  const someoneElseWorking =
-    job?.active_session_id && job?.current_operator_id !== currentOperatorId;
+  const handleRevert = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await revertOperationCompletion(jobOperationId);
+      await loadJob();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to undo completion');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // The operator confirms they are at this step's station, then completes in the
+  // same tap. setStation persists the choice so later scans match too.
+  const handleSwitchAndComplete = async () => {
+    if (job?.operation_work_center_id) {
+      setStation(job.operation_work_center_id);
+    }
+    await handleComplete();
+  };
+
   const isCompleted = job?.operation_status === 'completed';
+
+  const statusColor = (status: string | null): 'success' | 'primary' | 'default' => {
+    if (status === 'completed') return 'success';
+    if (status === 'in_progress') return 'primary';
+    return 'default';
+  };
 
   if (loading) {
     return (
@@ -229,8 +151,19 @@ export default function OperatorOperationActionPage() {
     );
   }
 
+  // Station guard: a step whose work center differs from the operator's selected
+  // station is the likely signature of a wrong QR scan. (Can't catch a mis-scan
+  // between two steps sharing one work center — the on-screen step name + Undo
+  // are the backstop there.)
+  const needsStation = !isCompleted && !stationId;
+  const stationMismatch =
+    !isCompleted &&
+    !!stationId &&
+    !!job.operation_work_center_id &&
+    job.operation_work_center_id !== stationId;
+
   return (
-    <Box sx={{ pb: isWorking ? 16 : 0 }}>
+    <Box>
       <IconButton onClick={() => router.push(travelerHref)} sx={{ mb: 2 }} aria-label="Back to traveler">
         <ArrowBackIcon />
       </IconButton>
@@ -241,9 +174,9 @@ export default function OperatorOperationActionPage() {
         </Alert>
       )}
 
-      {!isWorking && !isCompleted && job.predecessors_incomplete && (
+      {!isCompleted && job.predecessors_incomplete && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          Earlier steps on this part aren&apos;t complete yet. You can still start this
+          Earlier steps on this part aren&apos;t complete yet. You can still complete this
           step if you&apos;re working out of order.
         </Alert>
       )}
@@ -264,7 +197,7 @@ export default function OperatorOperationActionPage() {
             </Box>
             <Chip
               label={job.operation_status || job.production_status}
-              color={job.operation_status === 'in_progress' ? 'primary' : 'default'}
+              color={statusColor(job.operation_status)}
             />
           </Box>
 
@@ -273,7 +206,7 @@ export default function OperatorOperationActionPage() {
             {job.part_name || 'Part'} &middot; Order qty {job.part_quantity}
           </Typography>
 
-          {!isWorking && job.estimated_minutes != null && job.estimated_minutes > 0 && (
+          {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Estimated:{' '}
               {job.estimated_minutes < 60
@@ -302,97 +235,71 @@ export default function OperatorOperationActionPage() {
         </CardContent>
       </Card>
 
-      {isWorking && job.session_started_at && (
-        <Card
-          elevation={2}
-          sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)', py: 3 }}
-        >
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="overline" color="text.secondary">
-              Time on Job
-            </Typography>
-            <SessionTimer startedAt={job.session_started_at} />
-            {job.estimated_minutes != null && job.estimated_minutes > 0 && (
-              <EstimatedComparison
-                estimatedMinutes={job.estimated_minutes}
-                sessionStartedAt={job.session_started_at}
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {isCompleted && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          This step is already complete.
-        </Alert>
-      )}
-
-      {someoneElseWorking && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          {job.current_operator_name} is currently working on this operation. Starting will take
-          over their session.
-        </Alert>
-      )}
-
-      {isCompleted ? null : !isWorking ? (
+      {isCompleted ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Alert severity="success">This step is complete.</Alert>
           <Button
-            variant="contained"
+            variant="outlined"
             size="large"
-            color="success"
-            startIcon={<PlayArrowIcon />}
-            onClick={handleStart}
-            disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
-          >
-            {actionLoading ? <CircularProgress size={24} /> : 'START WORK'}
-          </Button>
-        </Box>
-      ) : (
-        <Paper
-          elevation={4}
-          square
-          sx={{
-            position: 'sticky',
-            bottom: 0,
-            mx: -2,
-            px: 2,
-            py: 2,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            bgcolor: 'rgba(26, 31, 74, 0.92)',
-            backdropFilter: 'blur(8px)',
-            borderTop: 1,
-            borderColor: 'divider',
-            zIndex: (t) => t.zIndex.appBar,
-          }}
-        >
-          <Button
-            variant="contained"
-            size="large"
-            color="error"
-            startIcon={<ExitToAppIcon />}
-            onClick={handleStop}
+            color="inherit"
+            startIcon={<UndoIcon />}
+            onClick={handleRevert}
             disabled={actionLoading}
             sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
           >
-            {actionLoading ? <CircularProgress size={24} /> : 'EXIT'}
+            {actionLoading ? <CircularProgress size={24} /> : 'UNDO COMPLETION'}
           </Button>
-
+        </Box>
+      ) : needsStation ? (
+        <StationSelector subtitle="Select your station to complete this step." />
+      ) : stationMismatch ? (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Alert severity="warning">
+            This step runs at <strong>{job.operation_work_center_name || 'another station'}</strong>.
+            You&apos;re at <strong>{stationName || 'a different station'}</strong> — did you scan the
+            wrong code?
+          </Alert>
           <Button
+            fullWidth
             variant="contained"
             size="large"
             color="primary"
             startIcon={<CheckCircleIcon />}
-            onClick={handleComplete}
+            onClick={handleSwitchAndComplete}
             disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
           >
-            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
+            {actionLoading ? (
+              <CircularProgress size={24} />
+            ) : (
+              `Switch to ${job.operation_work_center_name || 'this station'} & complete`
+            )}
           </Button>
-        </Paper>
+          <Button
+            variant="outlined"
+            size="large"
+            color="inherit"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => router.push(travelerHref)}
+            disabled={actionLoading}
+            sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
+          >
+            Not my step — back to traveler
+          </Button>
+        </Box>
+      ) : (
+        <Button
+          fullWidth
+          variant="contained"
+          size="large"
+          color="primary"
+          startIcon={<CheckCircleIcon />}
+          onClick={handleComplete}
+          disabled={actionLoading}
+          sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+        >
+          {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
+        </Button>
       )}
     </Box>
   );

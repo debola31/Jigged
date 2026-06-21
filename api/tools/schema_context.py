@@ -214,7 +214,6 @@ SCHEMA_CONTEXT = """
 - routing_operation_id: UUID (FK -> routing_operations.id, nullable; the source row)
 - estimated_setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES, not hours
 - estimated_run_minutes_per_unit: NUMERIC(8,4) (default 0) -- MINUTES per unit
-- actual_setup_minutes: NUMERIC(8,2), actual_run_minutes: NUMERIC(8,2)
 - status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
 - started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
 - assigned_to: UUID, completed_by: UUID
@@ -282,16 +281,6 @@ SCHEMA_CONTEXT = """
 - has_discrepancy: BOOLEAN (default false)
 - notes: TEXT, created_at: TIMESTAMPTZ
 
-### operator_sessions (time tracking for operators working on jobs)
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- operator_id: UUID
-- job_id: UUID (FK -> jobs.id)
-- job_operation_id: UUID (FK -> job_operations.id, nullable)
-- work_center_id: UUID (FK -> work_centers.id) -- was operation_type_id
-- started_at: TIMESTAMPTZ, ended_at: TIMESTAMPTZ (null = currently active)
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)
 - jobs.customer_id -> customers.id
@@ -319,8 +308,6 @@ SCHEMA_CONTEXT = """
 - parts_bom.parent_part_id -> parts.id, .child_part_id -> parts.id
 - parts_unit_conversions.part_id -> parts.id
 - inventory_transactions.part_id -> parts.id
-- operator_sessions.job_id -> jobs.id
-- operator_sessions.work_center_id -> work_centers.id
 
 ## Important Notes
 - Tables WITHOUT company_id: job_operations, job_materials, routing_operations,
@@ -342,7 +329,7 @@ SCHEMA_CONTEXT = """
   For external operations the cost is external_unit_price * qty + external_setup_cost.
 - Time fields are MINUTES on both routing_operations (setup_minutes,
   cycle_minutes_per_unit) and job_operations (estimated_setup_minutes,
-  estimated_run_minutes_per_unit, actual_setup_minutes, actual_run_minutes).
+  estimated_run_minutes_per_unit).
   Divide by 60 before multiplying by an hourly labor_rate.
 
 ## Example Queries
@@ -438,6 +425,5 @@ ALLOWED_TABLES = frozenset({
     "work_centers",
     "routings",
     "routing_operations",
-    "operator_sessions",
     "inventory_transactions",
 })

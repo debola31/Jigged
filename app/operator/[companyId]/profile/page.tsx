@@ -9,22 +9,12 @@ import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import Divider from '@mui/material/Divider';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
-import Chip from '@mui/material/Chip';
 import Snackbar from '@mui/material/Snackbar';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import FeedbackDialog from '@/components/feedback/FeedbackDialog';
-import {
-  getCurrentOperator,
-  getOperatorSessions,
-} from '@/utils/operatorAccess';
+import { getCurrentOperator } from '@/utils/operatorAccess';
 import { getCompany } from '@/utils/companyAccess';
-import { formatDuration } from '@/types/operator';
-import type { OperatorSession } from '@/types/operator';
 import { getSupabase } from '@/lib/supabase';
 
 /**
@@ -41,7 +31,6 @@ export default function OperatorProfilePage() {
   const [operatorEmail, setOperatorEmail] = useState<string>('');
   const [operatorUserId, setOperatorUserId] = useState<string>('');
   const [companyName, setCompanyName] = useState<string>('');
-  const [sessions, setSessions] = useState<OperatorSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -77,10 +66,6 @@ export default function OperatorProfilePage() {
         if (company?.name) {
           setCompanyName(company.name);
         }
-
-        // Load session history
-        const sessionData = await getOperatorSessions(operator.id, 50);
-        setSessions(sessionData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load profile');
       } finally {
@@ -98,23 +83,6 @@ export default function OperatorProfilePage() {
     const supabase = getSupabase();
     await supabase.auth.signOut();
     router.push(`/operator/${companyId}/login`);
-  };
-
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleTimeString(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
   };
 
   if (loading) {
@@ -212,77 +180,6 @@ export default function OperatorProfilePage() {
           Thanks for your feedback!
         </Alert>
       </Snackbar>
-
-      {/* Work History */}
-      <Typography variant="h6" fontWeight={600} sx={{ mb: 2 }}>
-        Work History
-      </Typography>
-
-      {sessions.length === 0 ? (
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <Typography variant="body2" color="text.secondary">
-            No work sessions yet.
-          </Typography>
-        </Box>
-      ) : (
-        <Card
-          elevation={2}
-          sx={{
-            bgcolor: 'rgba(26, 31, 74, 0.55)',
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <List disablePadding>
-            {sessions.map((session, index) => (
-              <Box key={session.id}>
-                {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />}
-                <ListItem
-                  sx={{ py: 2 }}
-                  secondaryAction={
-                    <Chip
-                      label={session.ended_at ? 'Done' : 'Active'}
-                      size="small"
-                      color={session.ended_at ? 'default' : 'primary'}
-                    />
-                  }
-                >
-                  <ListItemText
-                    primary={
-                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-                        <Typography variant="body1" fontWeight={600}>
-                          {session.job_number || 'Job'}
-                        </Typography>
-                        {session.operation_name && (
-                          <Typography variant="body2" color="text.secondary">
-                            - {session.operation_name}
-                          </Typography>
-                        )}
-                      </Box>
-                    }
-                    secondary={
-                      <Box sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary" component="span">
-                          {formatDate(session.started_at)} at {formatTime(session.started_at)}
-                        </Typography>
-                        {session.duration_seconds != null && (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            component="span"
-                            sx={{ ml: 2, fontFamily: 'monospace' }}
-                          >
-                            {formatDuration(session.duration_seconds)}
-                          </Typography>
-                        )}
-                      </Box>
-                    }
-                  />
-                </ListItem>
-              </Box>
-            ))}
-          </List>
-        </Card>
-      )}
     </Box>
   );
 }

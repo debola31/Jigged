@@ -13,7 +13,6 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
-import { QRCodeCanvas } from 'qrcode.react';
 
 import type { jsPDF } from 'jspdf';
 import { getSupabase } from '@/lib/supabase';
@@ -36,13 +35,10 @@ export interface JobTravelerPreviewDialogProps {
 
 /**
  * Per-part job-traveler preview. Re-renders the PDF from the job_part on
- * every open. The traveler carries the part's QR code, which deep-links the
- * operator to /operator/{companyId}/login?job={jobId}&part={jobPartId} and,
- * post-login, straight to that part's operator traveler.
- *
- * The QR is rendered through a hidden QRCodeCanvas (mounted below) and read
- * as a PNG data URL — same technique as the old JobQRCode component, so no
- * extra dependency is needed.
+ * every open. The traveler carries one QR PER OPERATION (generated inside
+ * generateJobTravelerPdf), each deep-linking the operator to
+ * /operator/{companyId}/login?job=&part=&operation= and, post-login, straight
+ * to that exact step's action view.
  */
 export default function JobTravelerPreviewDialog({
   open,
@@ -56,14 +52,6 @@ export default function JobTravelerPreviewDialog({
   const [error, setError] = useState<string | null>(null);
   const docRef = useRef<jsPDF | null>(null);
   const filenameRef = useRef<string>('job-traveler.pdf');
-  const qrRef = useRef<HTMLDivElement>(null);
-
-  // The URL the printed QR encodes. Known from props before any fetch, so
-  // the hidden canvas is already mounted by the time the effect runs.
-  const qrUrl =
-    open && jobPartId && typeof window !== 'undefined'
-      ? `${window.location.origin}/operator/${companyId}/login?job=${jobId}&part=${jobPartId}`
-      : '';
 
   useEffect(() => {
     if (!open || !jobPartId) return;
@@ -91,14 +79,14 @@ export default function JobTravelerPreviewDialog({
           throw new Error(companyErr?.message ?? 'Failed to load company.');
         }
 
-        const qrCanvas = qrRef.current?.querySelector('canvas') ?? null;
-        const qrDataUrl = qrCanvas ? qrCanvas.toDataURL('image/png') : '';
+        const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
         const doc = await generateJobTravelerPdf({
           traveler,
           company: companyRow as unknown as Company,
           bom,
-          qrDataUrl,
+          companyId,
+          baseUrl,
           supabase,
         });
         if (cancelled) return;
@@ -196,13 +184,6 @@ export default function JobTravelerPreviewDialog({
           Download
         </Button>
       </DialogActions>
-
-      {/* Hidden QR canvas — read as a PNG data URL for the PDF. */}
-      <Box ref={qrRef} sx={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}>
-        {qrUrl && (
-          <QRCodeCanvas value={qrUrl} size={240} level="H" includeMargin bgColor="#ffffff" fgColor="#000000" />
-        )}
-      </Box>
     </Dialog>
   );
 }

@@ -13,14 +13,10 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import IconButton from '@mui/material/IconButton';
-import {
-  getOperatorJobs,
-  getCurrentOperator,
-  getActiveSession,
-} from '@/utils/operatorAccess';
+import { getOperatorJobs } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
-import type { OperatorJob, ActiveSession } from '@/types/operator';
+import type { OperatorJob } from '@/types/operator';
 
 /**
  * Operator Jobs List Page.
@@ -35,21 +31,8 @@ export default function OperatorJobsPage() {
   const { stationId } = useStationContext();
 
   const [jobs, setJobs] = useState<OperatorJob[]>([]);
-  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
-  const [operatorId, setOperatorId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Get current operator on mount
-  useEffect(() => {
-    async function loadOperator() {
-      const operator = await getCurrentOperator(companyId);
-      if (operator) {
-        setOperatorId(operator.id);
-      }
-    }
-    loadOperator();
-  }, [companyId]);
 
   const loadJobs = useCallback(async () => {
     if (!stationId) return;
@@ -59,18 +42,12 @@ export default function OperatorJobsPage() {
     try {
       const jobsData = await getOperatorJobs(companyId, stationId);
       setJobs(jobsData);
-
-      // Get active session if we have operator ID
-      if (operatorId) {
-        const sessionData = await getActiveSession(operatorId);
-        setActiveSession(sessionData);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load jobs');
     } finally {
       setLoading(false);
     }
-  }, [companyId, stationId, operatorId]);
+  }, [companyId, stationId]);
 
   useEffect(() => {
     // Wait for station to resolve before fetching — otherwise a fetch with
@@ -90,11 +67,6 @@ export default function OperatorJobsPage() {
         const jobsData = await getOperatorJobs(companyId, stationId);
         if (cancelled) return;
         setJobs(jobsData);
-        if (operatorId) {
-          const sessionData = await getActiveSession(operatorId);
-          if (cancelled) return;
-          setActiveSession(sessionData);
-        }
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load jobs');
@@ -106,7 +78,7 @@ export default function OperatorJobsPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, stationId, operatorId]);
+  }, [companyId, stationId]);
 
   // From the station-scoped list the operator is already at a station, so jump
   // straight to that station's operation (skip the traveler). Fall back to the
@@ -167,24 +139,6 @@ export default function OperatorJobsPage() {
           <RefreshIcon />
         </IconButton>
       </Box>
-
-      {/* Active Session Banner */}
-      {activeSession && (
-        <Alert
-          severity="info"
-          sx={{ mb: 2 }}
-          action={
-            <Chip
-              label="View"
-              size="small"
-              onClick={() => router.push(`/operator/${companyId}/jobs/${activeSession.job_id}`)}
-            />
-          }
-        >
-          Working on: {activeSession.job_number || 'Job'} -{' '}
-          {activeSession.operation_name || 'Operation'}
-        </Alert>
-      )}
 
       {/* Error State */}
       {error && (
@@ -254,12 +208,6 @@ export default function OperatorJobsPage() {
                 {row.operation_name && (
                   <Typography variant="body1" sx={{ mb: 1 }}>
                     Op: {row.operation_name}
-                  </Typography>
-                )}
-
-                {row.current_operator_name && (
-                  <Typography variant="caption" color="text.secondary">
-                    In progress: {row.current_operator_name}
                   </Typography>
                 )}
 

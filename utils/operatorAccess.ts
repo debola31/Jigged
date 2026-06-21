@@ -19,7 +19,6 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
-import { calculateActualRunMinutes } from '@/utils/sessionDuration';
 
 // Update payload type for user_company_access. Used where the patch
 // object is built conditionally and would otherwise be inferred as
@@ -29,10 +28,7 @@ import type {
   OperatorJob,
   OperatorJobDetail,
   OperatorJobPartSummary,
-  OperatorSession,
-  ActiveSession,
   Station,
-  JobStartRequest,
   JobCompleteResponse,
   JobTraveler,
   JobTravelerOperation,
@@ -234,7 +230,6 @@ export async function getOperatorJobs(
   if (readyRows.length === 0) return [];
 
   const jobPartIds = readyRows.map((r) => r.job_part_id);
-  const operationIds = readyRows.map((r) => r.job_operation_id);
 
   // Fetch per-part progress (count of ops total + completed per part).
   const { data: partOps } = await supabase
@@ -249,33 +244,6 @@ export async function getOperatorJobs(
     acc.total += 1;
     if (row.status === 'completed') acc.done += 1;
     progressByPart.set(row.job_part_id, acc);
-  }
-
-  // Look up active sessions on the listed operations to surface "currently
-  // worked by …".
-  const { data: activeSessions } = await supabase
-    .from('operator_sessions')
-    .select('job_operation_id, operator_id')
-    .in('job_operation_id', operationIds)
-    .is('ended_at', null);
-
-  type ActiveRow = { job_operation_id: string; operator_id: string };
-  const operatorIdByOp = new Map<string, string>();
-  for (const s of (activeSessions ?? []) as ActiveRow[]) {
-    operatorIdByOp.set(s.job_operation_id, s.operator_id);
-  }
-
-  const operatorIds = Array.from(new Set(Array.from(operatorIdByOp.values())));
-  const operatorNameById = new Map<string, string>();
-  if (operatorIds.length > 0) {
-    const { data: nameRows } = await supabase
-      .from('user_company_access')
-      .select('id, name')
-      .in('id', operatorIds);
-    type NameRow = { id: string; name: string | null };
-    for (const r of (nameRows ?? []) as NameRow[]) {
-      if (r.name) operatorNameById.set(r.id, r.name);
-    }
   }
 
   // Fetch each part's current status + customer (one query per (jobs, job_parts)).
@@ -302,7 +270,6 @@ export async function getOperatorJobs(
 
   return readyRows.map((row) => {
     const progress = progressByPart.get(row.job_part_id) ?? { total: 0, done: 0 };
-    const opOperatorId = operatorIdByOp.get(row.job_operation_id) ?? null;
     return {
       id: row.job_part_id,
       job_id: row.job_id,
@@ -314,7 +281,6 @@ export async function getOperatorJobs(
       operation_id: row.job_operation_id,
       operation_name: row.operation_name,
       operation_status: row.op_status,
-      current_operator_name: opOperatorId ? operatorNameById.get(opOperatorId) ?? null : null,
       operations_total: progress.total,
       operations_completed: progress.done,
     };
@@ -343,6 +309,8 @@ interface CurrentOpForDetail {
   status: string;
   estimated_setup_minutes: number | null;
   estimated_run_minutes_per_unit: number | null;
+  work_center_id: string | null;
+  work_center_name: string | null;
 }
 
 /**
@@ -396,8 +364,7 @@ async function loadPartHeader(
 
 /**
  * Assemble the OperatorJobDetail (session, estimate, progress, materials)
- * around a resolved part header + a single "current" operation. Shared by
- * getOperatorJobPartDetail (resolves the op by station/sequence) and
+ * around a resolved part header + a single "current" operation. Used by
  * getOperatorOperationDetail (resolves a specific op by id).
  */
 async function assembleJobPartDetail(
@@ -406,35 +373,6 @@ async function assembleJobPartDetail(
 ): Promise<OperatorJobDetail> {
   const supabase = getSupabase();
   const jobPartId = header.id;
-
-  let activeSessionId: string | null = null;
-  let sessionStartedAt: string | null = null;
-  let currentOperatorId: string | null = null;
-  let currentOperatorName: string | null = null;
-
-  if (currentOp) {
-    const { data: sessionData } = await supabase
-      .from('operator_sessions')
-      .select('id, started_at, operator_id')
-      .eq('job_operation_id', currentOp.id)
-      .is('ended_at', null)
-      .single();
-
-    if (sessionData) {
-      activeSessionId = sessionData.id;
-      sessionStartedAt = sessionData.started_at;
-      currentOperatorId = sessionData.operator_id;
-
-      if (sessionData.operator_id) {
-        const { data: opData } = await supabase
-          .from('user_company_access')
-          .select('name')
-          .eq('id', sessionData.operator_id)
-          .single();
-        currentOperatorName = opData?.name || null;
-      }
-    }
-  }
 
   let estimatedMinutes: number | null = null;
   if (currentOp) {
@@ -465,11 +403,9 @@ async function assembleJobPartDetail(
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
+    operation_work_center_id: currentOp?.work_center_id ?? null,
+    operation_work_center_name: currentOp?.work_center_name ?? null,
     estimated_minutes: estimatedMinutes,
-    active_session_id: activeSessionId,
-    session_started_at: sessionStartedAt,
-    current_operator_id: currentOperatorId,
-    current_operator_name: currentOperatorName,
     operations_total: operationsTotal,
     operations_completed: operationsCompleted,
   };
@@ -489,7 +425,7 @@ export async function getOperatorOperationDetail(
 
   const { data: op, error } = await supabase
     .from('job_operations')
-    .select('id, job_part_id, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit')
+    .select('id, job_part_id, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name)')
     .eq('id', jobOperationId)
     .single();
 
@@ -498,12 +434,15 @@ export async function getOperatorOperationDetail(
   const header = await loadPartHeader(op.job_part_id, companyId);
   if (!header) return null; // not this company's job
 
+  const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
   const currentOp: CurrentOpForDetail = {
     id: op.id,
     operation_name: op.operation_name,
     status: op.status,
     estimated_setup_minutes: op.estimated_setup_minutes,
     estimated_run_minutes_per_unit: op.estimated_run_minutes_per_unit,
+    work_center_id: op.work_center_id,
+    work_center_name: wcJoin?.name ?? null,
   };
 
   const detail = await assembleJobPartDetail(header, currentOp);
@@ -614,255 +553,58 @@ export async function getOperatorJobParts(
 }
 
 // ============================================================================
-// SESSION ACTIONS — keyed on job_part_id
+// OPERATION ACTIONS — keyed on job_operation_id
 // ============================================================================
 
 /**
- * Start working on a job_part at a station. Finds the matching pending or
- * in-progress operation on this part and creates an operator_session.
- */
-export async function startJob(
-  jobPartId: string,
-  operatorId: string,
-  companyId: string,
-  request: JobStartRequest,
-): Promise<OperatorSession> {
-  const supabase = getSupabase();
-
-  const { data: part } = await supabase
-    .from('job_parts')
-    .select('job_id')
-    .eq('id', jobPartId)
-    .single();
-  if (!part) {
-    throw new Error('Job part not found.');
-  }
-
-  // 1. Resolve the job_operation to start. When the traveler taps a specific
-  // step, request.job_operation_id pins the exact operation (two steps can
-  // share a work center, so resolving by work center alone is ambiguous).
-  // Otherwise (station-QR flow) resolve by work center as before. The request
-  // field is named `operation_type_id` for source-compatibility; its value is
-  // a work_center_id.
-  if (!request.job_operation_id && !request.operation_type_id) {
-    throw new Error('A station or operation is required to start work.');
-  }
-
-  let opQuery = supabase
-    .from('job_operations')
-    .select('*')
-    .eq('job_part_id', jobPartId)
-    .in('status', ['pending', 'in_progress']);
-
-  opQuery = request.job_operation_id
-    ? opQuery.eq('id', request.job_operation_id)
-    : opQuery.eq('work_center_id', request.operation_type_id as string);
-
-  const { data: jobOp, error: opError } = await opQuery.single();
-
-  if (opError || !jobOp) {
-    throw new Error('No pending operation found for this part and station');
-  }
-
-  // NOTE: we intentionally do NOT block on predecessor readiness. Shops work
-  // out of order, so an operator may start any pending/in-progress step from
-  // the traveler. The UI surfaces a non-blocking "earlier steps not complete"
-  // warning instead of preventing the start.
-
-  // 2. Auto-stop any existing active session for this operator.
-  const { data: existing } = await supabase
-    .from('operator_sessions')
-    .select('id')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null);
-
-  if (existing && existing.length > 0) {
-    await supabase
-      .from('operator_sessions')
-      .update({ ended_at: new Date().toISOString() })
-      .eq('id', existing[0].id);
-  }
-
-  // 3. Create new session. Prefer the resolved operation's own work center
-  // (correct when the traveler pinned a specific step); fall back to the
-  // requested station for the work-center-resolution path.
-  const sessionWorkCenterId = jobOp.work_center_id ?? request.operation_type_id;
-  if (!sessionWorkCenterId) {
-    throw new Error('This operation has no work center assigned and cannot be started.');
-  }
-  const now = new Date().toISOString();
-  const { data: session, error: sessionError } = await supabase
-    .from('operator_sessions')
-    .insert({
-      company_id: companyId,
-      operator_id: operatorId,
-      job_id: part.job_id,
-      job_operation_id: jobOp.id,
-      work_center_id: sessionWorkCenterId,
-      started_at: now,
-    })
-    .select()
-    .single();
-
-  if (sessionError) throw new Error(sessionError.message);
-
-  // 4. Mark op + part in_progress.
-  await supabase
-    .from('job_operations')
-    .update({ status: 'in_progress', started_at: now })
-    .eq('id', jobOp.id);
-
-  await supabase
-    .from('job_parts')
-    .update({
-      production_status: 'in_progress',
-      status_changed_at: now,
-      started_at: now, // started_at is set only the first time per the trigger logic
-      updated_at: now,
-    })
-    .eq('id', jobPartId)
-    .not('production_status', 'in', '("in_progress","completed","cancelled")');
-
-  return {
-    id: session.id,
-    operator_id: operatorId,
-    job_id: part.job_id,
-    job_operation_id: jobOp.id,
-    operation_type_id: sessionWorkCenterId, // OperatorSession type holds the work_center id under this legacy field name
-    started_at: now,
-    ended_at: null,
-  };
-}
-
-/**
- * Stop (pause) work on a job_part. Closes the operator's active session for
- * the part without changing the operation status (still in_progress).
- */
-export async function stopJob(
-  jobPartId: string,
-  operatorId: string,
-): Promise<OperatorSession> {
-  const supabase = getSupabase();
-
-  const { data: part } = await supabase
-    .from('job_parts')
-    .select('job_id')
-    .eq('id', jobPartId)
-    .single();
-  if (!part) throw new Error('Job part not found.');
-
-  const { data: session, error } = await supabase
-    .from('operator_sessions')
-    .select('*')
-    .eq('operator_id', operatorId)
-    .eq('job_id', part.job_id)
-    .is('ended_at', null)
-    .single();
-
-  if (error || !session) {
-    throw new Error('No active session found');
-  }
-
-  const now = new Date().toISOString();
-
-  await supabase
-    .from('operator_sessions')
-    .update({ ended_at: now })
-    .eq('id', session.id);
-
-  // operator_sessions.started_at has DEFAULT now() in the schema, so
-  // every inserted row is non-null in practice. The generated type still
-  // sees `string | null` (DEFAULT without NOT NULL), so we assert.
-  const startedAt = session.started_at ?? now;
-  const started = new Date(startedAt);
-  const ended = new Date(now);
-  const durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
-
-  return {
-    id: session.id,
-    operator_id: operatorId,
-    job_id: part.job_id,
-    job_operation_id: session.job_operation_id,
-    operation_type_id: session.work_center_id,
-    started_at: startedAt,
-    ended_at: now,
-    duration_seconds: durationSeconds,
-  };
-}
-
-/**
- * Mark the current operation on a job_part complete. Closes the operator
- * session, computes actual run minutes, marks the operation completed, and
- * — if it was the last op on the part — flips the job_part to 'completed'
- * (the database trigger then aggregates that into jobs.production_status).
+ * Mark a single operation complete. This is the operator's one-tap action —
+ * there is no separate "start" step, no pause, and no on-job timer. We record
+ * who completed the step (job_operations.completed_by = the signed-in auth user)
+ * and when, then roll the result up to the job_part (which a DB trigger cascades
+ * to the job).
  *
- * No completion notes or material-consumption confirmation: job notes now live
- * at the job level (job_notes) and material consumption is driven by the part
- * BOM, not tracked here. This is a direct action with no confirmation dialog.
+ * Time-on-job is intentionally NOT tracked: operators complete in a single tap,
+ * so there's no reliable session duration to record (the operator_sessions table
+ * and the job_operations actual-time columns were removed with this flow).
+ *
+ * Completing an earlier-than-final step moves the part to 'in_progress'; the
+ * last remaining step moves it to 'completed'. No notes or material-consumption
+ * confirmation here: job notes live at the job level (job_notes) and material
+ * consumption is driven by the part BOM.
  */
-export async function completeJob(
-  jobPartId: string,
-  operatorId: string,
+export async function completeOperation(
+  jobOperationId: string,
 ): Promise<JobCompleteResponse> {
   const supabase = getSupabase();
 
-  const { data: part } = await supabase
-    .from('job_parts')
-    .select('job_id')
-    .eq('id', jobPartId)
+  const { data: op, error: opError } = await supabase
+    .from('job_operations')
+    .select('id, job_id, job_part_id, started_at')
+    .eq('id', jobOperationId)
     .single();
-  if (!part) throw new Error('Job part not found.');
+  if (opError || !op) throw new Error('Operation not found.');
 
-  const { data: session, error } = await supabase
-    .from('operator_sessions')
-    .select('*')
-    .eq('operator_id', operatorId)
-    .eq('job_id', part.job_id)
-    .is('ended_at', null)
-    .single();
-
-  if (error || !session) {
-    throw new Error('No active session found');
-  }
+  // completed_by references auth.users(id) (NOT user_company_access.id), so we
+  // record the signed-in auth user — same as the admin completeJobOperation path.
+  const { data: { user } } = await supabase.auth.getUser();
 
   const now = new Date().toISOString();
 
   await supabase
-    .from('operator_sessions')
-    .update({ ended_at: now })
-    .eq('id', session.id);
-
-  let actualRunMinutes: number | null = null;
-  if (session.job_operation_id) {
-    const { data: allSessions } = await supabase
-      .from('operator_sessions')
-      .select('started_at, ended_at')
-      .eq('job_operation_id', session.job_operation_id)
-      .not('ended_at', 'is', null);
-
-    if (allSessions && allSessions.length > 0) {
-      actualRunMinutes = calculateActualRunMinutes(
-        allSessions as { started_at: string; ended_at: string }[],
-      );
-    }
-  }
-
-  if (session.job_operation_id) {
-    await supabase
-      .from('job_operations')
-      .update({
-        status: 'completed',
-        completed_at: now,
-        actual_run_minutes: actualRunMinutes,
-      })
-      .eq('id', session.job_operation_id);
-  }
+    .from('job_operations')
+    .update({
+      status: 'completed',
+      completed_at: now,
+      completed_by: user?.id ?? null,
+      started_at: op.started_at ?? now,
+    })
+    .eq('id', jobOperationId);
 
   // Per-part rollup: are all ops on THIS part now done?
   const { data: remaining } = await supabase
     .from('job_operations')
     .select('id')
-    .eq('job_part_id', jobPartId)
+    .eq('job_part_id', op.job_part_id)
     .neq('status', 'completed');
 
   const partCompleted = !remaining || remaining.length === 0;
@@ -876,138 +618,90 @@ export async function completeJob(
         status_changed_at: now,
         updated_at: now,
       })
-      .eq('id', jobPartId)
+      .eq('id', op.job_part_id)
       .not('production_status', 'in', '("cancelled")');
+  } else {
+    // Work has begun even though there was no explicit "start". Move a
+    // not-yet-started part to in_progress (the guard skips parts already
+    // in_progress/completed/cancelled, leaving their started_at untouched).
+    await supabase
+      .from('job_parts')
+      .update({
+        production_status: 'in_progress',
+        started_at: now,
+        status_changed_at: now,
+        updated_at: now,
+      })
+      .eq('id', op.job_part_id)
+      .not('production_status', 'in', '("in_progress","completed","cancelled")');
   }
 
-  // After the part flips, check if EVERY part on the job is done — for the
-  // "job_completed" return flag. The DB trigger has already cascaded the
-  // production_status; we just read it back.
+  // The job_parts trigger has cascaded production_status to the job; read it
+  // back for the job_completed flag.
   let jobCompleted = false;
   if (partCompleted) {
     const { data: jobRow } = await supabase
       .from('jobs')
       .select('production_status')
-      .eq('id', part.job_id)
+      .eq('id', op.job_id)
       .single();
     jobCompleted = jobRow?.production_status === 'completed';
   }
 
-  // DB DEFAULT now() on started_at; never null at read time. See note
-  // in stopSession() above.
-  const started = new Date(session.started_at ?? now);
-  const ended = new Date(now);
-  const durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
-
-  return {
-    success: true,
-    session_id: session.id,
-    duration_seconds: durationSeconds,
-    job_completed: jobCompleted,
-  };
+  return { success: true, job_completed: jobCompleted };
 }
 
-// ============================================================================
-// SESSION HISTORY
-// ============================================================================
-
-export async function getActiveSession(
-  operatorId: string,
-): Promise<ActiveSession | null> {
+/**
+ * Undo a completion: put the operation back to 'pending' and recompute the
+ * part's status. Backs the operator "Undo completion" action for a step marked
+ * done by mistake. Clears completed_at / completed_by.
+ *
+ * The part can no longer be 'completed' (we just un-completed one of its ops):
+ * if any other op is still completed the part is 'in_progress', otherwise it
+ * returns to 'not_started'. The job_parts trigger cascades the recomputed
+ * status to the job (e.g. a completed job reopens to in_progress).
+ */
+export async function revertOperationCompletion(
+  jobOperationId: string,
+): Promise<void> {
   const supabase = getSupabase();
 
-  const { data: session } = await supabase
-    .from('operator_sessions')
-    .select(`
-      id, job_id, job_operation_id, work_center_id, started_at,
-      jobs(job_number),
-      job_operations(operation_name)
-    `)
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
+  const { data: op, error: opError } = await supabase
+    .from('job_operations')
+    .select('id, job_part_id')
+    .eq('id', jobOperationId)
     .single();
+  if (opError || !op) throw new Error('Operation not found.');
 
-  if (!session) return null;
+  const now = new Date().toISOString();
 
-  type JobJoin = { job_number: string };
-  type OpJoin = { operation_name: string };
-  const jobJoin = Array.isArray(session.jobs) ? session.jobs[0] : (session.jobs as JobJoin | null);
-  const opJoin = Array.isArray(session.job_operations)
-    ? session.job_operations[0]
-    : (session.job_operations as OpJoin | null);
+  await supabase
+    .from('job_operations')
+    .update({
+      status: 'pending',
+      completed_at: null,
+      completed_by: null,
+    })
+    .eq('id', jobOperationId);
 
-  return {
-    id: session.id,
-    operator_id: operatorId,
-    job_id: session.job_id,
-    job_number: jobJoin?.job_number ?? null,
-    job_operation_id: session.job_operation_id,
-    operation_name: opJoin?.operation_name ?? null,
-    operation_type_id: session.work_center_id,
-    // DB DEFAULT now() — non-null in practice; fall back to '' for the
-    // theoretical case where a row was inserted with explicit NULL.
-    started_at: session.started_at ?? '',
-  };
-}
+  const { data: stillCompleted } = await supabase
+    .from('job_operations')
+    .select('id')
+    .eq('job_part_id', op.job_part_id)
+    .eq('status', 'completed');
 
-export async function getOperatorSessions(
-  operatorId: string,
-  limit: number = 50,
-): Promise<OperatorSession[]> {
-  const supabase = getSupabase();
+  const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
 
-  const { data, error } = await supabase
-    .from('operator_sessions')
-    .select(`
-      id, operator_id, job_id, job_operation_id, work_center_id,
-      started_at, ended_at,
-      jobs(job_number),
-      job_operations(operation_name)
-    `)
-    .eq('operator_id', operatorId)
-    .order('started_at', { ascending: false })
-    .limit(limit);
-
-  if (error) throw new Error(error.message);
-
-  interface SessionRow {
-    id: string;
-    operator_id: string;
-    job_id: string;
-    job_operation_id: string | null;
-    work_center_id: string;
-    // Schema has DEFAULT now() but no NOT NULL constraint; mirror that
-    // here so the typed select's row shape lines up. Consumers below
-    // fall back to '' for the theoretical NULL case.
-    started_at: string | null;
-    ended_at: string | null;
-    jobs: { job_number: string } | { job_number: string }[] | null;
-    job_operations: { operation_name: string } | { operation_name: string }[] | null;
-  }
-
-  return (data || []).map((s: SessionRow) => {
-    let durationSeconds: number | undefined;
-    if (s.ended_at && s.started_at) {
-      const started = new Date(s.started_at);
-      const ended = new Date(s.ended_at);
-      durationSeconds = Math.floor((ended.getTime() - started.getTime()) / 1000);
-    }
-    const jobJoin = Array.isArray(s.jobs) ? s.jobs[0] : s.jobs;
-    const opJoin = Array.isArray(s.job_operations) ? s.job_operations[0] : s.job_operations;
-
-    return {
-      id: s.id,
-      operator_id: s.operator_id,
-      job_id: s.job_id,
-      job_operation_id: s.job_operation_id,
-      operation_type_id: s.work_center_id,
-      started_at: s.started_at ?? '',
-      ended_at: s.ended_at,
-      duration_seconds: durationSeconds,
-      job_number: jobJoin?.job_number || null,
-      operation_name: opJoin?.operation_name || null,
-    };
-  });
+  await supabase
+    .from('job_parts')
+    .update({
+      production_status: hasCompleted ? 'in_progress' : 'not_started',
+      completed_at: null,
+      status_changed_at: now,
+      updated_at: now,
+    })
+    .eq('id', op.job_part_id)
+    .not('production_status', 'in', '("cancelled")');
 }
 
 // ============================================================================
@@ -1117,36 +811,6 @@ export async function getJobPartTraveler(
   };
   const opRows = (ops ?? []) as OpRow[];
 
-  // Resolve "in progress by {name}" for the operations that have an open session.
-  const inProgressOpIds = opRows.filter((o) => o.status === 'in_progress').map((o) => o.id);
-  const operatorNameByOp = new Map<string, string>();
-  if (inProgressOpIds.length > 0) {
-    const { data: sessions } = await supabase
-      .from('operator_sessions')
-      .select('job_operation_id, operator_id')
-      .in('job_operation_id', inProgressOpIds)
-      .is('ended_at', null);
-    type SessRow = { job_operation_id: string | null; operator_id: string };
-    const opByOperator = (sessions ?? []) as SessRow[];
-    const operatorIds = Array.from(new Set(opByOperator.map((s) => s.operator_id)));
-    const nameById = new Map<string, string>();
-    if (operatorIds.length > 0) {
-      const { data: names } = await supabase
-        .from('user_company_access')
-        .select('id, name')
-        .in('id', operatorIds);
-      type NameRow = { id: string; name: string | null };
-      for (const n of (names ?? []) as NameRow[]) {
-        if (n.name) nameById.set(n.id, n.name);
-      }
-    }
-    for (const s of opByOperator) {
-      if (s.job_operation_id) {
-        operatorNameByOp.set(s.job_operation_id, nameById.get(s.operator_id) ?? '');
-      }
-    }
-  }
-
   const operations: JobTravelerOperation[] = opRows.map((op) => {
     const wcJoin = Array.isArray(op.work_center) ? op.work_center[0] : op.work_center;
     return {
@@ -1159,7 +823,6 @@ export async function getJobPartTraveler(
       status: op.status,
       setup_minutes: Number(op.estimated_setup_minutes) || 0,
       cycle_minutes: Number(op.estimated_run_minutes_per_unit) || 0,
-      active_operator_name: operatorNameByOp.get(op.id) || null,
     };
   });
 

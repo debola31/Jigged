@@ -72,8 +72,6 @@ export default function OperationCard({
   const hasDetails =
     operation.started_at ||
     operation.completed_at ||
-    operation.actual_setup_minutes !== null ||
-    operation.actual_run_minutes !== null ||
     operation.notes;
 
   return (
@@ -211,45 +209,6 @@ export default function OperationCard({
                 Started
               </Typography>
               <Typography variant="body2">{formatDateTime(operation.started_at)}</Typography>
-            </Box>
-          )}
-
-          {/* Actual Time */}
-          {(operation.actual_setup_minutes !== null || operation.actual_run_minutes !== null) && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Actual Time
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 3, mt: 0.5 }}>
-                {operation.actual_setup_minutes !== null && (
-                  <Typography variant="body2">
-                    Setup: {formatTime(operation.actual_setup_minutes)}
-                    {operation.estimated_setup_minutes > 0 && (
-                      <Typography
-                        component="span"
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{ ml: 1 }}
-                      >
-                        (est: {formatTime(operation.estimated_setup_minutes)})
-                      </Typography>
-                    )}
-                  </Typography>
-                )}
-                <Typography variant="body2">
-                  Run: {formatTime(operation.actual_run_minutes)}
-                  {operation.estimated_run_minutes_per_unit > 0 && (
-                    <Typography
-                      component="span"
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ ml: 1 }}
-                    >
-                      (est: {formatTime(operation.estimated_run_minutes_per_unit)}/unit)
-                    </Typography>
-                  )}
-                </Typography>
-              </Box>
             </Box>
           )}
 

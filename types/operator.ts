@@ -20,41 +20,6 @@ export interface OperatorCreateResponse {
 }
 
 // ============================================================================
-// SESSION TYPES
-// ============================================================================
-
-/**
- * Work session data.
- */
-export interface OperatorSession {
-  id: string;
-  operator_id: string;
-  job_id: string;
-  job_operation_id: string | null;
-  operation_type_id: string;
-  started_at: string;
-  ended_at: string | null;
-  duration_seconds?: number;
-  // Enriched fields (joined from related tables)
-  job_number?: string | null;
-  operation_name?: string | null;
-}
-
-/**
- * Active session with additional job details.
- */
-export interface ActiveSession {
-  id: string;
-  operator_id: string;
-  job_id: string;
-  job_number: string | null;
-  job_operation_id: string | null;
-  operation_name: string | null;
-  operation_type_id: string;
-  started_at: string;
-}
-
-// ============================================================================
 // JOB TYPES
 // ============================================================================
 
@@ -84,8 +49,6 @@ export interface OperatorJob {
   operation_id: string | null;
   operation_name: string | null;
   operation_status: string | null;
-  // Who is currently working on this operation
-  current_operator_name: string | null;
   // Per-part progress
   operations_total: number;
   operations_completed: number;
@@ -109,12 +72,10 @@ export interface OperatorJobDetail {
   operation_id: string | null;
   operation_name: string | null;
   operation_status: string | null;
+  /** Work center this operation runs at — drives the station-match guard. */
+  operation_work_center_id: string | null;
+  operation_work_center_name: string | null;
   estimated_minutes: number | null;
-  // Active session info
-  active_session_id: string | null;
-  session_started_at: string | null;
-  current_operator_id: string | null;
-  current_operator_name: string | null;
   // Per-part operation progress
   operations_total: number;
   operations_completed: number;
@@ -167,8 +128,6 @@ export interface JobTravelerOperation {
   setup_minutes: number;
   /** estimated_run_minutes_per_unit (the traveler's "Cycle" column). */
   cycle_minutes: number;
-  /** Name of the operator with an active session on this op, if any. */
-  active_operator_name: string | null;
 }
 
 /**
@@ -213,26 +172,12 @@ export interface JobNote {
 // ============================================================================
 
 /**
- * Request body for starting work on a job. At least one of the two fields must
- * be supplied:
- * - `operation_type_id` (a work_center_id): the station-QR flow — resolves the
- *   matching pending/in-progress operation on the part by work center.
- * - `job_operation_id`: the traveler flow — pins the exact operation to start
- *   (important when two steps share a work center). The operation's own work
- *   center is used for the session, so `operation_type_id` is optional here.
- */
-export interface JobStartRequest {
-  operation_type_id?: string;
-  job_operation_id?: string;
-}
-
-/**
- * Response from completing a job.
+ * Response from completing an operation. Operators complete in a single tap with
+ * no session/timer, so there are no duration fields — just whether the parent
+ * job is now fully complete (for any downstream "job done" handling).
  */
 export interface JobCompleteResponse {
   success: boolean;
-  session_id: string;
-  duration_seconds: number;
   job_completed: boolean;
 }
 
@@ -246,23 +191,4 @@ export interface JobCompleteResponse {
 export interface Station {
   id: string;
   name: string;
-}
-
-// ============================================================================
-// UTILITY TYPES
-// ============================================================================
-
-/**
- * Format duration in seconds to HH:MM:SS.
- */
-export function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-
-  return [
-    hours.toString().padStart(2, '0'),
-    minutes.toString().padStart(2, '0'),
-    secs.toString().padStart(2, '0'),
-  ].join(':');
 }

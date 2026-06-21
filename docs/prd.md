@@ -211,6 +211,53 @@ Flow 1: job Happy Path
 
 ---
 
+### 4.3 Shop-Floor Data Capture Model (Complete-Only)
+
+> **Supersedes** the start→track→complete assumptions in FR-6, FR-12, and Flow 4
+> above. Those described a session/timer model; the shipped operator view does not
+> use one. This subsection is the source of truth for how operators record work.
+
+**Decision.** Operators record work with a single **finish** trigger — there is no
+start, pause, resume, or exit, and no on-job timer. The operator view exposes:
+
+- **Mark Complete** — one tap marks the operation done (records who and when via
+  `job_operations.completed_by` / `completed_at`). An accidental completion is
+  reversed with a one-tap **Undo**.
+- **Per-operation QR (scan-to-complete)** — the printed job traveler carries one QR
+  **per operation row** (not one per job). Scanning it deep-links the operator
+  straight to that exact step's action view. The scan *is* the data-capture event.
+- **Station guard** — the operator selects their station once; if a scanned step's
+  work center doesn't match (the signature of a wrong scan), Mark Complete is
+  replaced by a guide offering a one-tap "switch & complete" or a way back.
+
+This is operation-level **milestone confirmation / labor backflush**: confirm the
+finish, infer the rest, and do not burden the operator with maintaining timer state
+across interruptions. Per-operation **actual time is not tracked** — the
+`operator_sessions` table and the `job_operations.actual_*` columns were removed.
+**Costing and quoting are unaffected**: they use only the *estimated* fields
+(`estimated_setup_minutes`, `estimated_run_minutes_per_unit`, `work_centers.labor_rate`).
+
+**Rationale / evidence.** Shop operators reliably handle a completion trigger but not
+a start/pause/resume lifecycle; manual real-time tracking is well-documented as
+unreliable, and the completion-only pattern is standard practice:
+
+- Backflush accounting — completion-triggered costing that *"eliminates detailed
+  tracking"*: https://en.wikipedia.org/wiki/Backflush_accounting (also Infor labor
+  backflush; Qoblex).
+- SAP milestone confirmation — confirm one operation, the system confirms the rest:
+  https://www.scribd.com/doc/152034916/SAP-Repetitive-manufacturing-with-reporting-point-backflush
+- Manual shop-floor data is unreliable (operators batch-record at breaks/shift-end;
+  forgotten clock-ins): https://www.machinemetrics.com/blog/manual-data-collection ;
+  https://www.globalshopsolutions.com/blog/your-production-data-is-lying-to-you-8-causes-of-poor-real-time-shop-floor-visibility
+- Operator cognitive-load reduction as a UI goal: https://www.mdpi.com/2571-5577/3/4/55 ;
+  https://arxiv.org/abs/2109.03627
+
+**Gamification impact.** FR-12's time-based metrics (average time per station, time
+streaks) are out of scope under this model. Gamification, if pursued, should be built
+on completion counts, on-time delivery, and throughput — not per-operation duration.
+
+---
+
 ### 5. Non‑Functional Requirements (NFRs)
 
 ### 5.1 NFR Overview Table

@@ -802,8 +802,6 @@ export type Database = {
       }
       job_operations: {
         Row: {
-          actual_run_minutes: number | null
-          actual_setup_minutes: number | null
           assigned_to: string | null
           completed_at: string | null
           completed_by: string | null
@@ -824,8 +822,6 @@ export type Database = {
           work_center_id: string | null
         }
         Insert: {
-          actual_run_minutes?: number | null
-          actual_setup_minutes?: number | null
           assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
@@ -846,8 +842,6 @@ export type Database = {
           work_center_id?: string | null
         }
         Update: {
-          actual_run_minutes?: number | null
-          actual_setup_minutes?: number | null
           assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
@@ -1124,74 +1118,6 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      operator_sessions: {
-        Row: {
-          company_id: string
-          created_at: string | null
-          ended_at: string | null
-          id: string
-          job_id: string
-          job_operation_id: string | null
-          operator_id: string
-          started_at: string | null
-          updated_at: string | null
-          work_center_id: string
-        }
-        Insert: {
-          company_id: string
-          created_at?: string | null
-          ended_at?: string | null
-          id?: string
-          job_id: string
-          job_operation_id?: string | null
-          operator_id: string
-          started_at?: string | null
-          updated_at?: string | null
-          work_center_id: string
-        }
-        Update: {
-          company_id?: string
-          created_at?: string | null
-          ended_at?: string | null
-          id?: string
-          job_id?: string
-          job_operation_id?: string | null
-          operator_id?: string
-          started_at?: string | null
-          updated_at?: string | null
-          work_center_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "operator_sessions_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_sessions_job_id_fkey"
-            columns: ["job_id"]
-            isOneToOne: false
-            referencedRelation: "jobs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_sessions_job_operation_id_fkey"
-            columns: ["job_operation_id"]
-            isOneToOne: false
-            referencedRelation: "job_operations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_sessions_work_center_id_fkey"
-            columns: ["work_center_id"]
-            isOneToOne: false
-            referencedRelation: "work_centers"
             referencedColumns: ["id"]
           },
         ]

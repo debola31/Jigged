@@ -43,7 +43,6 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getStockedParts, bulkDeleteParts } from '@/utils/partsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import PartFormModal from '@/components/parts/PartFormModal';
 import StockStatusChip, {
   deriveStockStatus,
   type StockStatus,
@@ -60,10 +59,10 @@ type StatusFilter = 'all' | StockStatus;
  * Custom-made parts that aren't tracked on hand do not.
  *
  * Detail-page navigation: row clicks append `?from=inventory` so the back link
- * on the part detail page returns here. The Add Item flow opens PartFormModal
- * defaulted to is_stocked=true + source='bought' (the most common stocked
- * case); the user can toggle source to Made on the form to create a
- * sub-assembly directly.
+ * on the part detail page returns here. The Add Item button navigates to the
+ * create-mode part workspace (/parts/new) seeded with is_stocked=true +
+ * source='bought' (the most common stocked case); the user can toggle source
+ * to Made there to create a sub-assembly directly.
  */
 export default function InventoryPage() {
   const router = useRouter();
@@ -84,8 +83,6 @@ export default function InventoryPage() {
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<InventoryRow>>(null);
-
-  const [addModalOpen, setAddModalOpen] = useState(false);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
@@ -229,13 +226,6 @@ export default function InventoryPage() {
     }
   };
 
-  const handlePartCreated = (part: Part) => {
-    // Land the user on the new part's detail page so they can finish setup
-    // (unit conversions, vendor pick, etc.). Mark `from=inventory` so the
-    // back link returns here.
-    router.push(`/dashboard/${companyId}/parts/${part.id}?from=inventory`);
-  };
-
   // Formatters. Mirror the parts page (page.tsx:278-303). If formatting drift
   // becomes a problem across pages, extract into utils/formatters.ts in a
   // separate cleanup PR.
@@ -333,7 +323,9 @@ export default function InventoryPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setAddModalOpen(true)}
+            onClick={() =>
+              router.push(`/dashboard/${companyId}/parts/new?source=bought&stocked=1&from=inventory`)
+            }
           >
             Add Item
           </Button>
@@ -408,7 +400,9 @@ export default function InventoryPage() {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setAddModalOpen(true)}
+          onClick={() =>
+            router.push(`/dashboard/${companyId}/parts/new?source=bought&stocked=1&from=inventory`)
+          }
         >
           Add Item
         </Button>
@@ -470,14 +464,6 @@ export default function InventoryPage() {
           </Box>
         </Card>
       )}
-
-      <PartFormModal
-        open={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-        onCreated={handlePartCreated}
-        companyId={companyId}
-        createDefaults={{ is_stocked: true, source: 'bought' }}
-      />
 
       <Dialog
         open={deleteDialog.open}

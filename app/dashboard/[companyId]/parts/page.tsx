@@ -48,7 +48,6 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
 import { getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import PartFormModal from '@/components/parts/PartFormModal';
 import BulkApplyMarkupRateDialog from '@/components/parts/BulkApplyMarkupRateDialog';
 import type { Part } from '@/types/part';
 
@@ -83,8 +82,6 @@ export default function PartsPage() {
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<PartRow>>(null);
-
-  const [addModalOpen, setAddModalOpen] = useState(false);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
@@ -251,13 +248,6 @@ export default function PartsPage() {
     }
   };
 
-  const handlePartCreatedOrEdited = (part: Part) => {
-    // Whether the user created a new part or edited an existing one through
-    // the search-first modal, route them to the detail page so they can keep
-    // working (define routing, edit BOM, etc.).
-    router.push(`/dashboard/${companyId}/parts/${part.id}?from=parts`);
-  };
-
   const formatDate = (val: string | null | undefined): string => {
     if (!val) return '—';
     return new Date(val).toLocaleDateString();
@@ -389,7 +379,7 @@ export default function PartsPage() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setAddModalOpen(true)}
+            onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
           >
             Add Part
           </Button>
@@ -470,7 +460,7 @@ export default function PartsPage() {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setAddModalOpen(true)}
+          onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
         >
           Add Part
         </Button>
@@ -532,13 +522,6 @@ export default function PartsPage() {
           </Box>
         </Card>
       )}
-
-      <PartFormModal
-        open={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-        onCreated={handlePartCreatedOrEdited}
-        companyId={companyId}
-      />
 
       <BulkApplyMarkupRateDialog
         open={markupDialogOpen}

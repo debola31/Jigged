@@ -57,9 +57,6 @@ vi.mock('@/utils/quotePricingResolver', () => ({
 vi.mock('@/components/customers/CustomerFormModal', () => ({
   default: () => null,
 }));
-vi.mock('@/components/parts/PartFormModal', () => ({
-  default: () => null,
-}));
 vi.mock('@/components/parts/PartAutocomplete', () => ({
   default: () => null,
 }));

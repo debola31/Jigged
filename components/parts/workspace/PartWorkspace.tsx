@@ -12,6 +12,9 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
+import MuiLink from '@mui/material/Link';
+import NextLink from 'next/link';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DeleteIcon from '@mui/icons-material/Delete';
 
 import {
@@ -22,10 +25,11 @@ import {
   getPartCostExplain,
 } from '@/utils/partsAccess';
 import { parseBackChain } from '@/lib/partNavStack';
-import type { Part, PartUnitConversion } from '@/types/part';
+import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartTransactionModal from '@/components/parts/PartTransactionModal';
 
+import PartIdentitySection from './PartIdentitySection';
 import PartStickyHeader, { type PartTabDescriptor } from './PartStickyHeader';
 import { getPartSetupStatus, type PartSetupStatus } from './partSetupStatus';
 import WorkspaceTab from './tabs/WorkspaceTab';
@@ -48,13 +52,18 @@ const formatDate = (s: string | null): string => {
  * and the `?tab=` routing. The individual tab panels are presentational and
  * reuse the existing part panels verbatim.
  */
-export default function PartWorkspace() {
+export default function PartWorkspace({
+  mode = 'existing',
+}: {
+  mode?: 'create' | 'existing';
+}) {
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
-  const partId = params.partId as string;
+  // Undefined in create mode (/parts/new has no [partId] segment).
+  const partId = params.partId as string | undefined;
 
   // Breadcrumb root reflects where the user entered from (Parts vs Inventory).
   const partsListHref = useMemo(() => {
@@ -92,7 +101,7 @@ export default function PartWorkspace() {
   const [part, setPart] = useState<Part | null>(null);
   const [unitConversions, setUnitConversions] = useState<PartUnitConversion[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(mode === 'existing');
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -117,6 +126,7 @@ export default function PartWorkspace() {
    */
   const fetchPart = useCallback(
     async (silent = false) => {
+      if (!partId) return;
       try {
         if (!silent) setLoading(true);
         const data = await getPartWithRelations(partId);
@@ -146,6 +156,7 @@ export default function PartWorkspace() {
   }, [fetchPart]);
 
   useEffect(() => {
+    if (!partId) return;
     let cancelled = false;
     getPartCostExplain(partId, 1)
       .then(({ unit_cost }) => {
@@ -169,6 +180,7 @@ export default function PartWorkspace() {
   }, [fetchPart]);
 
   const handleDelete = async () => {
+    if (!partId) return;
     setActionLoading(true);
     try {
       await deletePart(partId);
@@ -219,6 +231,50 @@ export default function PartWorkspace() {
     return getPartSetupStatus(part, isPriceable);
   }, [part, isPriceable]);
 
+  // --- Create mode: the same identity surface as the saved view, gated to
+  // create the row. On create we redirect into the live page (preserving the
+  // quote return + list-origin context) — so the create view IS the saved view.
+  if (mode === 'create') {
+    const createDefaults: Partial<PartFormData> = {};
+    if (searchParams.get('source') === 'bought') createDefaults.source = 'bought';
+    if (searchParams.get('stocked') === '1') createDefaults.is_stocked = true;
+
+    const handleCreated = (created: Part) => {
+      const next = new URLSearchParams();
+      const from = searchParams.get('from');
+      if (from) next.set('from', from);
+      const returnTo = searchParams.get('returnTo');
+      if (returnTo) next.set('returnTo', returnTo);
+      const qs = next.toString();
+      router.replace(`/dashboard/${companyId}/parts/${created.id}${qs ? `?${qs}` : ''}`);
+    };
+
+    return (
+      <Box sx={{ maxWidth: 900, mx: 'auto' }}>
+        <Box sx={{ mb: 3 }}>
+          <MuiLink
+            component={NextLink}
+            href={partsListHref}
+            underline="hover"
+            color="text.secondary"
+            sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
+          >
+            <ArrowBackIcon fontSize="small" /> Back to {partsListLabel}
+          </MuiLink>
+        </Box>
+        <PartIdentitySection
+          mode="create"
+          companyId={companyId}
+          initialDefaults={createDefaults}
+          onCreated={handleCreated}
+        />
+      </Box>
+    );
+  }
+
+  // --- Existing mode below — the [partId] route guarantees a part id. ---
+  if (!partId) return null;
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -256,7 +312,7 @@ export default function PartWorkspace() {
         tabs={visibleTabs}
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        onEdit={() => router.push(`/dashboard/${companyId}/parts/${partId}/edit`)}
+        onEdit={() => handleTabChange('workspace')}
         onDelete={() => setDeleteDialogOpen(true)}
         hasReferences={hasReferences}
         actionLoading={actionLoading}
@@ -265,6 +321,30 @@ export default function PartWorkspace() {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {/* Quote create→return: came here to make a part for a quote in progress. */}
+      {searchParams.get('returnTo') && (
+        <Alert
+          severity="info"
+          sx={{ mb: 3 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                const returnTo = searchParams.get('returnTo');
+                if (!returnTo) return;
+                const sep = returnTo.includes('?') ? '&' : '?';
+                router.push(`${returnTo}${sep}newPartId=${partId}`);
+              }}
+            >
+              Return to quote
+            </Button>
+          }
+        >
+          Set this part up (or add an estimate price on the quote), then return to your quote.
         </Alert>
       )}
 

@@ -13,6 +13,7 @@ import PartPricing from '@/components/parts/PartPricing';
 import PartRoutingPanel from '@/components/parts/PartRoutingPanel';
 import PartBomPanel from '@/components/parts/PartBomPanel';
 import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
+import PartIdentitySection from '../PartIdentitySection';
 import type { PartSetupStatus } from '../partSetupStatus';
 
 interface WorkspaceTabProps {
@@ -51,6 +52,14 @@ export default function WorkspaceTab({
 
   return (
     <Box>
+      {/* Identity — same surface as the create flow; edits auto-save inline. */}
+      <PartIdentitySection
+        mode="existing"
+        companyId={companyId}
+        part={part}
+        onSaved={() => refreshAfterMutation()}
+      />
+
       {setupStatus && setupStatus.state !== 'ready' && setupStatus.nextStep && (
         <Alert severity={setupStatus.color} sx={{ mb: 3 }}>
           {setupStatus.nextStep}

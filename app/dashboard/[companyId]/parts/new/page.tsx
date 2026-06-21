@@ -1,23 +1,24 @@
-'use client';
-
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense } from 'react';
 import Box from '@mui/material/Box';
-import { PartForm } from '@/components/parts';
-import { EMPTY_PART_FORM } from '@/types/part';
+import CircularProgress from '@mui/material/CircularProgress';
+import PartWorkspace from '@/components/parts/workspace/PartWorkspace';
 
+/**
+ * New-part route. Renders the same PartWorkspace as the detail page in create
+ * mode — so the create view is the saved view. On create, the workspace
+ * redirects into /parts/[id]. Suspense wraps the client component's
+ * useSearchParams (?source, ?stocked, ?returnTo, ?from).
+ */
 export default function NewPartPage() {
-  const params = useParams();
-  const router = useRouter();
-  const companyId = params.companyId as string;
-
   return (
-    <Box>
-      <PartForm
-        mode="create"
-        companyId={companyId}
-        initialData={EMPTY_PART_FORM}
-        onCancel={() => router.back()}
-      />
-    </Box>
+    <Suspense
+      fallback={
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <PartWorkspace mode="create" />
+    </Suspense>
   );
 }

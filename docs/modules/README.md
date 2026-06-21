@@ -15,6 +15,7 @@ Detailed specifications for each Jigged module.
 | [Routings](routings.md) | Job routing definitions | Should Have |
 | [Inventory](inventory.md) | Inventory tracking | Should Have |
 | [Operator View](operator-view.md) | Shop floor interface | Must Have |
+| [Shipments](shipments.md) | Packing slips + fulfillment status | Built |
 | [Invitation System](invitation-system.md) | User invitations and referrals | Should Have |
 | [Demo Mode](demo-mode.md) | Demo mode with hidden demo company | Should Have |
 | [AI Insights & Charts](ai-insights.md) | AI-powered dashboard insights and natural language queries | Should Have |

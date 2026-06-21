@@ -20,6 +20,7 @@ import PrintIcon from '@mui/icons-material/Print';
 
 import { getShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { ShipmentWithRelations } from '@/types/shipment';
+import { SHIPPING_METHOD_LABELS } from '@/types/shipment';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 
 interface ShipmentHistoryCardProps {
@@ -124,8 +125,8 @@ export default function ShipmentHistoryCard({
               <TableRow>
                 <TableCell>Packing Slip #</TableCell>
                 <TableCell>Ship Date</TableCell>
+                <TableCell>Method</TableCell>
                 <TableCell>Carrier</TableCell>
-                <TableCell>Tracking</TableCell>
                 <TableCell align="right">Qty</TableCell>
                 <TableCell align="right" sx={{ width: 110 }}>
                   Actions
@@ -144,19 +145,10 @@ export default function ShipmentHistoryCard({
                     )}
                   </TableCell>
                   <TableCell>{formatShipDate(s.ship_date)}</TableCell>
-                  <TableCell>{s.carrier ?? '—'}</TableCell>
                   <TableCell>
-                    {s.tracking_number ? (
-                      // Full tracking, untruncated (FR — the salesperson
-                      // reads it aloud on phone calls). Overflow handled by
-                      // cell wrapping.
-                      <Box component="span" sx={{ wordBreak: 'break-all' }}>
-                        {s.tracking_number}
-                      </Box>
-                    ) : (
-                      '—'
-                    )}
+                    {s.shipping_method ? SHIPPING_METHOD_LABELS[s.shipping_method] : '—'}
                   </TableCell>
+                  <TableCell>{s.carrier ?? '—'}</TableCell>
                   <TableCell align="right">{totalQuantity(s)}</TableCell>
                   <TableCell align="right">
                     <Tooltip title="View / Print">

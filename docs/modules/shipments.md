@@ -2,13 +2,13 @@
 
 ## Overview
 
-Shipments capture what physically left the shop, when, to whom, against which job(s), and in what quantity. They generate packing slips, drive job auto-close, and decouple **fulfillment status** (what the customer sees) from **production status** (what the shop is working on).
+Shipments capture what physically left the shop, when, to whom, against which job, and in what quantity. They generate packing slips, drive job auto-close, and decouple **fulfillment status** (what the customer sees) from **production status** (what the shop is working on). Each shipment (and therefore each packing slip) belongs to exactly **one job**.
 
 **Priority:** Built; in production behind a per-tenant feature flag (`settings.features.shipments`). See [`lib/featureFlags.ts`](../../lib/featureFlags.ts).
 
 **Dependencies:** [Jobs](jobs.md), [Customers](customers.md). Updates `jobs.fulfillment_status` via DB triggers.
 
-The product reasoning behind this module is preserved in [PRD-shipments-2.md](PRD-shipments-2.md) (Cagan/Fadell-framed discovery doc). This file describes the implementation.
+This is the single source-of-truth doc for the module (implementation + the product reasoning that drove it). The earlier standalone discovery PRD was folded in and removed — its prior revisions live in git history.
 
 ---
 
@@ -23,16 +23,14 @@ One row per packing slip.
 | `id` | uuid | PK |
 | `company_id` | uuid | FK |
 | `customer_id` | uuid | FK |
+| `job_id` | uuid | FK → `jobs`. The single job this slip belongs to; source of the packing-slip number. Enforced by the RPC (all line items resolve to this job). |
 | `shipping_address_id` | uuid? | FK → `customer_addresses` (XOR with `one_time_address`) |
 | `one_time_address` | jsonb? | Phase 3 (XOR via `shipments_one_address_source` constraint) |
-| `packing_slip_number` | text | Unique per company; formatted via `format_packing_slip_number` and a row-locked counter on `companies.packing_slip_next_seq` |
+| `packing_slip_number` | text | Unique per company. App-wide rule `PS-{jobBase}-{n}` (jobBase = `job_number` minus its alpha prefix, e.g. `J-0141` → `0141`; `n` starts at 1). Derived inline by the RPC under the per-job advisory lock — no per-company configurable format/counter. |
 | `ship_date` | date | Defaults to `current_date` |
-| `carrier` | text? | |
-| `tracking_number` | text? | |
-| `shipping_arrangement` | enum-via-CHECK | `prepaid_and_add | prepaid | collect | third_party_account | customer_pickup | customer_arranged_freight | other` |
-| `shipping_arrangement_other` | text? | Required when `shipping_arrangement='other'` (CHECK constraint `shipments_arrangement_other_text`) |
-| `weight_lbs`, `package_count`, `package_type` | various | |
-| `notes`, `coc_text` | text? | |
+| `shipping_method` | enum-via-CHECK | `customer_pickup | personal_delivery | shipment | dropship | restock` (constraint `shipments_shipping_method_check`). Replaces the retired `shipping_arrangement`. |
+| `carrier` | text? | Only set when `shipping_method='shipment'`. UI offers UPS / FedEx / USPS / Other (Other → the typed name is stored here). No DB CHECK. |
+| `notes` | text? | |
 | `created_by` | uuid? | FK → `auth.users`, `ON DELETE SET NULL` |
 | `voided_at`, `voided_by` | timestamptz?, uuid? | Phase 3 (always NULL in Phase 1) |
 
@@ -79,9 +77,9 @@ A job auto-closes (fulfillment_status → `fully_shipped`) when `SUM(shipped) �
 
 ## RPC: `create_shipment_with_line_items`
 
-`VOLATILE SECURITY DEFINER`. Inserts a shipment and its line items in a single transaction with sorted `pg_advisory_xact_lock` per affected job (deadlock-free), snapshots `fulfillment_status` pre/post, writes the audit row when applicable, and returns `{shipmentId, packingSlipNumber}`.
+`VOLATILE SECURITY DEFINER`. Derives the single job behind the line items (raises if zero or **more than one** distinct job — one slip = one job), takes a `pg_advisory_xact_lock` on that job, mints the packing-slip number `PS-{jobBase}-{n}` inline (`n = count of existing shipments for the job + 1`, collision-free under the lock), inserts the shipment + line items, snapshots `fulfillment_status` pre/post, writes the audit row when applicable, and returns `{shipmentId, packingSlipNumber}`.
 
-Parameters mirror `CreateShipmentPayload` in `types/shipment.ts`.
+Parameters mirror `CreateShipmentPayload` in `types/shipment.ts` (`p_carrier`, `p_shipping_method`, `p_notes`, …); `job_id` is **not** a parameter — it's derived.
 
 ---
 
@@ -94,12 +92,12 @@ Feature-gated by `isShipmentsEnabled(company)`. AG Grid with columns:
 - **Packing Slip #** (blue, bold)
 - **Ship Date** (formatted "MMM D, YYYY")
 - **Customer**
-- **Jobs** (chip list — a shipment can span multiple jobs)
-- **Carrier**, **Tracking**
+- **Jobs** (chip list — one chip, since a slip is one job)
+- **Method** (`SHIPPING_METHOD_LABELS`), **Carrier**
 - **Lines** (line-item count)
 - **Created By** (member name, resolved via batched `getMember` calls)
 
-Search runs across `packing_slip_number`, `customer_name`, `tracking_number`, `job_numbers`, `carrier` (debounced 300ms). Row click opens `PackingSlipPreviewDialog` (PDF preview).
+Search runs across `packing_slip_number`, `customer_name`, `job_numbers`, `carrier` (debounced 300ms). Row click opens `PackingSlipPreviewDialog` (PDF preview).
 
 The list is hydrated via `listShipmentsForCompanyWithJobs(companyId)` — two round trips: PostgREST with a nested join through `shipment_line_items → job_parts → jobs`, then batch-resolve `created_by` member IDs.
 
@@ -114,17 +112,17 @@ Two-step wizard:
 
 The form:
 
-- Loads customer context (default carrier, default shipping arrangement, default COC text, addresses).
+- Loads customer context (addresses only — there are no per-customer shipping defaults anymore).
 - Loads open lines via `getOpenJobPartsForCustomer(companyId, customerId, {excludeFullyShipped: true, excludeCancelled: true})`.
 - Renders a checkbox table of open lines with a per-line **qty** input (warns when `qty > qty_remaining`, blocks submit when all qtys are zero).
-- Customer mode shows a "Ready to Ship" filter chip (`production_status != 'cancelled'` AND `fulfillment_status != 'fully_shipped'`) and a search input over part name / job number / customer PO.
-- Shipment-level fields: `ship_date` (today), `shipping_address_id` (customer addresses), `carrier`, `tracking_number`, `shipping_arrangement` (dropdown; `shipping_arrangement_other` shown when `other`), `weight_lbs`, `package_count`, `package_type`, `notes`, `coc_text`.
-- Submit calls `createShipment(companyId, payload)` which routes through `create_shipment_with_line_items`.
+- Customer mode shows a "Ready to Ship" filter chip (`production_status != 'cancelled'` AND `fulfillment_status != 'fully_shipped'`) and a search input over part name / job number / customer PO. **Single-job enforcement:** selecting a line locks the slip to that job — line groups for other jobs are disabled until the selection is cleared.
+- Shipment-level fields: `ship_date` (today), `shipping_address_id` (customer addresses), **`shipping_method`** (required dropdown), and **`carrier`** (a UPS/FedEx/USPS/Other dropdown shown only when `shipping_method='shipment'`; "Other" reveals a free-text carrier field), `notes`.
+- Submit calls `createShipment(companyId, payload)` which routes through `create_shipment_with_line_items` (which derives the job and mints the PS number).
 - Post-create the form opens `PackingSlipPreviewDialog` showing the PDF, then navigates back to `/shipments`.
 
 ### Job detail — `ShipmentHistoryCard`
 
-Embedded on the job detail page. Lists shipments for the job (`getShipmentsForJob(jobId)`), newest first by `ship_date` then `created_at`. Rolls up the inner-joined line items so each shipment appears once. Columns: Packing Slip #, Ship Date, Carrier, Tracking, Created By, Qty, Actions (View / Print). A `refreshKey` prop triggers refetch after a new shipment is created; `initialPreviewShipmentId` auto-opens the preview dialog on first mount (post-create flow).
+Embedded on the job detail page. Lists shipments for the job (`getShipmentsForJob(jobId)`), newest first by `ship_date` then `created_at`. Rolls up the inner-joined line items so each shipment appears once. Columns: Packing Slip #, Ship Date, Method, Carrier, Qty, Actions (View / Print). A `refreshKey` prop triggers refetch after a new shipment is created; `initialPreviewShipmentId` auto-opens the preview dialog on first mount (post-create flow).
 
 ---
 
@@ -157,4 +155,3 @@ The shipments UI is gated by `isShipmentsEnabled(company)` (see [`lib/featureFla
 
 - [Jobs](jobs.md) — for production_status and the job detail integration.
 - [Customers](customers.md) — addresses live on `customer_addresses` and feed the `shipping_address_id` picker.
-- [PRD-shipments-2.md](PRD-shipments-2.md) — original product-discovery PRD.

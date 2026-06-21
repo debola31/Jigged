@@ -31,6 +31,7 @@ import { getCompany, type Company } from '@/utils/companyAccess';
 import { isShipmentsEnabled } from '@/lib/featureFlags';
 import { listShipmentsForCompanyWithJobs } from '@/utils/shipmentsAccess';
 import type { ShipmentListRow } from '@/types/shipment';
+import { SHIPPING_METHOD_LABELS } from '@/types/shipment';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 
 function formatShipDate(value: string | null | undefined): string {
@@ -118,7 +119,6 @@ export default function ShipmentsListPage() {
       const hay = [
         r.packing_slip_number,
         r.customer_name ?? '',
-        r.tracking_number ?? '',
         r.job_numbers.join(' '),
         r.carrier ?? '',
       ]
@@ -181,15 +181,16 @@ export default function ShipmentsListPage() {
       },
     },
     {
+      field: 'shipping_method',
+      headerName: 'Method',
+      minWidth: 150,
+      valueFormatter: (p) =>
+        p.value ? SHIPPING_METHOD_LABELS[p.value as keyof typeof SHIPPING_METHOD_LABELS] : '—',
+    },
+    {
       field: 'carrier',
       headerName: 'Carrier',
       minWidth: 120,
-      valueFormatter: (p) => (p.value as string) || '—',
-    },
-    {
-      field: 'tracking_number',
-      headerName: 'Tracking',
-      minWidth: 160,
       valueFormatter: (p) => (p.value as string) || '—',
     },
     {
@@ -245,7 +246,7 @@ export default function ShipmentsListPage() {
       >
         <TextField
           size="small"
-          placeholder="Search packing slip, customer, tracking, job…"
+          placeholder="Search packing slip, customer, carrier, job…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           InputProps={{

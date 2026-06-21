@@ -1,14 +1,8 @@
-import type { ShippingArrangement } from '@/types/shipment';
-
 export interface Customer {
   id: string;
   company_id: string;
   name: string;
   website: string | null;
-  /** Shipping defaults — populated via the customer-detail UI in PR 7. */
-  default_shipping_arrangement: ShippingArrangement | null;
-  default_carrier: string | null;
-  default_coc_text: string | null;
   // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
   // mirror the DB shape. Consumers (e.g. the customer detail page) already
   // handle null via formatDate(string | null).

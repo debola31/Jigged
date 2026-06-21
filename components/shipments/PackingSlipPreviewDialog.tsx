@@ -62,31 +62,16 @@ export default function PackingSlipPreviewDialog({
 
         const { data: companyRow, error: companyErr } = await supabase
           .from('companies')
-          .select('id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website, default_coc_text')
+          .select('id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website')
           .eq('id', shipment.company_id)
           .single();
         if (companyErr || !companyRow) {
           throw new Error(companyErr?.message ?? 'Failed to load company.');
         }
 
-        // CoC cascade step 2 — pull the customer's default text. The
-        // packing slip's other customer surface (ship-to address +
-        // ATTN line) already comes from the shipment row itself, so
-        // this is the only field still worth reading.
-        const { data: customerRow, error: customerErr } = await supabase
-          .from('customers')
-          .select('id, default_coc_text')
-          .eq('id', shipment.customer_id)
-          .single();
-        if (customerErr || !customerRow) {
-          throw new Error(customerErr?.message ?? 'Failed to load customer.');
-        }
-
         const ctx: PackingSlipPdfContext = {
           shipment,
           company: companyRow as unknown as Company,
-          customerDefaultCocText:
-            (customerRow as { default_coc_text: string | null }).default_coc_text ?? null,
           supabase,
         };
 

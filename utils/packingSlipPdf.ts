@@ -16,13 +16,11 @@
  *     Description / Qty Shipped / Qty Remaining. The Qty Remaining
  *     *column* appears only when at least one line on the slip has
  *     qty_remaining > 0; when present, every cell shows the numeric
- *     value (0 for fully-shipped lines, not blanked). Same table for
- *     single-job and multi-job slips — multi-job legibility comes from
- *     the per-row Job # / PO, not from section headers.
- *   - Shipment details block: carrier, tracking #, arrangement label
- *     (+ free-text "Other" override), weight, package count + type, notes.
- *   - CoC block when text is non-empty after the cascade (shipment →
- *     customer → company → omit).
+ *     value (0 for fully-shipped lines, not blanked). Every slip is a
+ *     single job (shipments.job_id), so the per-row Job # / PO are
+ *     constant — kept for the JobBOSS-style legibility receiving expects.
+ *   - Shipment details block: shipping method label + carrier (carrier
+ *     only present when the method is a true shipment), notes.
  *   - Signature lines at the bottom: Received By / Date / Signature.
  *
  * Voided shipments render the same content with a "VOIDED" watermark
@@ -33,7 +31,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Company } from '@/utils/companyAccess';
 import type { CustomerAddress } from '@/types/customer';
-import { SHIPPING_ARRANGEMENT_LABELS, type ShipmentWithRelations } from '@/types/shipment';
+import { SHIPPING_METHOD_LABELS, type ShipmentWithRelations } from '@/types/shipment';
 import { resolveAttentionLine } from '@/utils/shipmentsAccess';
 
 const MARGIN = 40;
@@ -175,8 +173,6 @@ export interface SupabaseLike {
 export interface PackingSlipPdfContext {
   shipment: ShipmentWithRelations;
   company: Company;
-  /** Customer-level default CoC. Step 2 of the cascade. */
-  customerDefaultCocText: string | null;
   /** Optional Supabase client to resolve the logo signed URL. */
   supabase?: SupabaseLike | null;
 }
@@ -455,25 +451,13 @@ export async function generatePackingSlipPdf(
   cursorY += 18;
 
   // ---------- Shipment details ----------
-  const arrangementLabel = shipment.shipping_arrangement
-    ? shipment.shipping_arrangement === 'other'
-      ? `Other — ${shipment.shipping_arrangement_other ?? ''}`.trim()
-      : SHIPPING_ARRANGEMENT_LABELS[shipment.shipping_arrangement]
+  const methodLabel = shipment.shipping_method
+    ? SHIPPING_METHOD_LABELS[shipment.shipping_method]
     : null;
 
   const details: Array<[string, string]> = [];
+  if (methodLabel) details.push(['Shipping Method', methodLabel]);
   if (shipment.carrier) details.push(['Carrier', shipment.carrier]);
-  if (shipment.tracking_number) details.push(['Tracking #', shipment.tracking_number]);
-  if (arrangementLabel) details.push(['Shipping Arrangement', arrangementLabel]);
-  if (shipment.weight_lbs !== null && shipment.weight_lbs !== undefined) {
-    details.push(['Weight', `${formatNumber(shipment.weight_lbs, 2)} lbs`]);
-  }
-  if (shipment.package_count !== null && shipment.package_count !== undefined) {
-    const type = shipment.package_type ? ` ${shipment.package_type}` : '';
-    details.push(['Packages', `${shipment.package_count}${type}`]);
-  } else if (shipment.package_type) {
-    details.push(['Package Type', shipment.package_type]);
-  }
 
   if (details.length > 0) {
     doc.setFont('helvetica', 'bold');
@@ -510,35 +494,6 @@ export async function generatePackingSlipPdf(
     const wrapped = doc.splitTextToSize(shipment.notes.trim(), pageWidth - MARGIN * 2);
     doc.text(wrapped, MARGIN, cursorY);
     cursorY += wrapped.length * 12 + 10;
-  }
-
-  // ---------- CoC cascade ----------
-  // shipment → customer → company → omit
-  const cocText =
-    shipment.coc_text?.trim() ||
-    ctx.customerDefaultCocText?.trim() ||
-    company.default_coc_text?.trim() ||
-    '';
-  if (cocText) {
-    // Page-break if the CoC + signature block would run off the page.
-    const footerReserve = 90;
-    if (cursorY + 80 > pageHeight - footerReserve) {
-      doc.addPage();
-      cursorY = MARGIN;
-    }
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('CERTIFICATE OF CONFORMANCE', MARGIN, cursorY);
-    cursorY += 14;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(60);
-    const wrapped = doc.splitTextToSize(cocText, pageWidth - MARGIN * 2);
-    doc.text(wrapped, MARGIN, cursorY);
-    cursorY += wrapped.length * 12 + 14;
   }
 
   // ---------- Signature lines ----------

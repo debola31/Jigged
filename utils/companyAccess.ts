@@ -23,9 +23,6 @@ export interface Company {
   demo_company_id?: string | null;
   // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
   settings?: Record<string, unknown> | null;
-  // Packing-slip number generation (set by PR1; consumed by the RPC in PR4).
-  packing_slip_number_format?: string | null;
-  default_coc_text?: string | null;
 }
 
 export type CompanyProfilePatch = Pick<
@@ -251,7 +248,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, packing_slip_number_format, default_coc_text'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings'
     )
     .eq('id', companyId)
     .single();
@@ -287,45 +284,6 @@ export async function updateCompanyLogo(
   if (error) {
     console.error('Error updating company logo:', error);
     throw new Error(`Failed to update company logo: ${error.message}`);
-  }
-}
-
-export interface CompanyShippingSettingsPatch {
-  packing_slip_number_format: string;
-  default_coc_text: string | null;
-}
-
-/**
- * Update the company-wide shipping defaults: packing-slip number format
- * and the bottom-step CoC text in the cascade. Validates the format
- * contains a {seq} or {seq:0...0} token before saving so the next
- * call to next_packing_slip_number() doesn't return an unsubstituted
- * placeholder.
- */
-export async function updateCompanyShippingSettings(
-  companyId: string,
-  patch: CompanyShippingSettingsPatch,
-): Promise<void> {
-  const format = patch.packing_slip_number_format.trim();
-  if (!format) {
-    throw new Error('Packing-slip number format is required.');
-  }
-  if (!/\{seq(:0+)?\}/.test(format)) {
-    throw new Error('Packing-slip number format must include a {seq} or {seq:0000} token.');
-  }
-
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('companies')
-    .update({
-      packing_slip_number_format: format,
-      default_coc_text: patch.default_coc_text?.trim() ? patch.default_coc_text.trim() : null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', companyId);
-  if (error) {
-    console.error('Error updating company shipping settings:', error);
-    throw new Error(`Failed to save shipping settings: ${error.message}`);
   }
 }
 

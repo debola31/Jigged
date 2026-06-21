@@ -27,7 +27,6 @@ type UserCompanyAccessUpdate = Database['public']['Tables']['user_company_access
 import type {
   OperatorJob,
   OperatorJobDetail,
-  OperatorJobPartSummary,
   Station,
   JobCompleteResponse,
   JobTraveler,
@@ -455,107 +454,6 @@ export async function getOperatorOperationDetail(
   // Surface (but don't enforce) sequence: warn if earlier steps aren't done.
   detail.predecessors_incomplete = !(await isJobOperationReady(op.id));
   return detail;
-}
-
-/**
- * Parts hub for a scanned job — every job_part on the job, with a summary of
- * its next-ready operation. Used when an operator scans a multi-part job QR.
- */
-export async function getOperatorJobParts(
-  jobId: string,
-  companyId: string,
-): Promise<OperatorJobPartSummary[]> {
-  const supabase = getSupabase();
-
-  // Verify the job belongs to this company.
-  const { data: job } = await supabase
-    .from('jobs')
-    .select('id')
-    .eq('id', jobId)
-    .eq('company_id', companyId)
-    .single();
-  if (!job) return [];
-
-  const { data: parts } = await supabase
-    .from('job_parts')
-    .select(`
-      id, job_id, sequence, quantity, production_status,
-      parts(part_name, description)
-    `)
-    .eq('job_id', jobId)
-    .order('sequence', { ascending: true });
-
-  type PartRow = {
-    id: string;
-    job_id: string;
-    sequence: number;
-    quantity: number;
-    production_status: string;
-    parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
-  };
-  const partRows = (parts ?? []) as PartRow[];
-  if (partRows.length === 0) return [];
-
-  // Pull all operations for these parts in one round-trip.
-  const partIds = partRows.map((p) => p.id);
-  const { data: ops } = await supabase
-    .from('job_operations')
-    .select('id, job_part_id, sequence, operation_name, status')
-    .in('job_part_id', partIds)
-    .order('sequence', { ascending: true });
-
-  type OpRow = {
-    id: string;
-    job_part_id: string;
-    sequence: number;
-    operation_name: string;
-    status: string;
-  };
-  const opsByPart = new Map<string, OpRow[]>();
-  for (const op of (ops ?? []) as OpRow[]) {
-    const arr = opsByPart.get(op.job_part_id) ?? [];
-    arr.push(op);
-    opsByPart.set(op.job_part_id, arr);
-  }
-
-  return partRows.map((part) => {
-    const partsJoin = Array.isArray(part.parts) ? part.parts[0] : part.parts;
-    const partOps = opsByPart.get(part.id) ?? [];
-
-    const total = partOps.length;
-    const done = partOps.filter((o) => o.status === 'completed').length;
-
-    // Pick the first pending or in-progress op. For pending, ensure predecessors are done.
-    let nextOp: OpRow | null = null;
-    for (const op of partOps) {
-      if (op.status === 'in_progress') {
-        nextOp = op;
-        break;
-      }
-      if (op.status === 'pending') {
-        const earlierUnfinished = partOps.some(
-          (prev) => prev.sequence < op.sequence && prev.status !== 'completed',
-        );
-        if (!earlierUnfinished) {
-          nextOp = op;
-          break;
-        }
-      }
-    }
-
-    return {
-      id: part.id,
-      job_id: part.job_id,
-      part_name: partsJoin?.part_name ?? 'Part',
-      part_description: partsJoin?.description ?? null,
-      quantity: part.quantity,
-      production_status: part.production_status,
-      next_operation_name: nextOp?.operation_name ?? null,
-      next_operation_id: nextOp?.id ?? null,
-      operations_total: total,
-      operations_completed: done,
-    };
-  });
 }
 
 // ============================================================================

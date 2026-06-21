@@ -38,14 +38,13 @@ export default function OperatorLoginPage() {
 
   // Where to land after auth, given the scanned QR's params. A per-operation QR
   // (job + part + operation) jumps straight to that step's action view; a
-  // per-part QR to the part traveler; a per-job QR to the parts hub; else the
-  // jobs list.
+  // per-part QR (legacy travelers) to the part traveler; anything else — incl. a
+  // job-only scan, which we no longer print — falls back to the station jobs list.
   const postLoginPath = () => {
     if (jobId && partId && operationId) {
       return `/operator/${companyId}/jobs/${jobId}/parts/${partId}/operations/${operationId}`;
     }
     if (jobId && partId) return `/operator/${companyId}/jobs/${jobId}/parts/${partId}`;
-    if (jobId) return `/operator/${companyId}/jobs/${jobId}`;
     return `/operator/${companyId}/jobs`;
   };
 

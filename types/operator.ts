@@ -92,26 +92,6 @@ export interface OperatorJobDetail {
 }
 
 /**
- * One card on the operator parts-hub view (operator scans a job QR with >1 parts).
- */
-export interface OperatorJobPartSummary {
-  /** job_part_id. */
-  id: string;
-  job_id: string;
-  part_name: string;
-  part_description: string | null;
-  quantity: number;
-  /** job_parts.production_status. */
-  production_status: string;
-  /** Next ready operation on this part, when one exists. */
-  next_operation_name: string | null;
-  next_operation_id: string | null;
-  /** Per-part progress. */
-  operations_total: number;
-  operations_completed: number;
-}
-
-/**
  * One operation/step row on the job traveler (mirrors a row in the printed
  * job-traveler step table: Step #, Work Center, Description, Setup, Cycle).
  */

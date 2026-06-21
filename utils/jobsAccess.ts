@@ -589,7 +589,7 @@ export async function startJobOperation(
 }
 
 /**
- * Complete a job_operation with optional time-entry data. Flips the
+ * Complete a job_operation with optional notes. Flips the
  * job_part to 'completed' once every op on that part is completed.
  */
 export async function completeJobOperation(
@@ -609,8 +609,6 @@ export async function completeJobOperation(
     completed_by: user?.id || null,
     updated_at: new Date().toISOString(),
   };
-  if (data.actual_setup_minutes !== undefined) updateData.actual_setup_minutes = data.actual_setup_minutes;
-  if (data.actual_run_minutes !== undefined) updateData.actual_run_minutes = data.actual_run_minutes;
   if (data.notes !== undefined) updateData.notes = data.notes;
 
   const { data: operation, error: updateError } = await supabase
@@ -641,8 +639,8 @@ export async function completeJobOperation(
 }
 
 /**
- * Undo a completed job_operation back to pending. Clears timestamps,
- * actuals, and completed_by. Recomputes the parent job_part status (it may
+ * Undo a completed job_operation back to pending. Clears timestamps and
+ * completed_by. Recomputes the parent job_part status (it may
  * fall back to in_progress or not_started).
  */
 export async function undoJobOperation(operationId: string): Promise<JobOperation> {
@@ -656,8 +654,6 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
       started_at: null,
       completed_at: null,
       completed_by: null,
-      actual_setup_minutes: null,
-      actual_run_minutes: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', operationId)

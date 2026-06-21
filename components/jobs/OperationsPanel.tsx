@@ -123,11 +123,7 @@ export default function OperationsPanel({
     setCompleteModalOpen(true);
   };
 
-  const handleCompleteConfirm = async (data: {
-    actual_setup_minutes?: number;
-    actual_run_minutes?: number;
-    notes?: string;
-  }) => {
+  const handleCompleteConfirm = async (data: { notes?: string }) => {
     if (!selectedOperationId) return;
 
     setLoading(true);

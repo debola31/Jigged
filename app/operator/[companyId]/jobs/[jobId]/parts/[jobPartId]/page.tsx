@@ -165,10 +165,12 @@ export default function OperatorJobTravelerPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
+      {/* Back to the operator's station jobs list (not the parts hub, which
+          auto-redirects single-part jobs straight back to this traveler). */}
       <IconButton
-        onClick={() => router.push(`/operator/${companyId}/jobs/${jobId}`)}
+        onClick={() => router.push(`/operator/${companyId}/jobs`)}
         sx={{ mb: 2 }}
-        aria-label="Back to parts"
+        aria-label="Back to jobs"
       >
         <ArrowBackIcon />
       </IconButton>
@@ -252,7 +254,8 @@ export default function OperatorJobTravelerPage() {
           const done = op.status === 'completed';
           return (
             <Card key={op.id} elevation={2} sx={{ ...cardSx, opacity: done ? 0.65 : 1 }}>
-              <CardActionArea onClick={() => openStep(op)} disabled={done} sx={{ p: 0 }}>
+              {/* Completed steps stay tappable so the operator can reopen one to undo it. */}
+              <CardActionArea onClick={() => openStep(op)} sx={{ p: 0 }}>
                 <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5 }}>
                   <StepIcon status={op.status} />
                   <Box sx={{ minWidth: 36 }}>
@@ -275,11 +278,11 @@ export default function OperatorJobTravelerPage() {
                     </Typography>
                     {op.status === 'in_progress' && (
                       <Typography variant="caption" color="primary" display="block">
-                        In progress{op.active_operator_name ? ` · ${op.active_operator_name}` : ''}
+                        In progress
                       </Typography>
                     )}
                   </Box>
-                  {!done && <ChevronRightIcon color="action" />}
+                  <ChevronRightIcon color="action" />
                 </CardContent>
               </CardActionArea>
             </Card>

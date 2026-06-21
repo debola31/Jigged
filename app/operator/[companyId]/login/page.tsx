@@ -34,6 +34,19 @@ export default function OperatorLoginPage() {
   const stationId = searchParams.get('station') || undefined;
   const jobId = searchParams.get('job') || undefined;
   const partId = searchParams.get('part') || undefined;
+  const operationId = searchParams.get('operation') || undefined;
+
+  // Where to land after auth, given the scanned QR's params. A per-operation QR
+  // (job + part + operation) jumps straight to that step's action view; a
+  // per-part QR (legacy travelers) to the part traveler; anything else — incl. a
+  // job-only scan, which we no longer print — falls back to the station jobs list.
+  const postLoginPath = () => {
+    if (jobId && partId && operationId) {
+      return `/operator/${companyId}/jobs/${jobId}/parts/${partId}/operations/${operationId}`;
+    }
+    if (jobId && partId) return `/operator/${companyId}/jobs/${jobId}/parts/${partId}`;
+    return `/operator/${companyId}/jobs`;
+  };
 
   const [companyName, setCompanyName] = useState<string>('');
   const [email, setEmail] = useState('');
@@ -72,13 +85,7 @@ export default function OperatorLoginPage() {
             sessionStorage.setItem('jigged_operator_station', stationId);
           }
 
-          if (jobId && partId) {
-            router.push(`/operator/${companyId}/jobs/${jobId}/parts/${partId}`);
-          } else if (jobId) {
-            router.push(`/operator/${companyId}/jobs/${jobId}`);
-          } else {
-            router.push(`/operator/${companyId}/jobs`);
-          }
+          router.push(postLoginPath());
           return;
         }
       }
@@ -87,7 +94,8 @@ export default function OperatorLoginPage() {
     };
 
     checkSession();
-  }, [companyId, router, stationId, jobId, partId, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, router, stationId, jobId, partId, operationId, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,15 +151,9 @@ export default function OperatorLoginPage() {
         sessionStorage.setItem('jigged_operator_station', stationId);
       }
 
-      // 5. Redirect to the scanned part's traveler (if a per-part QR), the
-      // job's parts hub (legacy per-job QR), or the jobs list.
-      if (jobId && partId) {
-        router.push(`/operator/${companyId}/jobs/${jobId}/parts/${partId}`);
-      } else if (jobId) {
-        router.push(`/operator/${companyId}/jobs/${jobId}`);
-      } else {
-        router.push(`/operator/${companyId}/jobs`);
-      }
+      // 5. Redirect to wherever the scanned QR points (per-operation step,
+      // per-part traveler, per-job parts hub, or the jobs list).
+      router.push(postLoginPath());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {

@@ -253,8 +253,7 @@ def confirm_destructive(cur, company_id: str) -> None:
             (SELECT count(*) FROM work_centers WHERE company_id = %(c)s)       AS work_centers,
             (SELECT count(*) FROM vendors WHERE company_id = %(c)s)            AS vendors,
             (SELECT count(*) FROM jobs WHERE company_id = %(c)s)               AS jobs,
-            (SELECT count(*) FROM quotes WHERE company_id = %(c)s)             AS quotes,
-            (SELECT count(*) FROM operator_sessions WHERE company_id = %(c)s)  AS operator_sessions;
+            (SELECT count(*) FROM quotes WHERE company_id = %(c)s)             AS quotes;
     """
     cur.execute(counts_q, {"c": company_id})
     counts = cur.fetchone()
@@ -263,15 +262,15 @@ def confirm_destructive(cur, company_id: str) -> None:
     log(f"Current row counts that WILL BE DELETED:")
     labels = [
         "parts", "routings", "routing_operations", "parts_bom",
-        "work_centers", "vendors", "jobs", "quotes", "operator_sessions",
+        "work_centers", "vendors", "jobs", "quotes",
     ]
     for label, n in zip(labels, counts):
         marker = "  <-- will cascade-delete child rows" if label in ("jobs", "quotes") and n else ""
         log(f"{label:25} {n:>8}{marker}", indent=1)
 
-    jobs, quotes, sessions = counts[6], counts[7], counts[8]
-    if jobs or quotes or sessions:
-        log(f"\nNOTE: jobs/quotes/operator_sessions will be deleted to free up FK references.")
+    jobs, quotes = counts[6], counts[7]
+    if jobs or quotes:
+        log(f"\nNOTE: jobs/quotes will be deleted to free up FK references.")
         log(f"Their child tables (job_parts, job_operations, job_materials,")
         log(f"quote_line_items, quote_materials, quote_operations) cascade automatically.")
 
@@ -295,10 +294,6 @@ def clear_tables(cur, company_id: str) -> None:
 
     # First: clear tables that hold RESTRICT references to parts and work_centers.
     # If any of these have rows, deleting parts or work_centers will fail.
-    # operator_sessions -> work_centers (RESTRICT). No CASCADE source; delete directly.
-    cur.execute("DELETE FROM operator_sessions WHERE company_id = %s", (company_id,))
-    log(f"deleted operator_sessions: {cur.rowcount}", indent=1)
-
     # jobs CASCADE to job_parts, job_operations, job_materials.
     # Those tables hold RESTRICT FKs into parts and work_centers.
     cur.execute("DELETE FROM jobs WHERE company_id = %s", (company_id,))

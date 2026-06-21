@@ -150,6 +150,10 @@ def _seed_quote(admin, company_id: str, converted: bool) -> dict:
                 "source_quote_line_item_id": qli["id"],
                 "sequence": 0,
                 "quantity": 10,
+                # Invoicing reads price off job_parts now (single read shape),
+                # so the seed must carry it like convert/create-from-PO do.
+                "unit_price": 12.5,
+                "total_price": 125,
                 "production_status": "not_started",
                 "fulfillment_status": "unshipped",
             }

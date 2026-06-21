@@ -103,9 +103,11 @@ def test_invoice_links_cross_company_blocked(supabase_admin, seeded_user_a, seed
     """User A (member of company A only) cannot read company B's invoice links."""
     company_b = seeded_company_b_graph["company_id"]
     quote_b = seeded_company_b_graph["quote_id"]
+    job_b = seeded_company_b_graph["job_id"]
     supabase_admin.table("quickbooks_invoice_links").insert(
         {
             "company_id": company_b,
+            "job_id": job_b,  # invoice links are job-keyed now (job_id NOT NULL)
             "quote_id": quote_b,
             "realm_id": "realm-b",
             "qb_request_id": str(uuid4()),

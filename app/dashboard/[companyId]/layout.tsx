@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import { Sidebar, Header } from '@/components/layout';
+import { PageTitleProvider } from '@/components/layout/PageTitleProvider';
 import { AuthGuard } from '@/components/auth';
 import DemoModeProvider from '@/components/providers/DemoModeProvider';
 import DemoModeBanner from '@/components/demo/DemoModeBanner';
@@ -29,6 +30,7 @@ export default function DashboardLayout({
   return (
     <AuthGuard companyId={companyId} requireCompany>
       <DemoModeProvider>
+        <PageTitleProvider>
         <Box sx={{ display: 'flex', minHeight: '100vh' }}>
           <Sidebar isMobile={isMobile} open={drawerOpen} onClose={closeDrawer} onFeedbackClick={feedback.openDialog} />
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', ml: { xs: 0, md: '240px' }, minWidth: 0 }}>
@@ -47,6 +49,7 @@ export default function DashboardLayout({
           onSuccess={feedback.showSuccess}
           onSnackbarClose={feedback.closeSnackbar}
         />
+        </PageTitleProvider>
       </DemoModeProvider>
     </AuthGuard>
   );

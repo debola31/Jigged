@@ -10,6 +10,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import { usePageTitle } from './PageTitleProvider';
 import AlertBadge from './AlertBadge';
 
 function getPageTitle(pathname: string): string {
@@ -159,7 +160,10 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
   const { signOut, user } = useAuth();
   const firstName = user?.user_metadata?.first_name;
   const { isDemoMode } = useDemoMode();
-  const pageTitle = getPageTitle(pathname);
+  // A page may override the title (e.g. the part page shows the part number) so
+  // the record identity stays visible in the sticky app bar while scrolling.
+  const { title: overrideTitle } = usePageTitle();
+  const pageTitle = overrideTitle ?? getPageTitle(pathname);
 
   const handleSignOut = async () => {
     await signOut();

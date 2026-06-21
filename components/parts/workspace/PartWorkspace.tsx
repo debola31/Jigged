@@ -28,9 +28,10 @@ import { parseBackChain } from '@/lib/partNavStack';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartTransactionModal from '@/components/parts/PartTransactionModal';
+import { usePageTitle } from '@/components/layout/PageTitleProvider';
 
 import PartIdentitySection from './PartIdentitySection';
-import PartStickyHeader, { type PartTabDescriptor } from './PartStickyHeader';
+import PartHeaderBar, { type PartTabDescriptor } from './PartHeaderBar';
 import { getPartSetupStatus, type PartSetupStatus } from './partSetupStatus';
 import WorkspaceTab from './tabs/WorkspaceTab';
 import InventoryTab from './tabs/InventoryTab';
@@ -64,6 +65,7 @@ export default function PartWorkspace({
   const companyId = params.companyId as string;
   // Undefined in create mode (/parts/new has no [partId] segment).
   const partId = params.partId as string | undefined;
+  const { setTitle } = usePageTitle();
 
   // Breadcrumb root reflects where the user entered from (Parts vs Inventory).
   const partsListHref = useMemo(() => {
@@ -174,6 +176,15 @@ export default function PartWorkspace({
     };
   }, [partId, refreshKey]);
 
+  // Surface the part number in the global app bar (always visible while
+  // scrolling) instead of a second in-page header. Cleared on unmount so other
+  // pages fall back to their pathname title.
+  useEffect(() => {
+    if (mode === 'create' || !part) return;
+    setTitle(part.part_name);
+    return () => setTitle(null);
+  }, [mode, part, setTitle]);
+
   const refreshAfterMutation = useCallback(async () => {
     await fetchPart(true);
     setRefreshKey((k) => k + 1);
@@ -207,7 +218,7 @@ export default function PartWorkspace({
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
     if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
-    tabs.push({ slug: 'history', label: 'History' });
+    tabs.push({ slug: 'history', label: 'Notes & Activity' });
     return tabs;
   }, [part?.is_stocked]);
 
@@ -301,14 +312,12 @@ export default function PartWorkspace({
 
   return (
     <Box>
-      <PartStickyHeader
-        part={part}
+      <PartHeaderBar
         companyId={companyId}
         partsListHref={partsListHref}
         partsListLabel={partsListLabel}
         currentChain={currentChain}
         chainNames={chainNames}
-        setupStatus={setupStatus}
         tabs={visibleTabs}
         activeTab={activeTab}
         onTabChange={handleTabChange}

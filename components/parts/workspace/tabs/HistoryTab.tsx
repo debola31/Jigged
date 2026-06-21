@@ -19,7 +19,6 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import MuiLink from '@mui/material/Link';
 import NextLink from 'next/link';
-import StickyNote2Icon from '@mui/icons-material/StickyNote2';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import WorkIcon from '@mui/icons-material/Work';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
@@ -48,9 +47,9 @@ const TXN_VERB: Record<string, string> = {
 };
 
 /**
- * Part activity timeline + manual note composer. The feed is aggregated on
- * read (notes + stock transactions + jobs + quotes) by getPartActivity. Built
- * on List/ListItem (not @mui/lab, which isn't installed).
+ * Notes & Activity. Manual notes are kept in their own section (with the
+ * composer) so they're never buried by the auto-logged activity feed below —
+ * the two are split from the single merged list the first cut had.
  */
 export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   const [events, setEvents] = useState<PartActivityEvent[] | null>(null);
@@ -59,8 +58,6 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
-  // Bumped after add/delete to refetch the feed (avoids a synchronous
-  // setState-in-effect by keeping all feed writes inside the async callback).
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
@@ -123,13 +120,17 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
     }
   };
 
+  const loading = events === null;
+  const noteEvents = (events ?? []).filter((e) => e.kind === 'note');
+  const activityEvents = (events ?? []).filter((e) => e.kind !== 'note');
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {/* Composer */}
+      {/* Notes — manual, with the composer. Kept separate from activity. */}
       <Card elevation={2}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Add a note
+            Notes
           </Typography>
           <TextField
             fullWidth
@@ -158,39 +159,22 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
               {submitting ? 'Adding…' : 'Add note'}
             </Button>
           </Box>
-        </CardContent>
-      </Card>
 
-      {/* Activity feed */}
-      <Card elevation={2}>
-        <CardContent>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Activity
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Notes, stock movements, and the jobs &amp; quotes this part appears on.
-          </Typography>
           <Divider sx={{ my: 2 }} />
 
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-
-          {events === null ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-              <CircularProgress size={28} />
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+              <CircularProgress size={24} />
             </Box>
-          ) : events.length === 0 ? (
+          ) : noteEvents.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No activity yet.
+              No notes yet.
             </Typography>
           ) : (
             <List disablePadding>
-              {events.map((ev) => {
-                const canDelete =
-                  ev.kind === 'note' && !!operator && ev.note.author_id === operator.id;
+              {noteEvents.map((ev) => {
+                if (ev.kind !== 'note') return null;
+                const canDelete = !!operator && ev.note.author_id === operator.id;
                 return (
                   <ListItem
                     key={ev.id}
@@ -202,7 +186,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
                           <IconButton
                             edge="end"
                             size="small"
-                            onClick={() => handleDelete((ev as { note: { id: string } }).note.id)}
+                            onClick={() => handleDelete(ev.note.id)}
                             sx={{ color: 'text.secondary' }}
                           >
                             <DeleteOutlineIcon fontSize="small" />
@@ -211,16 +195,56 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
                       ) : undefined
                     }
                   >
-                    <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
-                      <ActivityIcon ev={ev} />
-                    </ListItemIcon>
                     <ListItemText
-                      primary={<ActivityPrimary ev={ev} companyId={companyId} />}
-                      secondary={<ActivitySecondary ev={ev} />}
+                      primary={<Typography variant="body2">{ev.note.body}</Typography>}
+                      secondary={`${ev.note.author_name ?? 'Unknown'} · ${fmtWhen(ev.at)}`}
                     />
                   </ListItem>
                 );
               })}
+            </List>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Activity — auto-logged events only (stock, jobs, quotes). */}
+      <Card elevation={2}>
+        <CardContent>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            Activity
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            Stock movements and the jobs &amp; quotes this part appears on.
+          </Typography>
+          <Divider sx={{ my: 2 }} />
+
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : activityEvents.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No activity yet.
+            </Typography>
+          ) : (
+            <List disablePadding>
+              {activityEvents.map((ev) => (
+                <ListItem key={ev.id} alignItems="flex-start" disableGutters>
+                  <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
+                    <ActivityIcon ev={ev} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={<ActivityPrimary ev={ev} companyId={companyId} />}
+                    secondary={<ActivitySecondary ev={ev} />}
+                  />
+                </ListItem>
+              ))}
             </List>
           )}
         </CardContent>
@@ -231,21 +255,19 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
 
 function ActivityIcon({ ev }: { ev: PartActivityEvent }) {
   switch (ev.kind) {
-    case 'note':
-      return <StickyNote2Icon fontSize="small" color="info" />;
     case 'transaction':
       return <Inventory2Icon fontSize="small" color="action" />;
     case 'job':
       return <WorkIcon fontSize="small" color="action" />;
     case 'quote':
       return <RequestQuoteIcon fontSize="small" color="action" />;
+    default:
+      return null;
   }
 }
 
 function ActivityPrimary({ ev, companyId }: { ev: PartActivityEvent; companyId: string }) {
   switch (ev.kind) {
-    case 'note':
-      return <Typography variant="body2">{ev.note.body}</Typography>;
     case 'transaction':
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -282,17 +304,15 @@ function ActivityPrimary({ ev, companyId }: { ev: PartActivityEvent; companyId: 
           </MuiLink>
         </Typography>
       );
+    default:
+      return null;
   }
 }
 
 function ActivitySecondary({ ev }: { ev: PartActivityEvent }) {
   const when = fmtWhen(ev.at);
-  switch (ev.kind) {
-    case 'note':
-      return <>{`${ev.note.author_name ?? 'Unknown'} · ${when}`}</>;
-    case 'transaction':
-      return <>{ev.txn.notes ? `${when} · ${ev.txn.notes}` : when}</>;
-    default:
-      return <>{when}</>;
+  if (ev.kind === 'transaction') {
+    return <>{ev.txn.notes ? `${when} · ${ev.txn.notes}` : when}</>;
   }
+  return <>{when}</>;
 }

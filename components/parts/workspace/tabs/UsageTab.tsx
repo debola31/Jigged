@@ -11,13 +11,14 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
+import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import MuiLink from '@mui/material/Link';
 import NextLink from 'next/link';
 
 import type { Part } from '@/types/part';
-import type { ProductionStatus, FulfillmentStatus } from '@/types/job';
+import type { ProductionStatus } from '@/types/job';
 import type { QuoteStatus } from '@/types/quote';
 import {
   getJobsForPart,
@@ -25,7 +26,7 @@ import {
   type PartJobUsage,
   type PartQuoteUsage,
 } from '@/utils/partsAccess';
-import { ProductionStatusChip, FulfillmentStatusChip } from '@/components/jobs/JobStatusChip';
+import { ProductionStatusChip } from '@/components/jobs/JobStatusChip';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import PartWhereUsedPanel from '@/components/parts/PartWhereUsedPanel';
 
@@ -38,155 +39,124 @@ interface UsageTabProps {
 
 const fmtDate = (s: string | null): string => (s ? new Date(s).toLocaleDateString() : '—');
 
+type UsageRow =
+  | { kind: 'job'; sortKey: string; data: PartJobUsage }
+  | { kind: 'quote'; sortKey: string; data: PartQuoteUsage };
+
 /**
- * "Where does this part show up?" — the record view of a part's relationships:
- * every job and quote it appears on, plus the parent assemblies that consume
- * it. Jobs/quotes are fetched when the tab opens (plain Supabase reads, no AI).
+ * "Where does this part show up?" Jobs and quotes are linked, so they share one
+ * table (a Type column distinguishes them), newest-first. Parent assemblies
+ * (Where Used) stay separate since that's a BOM relationship, not commercial.
  */
 export default function UsageTab({ part, partId, companyId, currentChain }: UsageTabProps) {
   const bomParentsCount = part.bom_parents_count ?? 0;
 
-  const [jobs, setJobs] = useState<PartJobUsage[] | null>(null);
-  const [quotes, setQuotes] = useState<PartQuoteUsage[] | null>(null);
+  const [rows, setRows] = useState<UsageRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([getJobsForPart(partId), getQuotesForPart(partId)])
-      .then(([j, q]) => {
-        if (!cancelled) {
-          setJobs(j);
-          setQuotes(q);
-          setError(null);
-        }
+      .then(([jobs, quotes]) => {
+        if (cancelled) return;
+        const merged: UsageRow[] = [
+          ...jobs.map((j) => ({ kind: 'job' as const, sortKey: j.created_at ?? '', data: j })),
+          ...quotes.map((q) => ({ kind: 'quote' as const, sortKey: q.created_at ?? '', data: q })),
+        ].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+        setRows(merged);
+        setError(null);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load usage');
-        }
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load usage');
       });
     return () => {
       cancelled = true;
     };
   }, [partId]);
 
-  const loading = jobs === null || quotes === null;
+  const loading = rows === null;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {error && <Alert severity="error">{error}</Alert>}
 
-      {/* Jobs */}
+      {/* Jobs & Quotes — one table */}
       <Card elevation={2}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Jobs{jobs ? ` (${jobs.length})` : ''}
+            Jobs &amp; Quotes{rows ? ` (${rows.length})` : ''}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Every job this part has been put into production on.
+            Every job and quote this part appears on.
           </Typography>
           <Divider sx={{ my: 2 }} />
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
               <CircularProgress size={28} />
             </Box>
-          ) : jobs && jobs.length > 0 ? (
+          ) : rows && rows.length > 0 ? (
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Job #</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Number</TableCell>
                   <TableCell>Customer</TableCell>
                   <TableCell align="right">Qty</TableCell>
-                  <TableCell>Production</TableCell>
-                  <TableCell>Fulfillment</TableCell>
-                  <TableCell>Due</TableCell>
-                  <TableCell>Created</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {jobs.map((j) => (
-                  <TableRow key={j.job_id} hover>
-                    <TableCell>
-                      <MuiLink
-                        component={NextLink}
-                        href={`/dashboard/${companyId}/jobs/${j.job_id}`}
-                        underline="hover"
-                      >
-                        {j.job_number}
-                      </MuiLink>
-                    </TableCell>
-                    <TableCell>{j.customer_name ?? '—'}</TableCell>
-                    <TableCell align="right">{j.quantity}</TableCell>
-                    <TableCell>
-                      <ProductionStatusChip status={j.production_status as ProductionStatus} />
-                    </TableCell>
-                    <TableCell>
-                      <FulfillmentStatusChip status={j.fulfillment_status as FulfillmentStatus} />
-                    </TableCell>
-                    <TableCell>{fmtDate(j.due_date)}</TableCell>
-                    <TableCell>{fmtDate(j.created_at)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              This part hasn’t been added to any jobs yet.
-            </Typography>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Quotes */}
-      <Card elevation={2}>
-        <CardContent>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Quotes{quotes ? ` (${quotes.length})` : ''}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Every quote this part has appeared on.
-          </Typography>
-          <Divider sx={{ my: 2 }} />
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-              <CircularProgress size={28} />
-            </Box>
-          ) : quotes && quotes.length > 0 ? (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Quote #</TableCell>
-                  <TableCell>Customer</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Expires</TableCell>
                   <TableCell>Created</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {quotes.map((q) => (
-                  <TableRow key={q.quote_id} hover>
-                    <TableCell>
-                      <MuiLink
-                        component={NextLink}
-                        href={`/dashboard/${companyId}/quotes/${q.quote_id}`}
-                        underline="hover"
-                      >
-                        {q.quote_number}
-                      </MuiLink>
-                    </TableCell>
-                    <TableCell>{q.customer_name ?? '—'}</TableCell>
-                    <TableCell>
-                      <QuoteStatusChip status={q.status as QuoteStatus} />
-                    </TableCell>
-                    <TableCell>{fmtDate(q.expiration_date)}</TableCell>
-                    <TableCell>{fmtDate(q.created_at)}</TableCell>
-                  </TableRow>
-                ))}
+                {rows.map((row) =>
+                  row.kind === 'job' ? (
+                    <TableRow key={`job-${row.data.job_id}`} hover>
+                      <TableCell>
+                        <Chip size="small" variant="outlined" color="primary" label="Job" />
+                      </TableCell>
+                      <TableCell>
+                        <MuiLink
+                          component={NextLink}
+                          href={`/dashboard/${companyId}/jobs/${row.data.job_id}`}
+                          underline="hover"
+                        >
+                          {row.data.job_number}
+                        </MuiLink>
+                      </TableCell>
+                      <TableCell>{row.data.customer_name ?? '—'}</TableCell>
+                      <TableCell align="right">{row.data.quantity}</TableCell>
+                      <TableCell>
+                        <ProductionStatusChip status={row.data.production_status as ProductionStatus} />
+                      </TableCell>
+                      <TableCell>{fmtDate(row.data.created_at)}</TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={`quote-${row.data.quote_id}`} hover>
+                      <TableCell>
+                        <Chip size="small" variant="outlined" label="Quote" />
+                      </TableCell>
+                      <TableCell>
+                        <MuiLink
+                          component={NextLink}
+                          href={`/dashboard/${companyId}/quotes/${row.data.quote_id}`}
+                          underline="hover"
+                        >
+                          {row.data.quote_number}
+                        </MuiLink>
+                      </TableCell>
+                      <TableCell>{row.data.customer_name ?? '—'}</TableCell>
+                      <TableCell align="right">—</TableCell>
+                      <TableCell>
+                        <QuoteStatusChip status={row.data.status as QuoteStatus} />
+                      </TableCell>
+                      <TableCell>{fmtDate(row.data.created_at)}</TableCell>
+                    </TableRow>
+                  ),
+                )}
               </TableBody>
             </Table>
           ) : (
             <Typography variant="body2" color="text.secondary">
-              This part hasn’t appeared on any quotes yet.
+              This part hasn’t been quoted or put into production yet.
             </Typography>
           )}
         </CardContent>

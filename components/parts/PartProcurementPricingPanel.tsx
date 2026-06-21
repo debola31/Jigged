@@ -19,7 +19,7 @@ import TableContainer from '@mui/material/TableContainer';
 import Autocomplete from '@mui/material/Autocomplete';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
+import SaveStatus from '@/components/common/SaveStatus';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
@@ -432,12 +432,7 @@ export default function PartProcurementPricingPanel({
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           Cost
         </Typography>
-        {saving && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
-            <CloudSyncOutlinedIcon fontSize="small" />
-            <Typography variant="caption">Saving…</Typography>
-          </Box>
-        )}
+        <SaveStatus state={saving ? 'saving' : 'idle'} />
       </Box>
 
       {error && (

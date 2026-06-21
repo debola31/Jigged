@@ -21,6 +21,7 @@ import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import Chip from '@mui/material/Chip';
+import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
@@ -28,7 +29,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
 import PercentIcon from '@mui/icons-material/Percent';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -56,6 +56,7 @@ import type { Part } from '@/types/part';
 // Grid sees the change as row-data, not a stale closure.
 type PartRow = Part & { is_priceable: boolean };
 type SourceFilter = 'all' | 'made' | 'bought';
+type CompletenessFilter = 'all' | 'complete' | 'incomplete';
 
 export default function PartsPage() {
   const router = useRouter();
@@ -76,6 +77,9 @@ export default function PartsPage() {
   // the toggle instant and matches the inventory list's status-filter
   // pattern. Shop-scale row counts make the cost negligible.
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  // Completeness = priceable (set up enough to quote). Drives the inline
+  // incomplete marker + this filter, replacing the old Pricing column.
+  const [completenessFilter, setCompletenessFilter] = useState<CompletenessFilter>('all');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'part_name',
     sort: 'asc',
@@ -150,11 +154,13 @@ export default function PartsPage() {
   // from the RPC set so the grid, gridHeight, and empty-state checks all
   // see the same row set. The map runs O(n) — fine at shop scale.
   const filteredRows = useMemo<PartRow[]>(() => {
-    const filtered = sourceFilter === 'all'
-      ? rows
-      : rows.filter((r) => r.source === sourceFilter);
-    return filtered.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
-  }, [rows, sourceFilter, priceableIds]);
+    const bySource =
+      sourceFilter === 'all' ? rows : rows.filter((r) => r.source === sourceFilter);
+    const stamped = bySource.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
+    if (completenessFilter === 'complete') return stamped.filter((r) => r.is_priceable);
+    if (completenessFilter === 'incomplete') return stamped.filter((r) => !r.is_priceable);
+    return stamped;
+  }, [rows, sourceFilter, priceableIds, completenessFilter]);
 
   const gridHeight = useMemo(() => {
     if (loading || filteredRows.length === 0) return 600;
@@ -260,8 +266,29 @@ export default function PartsPage() {
     {
       field: 'part_name',
       headerName: 'Part Name',
-      width: 240,
+      width: 260,
       pinned: 'left' as const,
+      cellStyle: { display: 'flex', alignItems: 'center' },
+      // Incomplete marker inline with the name (replaces the Pricing column):
+      // a ⚠ next to any part that isn't priceable yet. Legend below the toolbar.
+      cellRenderer: (params: ICellRendererParams<PartRow>) => {
+        if (!params.data) return (params.value as string) ?? '';
+        return (
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+            {!params.data.is_priceable && (
+              <Tooltip title="Incomplete — needs setup before it can be quoted">
+                <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main', flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            <Box
+              component="span"
+              sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {params.value}
+            </Box>
+          </Box>
+        );
+      },
     },
     {
       field: 'description',
@@ -304,41 +331,6 @@ export default function PartsPage() {
       },
     },
     {
-      // Both-states explicit: ✓ Priced (success) vs ⚠ No pricing (warning).
-      // "Priceable" = at least one tier yields a non-null cost via
-      // compute_part_cost_at_qty — same signal the quote form's
-      // hasUsableTier check uses, served by the get_priceable_part_ids RPC.
-      // Sorting puts the gaps at the top so a header click surfaces work.
-      colId: 'pricing_status',
-      headerName: 'Pricing',
-      width: 160,
-      sortable: true,
-      valueGetter: (params) => (params.data?.is_priceable ? 1 : 0),
-      cellStyle: { display: 'flex', alignItems: 'center' },
-      cellRenderer: (params: ICellRendererParams<PartRow>) => {
-        if (!params.data) return null;
-        const isPriceable = params.data.is_priceable;
-        return (
-          <Box
-            sx={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 0.5,
-              color: isPriceable ? 'success.main' : 'warning.main',
-              fontWeight: 500,
-            }}
-          >
-            {isPriceable ? (
-              <CheckCircleOutlineIcon fontSize="small" />
-            ) : (
-              <WarningAmberIcon fontSize="small" />
-            )}
-            <span>{isPriceable ? 'Priced' : 'No pricing'}</span>
-          </Box>
-        );
-      },
-    },
-    {
       field: 'updated_at',
       headerName: 'Updated',
       width: 140,
@@ -347,7 +339,8 @@ export default function PartsPage() {
   ];
 
   const renderEmptyState = () => {
-    const isFiltered = !!searchDebounced || sourceFilter !== 'all';
+    const isFiltered =
+      !!searchDebounced || sourceFilter !== 'all' || completenessFilter !== 'all';
     if (isFiltered) {
       return (
         <>
@@ -422,6 +415,20 @@ export default function PartsPage() {
           </Select>
         </FormControl>
 
+        <FormControl size="small" sx={{ minWidth: 170 }}>
+          <InputLabel id="parts-completeness-label">Completeness</InputLabel>
+          <Select
+            labelId="parts-completeness-label"
+            value={completenessFilter}
+            label="Completeness"
+            onChange={(e) => setCompletenessFilter(e.target.value as CompletenessFilter)}
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="complete">Complete</MenuItem>
+            <MenuItem value="incomplete">Incomplete</MenuItem>
+          </Select>
+        </FormControl>
+
         {selectedIds.length > 0 && (
           <>
             <ExportCsvButton
@@ -464,6 +471,14 @@ export default function PartsPage() {
         >
           Add Part
         </Button>
+      </Box>
+
+      {/* Legend for the inline incomplete marker. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2, color: 'text.secondary' }}>
+        <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main' }} />
+        <Typography variant="caption">
+          Incomplete — needs setup (routing/materials, or a vendor cost) before it can be quoted.
+        </Typography>
       </Box>
 
       {!loading && filteredRows.length === 0 ? (

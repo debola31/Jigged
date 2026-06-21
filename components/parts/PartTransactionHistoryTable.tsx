@@ -25,6 +25,7 @@ import {
   formatQuantityWithUnit,
 } from '@/types/partTransaction';
 import { getPartTransactions, updateTransactionNotes } from '@/utils/partsAccess';
+import SaveStatus from '@/components/common/SaveStatus';
 
 interface PartTransactionHistoryTableProps {
   partId: string;
@@ -223,19 +224,22 @@ export default function PartTransactionHistoryTable({
                   </TableCell>
                   <TableCell>
                     {editingId === transaction.id ? (
-                      <TextField
-                        value={editingNotes}
-                        onChange={(e) => setEditingNotes(e.target.value)}
-                        onBlur={handleSaveNotes}
-                        onKeyDown={handleNotesKeyDown}
-                        size="small"
-                        multiline
-                        maxRows={3}
-                        autoFocus
-                        disabled={savingNotes}
-                        sx={{ minWidth: 180 }}
-                        placeholder="Add notes..."
-                      />
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        <TextField
+                          value={editingNotes}
+                          onChange={(e) => setEditingNotes(e.target.value)}
+                          onBlur={handleSaveNotes}
+                          onKeyDown={handleNotesKeyDown}
+                          size="small"
+                          multiline
+                          maxRows={3}
+                          autoFocus
+                          disabled={savingNotes}
+                          sx={{ minWidth: 180 }}
+                          placeholder="Add notes..."
+                        />
+                        {savingNotes && <SaveStatus state="saving" />}
+                      </Box>
                     ) : (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                         <Typography

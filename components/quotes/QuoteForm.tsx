@@ -45,7 +45,6 @@ import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
-import PartFormModal from '@/components/parts/PartFormModal';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import type {
   Customer,
@@ -214,8 +213,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [error, setError] = useState<string | null>(null);
 
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
-  const [partModalOpen, setPartModalOpen] = useState(false);
-  const [partModalTargetIdx, setPartModalTargetIdx] = useState<number | null>(null);
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -521,11 +518,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
   };
 
-  const openCreatePartModalForBlock = (idx: number) => {
-    setPartModalTargetIdx(idx);
-    setPartModalOpen(true);
-  };
-
   const addRow = (blockIdx: number) => {
     setPartBlocks((prev) => {
       const block = prev[blockIdx];
@@ -613,24 +605,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     });
     handleCustomerChange(customer.id);
     setCustomerModalOpen(false);
-  };
-
-  const handlePartCreated = async (part: { id: string }) => {
-    const idx = partModalTargetIdx;
-    setPartModalOpen(false);
-    setPartModalTargetIdx(null);
-    if (idx === null) return;
-    try {
-      const [hydrated] = await getPartsForSelectByIds([part.id]);
-      if (!hydrated) return;
-      setPartBlocks((prev) => {
-        const next = [...prev];
-        next[idx] = { ...emptyBlock(), part: hydrated };
-        return next;
-      });
-    } catch (err) {
-      console.error('Failed to hydrate created part:', err);
-    }
   };
 
   /** Per-row live preview of the resolved tier + total: blockPreviews[block][row].
@@ -1063,7 +1037,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       companyId={companyId}
                       value={block.part}
                       onChange={(option) => updatePartInBlock(idx, option)}
-                      onCreateNew={() => openCreatePartModalForBlock(idx)}
+                      onCreateNew={() =>
+                        window.open(
+                          `/dashboard/${companyId}/parts/new?from=quotes`,
+                          '_blank',
+                          'noopener,noreferrer',
+                        )
+                      }
                       label={`Part ${idx + 1}`}
                     />
                   </Box>
@@ -1307,15 +1287,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         Add quantity
                       </Button>
                       <Box sx={{ flex: 1 }} />
-                      {blockOverrideActive && (
-                        <Chip
-                          size="small"
-                          label="adjusted for this quote"
-                          color="success"
-                          variant="outlined"
-                          sx={{ height: 20 }}
-                        />
-                      )}
+                      {blockOverrideActive &&
+                        (hasUsableTier ? (
+                          <Chip
+                            size="small"
+                            label="adjusted for this quote"
+                            color="success"
+                            variant="outlined"
+                            sx={{ height: 20 }}
+                          />
+                        ) : (
+                          // Override on a not-yet-costed part: it's an estimate.
+                          <Chip
+                            size="small"
+                            label="estimate — needs cost setup"
+                            color="warning"
+                            variant="outlined"
+                            sx={{ height: 20 }}
+                          />
+                        ))}
                       <Button
                         size="small"
                         onClick={() =>
@@ -1466,15 +1456,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         open={customerModalOpen}
         onClose={() => setCustomerModalOpen(false)}
         onCreated={handleCustomerCreated}
-        companyId={companyId}
-      />
-      <PartFormModal
-        open={partModalOpen}
-        onClose={() => {
-          setPartModalOpen(false);
-          setPartModalTargetIdx(null);
-        }}
-        onCreated={handlePartCreated}
         companyId={companyId}
       />
     </Box>

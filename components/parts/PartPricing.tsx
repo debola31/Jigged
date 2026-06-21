@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
@@ -24,7 +24,6 @@ import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckIcon from '@mui/icons-material/Check';
-import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
 import PercentIcon from '@mui/icons-material/Percent';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -48,6 +47,7 @@ import {
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
+import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 
 interface PartPricingProps {
   companyId: string;
@@ -83,7 +83,6 @@ interface EditRow {
   baseCostPerUnit: number | null;
 }
 
-const AUTOSAVE_DEBOUNCE_MS = 600;
 const DEFAULT_CUSTOM_MARKUP = '25';
 
 function formatCurrency(value: number | null | undefined): string {
@@ -149,7 +148,11 @@ export default function PartPricing({
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Pricing feeds quotes (financial data), so tier edits are committed via an
+  // explicit Save — not auto-saved. `dirty` tracks unsaved edits.
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [dirty, setDirty] = useState(false);
+  const saving = saveState === 'saving';
 
   // Local mirror of part.markup_rate_id so the UI flips instantly between
   // rate-linked (read-only) and Custom (editable) without waiting for the
@@ -163,9 +166,6 @@ export default function PartPricing({
   const [userRates, setUserRates] = useState<MarkupRate[]>([]);
   const [applyingRateName, setApplyingRateName] = useState<string | null>(null);
   const [appliedRateName, setAppliedRateName] = useState<string | null>(null);
-
-  const queueRef = useRef<Promise<void>>(Promise.resolve());
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const linkedRate = userRates.find((r) => r.id === linkedRateId) ?? null;
   const isCustom = linkedRateId === null;
@@ -223,77 +223,62 @@ export default function PartPricing({
     };
   }, [companyId]);
 
-  const scheduleSave = useCallback(
-    (next: EditRow[]) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        const job = queueRef.current.then(async () => {
-          // Skip if any row has an invalid qty (markup might still be in flight).
-          const allValid = next.every((r) => {
-            const q = parseNumber(r.quantity);
-            return q !== null && q > 0;
-          });
-          if (!allValid) return;
-
-          setSaving(true);
-          setError(null);
-          try {
-            const sortedRows = [...next].sort((a, b) => a.sequence - b.sequence);
-            const payload = sortedRows.map((r, i) => ({
-              id: r.id,
-              sequence: (i + 1) * 10,
-              quantity: parseNumber(r.quantity) as number,
-              markup_percent: parseNumber(r.markupPercent),
-            }));
-            // No rateId arg → manual edit path; replaceTiersForPart will set
-            // markup_rate_id to null, flipping the part to Custom.
-            await replaceTiersForPart(companyId, partId, payload);
-            setLinkedRateId(null);
-
-            // Reload so newly-inserted rows pick up real ids; preserve user's
-            // typed strings where possible.
-            const fresh = await getTiersForPart(partId);
-            setRows((prev) => {
-              const byId = new Map(prev.filter((r) => r.id).map((r) => [r.id, r]));
-              return fresh.map((t) => {
-                const existing = t.id ? byId.get(t.id) : undefined;
-                return existing
-                  ? { ...existing, id: t.id }
-                  : recomputeRow(
-                      {
-                        id: t.id,
-                        sequence: t.sequence,
-                        quantity: String(t.quantity),
-                        markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-                        // unitPrice is recomputed live by recomputeRow below; the
-        // part_pricing_tiers.unit_price column has been dropped — prices
-        // are always derived from the routing + BOM rollup.
-        unitPrice: '',
-                        baseCostPerUnit: 0,
-                      },
-                      breakdown,
-                    );
-              });
-            });
-          } catch (err) {
-            console.error('Failed to save pricing tiers:', err);
-            setError(err instanceof Error ? err.message : 'Failed to save pricing tiers');
-          } finally {
-            setSaving(false);
-          }
-        });
-        queueRef.current = job.catch(() => undefined);
-      }, AUTOSAVE_DEBOUNCE_MS);
-    },
-    [companyId, partId],
-  );
-
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
-    setRows((prev) => {
-      const next = mapper(prev);
-      scheduleSave(next);
-      return next;
+    setRows((prev) => mapper(prev));
+    setDirty(true);
+    setSaveState('idle');
+  };
+
+  /**
+   * Persist the current tiers. Explicit (button-driven) rather than auto-saved
+   * because pricing feeds quotes. Saving a rate-linked part forks it to Custom
+   * (replaceTiersForPart with no rateId sets markup_rate_id = null).
+   */
+  const handleSave = async (): Promise<void> => {
+    const allValid = rows.every((r) => {
+      const q = parseNumber(r.quantity);
+      return q !== null && q > 0;
     });
+    if (!allValid) {
+      setError('Every tier needs a quantity of at least 1.');
+      return;
+    }
+    setSaveState('saving');
+    setError(null);
+    try {
+      const sortedRows = [...rows].sort((a, b) => a.sequence - b.sequence);
+      const payload = sortedRows.map((r, i) => ({
+        id: r.id,
+        sequence: (i + 1) * 10,
+        quantity: parseNumber(r.quantity) as number,
+        markup_percent: parseNumber(r.markupPercent),
+      }));
+      await replaceTiersForPart(companyId, partId, payload);
+      setLinkedRateId(null);
+      // Reload so newly-inserted rows pick up real ids.
+      const fresh = await getTiersForPart(partId);
+      setRows(
+        fresh.map((t) =>
+          recomputeRow(
+            {
+              id: t.id,
+              sequence: t.sequence,
+              quantity: String(t.quantity),
+              markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
+              unitPrice: '',
+              baseCostPerUnit: 0,
+            },
+            breakdown,
+          ),
+        ),
+      );
+      setDirty(false);
+      setSaveState('saved');
+    } catch (err) {
+      console.error('Failed to save pricing tiers:', err);
+      setSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to save pricing tiers');
+    }
   };
 
   const handleQuantityChange = (idx: number, value: string): void => {
@@ -438,12 +423,7 @@ export default function PartPricing({
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           Pricing
         </Typography>
-        {saving && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
-            <CloudSyncOutlinedIcon fontSize="small" />
-            <Typography variant="caption">Saving…</Typography>
-          </Box>
-        )}
+        <SaveStatus state={saveState} />
       </Box>
       <Button
         variant="outlined"
@@ -570,6 +550,42 @@ export default function PartPricing({
           {/* (1) RATE-LINKED — read-only. */}
           {showReadOnly && (
             <>
+              {/* Make customizing obvious (the old small "Switch to Custom"
+                  button was missed). Prominent contained action at the top. */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 2,
+                  mb: 2,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Following the <strong>{linkedRate?.name ?? 'selected'}</strong> rate.
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {linkedRate && (
+                    <Button
+                      size="small"
+                      component={Link}
+                      href={`/dashboard/${companyId}/markup-rates/${linkedRate.id}/edit`}
+                      endIcon={<OpenInNewIcon fontSize="small" />}
+                    >
+                      Edit the rate
+                    </Button>
+                  )}
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<TuneIcon />}
+                    onClick={handleSwitchToCustom}
+                  >
+                    Customize pricing
+                  </Button>
+                </Box>
+              </Box>
               <TableContainer>
 
                 <Table size="small">
@@ -618,36 +634,6 @@ export default function PartPricing({
                   </TableBody>
                 </Table>
               </TableContainer>
-
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  mt: 2,
-                  flexWrap: 'wrap',
-                  gap: 1,
-                }}
-              >
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<TuneIcon />}
-                  onClick={handleSwitchToCustom}
-                >
-                  Switch to Custom to edit
-                </Button>
-                {linkedRate && (
-                  <Button
-                    size="small"
-                    component={Link}
-                    href={`/dashboard/${companyId}/markup-rates/${linkedRate.id}/edit`}
-                    endIcon={<OpenInNewIcon fontSize="small" />}
-                  >
-                    Edit the {linkedRate.name} rate
-                  </Button>
-                )}
-              </Box>
             </>
           )}
 
@@ -733,10 +719,35 @@ export default function PartPricing({
                 </Table>
               </TableContainer>
 
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  mt: 2,
+                  gap: 1.5,
+                  flexWrap: 'wrap',
+                }}
+              >
                 <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
                   Add tier
                 </Button>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  {dirty && saveState !== 'saving' && (
+                    <Typography variant="caption" color="text.secondary">
+                      Unsaved changes
+                    </Typography>
+                  )}
+                  <SaveStatus state={saveState} />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={handleSave}
+                    disabled={!dirty || saving}
+                  >
+                    Save pricing
+                  </Button>
+                </Box>
               </Box>
             </>
           )}

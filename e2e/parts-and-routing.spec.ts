@@ -21,47 +21,36 @@ test.describe('Parts and Routing workflow', () => {
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);
 
-    // "Add Part" now opens an inline PartFormModal instead of navigating to
-    // /parts/new — scope all field interactions to the dialog so we don't
-    // accidentally match the (off-screen) parts list behind it.
+    // "Add Part" navigates to the create-mode part workspace (/parts/new) —
+    // the create modal was retired in the parts re-architecture. Identity
+    // fields render directly on the page (the create view = the saved view).
     await page.getByRole('button', { name: /Add Part/i }).click();
-    const partFormDialog = page.getByRole('dialog');
-    await expect(partFormDialog).toBeVisible();
+    await expect(page).toHaveURL(/\/parts\/new/, { timeout: 15_000 });
 
-    // Fill part name (required) — Source defaults to 'made' (the modal's
-    // default), which is what the rest of this spec needs to exercise the
-    // routing panel.
-    await partFormDialog.getByLabel(/Part Name/i).fill(partName);
+    // Fill part name (required) — Source defaults to 'made', which the routing
+    // steps below need.
+    await page.getByLabel(/Part Name/i).fill(partName);
 
     // Fill description
-    await partFormDialog.getByLabel(/Description/i).fill(partDescription);
+    await page.getByLabel(/Description/i).fill(partDescription);
 
-    // Pick a primary unit. The parts_requires_unit DB constraint (added in
-    // 20260602000000_fix_cost_error_part_name_and_unit_canonicalization)
-    // makes primary_unit NOT NULL for every part, and PartFormModal gates
-    // submit on the same rule client-side — without this, validation blocks
-    // Create and the modal never closes.
-    //
-    // UnitOfMeasurementSelect wraps an MUI Autocomplete. A bare click on the
-    // combobox doesn't reliably open the listbox, so fill the input instead —
-    // that opens the dropdown AND filters to matching options. The rendered
-    // label for the 'each' standard unit is "Each (ea)".
-    const unitCombobox = partFormDialog.getByRole('combobox', { name: /Unit of measurement/i });
+    // Pick a primary unit. The parts_requires_unit DB constraint makes
+    // primary_unit NOT NULL for every part, and the create gate enforces the
+    // same rule client-side. UnitOfMeasurementSelect wraps an MUI Autocomplete:
+    // fill the input to open + filter; the 'each' option renders as "Each (ea)".
+    const unitCombobox = page.getByRole('combobox', { name: /Unit of measurement/i });
     await expect(unitCombobox).toBeVisible();
     await unitCombobox.fill('each');
     await page.getByRole('option', { name: /Each \(ea\)/i }).first().click();
 
-    // Submit — primary action is "Create" (was "Save" in the route-based form).
-    await partFormDialog.getByRole('button', { name: /^Create$/i }).click();
+    // Submit — the create gate's primary action is "Create part".
+    await page.getByRole('button', { name: /Create part/i }).click();
 
-    // After creation the modal closes and we land on the part detail page
+    // The workspace redirects (router.replace) into the live part page
     // (`/parts/{partId}?from=parts`). Anchor on the partId path segment.
-    await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/parts\/(?!new)[^/?]+/, { timeout: 15_000 });
 
-    // Verify the part was created. The part detail page renders the part
-    // name in the page heading AND inside the BOM panel's descriptive copy
-    // ("Parts consumed when manufacturing this <name>."), so a bare
-    // getByText trips strict mode — scope to the heading.
+    // The sticky part header renders the part name as the page heading.
     await expect(page.getByRole('heading', { name: partName })).toBeVisible();
 
     // ── Step 2: Add an operation via the inline routing editor ──

@@ -47,6 +47,20 @@ export interface Part {
 }
 
 /**
+ * A free-text note on a part, authored by a company member. Append-only feed
+ * (mirrors JobNote). `author_id` is the author's user_company_access id — used
+ * to gate the delete affordance to the author; `author_name` is for display.
+ */
+export interface PartNote {
+  id: string;
+  part_id: string;
+  body: string;
+  created_at: string;
+  author_id: string | null;
+  author_name: string | null;
+}
+
+/**
  * A secondary unit of measure for a part with a conversion factor back to
  * the part's `primary_unit`. Replaces the old `inventory_unit_conversions`.
  */

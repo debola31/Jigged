@@ -274,6 +274,32 @@ export type Database = {
           },
         ]
       }
+      company_order_counters: {
+        Row: {
+          company_id: string
+          next_number: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          next_number?: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          next_number?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_order_counters_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_addresses: {
         Row: {
           address_line1: string | null
@@ -2610,7 +2636,7 @@ export type Database = {
         }
         Returns: string
       }
-      generate_po_job_number: {
+      generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string
       }
@@ -2663,6 +2689,7 @@ export type Database = {
         Args: { p_job_part_id: string }
         Returns: string
       }
+      next_order_number: { Args: { company_uuid: string }; Returns: number }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }
         Returns: undefined

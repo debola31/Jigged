@@ -438,53 +438,43 @@ export async function createJobFromPurchaseOrder(
   const shippingAddressId = addresses.find((a) => a.default_shipping)?.id ?? null;
   const contactId = contacts.find((c) => c.is_primary)?.id ?? null;
 
-  // Mint a PO-J- job number and insert the header. MAX+1 can race two
-  // concurrent creates onto the same number; jobs_company_id_job_number_key
-  // catches it, so re-mint and retry once.
-  let job: { id: string; job_number: string } | null = null;
-  for (let attempt = 0; attempt < 2 && !job; attempt++) {
-    const { data: jobNumber, error: numErr } = await supabase.rpc('generate_po_job_number', {
-      company_uuid: companyId,
-    });
-    if (numErr || !jobNumber) {
-      console.error('Error generating PO job number:', numErr);
-      throw numErr || new Error('Could not generate a job number.');
-    }
-
-    const insertPayload: JobInsert = {
-      company_id: companyId,
-      quote_id: null,
-      customer_id: input.customer_id,
-      job_number: jobNumber as string,
-      production_status: 'not_started',
-      fulfillment_status: 'unshipped',
-      due_date: input.due_date || null,
-      lead_time_days: null,
-      customer_po_number: customerPoNumber,
-      billing_address_id: billingAddressId,
-      shipping_address_id: shippingAddressId,
-      contact_id: contactId,
-      created_by: user.id,
-    };
-
-    const { data: inserted, error: jobError } = await supabase
-      .from('jobs')
-      .insert(insertPayload)
-      .select('id, job_number')
-      .single();
-
-    if (jobError) {
-      // 23505 = unique_violation on (company_id, job_number) — re-mint + retry.
-      if ((jobError as { code?: string }).code === '23505' && attempt === 0) {
-        continue;
-      }
-      console.error('Error creating job from PO:', jobError);
-      throw jobError;
-    }
-    job = inserted;
+  // Draw a J- number from the shared per-company order counter
+  // (generate_direct_job_number -> next_order_number). It's atomic, so two
+  // concurrent creates get distinct numbers and the number can never collide
+  // with a quote's reserved J-N — no re-mint/retry dance needed.
+  const { data: jobNumber, error: numErr } = await supabase.rpc('generate_direct_job_number', {
+    company_uuid: companyId,
+  });
+  if (numErr || !jobNumber) {
+    console.error('Error generating job number:', numErr);
+    throw numErr || new Error('Could not generate a job number.');
   }
-  if (!job) {
-    throw new Error('Could not create the job — please try again.');
+
+  const insertPayload: JobInsert = {
+    company_id: companyId,
+    quote_id: null,
+    customer_id: input.customer_id,
+    job_number: jobNumber as string,
+    production_status: 'not_started',
+    fulfillment_status: 'unshipped',
+    due_date: input.due_date || null,
+    lead_time_days: null,
+    customer_po_number: customerPoNumber,
+    billing_address_id: billingAddressId,
+    shipping_address_id: shippingAddressId,
+    contact_id: contactId,
+    created_by: user.id,
+  };
+
+  const { data: job, error: jobError } = await supabase
+    .from('jobs')
+    .insert(insertPayload)
+    .select('id, job_number')
+    .single();
+
+  if (jobError || !job) {
+    console.error('Error creating job from PO:', jobError);
+    throw jobError || new Error('Could not create the job — please try again.');
   }
 
   // One job_part per line carrying the agreed price; clone each part's routing

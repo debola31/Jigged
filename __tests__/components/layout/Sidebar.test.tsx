@@ -77,19 +77,10 @@ describe('Sidebar', () => {
     }
   });
 
-  it('hides Shipments by default (feature flag off)', () => {
-    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: false },
-      loading: false,
-    });
-
-    render(<Sidebar />);
-
-    expect(screen.queryByText('Shipments')).not.toBeInTheDocument();
-  });
-
-  it('shows Shipments when the feature flag is enabled', () => {
+  // The Shipments nav item (the only feature-flag-gated entry) was removed
+  // when the standalone Shipments page was retired — a slip now lives on its
+  // job. The flag-gating + skeleton tests went with it.
+  it('does not render a Shipments nav item', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
     mockUseCompanyFeatures.mockReturnValue({
       features: { shipments: true },
@@ -98,21 +89,6 @@ describe('Sidebar', () => {
 
     render(<Sidebar />);
 
-    expect(screen.getByText('Shipments')).toBeInTheDocument();
-  });
-
-  it('renders a skeleton placeholder for flag-gated items while features load', () => {
-    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: false },
-      loading: true,
-    });
-
-    render(<Sidebar />);
-
-    // Shipments text should not appear yet (we don't know whether to show it).
     expect(screen.queryByText('Shipments')).not.toBeInTheDocument();
-    // But other items are still rendered alongside the placeholder.
-    expect(screen.getByText('Jobs')).toBeInTheDocument();
   });
 });

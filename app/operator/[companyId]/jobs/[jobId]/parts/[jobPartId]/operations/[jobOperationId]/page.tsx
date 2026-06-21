@@ -201,10 +201,38 @@ export default function OperatorOperationActionPage() {
             />
           </Box>
 
-          <Typography variant="h6">{job.operation_name || 'Operation'}</Typography>
+          {/* Lead with the part (what they're making). The operation's work
+              center is intentionally NOT repeated here — it's already shown as
+              the selected station in the header (and in the mismatch guard). */}
+          <Typography variant="h6">{job.part_name || 'Part'}</Typography>
+          {job.part_description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              {job.part_description}
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary">
-            {job.part_name || 'Part'} &middot; Order qty {job.part_quantity}
+            Order qty {job.part_quantity}
           </Typography>
+
+          {job.operation_instructions && (
+            <Box
+              sx={{
+                mt: 1.5,
+                p: 1.5,
+                borderRadius: 1,
+                bgcolor: 'rgba(255, 255, 255, 0.04)',
+                borderLeft: '3px solid',
+                borderColor: 'primary.main',
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" display="block">
+                Instructions
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {job.operation_instructions}
+              </Typography>
+            </Box>
+          )}
 
           {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>

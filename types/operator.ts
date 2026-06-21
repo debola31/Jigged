@@ -65,6 +65,7 @@ export interface OperatorJobDetail {
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
+  part_description: string | null;
   part_quantity: number;
   /** job_parts.production_status. */
   production_status: string;
@@ -72,6 +73,8 @@ export interface OperatorJobDetail {
   operation_id: string | null;
   operation_name: string | null;
   operation_status: string | null;
+  /** job_operations.instructions for this step (shop-floor instructions). */
+  operation_instructions: string | null;
   /** Work center this operation runs at — drives the station-match guard. */
   operation_work_center_id: string | null;
   operation_work_center_name: string | null;

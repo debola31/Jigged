@@ -31,8 +31,11 @@ import {
 } from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
-// Side of the per-operation QR drawn inside each table row (points).
-const OP_QR_SIZE = 46;
+// Side of the per-operation QR drawn inside each table row (points). Sized
+// generously and paired with a quiet zone (toDataURL margin) + tall rows
+// (bodyStyles.minCellHeight) so adjacent QR codes are far enough apart that a
+// phone camera locks onto a single one instead of getting confused by neighbors.
+const OP_QR_SIZE = 56;
 
 function formatMinutes(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -86,7 +89,9 @@ export async function generateJobTravelerPdf(
         `${baseUrl}/operator/${companyId}/login` +
         `?job=${traveler.job_id}&part=${traveler.job_part_id}&operation=${op.id}`;
       try {
-        qrByOpId.set(op.id, await QRCode.toDataURL(url, { margin: 0, width: 160, errorCorrectionLevel: 'M' }));
+        // margin: 2 = a white quiet zone baked into the image so the scanner
+        // can isolate this code from its neighbors on the sheet.
+        qrByOpId.set(op.id, await QRCode.toDataURL(url, { margin: 2, width: 220, errorCorrectionLevel: 'M' }));
       } catch {
         // Skip this row's QR; the rest of the traveler is still useful.
       }
@@ -248,8 +253,9 @@ export async function generateJobTravelerPdf(
       lineWidth: 0.5,
     },
     bodyStyles: {
-      // Keep rows tall enough for the per-operation QR.
-      minCellHeight: OP_QR_SIZE + 8,
+      // Tall rows put vertical whitespace between adjacent QR codes so a phone
+      // camera doesn't see two codes at once.
+      minCellHeight: OP_QR_SIZE + 30,
     },
     columnStyles: {
       0: { cellWidth: 38, halign: 'center' },
@@ -257,7 +263,7 @@ export async function generateJobTravelerPdf(
       2: { cellWidth: 'auto' },
       3: { cellWidth: 58, halign: 'right' },
       4: { cellWidth: 66, halign: 'right' },
-      5: { cellWidth: OP_QR_SIZE + 14, halign: 'center' },
+      5: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
     // Draw each operation's QR centered in its Scan cell.
     didDrawCell: (data) => {

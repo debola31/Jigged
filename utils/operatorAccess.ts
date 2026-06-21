@@ -300,6 +300,7 @@ interface PartHeaderForDetail {
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
+  part_description: string | null;
 }
 
 // The single operation an operator detail view is built around.
@@ -307,6 +308,7 @@ interface CurrentOpForDetail {
   id: string;
   operation_name: string;
   status: string;
+  instructions: string | null;
   estimated_setup_minutes: number | null;
   estimated_run_minutes_per_unit: number | null;
   work_center_id: string | null;
@@ -327,7 +329,7 @@ async function loadPartHeader(
     .from('job_parts')
     .select(`
       id, job_id, production_status, quantity,
-      parts(part_name),
+      parts(part_name, description),
       jobs!inner(id, job_number, customers(name))
     `)
     .eq('id', jobPartId)
@@ -341,7 +343,7 @@ async function loadPartHeader(
     job_id: string;
     production_status: string;
     quantity: number;
-    parts: { part_name: string } | { part_name: string }[] | null;
+    parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
     jobs: { id: string; job_number: string; customers: { name: string } | { name: string }[] | null } | null;
   };
   const p = part as PartRow;
@@ -359,6 +361,7 @@ async function loadPartHeader(
     job_number: jobJoin?.job_number ?? '',
     customer_name: customerJoin?.name ?? null,
     part_name: partsJoin?.part_name ?? null,
+    part_description: partsJoin?.description ?? null,
   };
 }
 
@@ -398,11 +401,13 @@ async function assembleJobPartDetail(
     job_number: header.job_number,
     customer_name: header.customer_name,
     part_name: header.part_name,
+    part_description: header.part_description,
     part_quantity: header.quantity,
     production_status: header.production_status,
     operation_id: currentOp?.id || null,
     operation_name: currentOp?.operation_name || null,
     operation_status: currentOp?.status || null,
+    operation_instructions: currentOp?.instructions ?? null,
     operation_work_center_id: currentOp?.work_center_id ?? null,
     operation_work_center_name: currentOp?.work_center_name ?? null,
     estimated_minutes: estimatedMinutes,
@@ -425,7 +430,7 @@ export async function getOperatorOperationDetail(
 
   const { data: op, error } = await supabase
     .from('job_operations')
-    .select('id, job_part_id, operation_name, status, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name)')
+    .select('id, job_part_id, operation_name, status, instructions, estimated_setup_minutes, estimated_run_minutes_per_unit, work_center_id, work_center:work_centers(name)')
     .eq('id', jobOperationId)
     .single();
 
@@ -439,6 +444,7 @@ export async function getOperatorOperationDetail(
     id: op.id,
     operation_name: op.operation_name,
     status: op.status,
+    instructions: op.instructions,
     estimated_setup_minutes: op.estimated_setup_minutes,
     estimated_run_minutes_per_unit: op.estimated_run_minutes_per_unit,
     work_center_id: op.work_center_id,

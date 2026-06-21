@@ -165,10 +165,12 @@ export default function OperatorJobTravelerPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
+      {/* Back to the operator's station jobs list (not the parts hub, which
+          auto-redirects single-part jobs straight back to this traveler). */}
       <IconButton
-        onClick={() => router.push(`/operator/${companyId}/jobs/${jobId}`)}
+        onClick={() => router.push(`/operator/${companyId}/jobs`)}
         sx={{ mb: 2 }}
-        aria-label="Back to parts"
+        aria-label="Back to jobs"
       >
         <ArrowBackIcon />
       </IconButton>

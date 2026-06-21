@@ -80,6 +80,7 @@ export default function RoutingOperationsList({
         workCenterName: value.workCenter.name,
         workCenterKind: value.workCenter.kind,
         vendorName: value.workCenter.vendor_name,
+        workCenterLaborRate: value.workCenter.labor_rate,
         setupMinutes: value.setupMinutes,
         cycleMinutesPerUnit: value.cycleMinutesPerUnit,
         laborRateOverride: value.laborRateOverride,

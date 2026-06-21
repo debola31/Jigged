@@ -11,6 +11,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { formatTime } from '@/types/routings';
@@ -37,6 +38,10 @@ export interface OperationRowData {
   cycleMinutesPerUnit: number | null;
   /** Internal: optional override for the work center's labor_rate. */
   laborRateOverride: number | null;
+  /** Internal: the work center's own default labor_rate. Together with
+   *  `laborRateOverride` this flags a missing rate (neither set → the
+   *  operation can't be priced), highlighted inline on the row. */
+  workCenterLaborRate: number | null;
   /** External: per-unit price the vendor charges. */
   externalUnitPrice: number | null;
   /** External: flat per-batch setup cost the vendor charges. */
@@ -71,6 +76,26 @@ export default function RoutingOperationRow({
   const placeholder = !row.workCenterId;
   const isExternal = row.workCenterKind === 'external';
 
+  // Localized validation: surface the exact blocker on the offending row
+  // (instead of only a top-of-card "Heads up" banner). An internal op with no
+  // labor rate (override or work-center default) can't be priced; an external
+  // op needs at least a unit price or a setup cost.
+  const missingLaborRate =
+    !placeholder &&
+    !isExternal &&
+    row.laborRateOverride === null &&
+    row.workCenterLaborRate === null;
+  const missingExternalPricing =
+    !placeholder &&
+    isExternal &&
+    !(row.externalUnitPrice && row.externalUnitPrice > 0) &&
+    !(row.externalSetupCost && row.externalSetupCost > 0);
+  const errorMessage = missingLaborRate
+    ? 'Missing labor rate — set a rate on this operation, or a default on its work center.'
+    : missingExternalPricing
+      ? 'Missing pricing — add a unit price or setup cost for this external step.'
+      : null;
+
   // Build the per-row caption based on kind.
   let captionLeft: string;
   let captionRight: string;
@@ -100,7 +125,7 @@ export default function RoutingOperationRow({
         p: 1,
         bgcolor: 'background.paper',
         border: '1px solid',
-        borderColor: placeholder ? 'warning.main' : 'divider',
+        borderColor: errorMessage ? 'error.main' : placeholder ? 'warning.main' : 'divider',
         borderRadius: 1,
         mb: 1,
       }}
@@ -175,6 +200,12 @@ export default function RoutingOperationRow({
               {captionRight}
             </Box>
           </Typography>
+        )}
+        {errorMessage && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.main', mt: 0.25 }}>
+            <ErrorOutlineIcon sx={{ fontSize: 16 }} />
+            <Typography variant="caption">{errorMessage}</Typography>
+          </Box>
         )}
       </Box>
 

@@ -40,6 +40,7 @@ function rowFromOperation(op: RoutingOperationWithWorkCenter): OperationRowData 
     setupMinutes: op.setup_minutes,
     cycleMinutesPerUnit: op.cycle_minutes_per_unit,
     laborRateOverride: op.labor_rate_override,
+    workCenterLaborRate: op.work_center?.labor_rate ?? null,
     externalUnitPrice: op.external_unit_price,
     externalSetupCost: op.external_setup_cost,
     instructions: op.instructions,

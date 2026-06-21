@@ -19,6 +19,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import NextLink from 'next/link';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import {
@@ -35,6 +36,7 @@ import MaterialRowEditor, {
   type MaterialEditorValue,
   type PartSelectOption,
 } from '@/components/parts/MaterialRowEditor';
+import SaveStatus from '@/components/common/SaveStatus';
 
 interface PartBomPanelProps {
   partId: string;
@@ -375,15 +377,18 @@ export default function PartBomPanel({
             <Box />
           )}
           {!readOnly && (
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<AddIcon />}
-              onClick={openAdd}
-              disabled={editorOpen || saving}
-            >
-              Add Material
-            </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <SaveStatus state={saving ? 'saving' : 'idle'} />
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={openAdd}
+                disabled={editorOpen || saving}
+              >
+                Add Material
+              </Button>
+            </Box>
           )}
         </Box>
       )}
@@ -403,6 +408,13 @@ export default function PartBomPanel({
           {rows.map((row) => {
             const child = row.child_part;
             const ladder = tierLadders.get(row.id) ?? [];
+            // Localized validation: once the ladder has loaded, a child with no
+            // breakpoints (or whose costs all resolve to null) can't be costed,
+            // so the parent can't be priced — flag the offending row directly.
+            const ladderLoaded = tierLadders.has(row.id);
+            const missingCost =
+              ladderLoaded &&
+              (ladder.length === 0 || ladder.every((t) => t.costPerUnit === null));
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -426,9 +438,12 @@ export default function PartBomPanel({
                 key={row.id}
                 sx={{
                   py: 1.5,
+                  pl: 1.5,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 1,
+                  borderLeft: '3px solid',
+                  borderColor: missingCost ? 'error.main' : 'transparent',
                 }}
               >
                 {/* Header row: name + BOM qty + actions on one line, all
@@ -491,7 +506,7 @@ export default function PartBomPanel({
                   )}
                 </Box>
 
-                {ladder.length > 0 ? (
+                {ladder.length > 0 && (
                   <Box
                     sx={{
                       display: 'grid',
@@ -529,10 +544,16 @@ export default function PartBomPanel({
                       </Box>
                     ))}
                   </Box>
-                ) : (
-                  <Typography variant="caption" color="text.secondary">
-                    No pricing tiers on this part yet.
-                  </Typography>
+                )}
+                {missingCost && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.main' }}>
+                    <ErrorOutlineIcon sx={{ fontSize: 16 }} />
+                    <Typography variant="caption">
+                      No cost on file — add{' '}
+                      {child.source === 'bought' ? 'a vendor price' : 'pricing tiers'} on this
+                      material so it can be costed.
+                    </Typography>
+                  </Box>
                 )}
               </Box>
             );

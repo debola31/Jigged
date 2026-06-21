@@ -36,7 +36,9 @@ jobs:
       # no shared state to clean up.
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned (not `latest`): resolving "latest" hits the releases API,
+          # which flakes with a Gateway Time-out and isn't reproducible.
+          version: 2.106.0
 
       - name: Start local Supabase
         run: supabase start

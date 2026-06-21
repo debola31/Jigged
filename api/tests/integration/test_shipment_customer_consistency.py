@@ -57,7 +57,7 @@ class TwoCustomerEnv:
     customer_a_id: str
     customer_b_id: str
     customer_a_address_id: str
-    customer_a_ps_format: str
+    job_a_id: str
     job_part_a_id: str
     job_part_b_id: str
 
@@ -72,7 +72,7 @@ def _new_two_customer_env(admin: Client) -> TwoCustomerEnv:
         .data[0]
     )
 
-    def _make_customer_with_job(name_prefix: str) -> tuple[str, str, str]:
+    def _make_customer_with_job(name_prefix: str) -> tuple[str, str, str, str]:
         c = (
             admin.table("customers")
             .insert({"company_id": company["id"], "name": f"{name_prefix}-{suffix}"})
@@ -130,26 +130,17 @@ def _new_two_customer_env(admin: Client) -> TwoCustomerEnv:
             .execute()
             .data[0]
         )
-        return c["id"], addr["id"], jp["id"]
+        return c["id"], addr["id"], job["id"], jp["id"]
 
-    cust_a_id, addr_a_id, jp_a_id = _make_customer_with_job("A")
-    cust_b_id, _addr_b_id, jp_b_id = _make_customer_with_job("B")
-
-    co_row = (
-        admin.table("companies")
-        .select("packing_slip_number_format")
-        .eq("id", company["id"])
-        .single()
-        .execute()
-        .data
-    )
+    cust_a_id, addr_a_id, job_a_id, jp_a_id = _make_customer_with_job("A")
+    cust_b_id, _addr_b_id, _job_b_id, jp_b_id = _make_customer_with_job("B")
 
     return TwoCustomerEnv(
         company_id=company["id"],
         customer_a_id=cust_a_id,
         customer_b_id=cust_b_id,
         customer_a_address_id=addr_a_id,
-        customer_a_ps_format=co_row["packing_slip_number_format"],
+        job_a_id=job_a_id,
         job_part_a_id=jp_a_id,
         job_part_b_id=jp_b_id,
     )
@@ -169,12 +160,13 @@ def _make_shipment_for_a(admin: Client, env: TwoCustomerEnv) -> str:
     SECURITY DEFINER RPC's auth guard, same shape as the existing
     void permutations harness). Returns the new shipment id.
     """
-    ps = env.customer_a_ps_format.replace("{YYYY}", "2026").replace("{seq:0000}", uuid.uuid4().hex[:6].upper())
+    ps = f"PS-XCUST-{uuid.uuid4().hex[:6].upper()}"
     row = (
         admin.table("shipments")
         .insert({
             "company_id": env.company_id,
             "customer_id": env.customer_a_id,
+            "job_id": env.job_a_id,
             "shipping_address_id": env.customer_a_address_id,
             "packing_slip_number": ps,
         })
@@ -296,18 +288,18 @@ def test_shipment_immutability_trigger_allows_other_field_updates(admin: Client)
 
         admin.table("shipments").update({
             "carrier": "UPS",
-            "tracking_number": "1Z999AA10123456784",
+            "notes": "left at dock B",
         }).eq("id", shipment_id).execute()
 
         row = (
             admin.table("shipments")
-            .select("carrier, tracking_number")
+            .select("carrier, notes")
             .eq("id", shipment_id)
             .single()
             .execute()
             .data
         )
         assert row["carrier"] == "UPS"
-        assert row["tracking_number"] == "1Z999AA10123456784"
+        assert row["notes"] == "left at dock B"
     finally:
         _teardown(admin, env)

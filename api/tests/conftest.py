@@ -405,6 +405,7 @@ def seeded_company_b_graph(
             {
                 "company_id": company_b_id,
                 "customer_id": customer_id,
+                "job_id": job_id,
                 "packing_slip_number": "PS-RLS-3D-B-0001",
                 "one_time_address": {
                     "name": "RLS-3d Fixture Address",

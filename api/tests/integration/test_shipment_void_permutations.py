@@ -178,14 +178,8 @@ def _ship(admin: Client, env: ShipmentEnv, quantity: float) -> str:
         "p_one_time_address": None,
         "p_ship_date": None,
         "p_carrier": None,
-        "p_tracking_number": None,
-        "p_shipping_arrangement": None,
-        "p_shipping_arrangement_other": None,
-        "p_weight_lbs": None,
-        "p_package_count": None,
-        "p_package_type": None,
+        "p_shipping_method": None,
         "p_notes": None,
-        "p_coc_text": None,
         "p_line_items": [
             {"job_part_id": env.job_part_id, "quantity": quantity}
         ],
@@ -215,45 +209,34 @@ def _ship_direct(admin: Client, env: ShipmentEnv, quantity: float) -> str:
     )
     pre_status = pre["fulfillment_status"] if pre else "unshipped"
 
-    # Mint the PS# via the helper RPC. next_packing_slip_number is
-    # SECURITY DEFINER + auth guard; the harness needs a direct counter
-    # bump, so do it inline here too.
-    company = (
-        admin.table("companies")
-        .select("packing_slip_number_format, packing_slip_seq_year, packing_slip_next_seq")
-        .eq("id", env.company_id)
+    # Mint the PS# the way create_shipment_with_line_items does:
+    # PS-{jobBase}-{n}, where jobBase strips the alpha prefix off the
+    # job_number and n = count of existing shipments for the job + 1.
+    import re
+    job_row = (
+        admin.table("jobs")
+        .select("job_number")
+        .eq("id", env.job_id)
         .single()
         .execute()
         .data
     )
-    from datetime import date
-    year = date.today().year
-    if company["packing_slip_seq_year"] == year:
-        new_next = company["packing_slip_next_seq"] + 1
-        seq = company["packing_slip_next_seq"]
-    else:
-        new_next = 2
-        seq = 1
-    admin.table("companies").update({
-        "packing_slip_next_seq": new_next,
-        "packing_slip_seq_year": year,
-    }).eq("id", env.company_id).execute()
-    fmt = company["packing_slip_number_format"]
-    # Compose the PS# matching the SQL helper's format substitution.
-    ps_number = fmt.replace("{YYYY}", str(year))
-    import re
-    pad_match = re.search(r"\{seq:(0+)\}", ps_number)
-    if pad_match:
-        width = len(pad_match.group(1))
-        ps_number = re.sub(r"\{seq:0+\}", str(seq).zfill(width), ps_number)
-    else:
-        ps_number = ps_number.replace("{seq}", str(seq))
+    job_base = re.sub(r"^[A-Za-z]+-?", "", job_row["job_number"])
+    existing = (
+        admin.table("shipments")
+        .select("id", count="exact")
+        .eq("job_id", env.job_id)
+        .execute()
+    )
+    seq = (existing.count or 0) + 1
+    ps_number = f"PS-{job_base}-{seq}"
 
     shipment = (
         admin.table("shipments")
         .insert({
             "company_id": env.company_id,
             "customer_id": env.customer_id,
+            "job_id": env.job_id,
             "shipping_address_id": env.customer_address_id,
             "packing_slip_number": ps_number,
         })
@@ -660,6 +643,7 @@ class TestConcurrencyAndUniqueness:
                 .insert({
                     "company_id": env.company_id,
                     "customer_id": env.customer_id,
+                    "job_id": env.job_id,
                     "shipping_address_id": env.customer_address_id,
                     "packing_slip_number": f"PS-EMPTY-{uuid.uuid4().hex[:6]}",
                 })

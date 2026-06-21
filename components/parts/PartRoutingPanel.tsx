@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, CircularProgress, Alert, Typography, Fade } from '@mui/material';
-import CloudDoneOutlinedIcon from '@mui/icons-material/CloudDoneOutlined';
-import CloudSyncOutlinedIcon from '@mui/icons-material/CloudSyncOutlined';
+import { Box, CircularProgress, Alert } from '@mui/material';
+import SaveStatus from '@/components/common/SaveStatus';
 import RoutingOperationsList from '@/components/routings/RoutingOperationsList';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { getRoutingForPart, saveRoutingWithOperations } from '@/utils/routingsAccess';
@@ -160,37 +159,13 @@ export default function PartRoutingPanel({
 
   return (
     <Box>
-      {/* Inline save indicator. Only mounted when there's something to show
-          so a brand-new part doesn't reserve empty space at the top of the
-          card. The first save will introduce the row — small one-time
-          layout shift, but better than perpetual whitespace. */}
-      {(saving || savedAt) && (
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            alignItems: 'center',
-            color: 'text.secondary',
-            mb: 1,
-          }}
-        >
-          {saving ? (
-            <Fade in>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CloudSyncOutlinedIcon fontSize="small" />
-                <Typography variant="caption">Saving…</Typography>
-              </Box>
-            </Fade>
-          ) : (
-            <Fade in>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <CloudDoneOutlinedIcon fontSize="small" color="success" />
-                <Typography variant="caption">All changes saved</Typography>
-              </Box>
-            </Fade>
-          )}
-        </Box>
-      )}
+      {/* Shared auto-save indicator (consistent across the part page). */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+        <SaveStatus
+          state={saving ? 'saving' : savedAt ? 'saved' : 'idle'}
+          savedLabel="All changes saved"
+        />
+      </Box>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

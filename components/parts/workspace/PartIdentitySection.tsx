@@ -17,8 +17,8 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import BuildIcon from '@mui/icons-material/Build';
 import LocalMallIcon from '@mui/icons-material/LocalMall';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
+import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 import type { Part, PartFormData } from '@/types/part';
 import { EMPTY_PART_FORM, partToFormData } from '@/types/part';
 import { createPart, updatePart, checkPartNameExists } from '@/utils/partsAccess';
@@ -26,8 +26,6 @@ import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import UnitOfMeasurementSelect from '@/components/parts/UnitOfMeasurementSelect';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 import { parseOptionalNumber } from '@/lib/validators';
-
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 interface PartIdentitySectionProps {
   mode: 'create' | 'existing';
@@ -70,7 +68,7 @@ export default function PartIdentitySection({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [saveStatus, setSaveStatus] = useState<SaveState>('idle');
 
   const showReorder = formData.is_stocked;
   const showVendor = formData.source === 'bought';
@@ -305,26 +303,7 @@ export default function PartIdentitySection({
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             {mode === 'create' ? 'New part' : 'Part details'}
           </Typography>
-          {mode === 'existing' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minHeight: 24 }}>
-              {saveStatus === 'saving' && (
-                <>
-                  <CircularProgress size={14} />
-                  <Typography variant="caption" color="text.secondary">
-                    Saving…
-                  </Typography>
-                </>
-              )}
-              {saveStatus === 'saved' && (
-                <>
-                  <CheckCircleIcon fontSize="small" color="success" />
-                  <Typography variant="caption" color="text.secondary">
-                    Saved
-                  </Typography>
-                </>
-              )}
-            </Box>
-          )}
+          {mode === 'existing' && <SaveStatus state={saveStatus} />}
         </Box>
 
         {error && (

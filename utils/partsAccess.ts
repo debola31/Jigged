@@ -418,6 +418,141 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
 }
 
 /**
+ * One row per job this part appears on (via job_parts). Powers the Usage tab.
+ * Sorted newest-first by job creation. Throws on error — no silent [].
+ */
+export interface PartJobUsage {
+  job_id: string;
+  job_number: string;
+  production_status: string;
+  fulfillment_status: string;
+  quantity: number;
+  customer_name: string | null;
+  due_date: string | null;
+  created_at: string | null;
+}
+
+export async function getJobsForPart(partId: string): Promise<PartJobUsage[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_parts')
+    .select(`
+      quantity,
+      jobs!inner (
+        id, job_number, production_status, fulfillment_status, due_date, created_at,
+        customers ( name )
+      )
+    `)
+    .eq('part_id', partId);
+
+  if (error) {
+    console.error('Error fetching jobs for part:', error);
+    throw error;
+  }
+
+  type Row = {
+    quantity: number;
+    jobs:
+      | {
+          id: string;
+          job_number: string;
+          production_status: string;
+          fulfillment_status: string;
+          due_date: string | null;
+          created_at: string | null;
+          customers: { name: string | null } | { name: string | null }[] | null;
+        }
+      | null;
+  };
+
+  return ((data ?? []) as Row[])
+    .map((r) => {
+      const job = r.jobs;
+      if (!job) return null;
+      const customer = Array.isArray(job.customers) ? job.customers[0] : job.customers;
+      return {
+        job_id: job.id,
+        job_number: job.job_number,
+        production_status: job.production_status,
+        fulfillment_status: job.fulfillment_status,
+        quantity: r.quantity,
+        customer_name: customer?.name ?? null,
+        due_date: job.due_date,
+        created_at: job.created_at,
+      } satisfies PartJobUsage;
+    })
+    .filter((r): r is PartJobUsage => r !== null)
+    .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+}
+
+/**
+ * One row per quote this part appears on (via quote_line_items), de-duped by
+ * quote_id — a part shows up once per pricing tier, so collapse to one row to
+ * match the DISTINCT-quote_id count in getPartWithRelations. Newest-first.
+ */
+export interface PartQuoteUsage {
+  quote_id: string;
+  quote_number: string;
+  status: string;
+  customer_name: string | null;
+  expiration_date: string | null;
+  created_at: string | null;
+}
+
+export async function getQuotesForPart(partId: string): Promise<PartQuoteUsage[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('quote_line_items')
+    .select(`
+      quote_id,
+      quotes!inner (
+        id, quote_number, status, expiration_date, created_at,
+        customers ( name )
+      )
+    `)
+    .eq('part_id', partId);
+
+  if (error) {
+    console.error('Error fetching quotes for part:', error);
+    throw error;
+  }
+
+  type Row = {
+    quotes:
+      | {
+          id: string;
+          quote_number: string;
+          status: string;
+          expiration_date: string | null;
+          created_at: string | null;
+          customers: { name: string | null } | { name: string | null }[] | null;
+        }
+      | null;
+  };
+
+  const byQuote = new Map<string, PartQuoteUsage>();
+  for (const row of (data ?? []) as Row[]) {
+    const quote = row.quotes;
+    if (!quote || byQuote.has(quote.id)) continue;
+    const customer = Array.isArray(quote.customers) ? quote.customers[0] : quote.customers;
+    byQuote.set(quote.id, {
+      quote_id: quote.id,
+      quote_number: quote.quote_number,
+      status: quote.status,
+      customer_name: customer?.name ?? null,
+      expiration_date: quote.expiration_date,
+      created_at: quote.created_at,
+    });
+  }
+
+  return Array.from(byQuote.values()).sort((a, b) =>
+    (b.created_at ?? '').localeCompare(a.created_at ?? ''),
+  );
+}
+
+/**
  * Lightweight parts query for dropdowns. Optional `kind` filter switches
  * between the unified, made, stocked, or bought subset (matches the saved
  * views on the parts list page).

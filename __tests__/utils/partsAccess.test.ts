@@ -60,6 +60,8 @@ import {
   updatePart,
   deletePart,
   bulkDeleteParts,
+  getJobsForPart,
+  getQuotesForPart,
 } from '@/utils/partsAccess';
 
 describe('partsAccess utilities', () => {
@@ -100,6 +102,106 @@ describe('partsAccess utilities', () => {
     id: 'part-2',
     part_name: 'GENERIC001',
   };
+
+  describe('getJobsForPart', () => {
+    it('maps job_parts → PartJobUsage, sorts newest-first, normalizes customer shape', async () => {
+      mockQueryBuilder.data = [
+        {
+          quantity: 5,
+          jobs: {
+            id: 'j1',
+            job_number: 'J-001',
+            production_status: 'in_progress',
+            fulfillment_status: 'unshipped',
+            due_date: '2026-07-01',
+            created_at: '2026-01-01T00:00:00Z',
+            customers: { name: 'Acme' }, // object form
+          },
+        },
+        {
+          quantity: 2,
+          jobs: {
+            id: 'j2',
+            job_number: 'J-002',
+            production_status: 'completed',
+            fulfillment_status: 'fully_shipped',
+            due_date: null,
+            created_at: '2026-03-01T00:00:00Z',
+            customers: [{ name: 'Beta' }], // array form
+          },
+        },
+        { quantity: 1, jobs: null }, // defensive: dropped
+      ];
+
+      const result = await getJobsForPart('part-1');
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('job_parts');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('part_id', 'part-1');
+      expect(result).toHaveLength(2);
+      // newest job first (j2 created March > j1 created Jan)
+      expect(result[0].job_id).toBe('j2');
+      expect(result[0].customer_name).toBe('Beta');
+      expect(result[1].job_id).toBe('j1');
+      expect(result[1].customer_name).toBe('Acme');
+      expect(result[1].quantity).toBe(5);
+    });
+
+    it('throws on error rather than returning []', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(getJobsForPart('part-1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('getQuotesForPart', () => {
+    it('de-dupes by quote_id (one row per quote, not per tier) and sorts newest-first', async () => {
+      mockQueryBuilder.data = [
+        {
+          quotes: {
+            id: 'q1',
+            quote_number: 'Q-001',
+            status: 'active',
+            expiration_date: null,
+            created_at: '2026-02-01T00:00:00Z',
+            customers: { name: 'Acme' },
+          },
+        },
+        {
+          // same quote, second pricing tier — must collapse
+          quotes: {
+            id: 'q1',
+            quote_number: 'Q-001',
+            status: 'active',
+            expiration_date: null,
+            created_at: '2026-02-01T00:00:00Z',
+            customers: { name: 'Acme' },
+          },
+        },
+        {
+          quotes: {
+            id: 'q2',
+            quote_number: 'Q-002',
+            status: 'expired',
+            expiration_date: '2026-01-01',
+            created_at: '2026-05-01T00:00:00Z',
+            customers: [{ name: 'Beta' }],
+          },
+        },
+      ];
+
+      const result = await getQuotesForPart('part-1');
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('quote_line_items');
+      expect(result).toHaveLength(2); // q1's two tiers collapsed to one
+      expect(result[0].quote_id).toBe('q2'); // newest first
+      expect(result[1].quote_id).toBe('q1');
+      expect(result[1].customer_name).toBe('Acme');
+    });
+
+    it('throws on error rather than returning []', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(getQuotesForPart('part-1')).rejects.toBeTruthy();
+    });
+  });
 
   describe('getAllParts', () => {
     it('returns parts for a company with routing data', async () => {

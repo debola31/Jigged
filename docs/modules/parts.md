@@ -204,7 +204,7 @@ A workspace tab (`?tab=files`, always visible) for engineering file attachments.
 - **Upload**: a multi-file picker accepting `.pdf,.step,.stp,.dwg`. Each file is validated client-side (allowlist + per-kind size cap) before upload; rejected files surface a clear message and are not stored. Uploads are immediate (no draft staging).
 - **List**: newest-first, each row showing the filename, a **kind chip** (PDF / STEP / DWG), size, and the uploader + date.
 - **Row actions**:
-  - **Open** — PDF opens inline in a viewer modal (`AttachmentViewerModal`, native `<iframe>` off a fresh signed URL); STEP and DWG download (STEP gains an in-app 3D viewer in Phase 2 — `online-3d-viewer`).
+  - **Open** — PDF opens inline in a viewer modal (`AttachmentViewerModal`, native `<iframe>` off a fresh signed URL); STEP opens an in-app 3D viewer (`online-3d-viewer`, lazy-loaded); DWG downloads.
   - **Download** — available for every kind (fresh signed URL).
   - **Delete** — shown only to the uploader or a company admin (RLS enforces the same rule). Removes the row and the stored file.
 
@@ -214,8 +214,8 @@ A workspace tab (`?tab=files`, always visible) for engineering file attachments.
 | Kind | Viewer | Notes |
 |---|---|---|
 | PDF | Native `<iframe>` + signed URL | No library; renders inline |
-| STEP (.step/.stp) | Download-only (Phase 1) → in-app 3D viewer (Phase 2) | `online-3d-viewer` (three.js + occt-import-js WASM), lazy-loaded via `next/dynamic({ ssr: false })` |
-| DWG | Download-only | No in-browser render; Contour standardizes on PDF, so DWG is converted upstream |
+| STEP (.step/.stp) | In-app 3D viewer | `online-3d-viewer` (three.js + occt-import-js WASM), lazy-loaded via `next/dynamic({ ssr: false })`. In v0.18 the engine fetches occt-import-js from the jsdelivr CDN at runtime (no self-hosting hook); single-threaded build, so no COOP/COEP headers needed |
+| DWG | Download-only | No in-browser render; Contour standardizes on PDF, so DWG is converted upstream. See #411 for an experimental in-browser DWG viewer |
 
 ---
 
@@ -314,7 +314,8 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 - [ ] Uploading a `.png` (or other disallowed type) is rejected with a clear message and nothing is stored
 - [ ] Uploading a PDF over 25 MB (or a STEP/DWG over 100 MB) is rejected with a size message
 - [ ] Opening a PDF renders it inline in the viewer modal
-- [ ] Opening a STEP or DWG downloads it (Phase 1; STEP gains an in-app 3D viewer in Phase 2)
+- [ ] Opening a STEP file renders a rotatable 3D model in the viewer modal; a parse/load failure shows an error with a download fallback
+- [ ] Opening a DWG downloads it (no in-browser preview)
 - [ ] Download is available for every attachment kind
 - [ ] The delete affordance is shown only to the uploader or a company admin
 - [ ] Deleting an attachment removes both the metadata row and the stored file

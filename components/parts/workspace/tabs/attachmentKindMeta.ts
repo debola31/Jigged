@@ -20,9 +20,9 @@ export const KIND_CHIP_COLOR: Record<
 };
 
 /**
- * Whether a kind can be previewed in-app (vs. download-only). PDF previews now;
- * STEP gains an in-app 3D viewer in Phase 2 (flip it to true then).
+ * Whether a kind can be previewed in-app (vs. download-only). PDF renders in an
+ * iframe; STEP renders in the lazy-loaded 3D viewer. DWG/other are download-only.
  */
 export function isPreviewable(kind: PartAttachmentKind): boolean {
-  return kind === 'pdf';
+  return kind === 'pdf' || kind === 'step';
 }

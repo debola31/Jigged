@@ -16,6 +16,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
+import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaicOutlined';
 
 import type {
   BulkGenerateSpec,
@@ -35,6 +36,7 @@ import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import BulkGenerateModal from './BulkGenerateModal';
 import LocationQRModal from './LocationQRModal';
+import VisualLocationBuilder from './builder/VisualLocationBuilder';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -69,6 +71,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -187,11 +190,18 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           Print all QR anchors
         </Button>
         <Button
-          variant="contained"
+          variant="outlined"
           startIcon={<AddIcon />}
           onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
         >
           New top-level location
+        </Button>
+        <Button
+          variant="contained"
+          startIcon={<AutoAwesomeMosaicOutlinedIcon />}
+          onClick={() => setBuilderOpen(true)}
+        >
+          Build visually
         </Button>
       </Box>
 
@@ -205,16 +215,25 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              No storage locations yet. Build your shelving, cabinets, and bins here, then print QR
-              labels to scan from the shop floor.
+              No storage locations yet. Build your cabinets, shelving, and bins visually in a couple of
+              taps, then print QR labels to scan from the shop floor.
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
-            >
-              New top-level location
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                startIcon={<AutoAwesomeMosaicOutlinedIcon />}
+                onClick={() => setBuilderOpen(true)}
+              >
+                Build visually
+              </Button>
+              <Button
+                variant="text"
+                startIcon={<AddIcon />}
+                onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+              >
+                Add manually
+              </Button>
+            </Box>
           </CardContent>
         </Card>
       ) : (
@@ -246,6 +265,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         path={qrState.path}
         anchorLabels={qrState.anchorLabels}
         onClose={() => setQrState((s) => ({ ...s, open: false }))}
+      />
+      <VisualLocationBuilder
+        open={builderOpen}
+        companyId={companyId}
+        onClose={() => setBuilderOpen(false)}
+        onCreated={(n) => {
+          void reload();
+          setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
+        }}
       />
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>

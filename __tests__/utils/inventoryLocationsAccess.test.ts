@@ -46,6 +46,7 @@ import {
   createLocation,
   deleteLocation,
   moveLocation,
+  materializeLocationSpec,
   getBalancesForPart,
   addStockAtLocation,
   depleteStockAtLocation,
@@ -310,5 +311,53 @@ describe('RPC wrappers', () => {
     queueFrom(partCtx());
     state.rpc = { data: null, error: { message: 'access denied to company X' } };
     await expect(addStockAtLocation('part1', 'loc1', 1, 'ft')).rejects.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('materializeLocationSpec', () => {
+  it('recursively creates parent-then-child and returns every created row', async () => {
+    const spec = [
+      {
+        key: '0',
+        name: 'Cabinet 1',
+        kind: 'cabinet',
+        code: 'C01',
+        is_stockable: false,
+        is_qr_anchor: true,
+        children: [
+          {
+            key: '0/0',
+            name: 'Row 1',
+            kind: 'row',
+            code: 'C01-R01',
+            is_stockable: true,
+            is_qr_anchor: false,
+            children: [],
+          },
+        ],
+      },
+    ];
+    // createLocation(A): insert (no parent check, parent_id null)
+    queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1', code: 'C01' }), error: null });
+    // createLocation(B): assertParentInCompany('a') -> getLocation, then insert
+    queueFrom({ data: loc({ id: 'a', company_id: 'co1' }), error: null });
+    queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a', code: 'C01-R01' }), error: null });
+
+    const created = await materializeLocationSpec('co1', null, spec);
+
+    expect(created.map((r) => r.id)).toEqual(['a', 'b']);
+    // first from() is the cabinet insert; assert the payload carries the spec fields
+    const cabinetBuilder = mockSupabase.from.mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(cabinetBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent_id: null,
+        name: 'Cabinet 1',
+        code: 'C01',
+        is_qr_anchor: true,
+        is_stockable: false,
+        sort_order: 0,
+      }),
+    );
   });
 });

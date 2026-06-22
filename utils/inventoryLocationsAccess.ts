@@ -11,6 +11,7 @@
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
+import { generatedCode, explicitCode } from '@/utils/locationSpec';
 import type {
   BulkGenerateSpec,
   CreateLocationInput,
@@ -18,6 +19,7 @@ import type {
   InventoryLocation,
   InventoryLocationNode,
   LocationContent,
+  LocationSpecNode,
   PartLocationBalanceWithLocation,
   ResolvedScan,
   StockMutationResult,
@@ -210,15 +212,11 @@ export async function deleteLocation(id: string): Promise<void> {
   }
 }
 
-/** Zero-pad a 1-based index to a uniform width (warehouse naming discipline). */
-function pad(n: number, width: number): string {
-  return String(n).padStart(width, '0');
-}
-
 /**
  * Bulk-generate repetitive structure under a parent — e.g. 10 rows × {Left,
  * Right}. Names follow `namePattern` ('{n}' → index); codes are zero-padded
- * for sortability. Created sequentially so leaves can attach to their row.
+ * for sortability (shared scheme with the visual builder via locationSpec).
+ * Created sequentially so leaves can attach to their row.
  */
 export async function bulkGenerateChildren(
   companyId: string,
@@ -240,7 +238,7 @@ export async function bulkGenerateChildren(
       parent_id: parentId,
       name: pattern.replace('{n}', String(idx)),
       kind: spec.kind ?? null,
-      code: `${parent?.code ? parent.code + '-' : ''}${(spec.kind ?? 'N').charAt(0).toUpperCase()}${pad(idx, width)}`,
+      code: generatedCode(parent?.code ?? null, spec.kind ?? '', idx, width),
       is_stockable: !spec.leaves || spec.leaves.length === 0,
       sort_order: idx,
     });
@@ -252,11 +250,46 @@ export async function bulkGenerateChildren(
         parent_id: node.id,
         name: leafName,
         kind: spec.leafKind ?? 'side',
-        code: `${node.code ?? ''}-${leafName.charAt(0).toUpperCase()}`,
+        code: explicitCode(node.code, leafName),
         is_stockable: true,
         sort_order: j,
       });
       created.push(leaf);
+    }
+  }
+  return created;
+}
+
+/**
+ * Materialize a LocationSpecNode forest (built client-side by the visual
+ * builder) into inventory_locations. Recursively composes the existing
+ * `createLocation` — parent before children — so all the company/parent
+ * validation and code handling is shared with the manual flow. Names, codes,
+ * is_stockable and is_qr_anchor come straight from the precomputed spec.
+ *
+ * Sequential inserts mirror bulkGenerateChildren; a single multi-row insert is
+ * a cheap future optimization if specs ever get large.
+ */
+export async function materializeLocationSpec(
+  companyId: string,
+  parentId: string | null,
+  nodes: LocationSpecNode[],
+): Promise<InventoryLocation[]> {
+  const created: InventoryLocation[] = [];
+  let sortOrder = 0;
+  for (const node of nodes) {
+    const row = await createLocation(companyId, {
+      parent_id: parentId,
+      name: node.name,
+      kind: node.kind,
+      code: node.code,
+      is_stockable: node.is_stockable,
+      is_qr_anchor: node.is_qr_anchor,
+      sort_order: sortOrder++,
+    });
+    created.push(row);
+    if (node.children.length > 0) {
+      created.push(...(await materializeLocationSpec(companyId, row.id, node.children)));
     }
   }
   return created;

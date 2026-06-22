@@ -14,9 +14,10 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+
+import DeleteIconButton from '@/components/common/DeleteIconButton';
 
 import {
   getPartUnitConversions,
@@ -281,18 +282,11 @@ export default function PartUnitConversionsEditor({
               >
                 <EditIcon fontSize="small" />
               </IconButton>
-              <IconButton
-                size="small"
+              <DeleteIconButton
+                ariaLabel="Delete conversion"
                 onClick={() => handleDelete(uc.id)}
                 disabled={saving}
-                aria-label="Delete conversion"
-                sx={{
-                  color: 'text.secondary',
-                  '&:hover': { color: 'error.main' },
-                }}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
+              />
             </Box>
           ))}
         </Stack>

@@ -1191,6 +1191,7 @@ export type Database = {
           company_id: string
           created_at: string
           id: string
+          note_type: string
           part_id: string
         }
         Insert: {
@@ -1199,6 +1200,7 @@ export type Database = {
           company_id: string
           created_at?: string
           id?: string
+          note_type?: string
           part_id: string
         }
         Update: {
@@ -1207,6 +1209,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           id?: string
+          note_type?: string
           part_id?: string
         }
         Relationships: [

@@ -6,7 +6,6 @@ import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
-import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Table from '@mui/material/Table';
@@ -22,13 +21,13 @@ import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckIcon from '@mui/icons-material/Check';
 import PercentIcon from '@mui/icons-material/Percent';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import TuneIcon from '@mui/icons-material/Tune';
+import DeleteIconButton from '@/components/common/DeleteIconButton';
 import {
   calculateRoutingCost,
   calculateTierPricing,
@@ -40,6 +39,8 @@ import {
   setPartMarkupRate,
 } from '@/utils/partPricingTiersAccess';
 import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
+import { addPartPricingNote } from '@/utils/partsAccess';
+import { getCurrentOperator } from '@/utils/operatorAccess';
 import {
   type MarkupRate,
   summarizeBreakpoints,
@@ -255,6 +256,25 @@ export default function PartPricing({
       }));
       await replaceTiersForPart(companyId, partId, payload);
       setLinkedRateId(null);
+      // Auto-log the change as a 'pricing' note (audit trail in the Notes feed).
+      // Non-fatal: a note-write failure must never block the pricing save.
+      try {
+        const operator = await getCurrentOperator(companyId);
+        if (operator) {
+          const summary = payload
+            .map((t) => `@${t.quantity} → ${t.markup_percent ?? '—'}%`)
+            .join(', ');
+          const label = payload.length === 1 ? 'tier' : 'tiers';
+          await addPartPricingNote(
+            partId,
+            companyId,
+            operator.id,
+            `Pricing updated — ${payload.length} ${label}: ${summary}`,
+          );
+        }
+      } catch (noteErr) {
+        console.error('Failed to log pricing note:', noteErr);
+      }
       // Reload so newly-inserted rows pick up real ids.
       const fresh = await getTiersForPart(partId);
       setRows(
@@ -653,17 +673,6 @@ export default function PartPricing({
                   </TableHead>
                   <TableBody>
                     {rows.map((row, idx) => {
-                      const markupNum = parseNumber(row.markupPercent);
-                      const base = row.baseCostPerUnit;
-                      // No placeholder when we can't compute — showing "0.00"
-                      // would imply $0 is a sensible suggestion. Empty
-                      // placeholder makes the missing data visible.
-                      const suggestedUnitPrice =
-                        base !== null && base > 0 && markupNum !== null
-                          ? (Math.round(base * (1 + markupNum / 100) * 100) / 100).toFixed(2)
-                          : base === null
-                            ? ''
-                            : '0.00';
                       return (
                         <TableRow key={row.id ?? `tier-${idx}`}>
                           <TableCell sx={{ minWidth: 90 }}>
@@ -672,7 +681,6 @@ export default function PartPricing({
                               value={row.quantity}
                               onChange={(e) => handleQuantityChange(idx, e.target.value)}
                               inputMode="numeric"
-                              placeholder="1"
                             />
                           </TableCell>
                           {!isBought && (
@@ -686,7 +694,6 @@ export default function PartPricing({
                               value={row.markupPercent}
                               onChange={(e) => handleMarkupChange(idx, e.target.value)}
                               inputMode="decimal"
-                              placeholder="25"
                               sx={{ width: 100 }}
                             />
                           </TableCell>
@@ -697,20 +704,15 @@ export default function PartPricing({
                                 value={row.unitPrice}
                                 onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
                                 inputMode="decimal"
-                                placeholder={suggestedUnitPrice}
                                 sx={{ width: 120 }}
                               />
                             </TableCell>
                           )}
                           <TableCell align="right">
-                            <IconButton
-                              size="small"
-                              color="error"
+                            <DeleteIconButton
+                              ariaLabel="Remove tier"
                               onClick={() => removeRow(idx)}
-                              aria-label="Remove tier"
-                            >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
+                            />
                           </TableCell>
                         </TableRow>
                       );

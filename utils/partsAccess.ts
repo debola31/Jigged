@@ -12,6 +12,7 @@ import type {
   Part,
   PartFormData,
   PartNote,
+  PartNoteType,
   PartUnitConversion,
   PartUnitConversionFormData,
 } from '@/types/part';
@@ -1504,7 +1505,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
 
   const { data, error } = await supabase
     .from('part_notes')
-    .select('id, part_id, body, created_at, author_id, author:user_company_access(name)')
+    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
     .eq('part_id', partId)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
@@ -1520,6 +1521,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
     body: string;
     created_at: string;
     author_id: string | null;
+    note_type: string;
     author: { name: string | null } | { name: string | null }[] | null;
   };
 
@@ -1532,6 +1534,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
       created_at: n.created_at,
       author_id: n.author_id,
       author_name: author?.name ?? null,
+      note_type: (n.note_type as PartNoteType) ?? 'user',
     };
   });
 }
@@ -1539,12 +1542,15 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
 /**
  * Append a part note. `authorId` is the author's user_company_access id (from
  * getCurrentOperator); RLS requires it to match the caller's access row.
+ * `noteType` defaults to 'user' (manual note); pass 'pricing' for auto-logged
+ * pricing-change entries (see addPartPricingNote).
  */
 export async function addPartNote(
   partId: string,
   companyId: string,
   authorId: string,
   body: string,
+  noteType: PartNoteType = 'user',
 ): Promise<PartNote> {
   const supabase = getSupabase();
 
@@ -1558,8 +1564,9 @@ export async function addPartNote(
       part_id: partId,
       author_id: authorId,
       body: trimmed,
+      note_type: noteType,
     })
-    .select('id, part_id, body, created_at, author_id, author:user_company_access(name)')
+    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
     .single();
 
   if (error) {
@@ -1573,6 +1580,7 @@ export async function addPartNote(
     body: string;
     created_at: string;
     author_id: string | null;
+    note_type: string;
     author: { name: string | null } | { name: string | null }[] | null;
   };
   const n = data as NoteRow;
@@ -1584,7 +1592,23 @@ export async function addPartNote(
     created_at: n.created_at,
     author_id: n.author_id,
     author_name: author?.name ?? null,
+    note_type: (n.note_type as PartNoteType) ?? 'user',
   };
+}
+
+/**
+ * Auto-log a pricing change as a 'pricing' note. Thin wrapper over addPartNote
+ * — the caller (PartPricing/PartProcurementPricingPanel save handlers) builds a
+ * human-readable summary of the change. This is a real event captured at save
+ * time, not derived from updated_at, so it's a legitimate audit entry.
+ */
+export async function addPartPricingNote(
+  partId: string,
+  companyId: string,
+  authorId: string,
+  body: string,
+): Promise<PartNote> {
+  return addPartNote(partId, companyId, authorId, body, 'pricing');
 }
 
 /**
@@ -1600,36 +1624,38 @@ export async function deletePartNote(noteId: string): Promise<void> {
 }
 
 /**
- * A single entry in the part activity feed — a discriminated union over the
+ * A single entry in the part Notes feed — a discriminated union over the
  * sources that accumulate against a part. `at` is the ISO timestamp used to
  * sort the merged feed; `id` is prefixed by kind for stable React keys.
+ *
+ * Notes carry their own `note_type` ('user' | 'pricing') so manual notes and
+ * auto-logged pricing events render in one feed, filterable client-side.
  */
 export type PartActivityEvent =
   | { kind: 'note'; id: string; at: string; note: PartNote }
-  | { kind: 'transaction'; id: string; at: string; txn: InventoryTransaction }
-  | { kind: 'job'; id: string; at: string; job: PartJobUsage }
-  | { kind: 'quote'; id: string; at: string; quote: PartQuoteUsage };
+  | { kind: 'transaction'; id: string; at: string; txn: InventoryTransaction };
 
 /**
- * Aggregate-on-read part activity feed: merges notes, stock transactions, and
- * the jobs/quotes the part appears on into one newest-first timeline.
+ * Aggregate-on-read part Notes feed: merges manual + auto (pricing) notes with
+ * stock transactions into one newest-first timeline.
  *
  * Deliberately NOT a materialized table — that would be a second source of
- * truth needing triggers on four tables (the no-silent-fallback anti-pattern);
- * per-part row counts are small, so an in-memory merge is trivial. Throws if
- * any source errors (no silent partial feed). Price-change events are out of
- * scope: there is no price-audit source, and deriving them from updated_at
- * would be a fabricated event.
+ * truth needing triggers (the no-silent-fallback anti-pattern); per-part row
+ * counts are small, so an in-memory merge is trivial. Throws if any source
+ * errors (no silent partial feed).
+ *
+ * Job/quote links were dropped from this feed: they're redundant with the Jobs
+ * and Quotes pages, where the part's usage is already visible. Pricing changes
+ * are now captured as real 'pricing' notes at save time (see addPartPricingNote)
+ * rather than derived from updated_at — a legitimate event, not a fabrication.
  */
 export async function getPartActivity(
   partId: string,
   companyId: string,
 ): Promise<PartActivityEvent[]> {
-  const [notes, txnResult, jobs, quotes] = await Promise.all([
+  const [notes, txnResult] = await Promise.all([
     getPartNotes(partId, companyId),
     getPartTransactions(partId, 0, 100),
-    getJobsForPart(partId),
-    getQuotesForPart(partId),
   ]);
 
   const events: PartActivityEvent[] = [];
@@ -1640,14 +1666,6 @@ export async function getPartActivity(
   for (const txn of txnResult.transactions) {
     if (!txn.created_at) continue;
     events.push({ kind: 'transaction', id: `txn-${txn.id}`, at: txn.created_at, txn });
-  }
-  for (const job of jobs) {
-    if (!job.created_at) continue;
-    events.push({ kind: 'job', id: `job-${job.job_id}`, at: job.created_at, job });
-  }
-  for (const quote of quotes) {
-    if (!quote.created_at) continue;
-    events.push({ kind: 'quote', id: `quote-${quote.quote_id}`, at: quote.created_at, quote });
   }
 
   return events.sort((a, b) => b.at.localeCompare(a.at));

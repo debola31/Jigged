@@ -248,6 +248,30 @@ shop-floor tablets where hover isn't available.
   free-text country/state. City stays free text. Validate postal codes per
   country.
 
+### Placeholders
+
+**A placeholder must never resemble real data.** Our users are 50–60 year old
+shop owners on tablets; a greyed `25` in an empty Markup % field reads as a
+*pre-filled value*, not a hint, and ships wrong quotes. The misleading set —
+**banned**:
+
+- Bare numbers: `placeholder="1"`, `placeholder="25"`.
+- Currency / value-shaped strings: `placeholder="$0.00"`, `placeholder="e.g. 5.50"`,
+  or any computed value (`placeholder={suggestedUnitPrice}`).
+
+These fields already carry a column header or `label`, so the placeholder adds
+nothing but confusion. Prefer `label` + `helperText` for guidance on required
+fields (see *Form validation* above).
+
+**Allowed** — placeholders that can't be mistaken for entered data:
+
+- Search prompts: `placeholder="Search parts…"`.
+- True format hints: `placeholder="customer@example.com"`, `placeholder="Suite, unit, etc."`.
+- Action prompts: `placeholder="Note about this part…"`.
+
+This rule is enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts)
+— a value-shaped placeholder fails CI.
+
 ### Cards
 
 ```javascript

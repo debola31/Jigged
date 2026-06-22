@@ -218,7 +218,8 @@ export default function PartWorkspace({
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
     if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
-    tabs.push({ slug: 'history', label: 'Notes & Activity' });
+    // Slug stays 'history' so existing ?tab=history deep links keep working.
+    tabs.push({ slug: 'history', label: 'Notes' });
     return tabs;
   }, [part?.is_stocked]);
 

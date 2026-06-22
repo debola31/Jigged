@@ -298,14 +298,18 @@ describe('partsAccess utilities', () => {
       return b;
     };
 
-    it('merges notes + transactions + jobs + quotes into one newest-first feed', async () => {
+    it('merges notes + transactions into one newest-first feed (job/quote dropped)', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
         switch (table) {
           case 'part_notes':
             return makeResult([
               {
-                id: 'n1', part_id: 'p1', body: 'note', created_at: '2026-04-01T00:00:00Z',
-                author_id: 'a1', author: { name: 'Sam' },
+                id: 'n2', part_id: 'p1', body: 'Pricing updated', created_at: '2026-04-01T00:00:00Z',
+                author_id: 'a1', note_type: 'pricing', author: { name: 'Sam' },
+              },
+              {
+                id: 'n1', part_id: 'p1', body: 'note', created_at: '2026-03-01T00:00:00Z',
+                author_id: 'a1', note_type: 'user', author: { name: 'Sam' },
               },
             ]);
           case 'inventory_transactions':
@@ -319,26 +323,6 @@ describe('partsAccess utilities', () => {
               ],
               1,
             );
-          case 'job_parts':
-            return makeResult([
-              {
-                quantity: 2,
-                jobs: {
-                  id: 'j1', job_number: 'J-1', production_status: 'in_progress',
-                  fulfillment_status: 'unshipped', due_date: null,
-                  created_at: '2026-03-01T00:00:00Z', customers: { name: 'Acme' },
-                },
-              },
-            ]);
-          case 'quote_line_items':
-            return makeResult([
-              {
-                quotes: {
-                  id: 'q1', quote_number: 'Q-1', status: 'active', expiration_date: null,
-                  created_at: '2026-01-01T00:00:00Z', customers: { name: 'Acme' },
-                },
-              },
-            ]);
           default:
             return makeResult([]);
         }
@@ -346,8 +330,9 @@ describe('partsAccess utilities', () => {
 
       const feed = await getPartActivity('p1', 'c1');
 
-      // Apr note > Mar job > Feb txn > Jan quote
-      expect(feed.map((e) => e.kind)).toEqual(['note', 'job', 'transaction', 'quote']);
+      // Apr pricing-note > Mar user-note > Feb txn; no job/quote kinds.
+      expect(feed.map((e) => e.kind)).toEqual(['note', 'note', 'transaction']);
+      expect(feed.some((e) => e.kind === 'note' && e.note.note_type === 'pricing')).toBe(true);
     });
 
     it('throws if any source errors (no silent partial feed)', async () => {

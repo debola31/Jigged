@@ -337,6 +337,27 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('CUSTOMER');
   });
 
+  it('does not render the billing address attention_to (Attn:) line in the CUSTOMER block', async () => {
+    const quoteWithAttn: QuoteWithRelations = {
+      ...baseQuote,
+      customers: {
+        ...baseQuote.customers!,
+        addresses: [{ ...baseQuote.customers!.addresses![0], attention_to: 'Receiving Dept' }],
+      },
+    };
+
+    await generateQuotePdf(quoteWithAttn, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).toContain('CUSTOMER');
+    expect(rendered).not.toContain('Attn: Receiving Dept');
+    expect(rendered.some((t) => t.includes('Receiving Dept'))).toBe(false);
+  });
+
   it('renders the static ACCEPTANCE block (signature, PO#)', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 

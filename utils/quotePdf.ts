@@ -101,9 +101,9 @@ function findContactById(
 
 /**
  * Build the printed address lines for the Customer block (customer name +
- * billing address). Surfaces ATTN: from customer_addresses.attention_to
- * when set. No contact lines or contact info — the Customer Contact has its
- * own section below the metadata block.
+ * billing address). The address's attention_to is intentionally NOT
+ * surfaced here — the Customer Contact has its own section below the
+ * metadata block. No contact lines or contact info either.
  */
 function buildBillingAddressLines(
   customer: QuoteCustomer | null | undefined,
@@ -113,7 +113,6 @@ function buildBillingAddressLines(
 
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-  if (address?.attention_to) lines.push(`Attn: ${address.attention_to}`);
 
   if (address) {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');

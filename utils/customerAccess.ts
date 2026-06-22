@@ -473,8 +473,11 @@ export async function bulkImportCustomers(
 }
 
 /**
- * Return the address tagged default_billing for the customer. Returns null
- * when none is set.
+ * Return the address tagged default_billing for the customer. When no address
+ * is flagged but the customer has exactly one address, that lone address is
+ * unambiguously the default and is returned — so single-address customers
+ * auto-fill on a quote instead of starting blank. Returns null only when there
+ * are zero, or two-plus addresses with none flagged (genuinely ambiguous).
  *
  * Used by QuoteForm at quote-creation time to pre-populate
  * quotes.billing_address_id. After PR 2 the printed quote reads the FK
@@ -483,13 +486,17 @@ export async function bulkImportCustomers(
 export function pickBillingAddress(
   customer: { addresses: CustomerAddress[] },
 ): CustomerAddress | null {
-  return customer.addresses.find((a) => a.default_billing) ?? null;
+  const flagged = customer.addresses.find((a) => a.default_billing);
+  if (flagged) return flagged;
+  if (customer.addresses.length === 1) return customer.addresses[0];
+  return null;
 }
 
 /**
- * Return the address tagged default_shipping. Falls back to the default
- * billing address — documented product behavior: "if no ship-to is set,
- * ship to where we bill". Implemented in exactly one place.
+ * Return the address tagged default_shipping. Falls back to the billing
+ * address — documented product behavior: "if no ship-to is set, ship to
+ * where we bill". Single-address customers therefore resolve here too, since
+ * pickBillingAddress returns the lone address. Implemented in exactly one place.
  */
 export function pickShippingAddress(
   customer: { addresses: CustomerAddress[] },

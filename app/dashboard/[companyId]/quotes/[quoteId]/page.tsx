@@ -30,9 +30,8 @@ import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
-import SendQuoteEmailDialog from '@/components/quotes/SendQuoteEmailDialog';
 import EmailIcon from '@mui/icons-material/Email';
-import Snackbar from '@mui/material/Snackbar';
+import { buildQuoteMailto } from '@/utils/quoteMailto';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -62,10 +61,8 @@ export default function QuoteDetailPage() {
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const fetchQuote = useCallback(async () => {
     try {
       setLoading(true);
@@ -125,7 +122,7 @@ export default function QuoteDetailPage() {
     }
   };
 
-  const handleOpenEmailDialog = async () => {
+  const handleEmailQuote = async () => {
     if (!quote) return;
     setError(null);
     setPreviewLoading(true);
@@ -135,9 +132,11 @@ export default function QuoteDetailPage() {
         throw new Error('Company info unavailable — cannot draft email.');
       }
       setCompany(c);
-      setEmailDialogOpen(true);
+      // Open the user's own mail client with the quote pre-filled via mailto —
+      // no server send, no attachment. Replies/sent-copy come from their mailbox.
+      window.location.href = buildQuoteMailto(quote, c);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open email dialog');
+      setError(err instanceof Error ? err.message : 'Failed to open email draft');
     } finally {
       setPreviewLoading(false);
     }
@@ -249,7 +248,7 @@ export default function QuoteDetailPage() {
           <Button
             variant="outlined"
             startIcon={<EmailIcon />}
-            onClick={handleOpenEmailDialog}
+            onClick={handleEmailQuote}
             disabled={previewLoading || actionLoading}
           >
             Email
@@ -563,31 +562,12 @@ export default function QuoteDetailPage() {
           onClose={() => setPreviewOpen(false)}
           quote={quote}
           company={company}
-          onEmail={() => setEmailDialogOpen(true)}
-        />
-      )}
-
-      {/* Send Quote Email Dialog */}
-      {company && (
-        <SendQuoteEmailDialog
-          open={emailDialogOpen}
-          onClose={() => setEmailDialogOpen(false)}
-          onSent={(toEmail) => {
-            setEmailDialogOpen(false);
-            setEmailSuccess(toEmail);
+          onEmail={() => {
+            setPreviewOpen(false);
+            handleEmailQuote();
           }}
-          quote={quote}
-          company={company}
         />
       )}
-
-      <Snackbar
-        open={!!emailSuccess}
-        autoHideDuration={5000}
-        onClose={() => setEmailSuccess(null)}
-        message={emailSuccess ? `Quote emailed to ${emailSuccess}` : ''}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      />
 
       {/* Convert to Job Modal */}
       <ConvertToJobModal

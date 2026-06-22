@@ -315,9 +315,11 @@ export interface QuoteFormData {
   parts: QuoteFormPartBlock[];
   // Lead time as the user states it. lead_time_value is a working-copy string
   // (so the input can be empty mid-edit); the access layer normalizes
-  // (value, unit) into the canonical lead_time_days column on save.
+  // (value, unit) into the canonical lead_time_days column on save. The unit
+  // starts as '' (unselected) so a new quote can't silently inherit a wrong
+  // default — the form requires an explicit pick before save.
   lead_time_value: string;
-  lead_time_unit: LeadTimeUnit;
+  lead_time_unit: LeadTimeUnit | '';
   // Payment terms shown on the quote (preset or custom free text). '' = unset.
   payment_terms: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
@@ -364,7 +366,7 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   shipping_address_id: '',
   parts: [],
   lead_time_value: '',
-  lead_time_unit: DEFAULT_LEAD_TIME_UNIT,
+  lead_time_unit: '',
   payment_terms: '',
   expiration_date: defaultExpirationDate(),
 };
@@ -403,7 +405,9 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
           : {}),
       })),
     lead_time_value: quote.lead_time_value !== null ? String(quote.lead_time_value) : '',
-    lead_time_unit: quote.lead_time_unit ?? DEFAULT_LEAD_TIME_UNIT,
+    // Existing quotes always carry a unit; '' only if a legacy row is null, which
+    // re-forces an explicit pick on next save rather than guessing a default.
+    lead_time_unit: (quote.lead_time_unit as LeadTimeUnit | null) ?? '',
     payment_terms: quote.payment_terms ?? '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,

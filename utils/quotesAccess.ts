@@ -17,7 +17,7 @@ import type {
   QuoteLineItem,
   CompanyMember,
 } from '@/types/quote';
-import { isQuoteExpired, leadTimeToDays, DEFAULT_LEAD_TIME_UNIT } from '@/types/quote';
+import { isQuoteExpired, leadTimeToDays } from '@/types/quote';
 import type { LeadTimeUnit } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
@@ -58,7 +58,12 @@ function normalizeLeadTime(formData: QuoteFormData): {
   leadTimeUnit: LeadTimeUnit;
   leadTimeDays: number | null;
 } {
-  const unit: LeadTimeUnit = formData.lead_time_unit ?? DEFAULT_LEAD_TIME_UNIT;
+  const unit = formData.lead_time_unit;
+  if (unit === '') {
+    // The form requires an explicit unit; guard the shared save path too so a
+    // missing unit can never silently normalize to a wrong day count.
+    throw new Error('Select a lead time unit.');
+  }
   const raw = formData.lead_time_value;
   const value = raw !== '' && raw !== null && raw !== undefined ? Number(raw) : null;
   if (value !== null && (!Number.isFinite(value) || value < 0 || !Number.isInteger(value))) {

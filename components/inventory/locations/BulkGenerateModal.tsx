@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -30,15 +30,14 @@ export default function BulkGenerateModal({ open, parentPath, onClose, onSubmit 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  const handleEnter = () => {
     setCount('10');
     setKind('row');
     setNamePattern('Row {n}');
     setLeaves('Left, Right');
     setLeafKind('side');
     setError(null);
-  }, [open]);
+  };
 
   const leafList = useMemo(
     () => leaves.split(',').map((s) => s.trim()).filter(Boolean),
@@ -71,7 +70,13 @@ export default function BulkGenerateModal({ open, parentPath, onClose, onSubmit 
   };
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={saving ? undefined : onClose}
+      maxWidth="xs"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>Bulk-generate sub-locations</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>

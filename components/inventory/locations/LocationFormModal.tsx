@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -50,15 +50,16 @@ export default function LocationFormModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  // Reset form when the dialog opens (codebase convention: Dialog onEnter,
+  // not a setState-in-effect).
+  const handleEnter = () => {
     setName(location?.name ?? '');
     setKind(location?.kind ?? null);
     setCode(location?.code ?? '');
     setIsStockable(location?.is_stockable ?? true);
     setIsQrAnchor(location?.is_qr_anchor ?? false);
     setError(null);
-  }, [open, location]);
+  };
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -84,7 +85,13 @@ export default function LocationFormModal({
   };
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={saving ? undefined : onClose}
+      maxWidth="xs"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>{location ? 'Edit location' : 'New location'}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>

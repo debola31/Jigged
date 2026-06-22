@@ -24,7 +24,7 @@ import {
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, is_location_tracked, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -39,6 +39,7 @@ interface PartRow {
   preferred_vendor_id: string | null;
   markup_rate_id: string | null;
   legacy_id: string | null;
+  is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
   routings?: Array<{ id: string }> | { id: string } | null;
@@ -60,6 +61,7 @@ function rowToPart(row: PartRow): Part {
     preferred_vendor_id: row.preferred_vendor_id,
     markup_rate_id: row.markup_rate_id,
     legacy_id: row.legacy_id,
+    is_location_tracked: row.is_location_tracked ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,
     routing: routingRecord

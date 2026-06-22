@@ -1,19 +1,24 @@
 'use client';
 
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import Alert from '@mui/material/Alert';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
+import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined';
 
 import type { Part, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartTransactionHistoryTable from '@/components/parts/PartTransactionHistoryTable';
 import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEditor';
+import PartLocationInventory from '@/components/parts/PartLocationInventory';
+import { enableLocationTracking } from '@/utils/inventoryLocationsAccess';
 
 interface InventoryTabProps {
   part: Part;
@@ -22,6 +27,8 @@ interface InventoryTabProps {
   transactionsRefreshKey: number;
   openTxnModal: (type: InventoryTransactionType) => void;
   onConversionsChanged: (next: PartUnitConversion[]) => void;
+  /** Refresh the part (rollup quantity + history) after a location change. */
+  onStockChanged: () => void | Promise<void>;
 }
 
 /**
@@ -37,9 +44,26 @@ export default function InventoryTab({
   transactionsRefreshKey,
   openTxnModal,
   onConversionsChanged,
+  onStockChanged,
 }: InventoryTabProps) {
   const belowReorder =
     part.reorder_point !== null && part.quantity <= part.reorder_point;
+
+  const [enabling, setEnabling] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
+
+  const handleEnableTracking = async () => {
+    setEnabling(true);
+    setEnableError(null);
+    try {
+      await enableLocationTracking(partId);
+      await onStockChanged();
+    } catch (e) {
+      setEnableError(e instanceof Error ? e.message : 'Failed to enable location tracking.');
+    } finally {
+      setEnabling(false);
+    }
+  };
 
   return (
     <Card elevation={2}>
@@ -66,38 +90,73 @@ export default function InventoryTab({
           />
         )}
 
-        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 4, flexWrap: 'wrap' }}>
-          <Button
-            variant="contained"
-            color="success"
-            size="large"
-            startIcon={<AddIcon />}
-            onClick={() => openTxnModal('addition')}
-            disabled={!part.primary_unit}
-          >
-            Add Stock
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            size="large"
-            startIcon={<RemoveIcon />}
-            onClick={() => openTxnModal('depletion')}
-            disabled={!part.primary_unit || part.quantity <= 0}
-          >
-            Remove Stock
-          </Button>
-          <Button
-            variant="outlined"
-            color="info"
-            size="large"
-            startIcon={<TuneIcon />}
-            onClick={() => openTxnModal('adjustment')}
-            disabled={!part.primary_unit}
-          >
-            Adjust
-          </Button>
-        </Box>
+        {part.is_location_tracked ? (
+          <Box sx={{ mt: 4 }}>
+            <PartLocationInventory
+              part={part}
+              partId={partId}
+              companyId={companyId}
+              onStockChanged={onStockChanged}
+            />
+          </Box>
+        ) : (
+          <>
+            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 4, flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                color="success"
+                size="large"
+                startIcon={<AddIcon />}
+                onClick={() => openTxnModal('addition')}
+                disabled={!part.primary_unit}
+              >
+                Add Stock
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                size="large"
+                startIcon={<RemoveIcon />}
+                onClick={() => openTxnModal('depletion')}
+                disabled={!part.primary_unit || part.quantity <= 0}
+              >
+                Remove Stock
+              </Button>
+              <Button
+                variant="outlined"
+                color="info"
+                size="large"
+                startIcon={<TuneIcon />}
+                onClick={() => openTxnModal('adjustment')}
+                disabled={!part.primary_unit}
+              >
+                Adjust
+              </Button>
+            </Box>
+
+            {part.primary_unit && (
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="text"
+                  startIcon={<LocationOnOutlinedIcon />}
+                  onClick={handleEnableTracking}
+                  disabled={enabling}
+                >
+                  Enable location tracking
+                </Button>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Track where this part is stored across cabinets and bins. Current stock moves to an
+                  “Unassigned” location you can distribute from.
+                </Typography>
+                {enableError && (
+                  <Alert severity="error" sx={{ mt: 1 }}>
+                    {enableError}
+                  </Alert>
+                )}
+              </Box>
+            )}
+          </>
+        )}
 
         {/* Unit conversions — inline-editable list. */}
         {part.primary_unit && (

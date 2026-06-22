@@ -380,6 +380,7 @@ export default function PartWorkspace({
           transactionsRefreshKey={transactionsRefreshKey}
           openTxnModal={openTxnModal}
           onConversionsChanged={setUnitConversions}
+          onStockChanged={handleTxnSuccess}
         />
       )}
 

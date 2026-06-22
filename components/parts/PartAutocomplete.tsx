@@ -121,6 +121,7 @@ export default function PartAutocomplete({
   return (
     <Autocomplete
       size={size}
+      openOnFocus
       open={open}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}

@@ -15,22 +15,20 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
-import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
-import DeleteIcon from '@mui/icons-material/Delete';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, deleteJob, cancelJob } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
@@ -62,7 +60,6 @@ export default function JobDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -119,15 +116,15 @@ export default function JobDetailPage() {
     };
   }, [companyId, jobId]);
 
-  const handleDelete = async () => {
+  const handleReopen = async () => {
     setActionLoading(true);
     try {
-      await deleteJob(jobId, companyId);
-      router.push(`/dashboard/${companyId}/jobs`);
+      await reopenJob(jobId);
+      await fetchJob();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete job');
+      setError(err instanceof Error ? err.message : 'Failed to reopen job');
+    } finally {
       setActionLoading(false);
-      setDeleteDialogOpen(false);
     }
   };
 
@@ -168,8 +165,12 @@ export default function JobDetailPage() {
   const parts: JobPartWithRelations[] = job.job_parts ?? [];
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
+  const canReopen = job.production_status === 'cancelled';
   const canShip =
-    shipmentsEnabled && job.fulfillment_status !== 'fully_shipped' && parts.length > 0;
+    shipmentsEnabled &&
+    job.production_status !== 'cancelled' &&
+    job.fulfillment_status !== 'fully_shipped' &&
+    parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
 
@@ -220,13 +221,22 @@ export default function JobDetailPage() {
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           {canShip && (
             <Button
-              variant="contained"
-              color="primary"
+              variant="outlined"
               startIcon={<LocalShippingIcon />}
               onClick={() => setShipModalOpen(true)}
               disabled={actionLoading}
             >
               Create Shipment
+            </Button>
+          )}
+          {canReopen && (
+            <Button
+              variant="outlined"
+              startIcon={<RestartAltIcon />}
+              onClick={handleReopen}
+              disabled={actionLoading}
+            >
+              Reopen
             </Button>
           )}
           {canCancel && (
@@ -261,19 +271,6 @@ export default function JobDetailPage() {
               Create Invoice in QuickBooks
             </Button>
           )}
-
-          <Tooltip title="Delete Job">
-            <IconButton
-              onClick={() => setDeleteDialogOpen(true)}
-              disabled={actionLoading}
-              sx={{
-                color: 'error.main',
-                '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
-              }}
-            >
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
         </Box>
       </Box>
 
@@ -490,8 +487,7 @@ export default function JobDetailPage() {
         <DialogContent>
           <Typography>
             Are you sure you want to cancel <strong>{job.job_number}</strong>? Every part on the
-            job will be marked cancelled. This action can be reversed by editing each part&apos;s
-            status individually.
+            job will be marked cancelled. You can reopen the job later.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -506,31 +502,6 @@ export default function JobDetailPage() {
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <CancelIcon />}
           >
             {actionLoading ? 'Cancelling…' : 'Cancel Job'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Job?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete <strong>{job.job_number}</strong>? This will also
-            delete every part, every operation, and every material on the job. This action cannot
-            be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)} disabled={actionLoading}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDelete}
-            color="error"
-            variant="contained"
-            disabled={actionLoading}
-            startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
-          >
-            {actionLoading ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

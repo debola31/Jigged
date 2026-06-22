@@ -97,6 +97,7 @@ export default function VendorAutocomplete({
 
   return (
     <Autocomplete<Vendor>
+      openOnFocus
       options={vendors}
       value={effectiveValue}
       onChange={(_, v) => onChange(v)}

@@ -335,6 +335,7 @@ export default function PartUnitConversionsEditor({
                 }))
               }
               disabled={saving}
+              InputLabelProps={{ shrink: true }}
               inputProps={{ min: 0, step: 'any' }}
               helperText={`How many ${primaryUnit} are in 1 of the from-unit (e.g. 12 if 1 ft = 12 in).`}
               fullWidth

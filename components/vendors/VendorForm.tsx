@@ -243,10 +243,7 @@ export default function VendorForm({
                 value={formData.name}
                 onChange={handleChange('name')}
                 error={!!fieldErrors.name}
-                helperText={
-                  fieldErrors.name ||
-                  'Unique vendor name (e.g. "PerformCoat of Michigan LLC")'
-                }
+                helperText={fieldErrors.name || ' '}
                 disabled={loading}
               />
             </Grid>

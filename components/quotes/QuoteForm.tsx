@@ -1436,6 +1436,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   required
                   value={formData.lead_time_value}
                   onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
+                  InputLabelProps={{ shrink: true }}
                   inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
                   sx={{ width: 120 }}
                 />
@@ -1483,7 +1484,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     {...params}
                     label="Payment terms"
                     size="small"
-                    placeholder="e.g. Net 30, 2/10 Net 30"
+                    placeholder="Select or type your own…"
                   />
                 )}
               />

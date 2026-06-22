@@ -210,6 +210,7 @@ export default function MaterialRowEditor({
           value={value.quantity}
           onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
           required
+          InputLabelProps={{ shrink: true }}
           inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
           size="small"
           disabled={saving}

@@ -107,7 +107,6 @@ export default function WorkspaceTab({
                         partId={partId}
                         companyId={companyId}
                         currentChain={currentChain}
-                        description={`Parts consumed when manufacturing this ${part.part_name}.`}
                         onChanged={refreshAfterMutation}
                       />
                     </>

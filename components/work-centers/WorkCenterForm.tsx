@@ -220,10 +220,7 @@ export default function WorkCenterForm({
                 value={formData.name}
                 onChange={handleTextChange('name')}
                 error={!!fieldErrors.name}
-                helperText={
-                  fieldErrors.name ||
-                  'e.g. "HURCO Mill", "Mazak Lathe", "PerformCoat"'
-                }
+                helperText={fieldErrors.name || ' '}
                 disabled={loading}
               />
             </Grid>
@@ -288,6 +285,7 @@ export default function WorkCenterForm({
                   type="number"
                   inputProps={{ min: 0, step: '0.01', inputMode: 'decimal' }}
                   slotProps={{
+                    inputLabel: { shrink: true },
                     input: {
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,
                       endAdornment: <InputAdornment position="end">/hr</InputAdornment>,
@@ -334,9 +332,7 @@ export default function WorkCenterForm({
                   required
                   label="Vendor"
                   error={!!fieldErrors.vendor_id}
-                  helperText={
-                    fieldErrors.vendor_id || 'Vendor performing this outside operation'
-                  }
+                  helperText={fieldErrors.vendor_id || ' '}
                 />
               </Grid>
             )}

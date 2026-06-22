@@ -206,12 +206,9 @@ export default function AcceptPurchaseOrderModal({
                 label="Customer PO #"
                 size="small"
                 fullWidth
-                required
                 value={poNumber}
                 onChange={(e) => setPoNumber(e.target.value)}
                 disabled={loading}
-                error={poNumber !== '' && !poValid}
-                helperText="The PO number from the customer's document."
               />
               <TextField
                 label="Due date"
@@ -222,7 +219,7 @@ export default function AcceptPurchaseOrderModal({
                 onChange={(e) => setDueDate(e.target.value)}
                 disabled={loading}
                 error={!dueDateValid}
-                helperText="Promised ship date (optional)."
+                helperText={!dueDateValid ? 'Enter a valid date' : ' '}
                 slotProps={{ inputLabel: { shrink: true } }}
               />
             </Box>

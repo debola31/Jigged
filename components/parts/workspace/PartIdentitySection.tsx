@@ -234,7 +234,7 @@ export default function PartIdentitySection({
             onChange={onTextChange('part_name')}
             onBlur={handleBlur}
             error={!!fieldErrors.part_name}
-            helperText={fieldErrors.part_name || 'Must be unique within this company'}
+            helperText={fieldErrors.part_name || ' '}
             disabled={busy}
           />
         </Grid>
@@ -246,9 +246,7 @@ export default function PartIdentitySection({
             required
             disabled={busy}
             error={!!fieldErrors.primary_unit}
-            helperText={
-              fieldErrors.primary_unit || 'How quantities of this part are measured.'
-            }
+            helperText={fieldErrors.primary_unit || ' '}
           />
         </Grid>
         <Grid size={{ xs: 12 }}>
@@ -276,6 +274,7 @@ export default function PartIdentitySection({
               error={!!fieldErrors.reorder_point}
               helperText={fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts.'}
               disabled={busy}
+              InputLabelProps={{ shrink: true }}
               inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
             />
           </Grid>

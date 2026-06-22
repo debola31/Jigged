@@ -19,6 +19,7 @@ import PartTransactionHistoryTable from '@/components/parts/PartTransactionHisto
 import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEditor';
 import PartLocationInventory from '@/components/parts/PartLocationInventory';
 import { enableLocationTracking } from '@/utils/inventoryLocationsAccess';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 interface InventoryTabProps {
   part: Part;
@@ -48,6 +49,7 @@ export default function InventoryTab({
 }: InventoryTabProps) {
   const belowReorder =
     part.reorder_point !== null && part.quantity <= part.reorder_point;
+  const { features } = useCompanyFeatures();
 
   const [enabling, setEnabling] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
@@ -134,7 +136,7 @@ export default function InventoryTab({
               </Button>
             </Box>
 
-            {part.primary_unit && (
+            {part.primary_unit && features.inventory_locations && (
               <Box sx={{ mt: 2 }}>
                 <Button
                   variant="text"

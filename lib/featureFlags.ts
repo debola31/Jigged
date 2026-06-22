@@ -44,6 +44,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     description:
       'Packing-slip generation, shipment history, and dual production / fulfillment status on jobs.',
   },
+  {
+    key: 'inventory_locations',
+    label: 'Inventory Locations',
+    description:
+      'QR-addressable storage locations with per-location stock: the Locations manager + visual builder, per-part location tracking, and bin scanning. The base inventory list is unaffected.',
+  },
 ] as const;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];
@@ -75,6 +81,12 @@ export function isShipmentsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
   return readFeatureFlag(company, 'shipments');
+}
+
+export function isInventoryLocationsEnabled(
+  company: Pick<Company, 'settings'> | null | undefined,
+): boolean {
+  return readFeatureFlag(company, 'inventory_locations');
 }
 
 /**

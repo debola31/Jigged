@@ -26,6 +26,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import UploadIcon from '@mui/icons-material/Upload';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -69,6 +70,7 @@ export default function InventoryPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
+  const { features } = useCompanyFeatures();
 
   const [rows, setRows] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -390,13 +392,15 @@ export default function InventoryPage() {
 
         <Box sx={{ flex: 1 }} />
 
-        <Button
-          variant="outlined"
-          startIcon={<WarehouseOutlinedIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/inventory/locations`)}
-        >
-          Locations
-        </Button>
+        {features.inventory_locations && (
+          <Button
+            variant="outlined"
+            startIcon={<WarehouseOutlinedIcon />}
+            onClick={() => router.push(`/dashboard/${companyId}/inventory/locations`)}
+          >
+            Locations
+          </Button>
+        )}
 
         <Button
           variant="outlined"

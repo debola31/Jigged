@@ -37,6 +37,7 @@ import WorkspaceTab from './tabs/WorkspaceTab';
 import InventoryTab from './tabs/InventoryTab';
 import UsageTab from './tabs/UsageTab';
 import HistoryTab from './tabs/HistoryTab';
+import FilesTab from './tabs/FilesTab';
 
 const formatDate = (s: string | null): string => {
   if (!s) return '—';
@@ -218,6 +219,7 @@ export default function PartWorkspace({
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
     if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
+    tabs.push({ slug: 'files', label: 'Files' });
     // Slug stays 'history' so existing ?tab=history deep links keep working.
     tabs.push({ slug: 'history', label: 'Activity' });
     return tabs;
@@ -384,6 +386,8 @@ export default function PartWorkspace({
       {activeTab === 'usage' && (
         <UsageTab part={part} partId={partId} companyId={companyId} currentChain={currentChain} />
       )}
+
+      {activeTab === 'files' && <FilesTab part={part} partId={partId} companyId={companyId} />}
 
       {activeTab === 'history' && <HistoryTab partId={partId} companyId={companyId} />}
 

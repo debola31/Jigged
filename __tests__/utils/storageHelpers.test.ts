@@ -118,6 +118,11 @@ describe('storageHelpers', () => {
       expect(result).toMatch(/^company-1\/jobs\/job-1\/[a-f0-9]{8}_attachment\.pdf$/);
     });
 
+    it('generates correct path format for parts', () => {
+      const result = generateStoragePath('company-1', 'parts', 'part-1', 'model.step');
+      expect(result).toMatch(/^company-1\/parts\/part-1\/[a-f0-9]{8}_model\.step$/);
+    });
+
     it('sanitizes filename in path', () => {
       const result = generateStoragePath('company-1', 'quotes', 'quote-1', 'bad file@name.pdf');
       expect(result).toContain('bad_file_name.pdf');

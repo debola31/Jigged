@@ -17,6 +17,10 @@ import type {
   PartUnitConversionFormData,
 } from '@/types/part';
 import type { InventoryTransaction, InventoryTransactionType } from '@/types/partTransaction';
+import {
+  getStoredPartAttachmentPaths,
+  deleteStoredFilesByPaths,
+} from '@/utils/partAttachmentsAccess';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 
 const PART_COLUMNS =
@@ -877,6 +881,12 @@ export async function updatePartPreferredVendor(
 export async function deletePart(partId: string): Promise<void> {
   const supabase = getSupabase();
 
+  // Capture attachment file paths BEFORE the delete — the part_attachments rows
+  // cascade away with the part, so we can't read them afterward. Capture-then-
+  // clean (not clean-then-delete): a part blocked by FK references must keep its
+  // files when the delete below is refused.
+  const attachmentPaths = await getStoredPartAttachmentPaths([partId]);
+
   const { error } = await supabase.from('parts').delete().eq('id', partId);
 
   if (error) {
@@ -888,6 +898,9 @@ export async function deletePart(partId: string): Promise<void> {
     console.error('Error deleting part:', error);
     throw error;
   }
+
+  // Row gone (and its attachment rows with it); best-effort remove the files.
+  await deleteStoredFilesByPaths(attachmentPaths);
 }
 
 /**
@@ -904,6 +917,9 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
+
+    // Capture this batch's attachment paths before the cascade removes the rows.
+    const attachmentPaths = await getStoredPartAttachmentPaths(batch);
 
     const { error } = await supabase
       .from('parts')
@@ -924,6 +940,9 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
       console.error('Error bulk deleting parts:', error);
       throw new Error(error.message || 'Failed to delete parts');
     }
+
+    // Batch deleted; best-effort remove its attachment files from storage.
+    await deleteStoredFilesByPaths(attachmentPaths);
   }
 }
 

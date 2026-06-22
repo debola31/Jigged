@@ -15,6 +15,7 @@ import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
+import TuneIcon from '@mui/icons-material/Tune';
 
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
@@ -59,6 +60,7 @@ interface LevelConfigStepProps {
   total: number;
   customized: boolean;
   tree: LocationSpecNode[];
+  onCustomize: () => void;
   onRemove: (key: string) => void;
   onAdd: (parentKey: string) => void;
   onStartOver: () => void;
@@ -70,6 +72,7 @@ export default function LevelConfigStep({
   total,
   customized,
   tree,
+  onCustomize,
   onRemove,
   onAdd,
   onStartOver,
@@ -252,6 +255,20 @@ export default function LevelConfigStep({
           <strong>{total}</strong> location{total === 1 ? '' : 's'}
         </Typography>
       </Stack>
+
+      <Button
+        fullWidth
+        variant="outlined"
+        startIcon={<TuneIcon />}
+        onClick={onCustomize}
+        disabled={total === 0}
+        sx={{ mt: 2 }}
+      >
+        Customize individual spots
+      </Button>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
+        Give specific branches different bins (e.g. a gap, or one extra).
+      </Typography>
     </Box>
   );
 }

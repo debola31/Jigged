@@ -46,26 +46,26 @@ describe('VisualLocationBuilder', () => {
     expect(onCreated).toHaveBeenCalledWith(16);
   });
 
-  it('fine-tunes one branch (remove + add), reflects it, and can start over', async () => {
+  it('customizes per branch from the config, then can start over', async () => {
     const user = userEvent.setup();
     render(<VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={vi.fn()} />);
 
     await user.click(screen.getByText('Cabinet'));
     expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
 
-    // remove one leaf from one branch → non-uniform, count drops, config reflects it
-    await user.click(screen.getAllByRole('button', { name: /^remove left$/i })[0]);
-    expect(await screen.findByRole('button', { name: /create 15 locations/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /start over/i })).toBeInTheDocument(); // customized config
+    // editing is in the config now — enter the per-branch editor
+    await user.click(screen.getByRole('button', { name: /customize individual spots/i }));
+    expect(await screen.findByText('Cabinet 1 › Row 1')).toBeInTheDocument(); // config reflects branches
+    expect(screen.getByRole('button', { name: /^start over$/i })).toBeInTheDocument();
 
-    // add one back to that branch
-    await user.click(screen.getByRole('button', { name: /add to row 1/i }));
-    expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
+    // add one to a single branch → count rises
+    await user.click(screen.getAllByRole('button', { name: /^add$/i })[0]);
+    expect(await screen.findByRole('button', { name: /create 17 locations/i })).toBeInTheDocument();
 
     // start over → confirm → back to the uniform numbers form
-    await user.click(screen.getByRole('button', { name: /start over/i }));
-    const confirms = screen.getAllByRole('button', { name: /start over/i });
-    await user.click(confirms[confirms.length - 1]); // the dialog's confirm
+    await user.click(screen.getByRole('button', { name: /^start over$/i }));
+    const confirms = screen.getAllByRole('button', { name: /^start over$/i });
+    await user.click(confirms[confirms.length - 1]);
     expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
     expect(screen.getAllByText('Call them').length).toBeGreaterThan(0); // uniform controls back
   });

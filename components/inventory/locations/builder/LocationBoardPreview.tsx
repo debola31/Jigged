@@ -1,165 +1,219 @@
 'use client';
 
 import Box from '@mui/material/Box';
-import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
-import IconButton from '@mui/material/IconButton';
-import CloseIcon from '@mui/icons-material/Close';
-import AddIcon from '@mui/icons-material/Add';
+import { alpha } from '@mui/material/styles';
 
 import type { LocationSpecNode } from '@/types/inventoryLocations';
 
-// Spatial depiction: containers as cards, sections stacked, leaves as CENTERED
-// cells (3 on a line → middle one centered). Editable: × removes a node, ＋ adds
-// one to that branch. Big/deep sets are summarized so it stays scannable.
-const TOP_LIMIT = 30;
-const GROUP_LIMIT = 14;
-const CELL_LIMIT = 18;
+// READ-ONLY, type-aware depiction (editing lives in the config). Each top
+// container is drawn to resemble its kind; a section's leaves fill the width as
+// evenly-divided compartments (like real cubbies/positions). Big/deep sets are
+// summarized. A 3D diorama is a tracked follow-up.
+const TOP_LIMIT = 24;
+const SECTION_LIMIT = 16;
+const CELL_LIMIT = 20;
+const FILL_MAX = 8; // up to this many leaves fill the width; beyond, wrap centered
 
-const cellSx = (qr: boolean) => ({
-  px: 1,
-  py: 0.5,
-  borderRadius: 1,
-  border: 1,
-  borderColor: qr ? 'info.main' : 'divider',
-  color: qr ? 'info.light' : 'text.primary',
-  fontSize: 13,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 0.25,
-  whiteSpace: 'nowrap' as const,
-});
+const qrCellBg = (t: { palette: { info: { main: string } } }) => alpha(t.palette.info.main, 0.18);
 
-interface Edit {
-  onRemove: (key: string) => void;
-  onAdd: (parentKey: string) => void;
-}
+/** Leaves spanning the section width as evenly-divided compartments. */
+function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
+  if (nodes.length === 0) return null;
 
-function Cell({ node, onRemove }: { node: LocationSpecNode } & Pick<Edit, 'onRemove'>) {
+  if (nodes.length > FILL_MAX) {
+    // too many to divide evenly — centered wrap so it stays readable
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
+        {nodes.slice(0, CELL_LIMIT).map((n) => (
+          <Box
+            key={n.key}
+            sx={{
+              fontSize: 12,
+              px: 0.75,
+              py: 0.25,
+              border: 1,
+              borderRadius: 0.5,
+              borderColor: n.is_qr_anchor ? 'info.main' : 'divider',
+              bgcolor: n.is_qr_anchor ? qrCellBg : 'transparent',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {n.name}
+            {n.children.length ? ` ·${n.children.length}` : ''}
+          </Box>
+        ))}
+        {nodes.length > CELL_LIMIT && (
+          <Box sx={{ fontSize: 12, color: 'text.secondary', px: 0.5 }}>+{nodes.length - CELL_LIMIT}</Box>
+        )}
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={cellSx(node.is_qr_anchor)}>
-      {node.name}
-      {node.children.length ? ` ·${node.children.length}` : ''}
-      <IconButton
-        size="small"
-        aria-label={`Remove ${node.name}`}
-        onClick={() => onRemove(node.key)}
-        sx={{ p: 0, ml: 0.25 }}
-      >
-        <CloseIcon sx={{ fontSize: 14 }} />
-      </IconButton>
-    </Box>
-  );
-}
-
-function AddButton({ parentKey, label, onAdd }: { parentKey: string; label: string } & Pick<Edit, 'onAdd'>) {
-  return (
-    <IconButton
-      size="small"
-      aria-label={label}
-      onClick={() => onAdd(parentKey)}
-      sx={{ border: 1, borderStyle: 'dashed', borderColor: 'divider', borderRadius: 1 }}
-    >
-      <AddIcon sx={{ fontSize: 16 }} />
-    </IconButton>
-  );
-}
-
-/** Centered, wrapping row of leaf cells + an Add button for this branch. */
-function CellGroup({
-  nodes,
-  parentKey,
-  addLabel,
-  onRemove,
-  onAdd,
-}: { nodes: LocationSpecNode[]; parentKey?: string; addLabel?: string } & Edit) {
-  const truncated = nodes.length > CELL_LIMIT;
-  return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5, alignItems: 'center' }}>
-      {nodes.slice(0, CELL_LIMIT).map((n) => (
-        <Cell key={n.key} node={n} onRemove={onRemove} />
+    <Box sx={{ display: 'flex', mt: 0.5, borderRadius: 0.5, overflow: 'hidden' }}>
+      {nodes.map((n, i) => (
+        <Box
+          key={n.key}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            textAlign: 'center',
+            fontSize: 12,
+            py: 0.4,
+            px: 0.5,
+            borderRight: i < nodes.length - 1 ? '1px solid' : 0,
+            borderColor: 'divider',
+            color: n.is_qr_anchor ? 'info.light' : 'text.primary',
+            bgcolor: n.is_qr_anchor ? qrCellBg : 'transparent',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={n.name}
+        >
+          {n.name}
+          {n.children.length ? ` ·${n.children.length}` : ''}
+        </Box>
       ))}
-      {truncated && <Box sx={{ ...cellSx(false), color: 'text.secondary' }}>+{nodes.length - CELL_LIMIT}</Box>}
-      {parentKey && !truncated && (
-        <AddButton parentKey={parentKey} label={addLabel ?? 'Add one'} onAdd={onAdd} />
-      )}
     </Box>
   );
 }
 
-function ContainerCard({ node, onRemove, onAdd }: { node: LocationSpecNode } & Edit) {
-  const kids = node.children;
-  const threeLevel = kids.length > 0 && kids[0].children.length > 0;
+function SectionLabel({ node }: { node: LocationSpecNode }) {
+  return (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+      {node.name}
+      {node.is_qr_anchor ? ' · QR' : ''}
+    </Typography>
+  );
+}
+
+type Kind = 'cabinet' | 'shelving' | 'rack' | 'drawer' | 'aisle' | 'generic';
+
+function unitKind(kind?: string | null): Kind {
+  const k = (kind ?? '').toLowerCase();
+  if (k.includes('rack')) return 'rack';
+  if (k.includes('drawer')) return 'drawer';
+  if (k.includes('aisle') || k.includes('zone')) return 'aisle';
+  if (k.includes('shelv') || k.includes('shelf')) return 'shelving';
+  if (k.includes('cabinet')) return 'cabinet';
+  return 'generic';
+}
+
+function Section({ node, kind }: { node: LocationSpecNode; kind: Kind }) {
+  const hasLeaves = node.children.length > 0;
+
+  if (kind === 'drawer') {
+    return (
+      <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'action.hover', py: 0.75, px: 1, textAlign: 'center' }}>
+        <Box sx={{ width: 28, height: 3, bgcolor: 'text.disabled', borderRadius: 2, mx: 'auto', mb: 0.5 }} />
+        <SectionLabel node={node} />
+        {hasLeaves && <Compartments nodes={node.children} />}
+      </Box>
+    );
+  }
+
+  if (kind === 'rack') {
+    // a beam: thick lines top and bottom, positions span the beam
+    return (
+      <Box sx={{ borderTop: '3px solid', borderBottom: '3px solid', borderColor: alpha('#5b8cf0', 0.55), py: 0.5 }}>
+        <SectionLabel node={node} />
+        <Compartments nodes={node.children} />
+      </Box>
+    );
+  }
+
+  if (kind === 'shelving' && !hasLeaves) {
+    // a plank: a solid shelf bar
+    return (
+      <Box sx={{ bgcolor: 'action.hover', borderBottom: '3px solid', borderColor: 'divider', borderRadius: 0.5, py: 0.5, textAlign: 'center' }}>
+        <Typography variant="caption" color="text.primary">
+          {node.name}
+          {node.is_qr_anchor ? ' · QR' : ''}
+        </Typography>
+      </Box>
+    );
+  }
+
+  // cabinet rows / shelving with items / generic bands: a shelf line with compartments
+  return (
+    <Box sx={{ borderBottom: '3px solid', borderColor: 'divider', pb: 0.5 }}>
+      <SectionLabel node={node} />
+      {hasLeaves && <Compartments nodes={node.children} />}
+    </Box>
+  );
+}
+
+function StorageUnit({ node }: { node: LocationSpecNode }) {
+  const kind = unitKind(node.kind);
+  const children = node.children;
+  const allLeaves = children.length > 0 && children.every((c) => c.children.length === 0);
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.5 }}>
-      <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: kids.length ? 1 : 0 }}>
+    <Box
+      sx={{
+        border: 2,
+        borderColor: 'divider',
+        borderLeftWidth: kind === 'rack' ? 6 : 2,
+        borderRightWidth: kind === 'rack' ? 6 : 2,
+        borderLeftColor: kind === 'rack' ? alpha('#5b8cf0', 0.55) : 'divider',
+        borderRightColor: kind === 'rack' ? alpha('#5b8cf0', 0.55) : 'divider',
+        borderRadius: 1,
+        overflow: 'hidden',
+        bgcolor: 'background.paper',
+      }}
+    >
+      <Box sx={{ px: 1.5, py: 0.75, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
           {node.name}
         </Typography>
         {node.is_qr_anchor && <Chip size="small" color="info" label="QR" />}
-        <IconButton size="small" aria-label={`Remove ${node.name}`} onClick={() => onRemove(node.key)}>
-          <CloseIcon fontSize="small" />
-        </IconButton>
-      </Stack>
+        {node.code && (
+          <Typography variant="caption" color="text.secondary">
+            {node.code}
+          </Typography>
+        )}
+      </Box>
 
-      {kids.length > 0 &&
-        (threeLevel ? (
-          <Stack spacing={1}>
-            {kids.slice(0, GROUP_LIMIT).map((section) => (
-              <Box key={section.key}>
-                <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5} sx={{ mb: 0.25 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    {section.name}
-                    {section.is_qr_anchor ? ' · QR' : ''}
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    aria-label={`Remove ${section.name}`}
-                    onClick={() => onRemove(section.key)}
-                    sx={{ p: 0 }}
-                  >
-                    <CloseIcon sx={{ fontSize: 14 }} />
-                  </IconButton>
+      <Box sx={{ p: 1 }}>
+        {children.length === 0 ? null : allLeaves ? (
+          <Compartments nodes={children} />
+        ) : kind === 'aisle' ? (
+          <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {children.slice(0, SECTION_LIMIT).map((bay) => (
+              <Box key={bay.key} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 0.5, minWidth: 56 }}>
+                <SectionLabel node={bay} />
+                <Stack spacing={0.25} sx={{ mt: 0.25 }}>
+                  {bay.children.slice(0, CELL_LIMIT).map((leaf) => (
+                    <Box key={leaf.key} sx={{ fontSize: 12, textAlign: 'center', border: 1, borderColor: leaf.is_qr_anchor ? 'info.main' : 'divider', borderRadius: 0.5, py: 0.25 }}>
+                      {leaf.name}
+                    </Box>
+                  ))}
                 </Stack>
-                <CellGroup
-                  nodes={section.children}
-                  parentKey={section.key}
-                  addLabel={`Add to ${section.name}`}
-                  onRemove={onRemove}
-                  onAdd={onAdd}
-                />
               </Box>
             ))}
-            {kids.length > GROUP_LIMIT && (
+          </Box>
+        ) : (
+          <Stack spacing={kind === 'drawer' ? 0.75 : 1}>
+            {children.slice(0, SECTION_LIMIT).map((section) => (
+              <Section key={section.key} node={section} kind={kind} />
+            ))}
+            {children.length > SECTION_LIMIT && (
               <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-                +{kids.length - GROUP_LIMIT} more
+                +{children.length - SECTION_LIMIT} more
               </Typography>
             )}
-            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-              <AddButton parentKey={node.key} label={`Add a section to ${node.name}`} onAdd={onAdd} />
-            </Box>
           </Stack>
-        ) : (
-          <CellGroup
-            nodes={kids}
-            parentKey={node.key}
-            addLabel={`Add to ${node.name}`}
-            onRemove={onRemove}
-            onAdd={onAdd}
-          />
-        ))}
-    </Paper>
+        )}
+      </Box>
+    </Box>
   );
 }
 
-interface LocationBoardPreviewProps extends Edit {
-  nodes: LocationSpecNode[];
-}
-
-export default function LocationBoardPreview({ nodes, onRemove, onAdd }: LocationBoardPreviewProps) {
+export default function LocationBoardPreview({ nodes }: { nodes: LocationSpecNode[] }) {
   if (nodes.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
@@ -168,19 +222,18 @@ export default function LocationBoardPreview({ nodes, onRemove, onAdd }: Locatio
     );
   }
 
-  // Flat (every top node is a leaf, e.g. loose bins): one centered cluster.
   if (nodes.every((n) => n.children.length === 0)) {
     return (
-      <Paper variant="outlined" sx={{ p: 1.5 }}>
-        <CellGroup nodes={nodes} onRemove={onRemove} onAdd={onAdd} />
-      </Paper>
+      <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
+        <Compartments nodes={nodes} />
+      </Box>
     );
   }
 
   return (
     <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' } }}>
       {nodes.slice(0, TOP_LIMIT).map((node) => (
-        <ContainerCard key={node.key} node={node} onRemove={onRemove} onAdd={onAdd} />
+        <StorageUnit key={node.key} node={node} />
       ))}
       {nodes.length > TOP_LIMIT && (
         <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>

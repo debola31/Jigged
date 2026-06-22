@@ -97,7 +97,11 @@ export default function VisualLocationBuilder({
     if (customized) setEditedTree((t) => applyQrAnchorByDepth(t, depth));
   };
 
-  // Direct manipulation from either the preview or the config chips.
+  // Editing lives in the config; the preview is read-only.
+  const enterCustomize = () => {
+    setEditedTree(applyQrAnchorByDepth(tree, qrAnchorDepth));
+    setCustomized(true);
+  };
   const editRemove = (key: string) => {
     setEditedTree(applyQrAnchorByDepth(removeSpecNode(tree, key), qrAnchorDepth));
     setCustomized(true);
@@ -157,6 +161,7 @@ export default function VisualLocationBuilder({
                 total={total}
                 customized={customized}
                 tree={tree}
+                onCustomize={enterCustomize}
                 onRemove={editRemove}
                 onAdd={editAdd}
                 onStartOver={() => setStartOverOpen(true)}
@@ -184,7 +189,7 @@ export default function VisualLocationBuilder({
                   ))}
                 </TextField>
               </Box>
-              <LocationBoardPreview nodes={tree} onRemove={editRemove} onAdd={editAdd} />
+              <LocationBoardPreview nodes={tree} />
             </Box>
           </Box>
         )}

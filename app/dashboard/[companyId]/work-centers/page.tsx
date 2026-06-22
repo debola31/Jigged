@@ -43,6 +43,7 @@ import {
   bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
+import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import type { WorkCenter, WorkCenterKind } from '@/types/workCenter';
 import type { Vendor } from '@/types/vendor';
@@ -68,6 +69,7 @@ export default function WorkCentersPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
+  const { setTitle } = usePageTitle();
 
   const [rows, setRows] = useState<WorkCenterRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,13 @@ export default function WorkCentersPage() {
     const timer = setTimeout(() => setSearchDebounced(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  // Reflect the active tab in the global app bar title (cleared on unmount so
+  // other pages fall back to their pathname title).
+  useEffect(() => {
+    setTitle(activeKind === 'internal' ? 'Work Centers — Internal' : 'Work Centers — External');
+    return () => setTitle(null);
+  }, [activeKind, setTitle]);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);

@@ -162,13 +162,8 @@ describe('deleteLocation', () => {
     expect(mockSupabase.rpc).toHaveBeenCalledWith('delete_location', { p_location_id: 'node' });
   });
 
-  it('maps the RPC sub-locations error to a friendly message', async () => {
-    state.rpc = { data: null, error: { message: 'location has sub-locations' } };
-    await expect(deleteLocation('node')).rejects.toThrow(/sub-locations/i);
-  });
-
-  it('maps the RPC stock error to a friendly message', async () => {
-    state.rpc = { data: null, error: { message: 'location still holds stock' } };
+  it('maps a stocked-subtree error to a friendly message', async () => {
+    state.rpc = { data: null, error: { message: 'location subtree still holds stock' } };
     await expect(deleteLocation('node')).rejects.toThrow(/still holds stock/i);
   });
 });

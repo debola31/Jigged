@@ -188,11 +188,11 @@ export async function moveLocation(
 }
 
 /**
- * Delete a location via the delete_location RPC. An EMPTY location is deletable
- * even after activity history: the RPC refuses only when it has children or
- * qty>0 balances, cleans up any leftover zero-qty balance rows (SELECT-only for
- * clients), and lets the ON DELETE SET NULL FK null the link on historical
- * ledger rows — which keep their location_name snapshot for audit.
+ * Delete a location (and its EMPTY subtree) via the delete_location RPC. The RPC
+ * refuses only when some location in the subtree still holds qty>0 stock;
+ * otherwise it cascade-deletes the empty sub-locations and their leftover
+ * zero-qty balance rows (SELECT-only for clients). Historical ledger rows keep
+ * their location_name snapshot; their location_id is nulled by the FK.
  */
 export async function deleteLocation(id: string): Promise<void> {
   const supabase = getSupabase();
@@ -200,11 +200,8 @@ export async function deleteLocation(id: string): Promise<void> {
   if (error) {
     console.error('Error deleting inventory location:', error);
     const msg = error.message ?? '';
-    if (msg.includes('sub-locations')) {
-      throw new Error('This location has sub-locations. Delete or move them first.');
-    }
     if (msg.includes('still holds stock')) {
-      throw new Error('This location still holds stock. Move it out (or disable tracking) first.');
+      throw new Error('This location (or something inside it) still holds stock. Move it out first.');
     }
     throw new Error('Failed to delete location.');
   }

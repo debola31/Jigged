@@ -252,8 +252,9 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         <DialogTitle>Delete location?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Delete <strong>{deleteState.node?.name}</strong>? This can&apos;t be undone. A location with
-            sub-locations or stock on it can&apos;t be deleted, but past activity is kept in history.
+            Delete <strong>{deleteState.node?.name}</strong> and everything empty inside it? This
+            can&apos;t be undone. A location can&apos;t be deleted while it (or something inside it)
+            holds stock, but past activity is kept in history.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

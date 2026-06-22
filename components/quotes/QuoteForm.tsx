@@ -1498,6 +1498,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         variant="standard"
                         disableUnderline
                         displayEmpty
+                        inputProps={{ 'aria-label': 'Lead time unit' }}
                         value={formData.lead_time_unit}
                         onChange={(e) =>
                           handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)

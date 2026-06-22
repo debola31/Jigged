@@ -18,7 +18,7 @@ import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
-import { isQuoteExpired } from '@/types/quote';
+import { isQuoteExpired, formatLeadTime } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
@@ -272,9 +272,7 @@ export default function ConvertToJobModal({
                 Quoted lead time
               </Typography>
               <Typography variant="body1" fontWeight={500}>
-                {quote.lead_time_days !== null
-                  ? `${quote.lead_time_days} day${quote.lead_time_days === 1 ? '' : 's'}`
-                  : 'Not specified'}
+                {formatLeadTime(quote.lead_time_value, quote.lead_time_unit) ?? 'Not specified'}
               </Typography>
             </Box>
             <TextField

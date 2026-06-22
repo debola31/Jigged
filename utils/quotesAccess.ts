@@ -17,7 +17,8 @@ import type {
   QuoteLineItem,
   CompanyMember,
 } from '@/types/quote';
-import { isQuoteExpired } from '@/types/quote';
+import { isQuoteExpired, leadTimeToDays, DEFAULT_LEAD_TIME_UNIT } from '@/types/quote';
+import type { LeadTimeUnit } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
@@ -39,6 +40,35 @@ import type { ComputedPartPricingTier } from '@/types/partPricing';
  */
 function asQuote(row: Record<string, unknown> & { status: string }): Quote {
   return row as unknown as Quote;
+}
+
+/** Trim a form string to a value or NULL (empty/whitespace → NULL). */
+function nullIfBlank(s: string | null | undefined): string | null {
+  return s && s.trim() !== '' ? s.trim() : null;
+}
+
+/**
+ * Resolve the lead-time columns to persist from the form payload. Returns the
+ * raw (value, unit) the user stated plus the normalized calendar-day count
+ * (lead_time_days) that convertQuoteToJob reads. Throws on an out-of-range
+ * value so create/update share one validation path.
+ */
+function normalizeLeadTime(formData: QuoteFormData): {
+  leadTimeValue: number | null;
+  leadTimeUnit: LeadTimeUnit;
+  leadTimeDays: number | null;
+} {
+  const unit: LeadTimeUnit = formData.lead_time_unit ?? DEFAULT_LEAD_TIME_UNIT;
+  const raw = formData.lead_time_value;
+  const value = raw !== '' && raw !== null && raw !== undefined ? Number(raw) : null;
+  if (value !== null && (!Number.isFinite(value) || value < 0 || !Number.isInteger(value))) {
+    throw new Error('Lead time must be a whole number of days/weeks.');
+  }
+  const leadTimeDays = leadTimeToDays(value, unit);
+  if (leadTimeDays !== null && leadTimeDays > 3650) {
+    throw new Error('Lead time must be 3,650 days or fewer.');
+  }
+  return { leadTimeValue: value, leadTimeUnit: unit, leadTimeDays };
 }
 
 /**
@@ -337,12 +367,10 @@ export async function createQuote(
     }
   }
 
-  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
-  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
-    throw new Error('Lead time must be between 0 and 3,650 days');
-  }
+  const { leadTimeValue, leadTimeUnit, leadTimeDays } = normalizeLeadTime(formData);
 
   const expirationDate = formData.expiration_date || null;
+  const paymentTerms = nullIfBlank(formData.payment_terms);
 
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -371,6 +399,9 @@ export async function createQuote(
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_days: leadTimeDays,
+      lead_time_value: leadTimeValue,
+      lead_time_unit: leadTimeUnit,
+      payment_terms: paymentTerms,
       expiration_date: expirationDate,
       status: 'active',
       created_by: user?.id ?? null,
@@ -491,10 +522,7 @@ export async function updateQuote(
     }
   }
 
-  const leadTimeDays = formData.lead_time_days ? parseInt(formData.lead_time_days, 10) : null;
-  if (leadTimeDays !== null && (isNaN(leadTimeDays) || leadTimeDays < 0 || leadTimeDays > 3650)) {
-    throw new Error('Lead time must be between 0 and 3,650 days');
-  }
+  const { leadTimeValue, leadTimeUnit, leadTimeDays } = normalizeLeadTime(formData);
 
   // customer_po_number is not on the quote — it lives on jobs and is
   // captured during convertQuoteToJob (migration 20260526). updateQuote
@@ -510,6 +538,9 @@ export async function updateQuote(
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_days: leadTimeDays,
+      lead_time_value: leadTimeValue,
+      lead_time_unit: leadTimeUnit,
+      payment_terms: nullIfBlank(formData.payment_terms),
       expiration_date: formData.expiration_date || null,
       updated_at: new Date().toISOString(),
     })

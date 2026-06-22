@@ -382,7 +382,9 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [{ part_id: 'part-1', order_quantity: 100 }],
-      lead_time_days: '14',
+      lead_time_value: '14',
+      lead_time_unit: 'business_days',
+      payment_terms: '',
       expiration_date: '',
     };
 
@@ -442,16 +444,17 @@ describe('quotesAccess utilities', () => {
       ).rejects.toThrow('Every part needs an order quantity greater than zero.');
     });
 
-    it('rejects lead_time_days > 3650', async () => {
+    it('rejects a lead time that normalizes to > 3650 days', async () => {
+      // 5000 business days → ceil(5000 * 7/5) = 7000 calendar days.
       await expect(
-        createQuote('company-1', { ...baseForm, lead_time_days: '5000' }),
-      ).rejects.toThrow('Lead time must be between 0 and 3,650 days');
+        createQuote('company-1', { ...baseForm, lead_time_value: '5000' }),
+      ).rejects.toThrow('Lead time must be 3,650 days or fewer.');
     });
 
-    it('rejects negative lead_time_days', async () => {
+    it('rejects a negative lead time value', async () => {
       await expect(
-        createQuote('company-1', { ...baseForm, lead_time_days: '-5' }),
-      ).rejects.toThrow('Lead time must be between 0 and 3,650 days');
+        createQuote('company-1', { ...baseForm, lead_time_value: '-5' }),
+      ).rejects.toThrow('Lead time must be a whole number');
     });
   });
 
@@ -462,7 +465,9 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [{ part_id: 'part-1', order_quantity: 200 }],
-      lead_time_days: '14',
+      lead_time_value: '14',
+      lead_time_unit: 'business_days',
+      payment_terms: '',
       expiration_date: '',
     };
 
@@ -834,7 +839,9 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [],
-      lead_time_days: '14',
+      lead_time_value: '14',
+      lead_time_unit: 'business_days',
+      payment_terms: '',
       expiration_date: '',
     };
 

@@ -9,7 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable, { type RowInput } from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
-import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
+import { isQuoteExpired, daysUntilExpiration, formatLeadTime } from '@/types/quote';
 
 const MARGIN = 40;
 
@@ -192,10 +192,12 @@ export async function generateQuotePdf(
       color: expiredOrSoon ? [180, 40, 40] : undefined,
     });
   }
-  if (quote.lead_time_days !== null && quote.lead_time_days !== undefined) {
-    metaRows.push({
-      text: `Lead Time: ${quote.lead_time_days} day${quote.lead_time_days === 1 ? '' : 's'} ARO`,
-    });
+  const leadTimeText = formatLeadTime(quote.lead_time_value, quote.lead_time_unit);
+  if (leadTimeText) {
+    metaRows.push({ text: `Lead Time: ${leadTimeText} ARO` });
+  }
+  if (quote.payment_terms) {
+    metaRows.push({ text: `Payment Terms: ${quote.payment_terms}` });
   }
 
   doc.setFont('helvetica', 'normal');

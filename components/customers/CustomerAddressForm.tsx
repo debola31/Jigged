@@ -29,8 +29,12 @@ interface CustomerAddressFormProps {
   customerId: string;
   /** Provided when editing an existing address; omitted for "Add Address". */
   existing?: CustomerAddress;
-  /** Called after the address has been successfully created or updated. */
-  onSaved: () => void;
+  /**
+   * Called after the address has been successfully created or updated, with
+   * the saved row so callers can select it immediately (e.g. the quote form's
+   * inline add). Callers that don't need it can ignore the argument.
+   */
+  onSaved: (saved: CustomerAddress) => void;
   /** Called when the user cancels — returns to the address list. */
   onCancel: () => void;
 }
@@ -90,12 +94,11 @@ export default function CustomerAddressForm({
     setLoading(true);
     setError(null);
     try {
-      if (isEdit && existing) {
-        await updateCustomerAddress(existing.id, customerId, formData);
-      } else {
-        await createCustomerAddress(customerId, formData);
-      }
-      onSaved();
+      const saved =
+        isEdit && existing
+          ? await updateCustomerAddress(existing.id, customerId, formData)
+          : await createCustomerAddress(customerId, formData);
+      onSaved(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save address');
     } finally {

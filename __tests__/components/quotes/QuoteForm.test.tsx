@@ -53,8 +53,14 @@ vi.mock('@/utils/quotePricingResolver', () => ({
   })),
 }));
 
-// Modal/autocomplete children — render nothing so the surface stays clean
+// Modal/autocomplete children — render nothing so the surface stays clean.
+// CustomerAddressForm is mocked too: it transitively imports
+// customerAddressesAccess → lib/supabase, which eagerly initializes a browser
+// client and throws without test env. The inline-add flow isn't under test here.
 vi.mock('@/components/customers/CustomerFormModal', () => ({
+  default: () => null,
+}));
+vi.mock('@/components/customers/CustomerAddressForm', () => ({
   default: () => null,
 }));
 vi.mock('@/components/parts/PartAutocomplete', () => ({
@@ -67,7 +73,9 @@ const initialBlank: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [],
-  lead_time_days: '',
+  lead_time_value: '',
+  lead_time_unit: 'business_days',
+  payment_terms: '',
   expiration_date: '',
 };
 
@@ -77,7 +85,9 @@ const initialPopulated: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
-  lead_time_days: '14',
+  lead_time_value: '14',
+  lead_time_unit: 'business_days',
+  payment_terms: '',
   expiration_date: '',
 };
 
@@ -140,7 +150,7 @@ describe('QuoteForm', () => {
     render(
       <QuoteForm
         mode="create"
-        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_days: '14' }}
+        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_value: '14' }}
       />,
     );
     await waitFor(() => {
@@ -174,7 +184,7 @@ describe('QuoteForm', () => {
     const [companyId, payload] = createQuote.mock.calls[0];
     expect(companyId).toBe('test-company-id'); // from test-utils useParams mock
     expect(payload.customer_id).toBe('cust-1');
-    expect(payload.lead_time_days).toBe('14');
+    expect(payload.lead_time_value).toBe('14');
     expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 5 }]);
 
     await waitFor(() => {

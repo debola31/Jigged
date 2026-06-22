@@ -35,8 +35,11 @@ describe('VisualLocationBuilder', () => {
     // Step 1 — palette: pick Cabinet (defaults to 1 cabinet × 5 rows × {Left,Right} = 16)
     await user.click(screen.getByText('Cabinet'));
 
-    // Step 2 — Build: controls + live board are shown together, Create carries the count
+    // Step 2 — Build: controls + live board together. The WHOLE nesting is
+    // visible without any drill-in click (cabinet → rows → bin leaves).
     expect(await screen.findByText('Cabinet 1')).toBeInTheDocument();
+    expect(screen.getByText('Row 1')).toBeInTheDocument(); // level 2 section
+    expect(screen.getAllByText('Left').length).toBeGreaterThan(0); // level 3 leaf chips
     const createBtn = await screen.findByRole('button', { name: /create 16 locations/i });
     await user.click(createBtn);
 

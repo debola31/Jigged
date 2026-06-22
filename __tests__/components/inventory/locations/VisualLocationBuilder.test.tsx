@@ -69,4 +69,17 @@ describe('VisualLocationBuilder', () => {
     expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
     expect(screen.getAllByText('Call them').length).toBeGreaterThan(0); // uniform controls back
   });
+
+  it('duplicates a top-level entry from the customize editor', async () => {
+    const user = userEvent.setup();
+    render(<VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    await user.click(screen.getByText('Cabinet')); // 16 nodes
+    await user.click(screen.getByRole('button', { name: /customize individual spots/i }));
+
+    // duplicate the cabinet → a second one like it → 32 nodes
+    await user.click(await screen.findByRole('button', { name: /duplicate cabinet 1/i }));
+    expect(await screen.findByRole('button', { name: /create 32 locations/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /duplicate cabinet 2/i })).toBeInTheDocument();
+  });
 });

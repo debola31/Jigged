@@ -4,6 +4,7 @@ import {
   countSpecNodes,
   removeSpecNode,
   addChildUnder,
+  duplicateNode,
   applyQrAnchorByDepth,
   generatedCode,
   explicitCode,
@@ -146,6 +147,30 @@ describe('non-uniform editing', () => {
     // Right is the last section → a new section cloned with 4 bins under it
     expect(next[0].children).toHaveLength(3);
     expect(next[0].children[2].children).toHaveLength(4);
+  });
+
+  it('duplicateNode clones a top-level entry as the next sibling (Cabinet 1 → Cabinet 2)', () => {
+    const roots = buildSpecFromLevels([
+      { kind: 'cabinet', count: 1, namePattern: 'Cabinet {n}' },
+      { kind: 'bin', count: 2, namePattern: 'Bin {n}' },
+    ]);
+    const next = duplicateNode(roots, roots[0].key);
+
+    expect(next.map((c) => c.name)).toEqual(['Cabinet 1', 'Cabinet 2']);
+    expect(next[1].code).toBe('C02');
+    expect(next[1].children.map((b) => b.name)).toEqual(['Bin 1', 'Bin 2']);
+    expect(next[1].children[0].code).toBe('C02-B01'); // re-coded under the new cabinet
+    expect(next[1].key).not.toBe(next[0].key); // fresh keys
+    expect(countSpecNodes(next)).toBe(6); // 2 cabinets × (1 + 2)
+  });
+
+  it('duplicateNode works on a nested branch too', () => {
+    const roots = buildSpecFromLevels(cabinetSidesBins); // cabinet → {Left,Right} → 4 bins
+    const left = roots[0].children[0];
+    const next = duplicateNode(roots, left.key);
+    // Left duplicated → a sibling "Left 2" with its 4 bins; Right untouched
+    expect(next[0].children.map((s) => s.name)).toEqual(['Left', 'Left 2', 'Right']);
+    expect(next[0].children[1].children).toHaveLength(4);
   });
 
   it('applyQrAnchorByDepth re-stamps anchors to a chosen depth', () => {

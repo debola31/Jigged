@@ -138,15 +138,21 @@ function cloneSubtree(node: LocationSpecNode, parentCode: string | null, overrid
   };
 }
 
-/** Next sibling name: bump the trailing number (Bin 4 → Bin 5), skipping gaps. */
+/** Next sibling name for a clone: bump past the highest number sharing the same
+ *  base (Bin 4 → Bin 5, keeping a gap), or count the same-base siblings when
+ *  they're unnumbered (Left among [Left, Right] → Left 2). */
 function nextSiblingName(siblings: LocationSpecNode[], last: LocationSpecNode): string {
   const base = last.name.replace(/\s*\d+\s*$/, '').trim();
-  let max = 0;
+  let maxNum = 0;
+  let sameBase = 0;
   for (const s of siblings) {
-    const m = s.name.match(/(\d+)\s*$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+    if (s.name.replace(/\s*\d+\s*$/, '').trim() === base) {
+      sameBase += 1;
+      const m = s.name.match(/(\d+)\s*$/);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+    }
   }
-  const next = (max || siblings.length) + 1;
+  const next = (maxNum > 0 ? maxNum : sameBase) + 1;
   return base ? `${base} ${next}` : `${last.name} ${next}`;
 }
 
@@ -193,4 +199,30 @@ export function applyQrAnchorByDepth(nodes: LocationSpecNode[], depth: number): 
   const walk = (ns: LocationSpecNode[], d: number): LocationSpecNode[] =>
     ns.map((n) => ({ ...n, is_qr_anchor: d === depth, children: walk(n.children, d + 1) }));
   return walk(nodes, 0);
+}
+
+/** Parent's code, inferred from a child's code ("C01-R03" → "C01", "C01" → null). */
+function parentCodeOf(code: string | null): string | null {
+  if (!code) return null;
+  const i = code.lastIndexOf('-');
+  return i >= 0 ? code.slice(0, i) : null;
+}
+
+/**
+ * Duplicate a node (and its subtree) as the NEXT sibling — fresh keys, a bumped
+ * name (Cabinet 1 → Cabinet 2), and re-derived codes under the same parent.
+ * Works at any level, including top-level entries.
+ */
+export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSpecNode[] {
+  const walk = (nodes: LocationSpecNode[]): LocationSpecNode[] => {
+    const out: LocationSpecNode[] = [];
+    for (const n of nodes) {
+      out.push({ ...n, children: walk(n.children) });
+      if (n.key === key) {
+        out.push(cloneSubtree(n, parentCodeOf(n.code), nextSiblingName(nodes, n)));
+      }
+    }
+    return out;
+  };
+  return walk(tree);
 }

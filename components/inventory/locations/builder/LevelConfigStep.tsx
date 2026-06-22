@@ -16,6 +16,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import TuneIcon from '@mui/icons-material/Tune';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
@@ -63,6 +64,7 @@ interface LevelConfigStepProps {
   onCustomize: () => void;
   onRemove: (key: string) => void;
   onAdd: (parentKey: string) => void;
+  onDuplicate: (key: string) => void;
   onStartOver: () => void;
 }
 
@@ -75,6 +77,7 @@ export default function LevelConfigStep({
   onCustomize,
   onRemove,
   onAdd,
+  onDuplicate,
   onStartOver,
 }: LevelConfigStepProps) {
   // ----- Customized: reflect the real per-branch structure as editable chips ---
@@ -93,6 +96,36 @@ export default function LevelConfigStep({
         >
           Fine-tuning individual spots. Branches can differ now.
         </Alert>
+
+        {/* Top-level entries: duplicate one to make another like it, or remove it. */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            Top-level
+          </Typography>
+          <Stack spacing={0.5}>
+            {tree.map((container) => (
+              <Stack key={container.key} direction="row" alignItems="center" spacing={0.5}>
+                <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                  {container.name}
+                </Typography>
+                <IconButton
+                  size="small"
+                  aria-label={`Duplicate ${container.name}`}
+                  onClick={() => onDuplicate(container.key)}
+                >
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  aria-label={`Remove ${container.name}`}
+                  onClick={() => onRemove(container.key)}
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
 
         {leafParents.length === 0 ? (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>

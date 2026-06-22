@@ -23,6 +23,7 @@ import {
   countSpecNodes,
   removeSpecNode,
   addChildUnder,
+  duplicateNode,
   applyQrAnchorByDepth,
 } from '@/utils/locationSpec';
 import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
@@ -111,6 +112,10 @@ export default function VisualLocationBuilder({
     setEditedTree(applyQrAnchorByDepth(addChildUnder(tree, parentKey), qrAnchorDepth));
     setCustomized(true);
   };
+  const editDuplicate = (key: string) => {
+    setEditedTree(applyQrAnchorByDepth(duplicateNode(tree, key), qrAnchorDepth));
+    setCustomized(true);
+  };
 
   const confirmStartOver = () => {
     setCustomized(false);
@@ -172,6 +177,7 @@ export default function VisualLocationBuilder({
                 onCustomize={enterCustomize}
                 onRemove={editRemove}
                 onAdd={editAdd}
+                onDuplicate={editDuplicate}
                 onStartOver={() => setStartOverOpen(true)}
               />
             </Box>

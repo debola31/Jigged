@@ -29,6 +29,16 @@ vi.mock('@/utils/operatorAccess', () => ({
   getCurrentOperator: (...a: unknown[]) => mockGetCurrentOperator(...a),
 }));
 
+// The STEP 3D viewer is loaded via next/dynamic(() => import('./StepViewer')).
+// Stub next/dynamic to return a lightweight component so the WASM/WebGL engine
+// never loads in jsdom; we only assert the modal dispatches STEP to it.
+vi.mock('next/dynamic', () => ({
+  default: () =>
+    function StepViewerStub({ url }: { url: string }) {
+      return <div data-testid="step-viewer" data-url={url} />;
+    },
+}));
+
 import FilesTab from '@/components/parts/workspace/tabs/FilesTab';
 
 const part = { id: 'p1', company_id: 'c1', part_name: 'PART-1' } as Part;
@@ -104,6 +114,19 @@ describe('FilesTab', () => {
       expect(within(dialog).getByTitle('drawing.pdf')).toBeInTheDocument();
     });
     expect(mockGetUrl).toHaveBeenCalledWith(PDF.storage_path);
+  });
+
+  it('opens a STEP file in the 3D viewer', async () => {
+    const STEP = att({ id: 'a-step', file_name: 'model.step', kind: 'step', uploaded_by: 'op-2' });
+    mockList.mockResolvedValue([STEP]);
+    const user = userEvent.setup();
+    renderTab();
+    const stepRow = (await screen.findByText('model.step')).closest('li')!;
+    await user.click(within(stepRow).getByRole('button', { name: /open/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByTestId('step-viewer')).toBeInTheDocument();
+    expect(mockGetUrl).toHaveBeenCalledWith(STEP.storage_path);
   });
 
   it('downloads a DWG instead of opening the viewer', async () => {

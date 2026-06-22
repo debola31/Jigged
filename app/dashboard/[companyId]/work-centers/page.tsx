@@ -16,11 +16,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import Chip from '@mui/material/Chip';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
@@ -33,7 +30,6 @@ import type {
   ColDef,
   GridReadyEvent,
   SelectionChangedEvent,
-  SortChangedEvent,
   RowClickedEvent,
   CellKeyDownEvent,
   ICellRendererParams,
@@ -43,7 +39,6 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import {
-  getAllWorkCenters,
   getWorkCentersByKind,
   bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
@@ -52,11 +47,22 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import type { WorkCenter, WorkCenterKind } from '@/types/workCenter';
 import type { Vendor } from '@/types/vendor';
 
-type KindFilter = 'all' | WorkCenterKind;
-
 interface WorkCenterRow extends WorkCenter {
   vendor_name: string | null;
 }
+
+const formatRate = (val: number | null): string =>
+  val === null || val === undefined
+    ? ''
+    : `$${Number(val).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}/hr`;
+
+const formatDate = (val: string | null | undefined): string => {
+  if (!val) return '—';
+  return new Date(val).toLocaleDateString();
+};
 
 export default function WorkCentersPage() {
   const router = useRouter();
@@ -67,11 +73,7 @@ export default function WorkCentersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
-  const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
-    field: 'name',
-    sort: 'asc',
-  });
+  const [activeKind, setActiveKind] = useState<WorkCenterKind>('internal');
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<WorkCenterRow>>(null);
@@ -94,14 +96,7 @@ export default function WorkCentersPage() {
     setLoading(true);
     try {
       const [workCenters, vendors] = await Promise.all([
-        kindFilter === 'all'
-          ? getAllWorkCenters(
-              companyId,
-              searchDebounced,
-              sortModel.field === 'vendor_name' ? 'name' : sortModel.field,
-              sortModel.sort,
-            )
-          : getWorkCentersByKind(companyId, kindFilter, searchDebounced),
+        getWorkCentersByKind(companyId, activeKind, searchDebounced),
         getAllVendors(companyId),
       ]);
       const vendorById = new Map<string, Vendor>(vendors.map((v) => [v.id, v]));
@@ -121,7 +116,7 @@ export default function WorkCentersPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, searchDebounced, sortModel, kindFilter]);
+  }, [companyId, searchDebounced, activeKind]);
 
   useEffect(() => {
     fetchRows();
@@ -132,7 +127,7 @@ export default function WorkCentersPage() {
     if (gridRef.current?.api) {
       gridRef.current.api.deselectAll();
     }
-  }, [searchDebounced, kindFilter]);
+  }, [searchDebounced, activeKind]);
 
   const gridHeight = useMemo(() => {
     if (loading || rows.length === 0) return 600;
@@ -148,19 +143,6 @@ export default function WorkCentersPage() {
       state: [{ colId: 'name', sort: 'asc' }],
       defaultState: { sort: null },
     });
-  };
-
-  const handleSortChanged = (event: SortChangedEvent) => {
-    const columnState = event.api.getColumnState();
-    const sortedColumn = columnState.find((col) => col.sort !== null);
-    if (sortedColumn && sortedColumn.sort) {
-      setSortModel({
-        field: sortedColumn.colId || 'name',
-        sort: sortedColumn.sort as 'asc' | 'desc',
-      });
-    } else {
-      setSortModel({ field: 'name', sort: 'asc' });
-    }
   };
 
   const handleSelectionChanged = (event: SelectionChangedEvent<WorkCenterRow>) => {
@@ -213,114 +195,81 @@ export default function WorkCentersPage() {
     }
   };
 
-  const formatRate = (val: number | null): string =>
-    val === null || val === undefined
-      ? ''
-      : `$${Number(val).toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}/hr`;
-
-  const formatDate = (val: string | null | undefined): string => {
-    if (!val) return '—';
-    return new Date(val).toLocaleDateString();
-  };
-
-  const columnDefs: ColDef<WorkCenterRow>[] = [
-    {
+  // Columns are tailored per active tab so each kind shows a homogeneous,
+  // relevant table: internal centers carry an hourly labor rate; external
+  // centers carry a vendor and are priced per routing operation (a caption
+  // below the grid notes this, so the Cost column would be a constant).
+  const columnDefs = useMemo<ColDef<WorkCenterRow>[]>(() => {
+    const nameCol: ColDef<WorkCenterRow> = {
       field: 'name',
       headerName: 'Name',
       flex: 1.5,
       minWidth: 200,
       pinned: 'left' as const,
-    },
-    {
-      field: 'kind',
-      headerName: 'Kind',
-      width: 140,
-      cellRenderer: (params: ICellRendererParams<WorkCenterRow>) => {
-        const kind = params.value as WorkCenterKind | undefined;
-        if (!kind) return null;
-        const isInternal = kind === 'internal';
-        return (
-          <Chip
-            label={isInternal ? 'Internal' : 'External'}
-            size="small"
-            sx={{
-              fontWeight: 600,
-              bgcolor: isInternal ? 'info.dark' : 'warning.dark',
-              color: 'common.white',
-            }}
-          />
-        );
-      },
-    },
-    {
-      // Branches on kind: internal work centers carry an hourly labor rate
-      // (or em-dash if unset); external work centers' cost lives per-piece
-      // on each routing operation, so the cell points the user there.
-      // Custom comparator keeps internal rows ordered by labor_rate while
-      // pinning external rows to the bottom regardless of sort direction
-      // (their cost is not comparable to an hourly rate).
-      colId: 'cost',
-      headerName: 'Cost',
-      width: 160,
-      sortable: true,
-      comparator: (_a, _b, nodeA, nodeB) => {
-        const aExt = nodeA.data?.kind === 'external';
-        const bExt = nodeB.data?.kind === 'external';
-        if (aExt && !bExt) return 1;
-        if (!aExt && bExt) return -1;
-        if (aExt && bExt) return 0;
-        return (
-          (nodeA.data?.labor_rate ?? -Infinity) - (nodeB.data?.labor_rate ?? -Infinity)
-        );
-      },
-      cellStyle: { display: 'flex', alignItems: 'center' },
-      cellRenderer: (params: ICellRendererParams<WorkCenterRow>) => {
-        const wc = params.data;
-        if (!wc) return null;
-        if (wc.kind === 'external') {
-          return (
-            <Typography
-              variant="body2"
-              sx={{ fontStyle: 'italic', color: 'text.secondary' }}
-            >
-              Per operation
-            </Typography>
-          );
-        }
-        if (wc.labor_rate === null || wc.labor_rate === undefined) return '—';
-        return formatRate(Number(wc.labor_rate));
-      },
-    },
-    {
-      field: 'vendor_name',
-      headerName: 'Vendor',
-      width: 200,
-      valueFormatter: (params) => {
-        if (params.data?.kind === 'internal') return '';
-        return params.value || '—';
-      },
-    },
-    {
+    };
+    const descriptionCol: ColDef<WorkCenterRow> = {
       field: 'description',
       headerName: 'Description',
       flex: 2,
       minWidth: 200,
       sortable: false,
       valueFormatter: (params) => params.value ?? '—',
-    },
-    {
+    };
+    const updatedCol: ColDef<WorkCenterRow> = {
       field: 'updated_at',
       headerName: 'Updated',
       width: 140,
       valueFormatter: (params) => formatDate(params.value),
-    },
-  ];
+    };
+
+    if (activeKind === 'external') {
+      return [
+        nameCol,
+        {
+          field: 'vendor_name',
+          headerName: 'Vendor',
+          width: 240,
+          valueFormatter: (params) => params.value || '—',
+        },
+        descriptionCol,
+        updatedCol,
+      ];
+    }
+
+    return [
+      nameCol,
+      {
+        colId: 'cost',
+        headerName: 'Cost',
+        width: 160,
+        sortable: true,
+        valueGetter: (params) => params.data?.labor_rate ?? null,
+        cellRenderer: (params: ICellRendererParams<WorkCenterRow>) => {
+          const wc = params.data;
+          if (!wc) return null;
+          if (wc.labor_rate === null || wc.labor_rate === undefined) return '—';
+          return formatRate(Number(wc.labor_rate));
+        },
+      },
+      descriptionCol,
+      updatedCol,
+    ];
+  }, [activeKind]);
 
   return (
     <Box>
+      <Tabs
+        value={activeKind}
+        onChange={(_e, value) => {
+          setActiveKind(value as WorkCenterKind);
+          setSearch('');
+        }}
+        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="internal" label="Internal" />
+        <Tab value="external" label="External" />
+      </Tabs>
+
       <Box
         sx={{
           display: 'flex',
@@ -346,20 +295,6 @@ export default function WorkCentersPage() {
             },
           }}
         />
-
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel id="kind-filter-label">Filter by kind</InputLabel>
-          <Select
-            labelId="kind-filter-label"
-            value={kindFilter}
-            label="Filter by kind"
-            onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-          >
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="internal">Internal</MenuItem>
-            <MenuItem value="external">External</MenuItem>
-          </Select>
-        </FormControl>
 
         {selectedIds.length > 0 && (
           <>
@@ -398,6 +333,12 @@ export default function WorkCentersPage() {
         </Button>
       </Box>
 
+      {activeKind === 'external' && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          External work centers are priced per routing operation, not by an hourly rate.
+        </Typography>
+      )}
+
       {!loading && rows.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
@@ -405,14 +346,14 @@ export default function WorkCentersPage() {
               sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }}
             />
             <Typography variant="h6" color="text.secondary" gutterBottom>
-              No work centers yet
+              No {activeKind} work centers yet
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || kindFilter !== 'all'
-                ? 'No work centers match your filters.'
+              {searchDebounced
+                ? `No ${activeKind} work centers match your search.`
                 : 'Add your first work center or import from CSV.'}
             </Typography>
-            {!searchDebounced && kindFilter === 'all' && (
+            {!searchDebounced && (
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
                 <Button
                   variant="outlined"
@@ -469,7 +410,6 @@ export default function WorkCentersPage() {
               paginationPageSizeSelector={[25, 50, 100]}
               suppressPaginationPanel={false}
               domLayout="normal"
-              onSortChanged={handleSortChanged}
               onGridReady={handleGridReady}
               loading={loading}
               suppressCellFocus={false}

@@ -54,13 +54,16 @@ vi.mock('@/utils/quotePricingResolver', () => ({
 }));
 
 // Modal/autocomplete children — render nothing so the surface stays clean.
-// CustomerAddressForm is mocked too: it transitively imports
-// customerAddressesAccess → lib/supabase, which eagerly initializes a browser
-// client and throws without test env. The inline-add flow isn't under test here.
+// CustomerAddressForm / CustomerContactForm are mocked too: they transitively
+// import customer*Access → lib/supabase, which eagerly initializes a browser
+// client and throws without test env. The inline-add flows aren't under test here.
 vi.mock('@/components/customers/CustomerFormModal', () => ({
   default: () => null,
 }));
 vi.mock('@/components/customers/CustomerAddressForm', () => ({
+  default: () => null,
+}));
+vi.mock('@/components/customers/CustomerContactForm', () => ({
   default: () => null,
 }));
 vi.mock('@/components/parts/PartAutocomplete', () => ({

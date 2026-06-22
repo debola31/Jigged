@@ -48,6 +48,7 @@ import { resolveTier } from '@/utils/quotePricingResolver';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
+import CustomerContactForm from '@/components/customers/CustomerContactForm';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import type {
   Customer,
@@ -55,6 +56,7 @@ import type {
   CustomerListContact,
   CustomerWithRelations,
 } from '@/types/customer';
+import type { CustomerContact } from '@/types/customerContact';
 
 interface QuoteFormProps {
   mode: 'create' | 'edit';
@@ -113,6 +115,8 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 /** Sentinel option IDs for "add new" actions inside the dropdowns. */
 const ADD_NEW_CONTACT_ID = '__add_new_contact__';
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
+/** Sentinel for the "Other (specify)…" choice in the payment-terms picker. */
+const PAYMENT_TERMS_OTHER = '__payment_other__';
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -212,13 +216,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [customersById, setCustomersById] = useState<Map<string, CustomerWithRelations>>(
     () => new Map(),
   );
-  // Shipping address is the primary section because it's what the quote
-  // PDF actually renders. Billing address is captured for the future
-  // invoicing flow but de-emphasized into a disclosure that opens when
-  // billing differs from shipping. Initial state: ON when billing address
-  // equals shipping address (Customer Contact is independent of either).
-  const [billingSameAsShipping, setBillingSameAsShipping] = useState<boolean>(
-    () => initialData.billing_address_id === initialData.shipping_address_id,
+  // Billing address is the primary section: it's the more fundamental field
+  // and prints as the CUSTOMER block on the quote PDF. Shipping is
+  // de-emphasized into a disclosure that opens when shipping differs from
+  // billing. Initial state: ON when shipping address equals billing address
+  // (Customer Contact is independent of either).
+  const [shippingSameAsBilling, setShippingSameAsBilling] = useState<boolean>(
+    () => initialData.shipping_address_id === initialData.billing_address_id,
   );
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -230,6 +234,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // (null = closed). The new address is created against the current customer
   // and auto-selected into this field on save.
   const [addressFormFor, setAddressFormFor] = useState<'shipping' | 'billing' | null>(null);
+
+  // Whether the inline "+ Add new contact" form is open. Mirrors the address
+  // inline-add: the new contact is created against the current customer and
+  // auto-selected into the Contact field on save.
+  const [contactFormOpen, setContactFormOpen] = useState(false);
+
+  // Payment terms: true when the user is entering custom terms (the "Other
+  // (specify)…" path). Seeded true when editing a quote whose saved terms
+  // aren't one of the presets, so the custom field shows with that value.
+  const [paymentOther, setPaymentOther] = useState<boolean>(
+    () =>
+      !!initialData.payment_terms &&
+      !PAYMENT_TERM_PRESETS.includes(initialData.payment_terms),
+  );
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -360,13 +378,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * (they belong to a different customer and would be rejected by the
    * integrity trigger) and pre-populates defaults from the new customer:
    *   - contact_id          → primary contact
-   *   - shipping_address_id → default_shipping (falls back to default_billing)
-   *   - billing_address_id  → default_billing
+   *   - billing_address_id  → default_billing (or the sole address)
+   *   - shipping_address_id → default_shipping (falls back to billing)
    *
-   * "Billing same as shipping" goes ON when the resolved billing equals
-   * the resolved shipping address. Common case (single default address)
+   * "Shipping same as billing" goes ON when the resolved shipping equals
+   * the resolved billing address. Common case (single default address)
    * → ON, disclosure hidden. Customers with separate billing/shipping
-   * defaults → OFF, billing disclosure visible.
+   * defaults → OFF, shipping disclosure visible.
    */
   const handleCustomerChange = (customerId: string) => {
     if (!customerId) {
@@ -377,7 +395,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         billing_address_id: '',
         shipping_address_id: '',
       }));
-      setBillingSameAsShipping(true);
+      setShippingSameAsBilling(true);
       return;
     }
     if (customerId === formData.customer_id) return;
@@ -391,42 +409,42 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     const shippingId = shipping?.id ?? '';
     const contactId = primary?.id ?? '';
 
-    const sameAsShipping = billingId === shippingId;
+    const sameAsBilling = shippingId === billingId;
 
-    setBillingSameAsShipping(sameAsShipping);
+    setShippingSameAsBilling(sameAsBilling);
     setFormData((prev) => ({
       ...prev,
       customer_id: customerId,
       contact_id: contactId,
-      shipping_address_id: shippingId,
-      billing_address_id: sameAsShipping ? shippingId : billingId,
+      billing_address_id: billingId,
+      shipping_address_id: sameAsBilling ? billingId : shippingId,
     }));
   };
 
   /**
-   * When the user changes the shipping address while "billing same as
-   * shipping" is on, mirror the change into the hidden billing FK so
+   * When the user changes the billing address while "shipping same as
+   * billing" is on, mirror the change into the hidden shipping FK so
    * the two stay in sync without the user touching the disclosure.
    */
-  const handleShippingAddressChange = (newId: string) => {
+  const handleBillingAddressChange = (newId: string) => {
     setFormData((prev) => ({
       ...prev,
-      shipping_address_id: newId,
-      ...(billingSameAsShipping ? { billing_address_id: newId } : {}),
+      billing_address_id: newId,
+      ...(shippingSameAsBilling ? { shipping_address_id: newId } : {}),
     }));
   };
 
   /**
-   * Toggling "billing same as shipping".
-   * ON  → sync billing_address_id → shipping_address_id immediately.
-   * OFF → leave billing where it is; user opens the disclosure to pick.
+   * Toggling "shipping same as billing".
+   * ON  → sync shipping_address_id → billing_address_id immediately.
+   * OFF → leave shipping where it is; user opens the disclosure to pick.
    */
-  const handleBillingSameToggle = (next: boolean) => {
-    setBillingSameAsShipping(next);
+  const handleShippingSameToggle = (next: boolean) => {
+    setShippingSameAsBilling(next);
     if (next) {
       setFormData((prev) => ({
         ...prev,
-        billing_address_id: prev.shipping_address_id,
+        shipping_address_id: prev.billing_address_id,
       }));
     }
   };
@@ -435,7 +453,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * A new address was created inline for the current customer. Patch it into
    * the cached customer row (so the selector lists it) and auto-select it into
    * the field that opened the form — mirroring billing→shipping when "same as
-   * shipping" is on. Then close the inline form.
+   * billing" is on. Then close the inline form.
    */
   const handleAddressCreated = (saved: CustomerAddress) => {
     const target = addressFormFor;
@@ -451,12 +469,43 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         return next;
       });
     }
-    if (target === 'shipping') {
-      handleShippingAddressChange(saved.id);
-    } else if (target === 'billing') {
-      handleFieldChange('billing_address_id', saved.id);
+    if (target === 'billing') {
+      handleBillingAddressChange(saved.id);
+    } else if (target === 'shipping') {
+      handleFieldChange('shipping_address_id', saved.id);
     }
     setAddressFormFor(null);
+  };
+
+  /**
+   * A new contact was created inline for the current customer. Patch it into
+   * the cached customer row (mapped to the list-contact shape the selector
+   * uses) and auto-select it, then close the inline form. Mirrors
+   * handleAddressCreated.
+   */
+  const handleContactCreated = (saved: CustomerContact) => {
+    if (formData.customer_id) {
+      const listContact: CustomerListContact = {
+        id: saved.id,
+        name: saved.name,
+        role: saved.role,
+        email: saved.email,
+        phone: saved.phone,
+        is_primary: saved.is_primary,
+      };
+      setCustomersById((prev) => {
+        const existing = prev.get(formData.customer_id);
+        if (!existing) return prev;
+        const next = new Map(prev);
+        next.set(formData.customer_id, {
+          ...existing,
+          customer_contacts: [...(existing.customer_contacts ?? []), listContact],
+        });
+        return next;
+      });
+    }
+    handleFieldChange('contact_id', saved.id);
+    setContactFormOpen(false);
   };
 
   /** Addresses + contacts for the currently-selected customer (or empty). */
@@ -507,8 +556,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     const a = customerAddresses.find((x) => x.id === value);
     return a ? <AddressLines address={a} /> : '';
   };
-
-  const customerDetailHref = `/dashboard/${companyId}/customers/${formData.customer_id}`;
 
   const addPartBlock = () => {
     // New block lands at the current end, so its index is the current length.
@@ -734,6 +781,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     ) {
       return 'Enter a lead time (whole number).';
     }
+    if (formData.lead_time_unit === '') {
+      return 'Select a lead time unit.';
+    }
     const seenParts = new Set<string>();
     for (const block of partBlocks) {
       if (!block.part) return 'Every part block must have a part selected.';
@@ -866,7 +916,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
 
-          {/* Customer contact + Shipping address + Billing address.
+          {/* Customer contact + Billing address + Shipping address.
               Hidden until a customer is picked. */}
           {formData.customer_id && (
             <Box sx={{ mt: 3 }}>
@@ -876,9 +926,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     size="small"
                     options={[
                       ...customerContacts,
-                      // Sentinel "+ Add new contact" appears at the bottom
-                      // of the dropdown. Selecting it navigates to the
-                      // customer detail page instead of setting the FK.
+                      // Sentinel "+ Add new contact" appears at the bottom of
+                      // the dropdown. Selecting it opens the inline add-contact
+                      // form instead of setting the FK.
                       {
                         id: ADD_NEW_CONTACT_ID,
                         name: '+ Add new contact',
@@ -894,7 +944,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     }
                     onChange={(_, v) => {
                       if (v?.id === ADD_NEW_CONTACT_ID) {
-                        router.push(customerDetailHref);
+                        setContactFormOpen(true);
                         return;
                       }
                       handleFieldChange('contact_id', v?.id ?? '');
@@ -916,65 +966,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       <TextField {...params} label="Contact" />
                     )}
                   />
-                </Grid>
-                <Grid size={{ xs: 12, md: 6 }}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel id="shipping-address-label">Shipping address</InputLabel>
-                    <Select
-                      labelId="shipping-address-label"
-                      label="Shipping address"
-                      value={formData.shipping_address_id}
-                      onChange={(e) => {
-                        if (e.target.value === ADD_NEW_ADDRESS_ID) {
-                          setAddressFormFor('shipping');
-                          return;
-                        }
-                        handleShippingAddressChange(e.target.value);
-                      }}
-                      renderValue={renderAddressValue}
-                      sx={{
-                        '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
-                      }}
-                    >
-                      {customerAddresses.map((a) => (
-                        <MenuItem key={a.id} value={a.id} sx={{ whiteSpace: 'normal' }}>
-                          <AddressLines address={a} />
-                        </MenuItem>
-                      ))}
-                      <MenuItem value={ADD_NEW_ADDRESS_ID} sx={{ fontStyle: 'italic' }}>
-                        + Add new address
-                      </MenuItem>
-                    </Select>
-                  </FormControl>
-                  <Collapse in={addressFormFor === 'shipping'} unmountOnExit>
+                  <Collapse in={contactFormOpen} unmountOnExit>
                     <Box sx={{ mt: 2, p: 2, borderRadius: 1, bgcolor: 'action.hover' }}>
-                      <CustomerAddressForm
+                      <CustomerContactForm
                         customerId={formData.customer_id}
-                        onSaved={handleAddressCreated}
-                        onCancel={() => setAddressFormFor(null)}
+                        onSaved={handleContactCreated}
+                        onCancel={() => setContactFormOpen(false)}
                       />
                     </Box>
                   </Collapse>
                 </Grid>
-              </Grid>
-
-              <FormControlLabel
-                sx={{ mt: 2, mb: 0 }}
-                control={
-                  <Checkbox
-                    checked={billingSameAsShipping}
-                    onChange={(e) => handleBillingSameToggle(e.target.checked)}
-                  />
-                }
-                label={
-                  <Typography variant="body2" color="text.secondary">
-                    Billing address same as shipping
-                  </Typography>
-                }
-              />
-
-              {!billingSameAsShipping && (
-                <Box sx={{ mt: 1, pl: 4 }}>
+                <Grid size={{ xs: 12, md: 6 }}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="billing-address-label">Billing address</InputLabel>
                     <Select
@@ -986,7 +988,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                           setAddressFormFor('billing');
                           return;
                         }
-                        handleFieldChange('billing_address_id', e.target.value);
+                        handleBillingAddressChange(e.target.value);
                       }}
                       renderValue={renderAddressValue}
                       sx={{
@@ -1004,6 +1006,63 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     </Select>
                   </FormControl>
                   <Collapse in={addressFormFor === 'billing'} unmountOnExit>
+                    <Box sx={{ mt: 2, p: 2, borderRadius: 1, bgcolor: 'action.hover' }}>
+                      <CustomerAddressForm
+                        customerId={formData.customer_id}
+                        onSaved={handleAddressCreated}
+                        onCancel={() => setAddressFormFor(null)}
+                      />
+                    </Box>
+                  </Collapse>
+                </Grid>
+              </Grid>
+
+              <FormControlLabel
+                sx={{ mt: 2, mb: 0 }}
+                control={
+                  <Checkbox
+                    checked={shippingSameAsBilling}
+                    onChange={(e) => handleShippingSameToggle(e.target.checked)}
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Shipping address same as billing
+                  </Typography>
+                }
+              />
+
+              {!shippingSameAsBilling && (
+                <Box sx={{ mt: 1, pl: 4 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel id="shipping-address-label">Shipping address</InputLabel>
+                    <Select
+                      labelId="shipping-address-label"
+                      label="Shipping address"
+                      value={formData.shipping_address_id}
+                      onChange={(e) => {
+                        if (e.target.value === ADD_NEW_ADDRESS_ID) {
+                          setAddressFormFor('shipping');
+                          return;
+                        }
+                        handleFieldChange('shipping_address_id', e.target.value);
+                      }}
+                      renderValue={renderAddressValue}
+                      sx={{
+                        '& .MuiSelect-select': { whiteSpace: 'normal', py: 1 },
+                      }}
+                    >
+                      {customerAddresses.map((a) => (
+                        <MenuItem key={a.id} value={a.id} sx={{ whiteSpace: 'normal' }}>
+                          <AddressLines address={a} />
+                        </MenuItem>
+                      ))}
+                      <MenuItem value={ADD_NEW_ADDRESS_ID} sx={{ fontStyle: 'italic' }}>
+                        + Add new address
+                      </MenuItem>
+                    </Select>
+                  </FormControl>
+                  <Collapse in={addressFormFor === 'shipping'} unmountOnExit>
                     <Box sx={{ mt: 2, p: 2, borderRadius: 1, bgcolor: 'action.hover' }}>
                       <CustomerAddressForm
                         customerId={formData.customer_id}
@@ -1428,6 +1487,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
+              {/* Two clean fields: a plain number (native spinner arrows
+                  hidden) + a separate unit dropdown. The unit has no default —
+                  it shows a "Select…" placeholder and is required
+                  (validationError), so a quote can't ship with a wrong unit. */}
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <TextField
                   label="Lead time"
@@ -1438,16 +1501,36 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
                   InputLabelProps={{ shrink: true }}
                   inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
-                  sx={{ width: 120 }}
+                  sx={{
+                    width: 120,
+                    // Hide the native number spinner arrows — they crowd the
+                    // unit field and add no value for a small whole number.
+                    '& input[type=number]': { MozAppearance: 'textfield' },
+                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button':
+                      { WebkitAppearance: 'none', margin: 0 },
+                  }}
                 />
-                <FormControl size="small" sx={{ flex: 1 }}>
-                  <InputLabel id="lead-time-unit-label">Unit</InputLabel>
+                <FormControl size="small" required sx={{ flex: 1 }}>
+                  <InputLabel id="lead-time-unit-label" shrink>
+                    Unit
+                  </InputLabel>
                   <Select
                     labelId="lead-time-unit-label"
                     label="Unit"
+                    notched
+                    displayEmpty
                     value={formData.lead_time_unit}
                     onChange={(e) =>
                       handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
+                    }
+                    renderValue={(selected) =>
+                      selected ? (
+                        LEAD_TIME_UNITS.find((u) => u.value === selected)?.label
+                      ) : (
+                        <Box component="span" sx={{ color: 'text.secondary' }}>
+                          Select…
+                        </Box>
+                      )
                     }
                   >
                     {LEAD_TIME_UNITS.map((u) => (
@@ -1471,23 +1554,64 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              <Autocomplete
-                freeSolo
-                options={PAYMENT_TERM_PRESETS}
-                value={formData.payment_terms || null}
-                // freeSolo emits a string on free entry and on option pick; keep
-                // '' when cleared so the access layer stores NULL.
-                onChange={(_, v) => handleFieldChange('payment_terms', v ?? '')}
-                onInputChange={(_, v) => handleFieldChange('payment_terms', v)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Payment terms"
-                    size="small"
-                    placeholder="Select or type your own…"
-                  />
-                )}
-              />
+              {/* Presets + an explicit "Other (specify)…" that reveals a free
+                  text field — discoverable custom entry without losing the
+                  common presets. payment_terms stays a single string column. */}
+              <FormControl size="small" fullWidth>
+                <InputLabel id="payment-terms-label" shrink>
+                  Payment terms
+                </InputLabel>
+                <Select
+                  labelId="payment-terms-label"
+                  label="Payment terms"
+                  notched
+                  displayEmpty
+                  value={paymentOther ? PAYMENT_TERMS_OTHER : formData.payment_terms}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === PAYMENT_TERMS_OTHER) {
+                      setPaymentOther(true);
+                      handleFieldChange('payment_terms', '');
+                      return;
+                    }
+                    setPaymentOther(false);
+                    handleFieldChange('payment_terms', v);
+                  }}
+                  renderValue={(selected) => {
+                    if (paymentOther || selected === PAYMENT_TERMS_OTHER) {
+                      return 'Other (specify)…';
+                    }
+                    return selected ? (
+                      (selected as string)
+                    ) : (
+                      <Box component="span" sx={{ color: 'text.secondary' }}>
+                        Select…
+                      </Box>
+                    );
+                  }}
+                >
+                  {PAYMENT_TERM_PRESETS.map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {p}
+                    </MenuItem>
+                  ))}
+                  <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
+                    Other (specify)…
+                  </MenuItem>
+                </Select>
+              </FormControl>
+              {paymentOther && (
+                <TextField
+                  sx={{ mt: 1 }}
+                  fullWidth
+                  size="small"
+                  label="Custom payment terms"
+                  placeholder="e.g. Net 30, 1% late charge"
+                  value={formData.payment_terms}
+                  onChange={(e) => handleFieldChange('payment_terms', e.target.value)}
+                  autoFocus
+                />
+              )}
             </Grid>
           </Grid>
         </CardContent>

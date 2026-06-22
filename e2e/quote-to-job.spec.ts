@@ -83,11 +83,13 @@ test.describe('Quote to Job workflow', () => {
       timeout: 10_000,
     });
 
-    // Lead time is required for the Create button to enable — fill any
-    // whole number. Expiration date defaults from EMPTY_QUOTE_FORM so we
-    // don't touch it. Without this fill the submit button stays disabled
-    // and the next step times out waiting to click.
+    // Lead time value + unit are both required for the Create button to
+    // enable (the unit has no default). Expiration date defaults from
+    // EMPTY_QUOTE_FORM so we don't touch it. Without these the submit button
+    // stays disabled and the next step times out waiting to click.
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
+    await page.getByRole('combobox', { name: 'Unit' }).click();
+    await page.getByRole('option', { name: 'Weeks' }).click();
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)
     await page.getByRole('button', { name: /Create Quote/i }).click();

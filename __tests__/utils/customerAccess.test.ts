@@ -56,7 +56,10 @@ import {
   createCustomer,
   updateCustomer,
   softDeleteCustomer,
+  pickBillingAddress,
+  pickShippingAddress,
 } from '@/utils/customerAccess';
+import type { CustomerAddress } from '@/types/customer';
 
 describe('customerAccess utilities', () => {
   beforeEach(() => {
@@ -268,5 +271,55 @@ describe('customerAccess utilities', () => {
       expect(mockQueryBuilder.delete).toHaveBeenCalled();
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'customer-1');
     });
+  });
+});
+
+// Pure functions — no Supabase. These drive quote-form address pre-population.
+describe('address pickers', () => {
+  const addr = (over: Partial<CustomerAddress>): CustomerAddress => ({
+    id: 'a1',
+    customer_id: 'c1',
+    address_line1: '1 Main St',
+    address_line2: null,
+    city: 'Town',
+    state: 'CA',
+    postal_code: '90001',
+    country: 'USA',
+    default_billing: false,
+    default_shipping: false,
+    attention_to: null,
+    ...over,
+  });
+
+  it('returns the flagged default_billing address when one is set', () => {
+    const flagged = addr({ id: 'bill', default_billing: true });
+    const other = addr({ id: 'other' });
+    expect(pickBillingAddress({ addresses: [other, flagged] })?.id).toBe('bill');
+  });
+
+  it('auto-defaults a customer with exactly one address (no flags set)', () => {
+    const only = addr({ id: 'solo' });
+    expect(pickBillingAddress({ addresses: [only] })?.id).toBe('solo');
+    // Shipping falls back to billing, so the lone address resolves there too.
+    expect(pickShippingAddress({ addresses: [only] })?.id).toBe('solo');
+  });
+
+  it('returns null when there are zero addresses', () => {
+    expect(pickBillingAddress({ addresses: [] })).toBeNull();
+    expect(pickShippingAddress({ addresses: [] })).toBeNull();
+  });
+
+  it('returns null for billing when 2+ addresses have no default flag (ambiguous)', () => {
+    const a = addr({ id: 'a' });
+    const b = addr({ id: 'b' });
+    expect(pickBillingAddress({ addresses: [a, b] })).toBeNull();
+  });
+
+  it('prefers default_shipping, else falls back to billing', () => {
+    const ship = addr({ id: 'ship', default_shipping: true });
+    const bill = addr({ id: 'bill', default_billing: true });
+    expect(pickShippingAddress({ addresses: [bill, ship] })?.id).toBe('ship');
+    // No ship-to flag but a billing default exists → ship where we bill.
+    expect(pickShippingAddress({ addresses: [bill, addr({ id: 'x' })] })?.id).toBe('bill');
   });
 });

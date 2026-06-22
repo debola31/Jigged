@@ -187,6 +187,9 @@ test.describe('Quote edit — reload contract', () => {
       timeout: 10_000,
     });
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
+    // Lead time unit is required (no default) — pick one before submitting.
+    await page.getByRole('combobox', { name: 'Unit' }).click();
+    await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new
@@ -317,6 +320,9 @@ test.describe('Quote edit — reload contract', () => {
     expect(snapshottedDollar).toBeTruthy();
 
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
+    // Lead time unit is required (no default) — pick one before submitting.
+    await page.getByRole('combobox', { name: 'Unit' }).click();
+    await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new
@@ -429,6 +435,9 @@ test.describe('Quote edit — reload contract', () => {
     const snapshottedDollar = snapshottedDollarText.match(/\$[\d.,]+/)?.[0];
     expect(snapshottedDollar).toBeTruthy();
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
+    // Lead time unit is required (no default) — pick one before submitting.
+    await page.getByRole('combobox', { name: 'Unit' }).click();
+    await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new

@@ -3,15 +3,15 @@
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
+import QrCode2Icon from '@mui/icons-material/QrCode2';
 import { alpha } from '@mui/material/styles';
 
 import type { LocationSpecNode } from '@/types/inventoryLocations';
 
 // READ-ONLY, type-aware depiction (editing lives in the config). Each top
 // container is drawn to resemble its kind; a section's leaves fill the width as
-// evenly-divided compartments (like real cubbies/positions). Big/deep sets are
-// summarized. A 3D diorama is a tracked follow-up.
+// evenly-divided compartments. A QR-code icon marks wherever a label would be
+// printed. Big/deep sets are summarized. A 3D diorama is a tracked follow-up.
 const TOP_LIMIT = 24;
 const SECTION_LIMIT = 16;
 const CELL_LIMIT = 20;
@@ -19,18 +19,30 @@ const FILL_MAX = 8; // up to this many leaves fill the width; beyond, wrap cente
 
 const qrCellBg = (t: { palette: { info: { main: string } } }) => alpha(t.palette.info.main, 0.18);
 
+/** A little QR-code glyph marking where a printed label would go. */
+function QrMark({ size = 15 }: { size?: number }) {
+  return (
+    <QrCode2Icon
+      sx={{ fontSize: size, color: 'info.main', verticalAlign: 'middle', flexShrink: 0 }}
+      titleAccess="A QR label prints here"
+    />
+  );
+}
+
 /** Leaves spanning the section width as evenly-divided compartments. */
 function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
   if (nodes.length === 0) return null;
 
   if (nodes.length > FILL_MAX) {
-    // too many to divide evenly — centered wrap so it stays readable
     return (
       <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5, mt: 0.5 }}>
         {nodes.slice(0, CELL_LIMIT).map((n) => (
           <Box
             key={n.key}
             sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.25,
               fontSize: 12,
               px: 0.75,
               py: 0.25,
@@ -41,6 +53,7 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
               whiteSpace: 'nowrap',
             }}
           >
+            {n.is_qr_anchor && <QrMark size={12} />}
             {n.name}
             {n.children.length ? ` ·${n.children.length}` : ''}
           </Box>
@@ -60,7 +73,10 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
           sx={{
             flex: 1,
             minWidth: 0,
-            textAlign: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 0.25,
             fontSize: 12,
             py: 0.4,
             px: 0.5,
@@ -70,12 +86,14 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
             bgcolor: n.is_qr_anchor ? qrCellBg : 'transparent',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
-            textOverflow: 'ellipsis',
           }}
           title={n.name}
         >
-          {n.name}
-          {n.children.length ? ` ·${n.children.length}` : ''}
+          {n.is_qr_anchor && <QrMark size={12} />}
+          <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {n.name}
+            {n.children.length ? ` ·${n.children.length}` : ''}
+          </Box>
         </Box>
       ))}
     </Box>
@@ -84,10 +102,12 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
 
 function SectionLabel({ node }: { node: LocationSpecNode }) {
   return (
-    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
-      {node.name}
-      {node.is_qr_anchor ? ' · QR' : ''}
-    </Typography>
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25 }}>
+      <Typography variant="caption" color="text.secondary">
+        {node.name}
+      </Typography>
+      {node.is_qr_anchor && <QrMark size={13} />}
+    </Box>
   );
 }
 
@@ -117,7 +137,6 @@ function Section({ node, kind }: { node: LocationSpecNode; kind: Kind }) {
   }
 
   if (kind === 'rack') {
-    // a beam: thick lines top and bottom, positions span the beam
     return (
       <Box sx={{ borderTop: '3px solid', borderBottom: '3px solid', borderColor: alpha('#5b8cf0', 0.55), py: 0.5 }}>
         <SectionLabel node={node} />
@@ -127,18 +146,13 @@ function Section({ node, kind }: { node: LocationSpecNode; kind: Kind }) {
   }
 
   if (kind === 'shelving' && !hasLeaves) {
-    // a plank: a solid shelf bar
     return (
-      <Box sx={{ bgcolor: 'action.hover', borderBottom: '3px solid', borderColor: 'divider', borderRadius: 0.5, py: 0.5, textAlign: 'center' }}>
-        <Typography variant="caption" color="text.primary">
-          {node.name}
-          {node.is_qr_anchor ? ' · QR' : ''}
-        </Typography>
+      <Box sx={{ bgcolor: 'action.hover', borderBottom: '3px solid', borderColor: 'divider', borderRadius: 0.5, py: 0.5 }}>
+        <SectionLabel node={node} />
       </Box>
     );
   }
 
-  // cabinet rows / shelving with items / generic bands: a shelf line with compartments
   return (
     <Box sx={{ borderBottom: '3px solid', borderColor: 'divider', pb: 0.5 }}>
       <SectionLabel node={node} />
@@ -170,7 +184,7 @@ function StorageUnit({ node }: { node: LocationSpecNode }) {
         <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
           {node.name}
         </Typography>
-        {node.is_qr_anchor && <Chip size="small" color="info" label="QR" />}
+        {node.is_qr_anchor && <QrMark size={18} />}
         {node.code && (
           <Typography variant="caption" color="text.secondary">
             {node.code}
@@ -188,7 +202,11 @@ function StorageUnit({ node }: { node: LocationSpecNode }) {
                 <SectionLabel node={bay} />
                 <Stack spacing={0.25} sx={{ mt: 0.25 }}>
                   {bay.children.slice(0, CELL_LIMIT).map((leaf) => (
-                    <Box key={leaf.key} sx={{ fontSize: 12, textAlign: 'center', border: 1, borderColor: leaf.is_qr_anchor ? 'info.main' : 'divider', borderRadius: 0.5, py: 0.25 }}>
+                    <Box
+                      key={leaf.key}
+                      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25, fontSize: 12, border: 1, borderColor: leaf.is_qr_anchor ? 'info.main' : 'divider', borderRadius: 0.5, py: 0.25 }}
+                    >
+                      {leaf.is_qr_anchor && <QrMark size={12} />}
                       {leaf.name}
                     </Box>
                   ))}

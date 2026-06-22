@@ -11,6 +11,7 @@ import Button from '@mui/material/Button';
 import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
+import Divider from '@mui/material/Divider';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Alert from '@mui/material/Alert';
@@ -152,9 +153,16 @@ export default function VisualLocationBuilder({
         {activeStep === 0 && <StorageTypePalette selectedId={selectedTypeId} onSelect={pickType} />}
 
         {activeStep === 1 && (
-          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {/* Controls (uniform) or per-branch chips (customized) */}
-            <Box sx={{ flex: '1 1 320px', minWidth: 280 }}>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3 }}>
+            {/* Configure (the only editor) */}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography
+                variant="overline"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 1.5, letterSpacing: 1 }}
+              >
+                Configure
+              </Typography>
               <LevelConfigStep
                 levels={levels}
                 onChange={setLevels}
@@ -168,10 +176,13 @@ export default function VisualLocationBuilder({
               />
             </Box>
 
-            {/* Live spatial preview (also editable) */}
-            <Box sx={{ flex: '1 1 340px', minWidth: 280 }}>
+            <Divider orientation="vertical" flexItem sx={{ display: { xs: 'none', md: 'block' } }} />
+            <Divider sx={{ display: { xs: 'block', md: 'none' } }} />
+
+            {/* Read-only type-aware preview */}
+            <Box sx={{ flex: 1, minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5, flexWrap: 'wrap' }}>
-                <Typography variant="subtitle2" color="text.secondary" sx={{ flex: 1 }}>
+                <Typography variant="overline" color="text.secondary" sx={{ flex: 1, letterSpacing: 1 }}>
                   Preview
                 </Typography>
                 <TextField

@@ -72,10 +72,11 @@ type QuoteCustomerContact = NonNullable<QuoteCustomer['customer_contacts']>[numb
 
 /**
  * Resolve an embedded customer_addresses row by id. The quote carries
- * shipping_address_id (rendered on the PDF) and billing_address_id (stored
- * for downstream invoicing, not rendered) — both point at the address rows
- * joined under quote.customers.addresses. Returns null when the FK is null
- * or the lookup misses (e.g. address was deleted after the quote was issued).
+ * billing_address_id (rendered on the PDF under the CUSTOMER block) and
+ * shipping_address_id (stored for downstream fulfillment, not rendered) —
+ * both point at the address rows joined under quote.customers.addresses.
+ * Returns null when the FK is null or the lookup misses (e.g. address was
+ * deleted after the quote was issued).
  */
 function findAddressById(
   addresses: QuoteCustomerAddress[] | undefined,
@@ -99,12 +100,12 @@ function findContactById(
 }
 
 /**
- * Build the printed address lines for the Shipping Address block.
- * Surfaces ATTN: from customer_addresses.attention_to when set. No
- * contact lines or contact info — the Customer Contact has its own
- * section below the metadata block.
+ * Build the printed address lines for the Customer block (customer name +
+ * billing address). The address's attention_to is intentionally NOT
+ * surfaced here — the Customer Contact has its own section below the
+ * metadata block. No contact lines or contact info either.
  */
-function buildShippingAddressLines(
+function buildBillingAddressLines(
   customer: QuoteCustomer | null | undefined,
   address: QuoteCustomerAddress | null,
 ): string[] {
@@ -112,7 +113,6 @@ function buildShippingAddressLines(
 
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-  if (address?.attention_to) lines.push(`Attn: ${address.attention_to}`);
 
   if (address) {
     const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -234,7 +234,7 @@ export async function generateQuotePdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- CREATED BY · CUSTOMER CONTACT · SHIPPING ADDRESS (3 columns) ----------
+  // ---------- CREATED BY · CUSTOMER CONTACT · CUSTOMER (3 columns) ----------
   const usableWidth = pageWidth - MARGIN * 2;
   const col1X = MARGIN;
   const col2X = MARGIN + usableWidth * 0.33;
@@ -243,15 +243,15 @@ export async function generateQuotePdf(
   const createdByName = quote.created_by_member?.name ?? null;
   const createdByEmail = quote.created_by_member?.email ?? null;
 
-  // Resolve the shipping address + customer contact from the quote's FKs.
+  // Resolve the billing address + customer contact from the quote's FKs.
   // These are set at quote creation (legacy quotes were backfilled in
   // migrations 20260520 + 20260522) so the printed quote always renders
   // what the customer originally saw, even if the customer's defaults
-  // change later. The billing address is captured on the quote for the
-  // future invoicing flow but is NOT rendered on the quote document.
-  const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
+  // change later. The shipping address is captured on the quote for the
+  // future fulfillment flow but is NOT rendered on the quote document.
+  const billingAddress = findAddressById(quote.customers?.addresses, quote.billing_address_id);
   const contact = findContactById(quote.customers?.customer_contacts, quote.contact_id);
-  const shippingLines = buildShippingAddressLines(quote.customers ?? null, shippingAddress);
+  const billingLines = buildBillingAddressLines(quote.customers ?? null, billingAddress);
 
   // Build each column's body lines as { text, bold }. The lead line of each
   // column (creator/contact name, customer name) is bold; the rest plain.
@@ -266,7 +266,7 @@ export async function generateQuotePdf(
     if (contact.phone) contactLines.push({ text: contact.phone, bold: false });
   }
 
-  const shippingBody: Array<{ text: string; bold: boolean }> = shippingLines.map(
+  const billingBody: Array<{ text: string; bold: boolean }> = billingLines.map(
     (line: string, i: number) => ({ text: line, bold: i === 0 }),
   );
 
@@ -277,7 +277,7 @@ export async function generateQuotePdf(
   }> = [
     { x: col1X, label: createdByLines.length > 0 ? 'CREATED BY' : null, lines: createdByLines },
     { x: col2X, label: contactLines.length > 0 ? 'CUSTOMER CONTACT' : null, lines: contactLines },
-    { x: col3X, label: 'SHIPPING ADDRESS', lines: shippingBody },
+    { x: col3X, label: 'CUSTOMER', lines: billingBody },
   ];
 
   // Column labels on one row.

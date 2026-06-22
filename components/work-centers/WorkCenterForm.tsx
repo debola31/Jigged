@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -37,6 +37,12 @@ interface WorkCenterFormProps {
   workCenterId?: string;
   /** Optional: companyId override for modal usage */
   companyId?: string;
+  /**
+   * Number of routing operations referencing this work center (edit mode).
+   * When > 0 the kind toggle is locked: pricing is read live from kind, so
+   * flipping it would break the cost of every operation already using it.
+   */
+  routingOperationsCount?: number;
   /** Optional: Callback when work center is created/updated successfully */
   onSuccess?: (workCenter: WorkCenter) => void;
   /** Optional: Callback when cancel is clicked */
@@ -48,12 +54,18 @@ export default function WorkCenterForm({
   initialData,
   workCenterId,
   companyId: companyIdProp,
+  routingOperationsCount = 0,
   onSuccess,
   onCancel,
 }: WorkCenterFormProps) {
   const router = useRouter();
   const params = useParams();
   const companyId = companyIdProp || (params.companyId as string);
+
+  // Once a work center is used by routing operations, its kind is fixed:
+  // costing reads kind live, so switching internal↔external would orphan the
+  // pricing fields on every referencing operation (see Q1 in the PR).
+  const kindLocked = mode === 'edit' && routingOperationsCount > 0;
 
   const [formData, setFormData] = useState<WorkCenterFormData>(initialData);
   const [loading, setLoading] = useState(false);
@@ -98,10 +110,19 @@ export default function WorkCenterForm({
       errors.vendor_id = 'Vendor is required for external work centers';
     }
 
-    if (formData.kind === 'internal' && formData.labor_rate.trim()) {
-      const rate = parseOptionalNumber(formData.labor_rate);
-      if (rate === null || rate < 0) {
-        errors.labor_rate = 'Labor rate must be a non-negative number';
+    // Labor rate is required for internal work centers: an internal routing
+    // operation with no rate (and no per-op override) cannot be priced — the
+    // cost function raises and the part shows as unpriceable. Requiring it here
+    // stops that bad state at the source. (External WCs price per operation, so
+    // labor_rate stays hidden/empty for them.)
+    if (formData.kind === 'internal') {
+      if (!formData.labor_rate.trim()) {
+        errors.labor_rate = 'Labor rate is required for internal work centers';
+      } else {
+        const rate = parseOptionalNumber(formData.labor_rate);
+        if (rate === null || rate < 0) {
+          errors.labor_rate = 'Labor rate must be a non-negative number';
+        }
       }
     }
 
@@ -219,7 +240,7 @@ export default function WorkCenterForm({
                   value={formData.kind}
                   exclusive
                   onChange={handleKindChange}
-                  disabled={loading}
+                  disabled={loading || kindLocked}
                   fullWidth
                   color="primary"
                   size="medium"
@@ -239,9 +260,13 @@ export default function WorkCenterForm({
                   color="text.secondary"
                   sx={{ mt: 0.5, display: 'block' }}
                 >
-                  {formData.kind === 'internal'
-                    ? 'Runs in your shop. Has a labor rate.'
-                    : 'Performed by an outside vendor.'}
+                  {kindLocked
+                    ? `Locked — used by ${routingOperationsCount} routing operation${
+                        routingOperationsCount === 1 ? '' : 's'
+                      }. Changing the kind would break their pricing.`
+                    : formData.kind === 'internal'
+                      ? 'Runs in your shop. Has a labor rate.'
+                      : 'Performed by an outside vendor.'}
                 </Typography>
               </Box>
             </Grid>
@@ -253,11 +278,12 @@ export default function WorkCenterForm({
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
                   fullWidth
+                  required
                   label="Labor Rate"
                   value={formData.labor_rate}
                   onChange={handleTextChange('labor_rate')}
                   error={!!fieldErrors.labor_rate}
-                  helperText={fieldErrors.labor_rate || 'Optional. Hourly rate in dollars.'}
+                  helperText={fieldErrors.labor_rate || 'Hourly rate in dollars. Required for quoting.'}
                   disabled={loading}
                   type="number"
                   inputProps={{ min: 0, step: '0.01', inputMode: 'decimal' }}

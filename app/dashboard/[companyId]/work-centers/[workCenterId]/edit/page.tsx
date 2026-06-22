@@ -8,7 +8,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { WorkCenterForm } from '@/components/work-centers';
-import { getWorkCenter } from '@/utils/workCentersAccess';
+import { getWorkCenterWithRelations } from '@/utils/workCentersAccess';
 import { workCenterToFormData, EMPTY_WORK_CENTER_FORM } from '@/types/workCenter';
 import type { WorkCenterFormData } from '@/types/workCenter';
 
@@ -19,18 +19,20 @@ export default function WorkCenterEditPage() {
   const workCenterId = params.workCenterId as string;
 
   const [initialData, setInitialData] = useState<WorkCenterFormData | null>(null);
+  const [routingOperationsCount, setRoutingOperationsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchWorkCenter() {
       try {
-        const wc = await getWorkCenter(workCenterId);
+        const wc = await getWorkCenterWithRelations(workCenterId);
         if (!wc) {
           setError('Work center not found');
           setInitialData(EMPTY_WORK_CENTER_FORM);
         } else {
           setInitialData(workCenterToFormData(wc));
+          setRoutingOperationsCount(wc.routing_operations_count);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
@@ -75,6 +77,7 @@ export default function WorkCenterEditPage() {
         mode="edit"
         initialData={initialData}
         workCenterId={workCenterId}
+        routingOperationsCount={routingOperationsCount}
         onSuccess={() =>
           router.push(`/dashboard/${companyId}/work-centers/${workCenterId}`)
         }

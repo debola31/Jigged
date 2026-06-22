@@ -219,7 +219,7 @@ export default function PartWorkspace({
     if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
     // Slug stays 'history' so existing ?tab=history deep links keep working.
-    tabs.push({ slug: 'history', label: 'Notes' });
+    tabs.push({ slug: 'history', label: 'Activity' });
     return tabs;
   }, [part?.is_stocked]);
 

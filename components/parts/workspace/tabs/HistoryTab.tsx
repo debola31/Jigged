@@ -44,17 +44,17 @@ const TXN_VERB: Record<string, string> = {
   adjustment: 'Adjusted to',
 };
 
-/** Which slice of the unified Notes feed is shown. */
-type NotesFilter = 'all' | 'user' | 'pricing' | 'stock';
+/** Which slice of the unified Activity feed is shown. */
+type ActivityFilter = 'all' | 'user' | 'pricing' | 'stock';
 
-const FILTERS: { value: NotesFilter; label: string }[] = [
+const FILTERS: { value: ActivityFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'user', label: 'Notes' },
+  { value: 'user', label: 'Comments' },
   { value: 'pricing', label: 'Pricing' },
   { value: 'stock', label: 'Stock' },
 ];
 
-function matchesFilter(ev: PartActivityEvent, filter: NotesFilter): boolean {
+function matchesFilter(ev: PartActivityEvent, filter: ActivityFilter): boolean {
   switch (filter) {
     case 'all':
       return true;
@@ -68,9 +68,10 @@ function matchesFilter(ev: PartActivityEvent, filter: NotesFilter): boolean {
 }
 
 /**
- * Notes. A single feed mixing manual notes, auto-logged pricing notes, and
+ * Activity. A single feed mixing user comments, auto-logged pricing notes, and
  * stock movements — every entry is typed and filterable. The composer adds
- * 'user' notes; pricing notes are written automatically on a pricing save and
+ * 'user' notes (shown as "comments" in the UI); pricing notes are written
+ * automatically on a pricing save and
  * are not user-deletable (audit trail). Job/quote links were dropped — they're
  * already visible on the Jobs and Quotes pages.
  */
@@ -82,7 +83,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   const [submitting, setSubmitting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [filter, setFilter] = useState<NotesFilter>('all');
+  const [filter, setFilter] = useState<ActivityFilter>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +95,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load notes');
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load activity');
       });
     return () => {
       cancelled = true;
@@ -129,7 +130,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
       setBody('');
       setRefreshTick((t) => t + 1);
     } catch (err) {
-      setComposerError(err instanceof Error ? err.message : 'Failed to add note');
+      setComposerError(err instanceof Error ? err.message : 'Failed to add comment');
     } finally {
       setSubmitting(false);
     }
@@ -140,7 +141,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
       await deletePartNote(noteId);
       setRefreshTick((t) => t + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete note');
+      setError(err instanceof Error ? err.message : 'Failed to delete comment');
     }
   };
 
@@ -155,7 +156,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
       <Card elevation={2}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Notes
+            Comments
           </Typography>
 
           {/* Composer — manual notes only. */}
@@ -165,7 +166,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
             minRows={2}
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Note about this part…"
+            placeholder="Comment on this part…"
             disabled={submitting}
             sx={{ mt: 1.5 }}
           />
@@ -183,7 +184,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
                 submitting ? <CircularProgress size={16} color="inherit" /> : <AddCommentIcon />
               }
             >
-              {submitting ? 'Adding…' : 'Add note'}
+              {submitting ? 'Adding…' : 'Add comment'}
             </Button>
           </Box>
 
@@ -195,7 +196,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
             exclusive
             size="small"
             onChange={(_e, next) => {
-              if (next !== null) setFilter(next as NotesFilter);
+              if (next !== null) setFilter(next as ActivityFilter);
             }}
             aria-label="Filter notes"
             sx={{ mb: 2, flexWrap: 'wrap' }}
@@ -261,7 +262,7 @@ function FeedRow({
         canDelete && ev.kind === 'note' ? (
           <DeleteIconButton
             edge="end"
-            ariaLabel="Delete note"
+            ariaLabel="Delete comment"
             onClick={() => onDelete(ev.note.id)}
           />
         ) : undefined

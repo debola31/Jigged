@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -17,6 +18,17 @@ import DownloadIcon from '@mui/icons-material/Download';
 import { getPartAttachmentUrl } from '@/utils/partAttachmentsAccess';
 import type { PartAttachment } from '@/types/part';
 import { KIND_LABEL } from './attachmentKindMeta';
+
+// The 3D engine (three.js + occt-import-js WASM) touches window/DOM and is
+// several MB — load it client-side only, and only when a STEP file is opened.
+const StepViewer = dynamic(() => import('./StepViewer'), {
+  ssr: false,
+  loading: () => (
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '75vh' }}>
+      <CircularProgress />
+    </Box>
+  ),
+});
 
 interface AttachmentViewerModalProps {
   open: boolean;
@@ -120,12 +132,15 @@ function ViewerBody({
     );
   }
 
-  // STEP / DWG / other → download-only in Phase 1. (Phase 2 replaces the STEP
-  // branch with an in-app 3D viewer.)
+  if (attachment.kind === 'step') {
+    return <StepViewer url={url} />;
+  }
+
+  // DWG / other → download-only (no in-browser renderer).
   const reason =
     attachment.kind === 'dwg'
       ? "DWG files can't be previewed in the browser — download to open in your CAD software."
-      : "This file can't be previewed in the browser yet — download to open it in your CAD software.";
+      : "This file can't be previewed in the browser — download to open it in your CAD software.";
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, py: 8 }}>
       <Typography variant="body1" color="text.secondary" sx={{ textAlign: 'center', maxWidth: 420 }}>

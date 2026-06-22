@@ -107,3 +107,90 @@ export function removeSpecNode(nodes: LocationSpecNode[], key: string): Location
     .filter((n) => n.key !== key)
     .map((n) => ({ ...n, children: removeSpecNode(n.children, key) }));
 }
+
+// ---- Per-branch (non-uniform) hand edits -------------------------------------
+// Once the user fine-tunes a single branch, the tree is edited directly (no
+// longer regenerated from the uniform levels). Keys must stay stable across
+// edits, so added nodes get a fresh counter-based key.
+
+let addSeq = 0;
+const freshKey = () => `e${addSeq++}`;
+
+/** Code for a hand-added/cloned node, reusing the generated/explicit scheme. */
+function deriveCodeFor(name: string, kind: string, parentCode: string | null): string {
+  const m = name.match(/(\d+)\s*$/);
+  if (m) return generatedCode(parentCode, kind, parseInt(m[1], 10), Math.max(2, m[1].length));
+  return explicitCode(parentCode, name);
+}
+
+/** Deep-clone a subtree with fresh keys and codes re-derived under `parentCode`. */
+function cloneSubtree(node: LocationSpecNode, parentCode: string | null, overrideName?: string): LocationSpecNode {
+  const name = overrideName ?? node.name;
+  const code = deriveCodeFor(name, node.kind ?? '', parentCode);
+  return {
+    key: freshKey(),
+    name,
+    kind: node.kind,
+    code,
+    is_stockable: node.is_stockable,
+    is_qr_anchor: node.is_qr_anchor,
+    children: node.children.map((c) => cloneSubtree(c, code)),
+  };
+}
+
+/** Next sibling name: bump the trailing number (Bin 4 → Bin 5), skipping gaps. */
+function nextSiblingName(siblings: LocationSpecNode[], last: LocationSpecNode): string {
+  const base = last.name.replace(/\s*\d+\s*$/, '').trim();
+  let max = 0;
+  for (const s of siblings) {
+    const m = s.name.match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  const next = (max || siblings.length) + 1;
+  return base ? `${base} ${next}` : `${last.name} ${next}`;
+}
+
+function mapNode(
+  nodes: LocationSpecNode[],
+  key: string,
+  fn: (n: LocationSpecNode) => LocationSpecNode,
+): LocationSpecNode[] {
+  return nodes.map((n) =>
+    n.key === key ? fn(n) : { ...n, children: mapNode(n.children, key, fn) },
+  );
+}
+
+/**
+ * Add one child under `parentKey`, to that branch ONLY (the heart of
+ * non-uniform editing). Clones the parent's last child — so "+ under a section"
+ * adds another bin, and "+ under a container" adds another section *with its
+ * bins*. An empty parent gets a single stockable leaf.
+ */
+export function addChildUnder(tree: LocationSpecNode[], parentKey: string): LocationSpecNode[] {
+  return mapNode(tree, parentKey, (parent) => {
+    let child: LocationSpecNode;
+    if (parent.children.length === 0) {
+      child = {
+        key: freshKey(),
+        name: 'Item 1',
+        kind: 'item',
+        code: deriveCodeFor('Item 1', 'item', parent.code),
+        is_stockable: true,
+        is_qr_anchor: false,
+        children: [],
+      };
+    } else {
+      const last = parent.children[parent.children.length - 1];
+      child = cloneSubtree(last, parent.code, nextSiblingName(parent.children, last));
+    }
+    return { ...parent, children: [...parent.children, child] };
+  });
+}
+
+/** Re-stamp is_qr_anchor by depth across the whole tree (after the QR-level
+ *  selector changes while the tree is hand-edited). */
+export function applyQrAnchorByDepth(nodes: LocationSpecNode[], depth: number): LocationSpecNode[] {
+  const walk = (ns: LocationSpecNode[], d: number): LocationSpecNode[] =>
+    ns.map((n) => ({ ...n, is_qr_anchor: d === depth, children: walk(n.children, d + 1) }));
+  return walk(nodes, 0);
+}

@@ -7,43 +7,135 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
+import Chip from '@mui/material/Chip';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Alert from '@mui/material/Alert';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ReplayIcon from '@mui/icons-material/Replay';
 
-import type { LevelSpec } from '@/types/inventoryLocations';
+import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
 const MAX_LEVELS = 4;
 
 const stripPattern = (p?: string) => (p ?? '').replace(/\s*\{n\}\s*/g, ' ').trim();
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-/** The friendly word for this level (no "{n}" jargon). */
 function labelOf(level: LevelSpec): string {
   return level.names ? capitalize(level.kind) : stripPattern(level.namePattern);
 }
 
-/** A live example of the names this level will produce. */
 function exampleOf(level: LevelSpec): string {
   if (level.names) return level.names.join(', ') || '—';
   const count = level.count ?? 0;
   if (count === 0) return 'none';
   const pattern = level.namePattern || '{n}';
-  const shown = Array.from({ length: Math.min(3, count) }, (_, i) =>
-    pattern.replace('{n}', String(i + 1)),
-  );
+  const shown = Array.from({ length: Math.min(3, count) }, (_, i) => pattern.replace('{n}', String(i + 1)));
   return shown.join(', ') + (count > 3 ? ', …' : '');
+}
+
+/** Branches whose children are all leaves — the rows you'd fine-tune per side. */
+function collectLeafParents(
+  nodes: LocationSpecNode[],
+  trail: string[] = [],
+): { node: LocationSpecNode; path: string[] }[] {
+  const out: { node: LocationSpecNode; path: string[] }[] = [];
+  for (const n of nodes) {
+    const path = [...trail, n.name];
+    if (n.children.length > 0 && n.children.every((c) => c.children.length === 0)) {
+      out.push({ node: n, path });
+    } else if (n.children.length > 0) {
+      out.push(...collectLeafParents(n.children, path));
+    }
+  }
+  return out;
 }
 
 interface LevelConfigStepProps {
   levels: LevelSpec[];
   onChange: (levels: LevelSpec[]) => void;
   total: number;
+  customized: boolean;
+  tree: LocationSpecNode[];
+  onRemove: (key: string) => void;
+  onAdd: (parentKey: string) => void;
+  onStartOver: () => void;
 }
 
-export default function LevelConfigStep({ levels, onChange, total }: LevelConfigStepProps) {
+export default function LevelConfigStep({
+  levels,
+  onChange,
+  total,
+  customized,
+  tree,
+  onRemove,
+  onAdd,
+  onStartOver,
+}: LevelConfigStepProps) {
+  // ----- Customized: reflect the real per-branch structure as editable chips ---
+  if (customized) {
+    const leafParents = collectLeafParents(tree);
+    return (
+      <Box>
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" startIcon={<ReplayIcon />} onClick={onStartOver}>
+              Start over
+            </Button>
+          }
+          sx={{ mb: 2 }}
+        >
+          Fine-tuning individual spots. Branches can differ now.
+        </Alert>
+
+        {leafParents.length === 0 ? (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+            {tree.map((n) => (
+              <Chip key={n.key} size="small" label={n.name} onDelete={() => onRemove(n.key)} />
+            ))}
+          </Box>
+        ) : (
+          <Stack spacing={1.5}>
+            {leafParents.map(({ node, path }) => (
+              <Box key={node.key}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                  {path.join(' › ')}
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                  {node.children.map((leaf) => (
+                    <Chip
+                      key={leaf.key}
+                      size="small"
+                      label={leaf.name}
+                      color={leaf.is_qr_anchor ? 'info' : 'default'}
+                      variant={leaf.is_qr_anchor ? 'filled' : 'outlined'}
+                      onDelete={() => onRemove(leaf.key)}
+                    />
+                  ))}
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    icon={<AddIcon />}
+                    label="Add"
+                    onClick={() => onAdd(node.key)}
+                  />
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        )}
+
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'right' }}>
+          <strong>{total}</strong> location{total === 1 ? '' : 's'}
+        </Typography>
+      </Box>
+    );
+  }
+
+  // ----- Uniform: friendly per-level controls ---------------------------------
   const update = (i: number, patch: Partial<LevelSpec>) =>
     onChange(levels.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
@@ -60,11 +152,7 @@ export default function LevelConfigStep({ levels, onChange, total }: LevelConfig
     if (mode === 'names') {
       update(i, { names: levels[i].names ?? ['Left', 'Right'], count: undefined, namePattern: undefined });
     } else {
-      update(i, {
-        count: levels[i].count ?? 4,
-        namePattern: `${label} {n}`,
-        names: undefined,
-      });
+      update(i, { count: levels[i].count ?? 4, namePattern: `${label} {n}`, names: undefined });
     }
   };
 
@@ -119,11 +207,7 @@ export default function LevelConfigStep({ levels, onChange, total }: LevelConfig
                     <Typography variant="body2" color="text.secondary">
                       How many?
                     </Typography>
-                    <IconButton
-                      size="small"
-                      aria-label="Fewer"
-                      onClick={() => setCount(i, (level.count ?? 0) - 1)}
-                    >
+                    <IconButton size="small" aria-label="Fewer" onClick={() => setCount(i, (level.count ?? 0) - 1)}>
                       <RemoveIcon fontSize="small" />
                     </IconButton>
                     <TextField
@@ -133,11 +217,7 @@ export default function LevelConfigStep({ levels, onChange, total }: LevelConfig
                       size="small"
                       inputProps={{ min: 0, style: { textAlign: 'center', width: 56 } }}
                     />
-                    <IconButton
-                      size="small"
-                      aria-label="More"
-                      onClick={() => setCount(i, (level.count ?? 0) + 1)}
-                    >
+                    <IconButton size="small" aria-label="More" onClick={() => setCount(i, (level.count ?? 0) + 1)}>
                       <AddIcon fontSize="small" />
                     </IconButton>
                   </Stack>

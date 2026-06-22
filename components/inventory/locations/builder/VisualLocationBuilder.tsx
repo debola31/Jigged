@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
+import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -15,8 +16,14 @@ import MenuItem from '@mui/material/MenuItem';
 import Alert from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 
-import type { LevelSpec } from '@/types/inventoryLocations';
-import { buildSpecFromLevels, countSpecNodes, removeSpecNode } from '@/utils/locationSpec';
+import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
+import {
+  buildSpecFromLevels,
+  countSpecNodes,
+  removeSpecNode,
+  addChildUnder,
+  applyQrAnchorByDepth,
+} from '@/utils/locationSpec';
 import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
 import StorageTypePalette from './StorageTypePalette';
 import LevelConfigStep from './LevelConfigStep';
@@ -49,7 +56,11 @@ export default function VisualLocationBuilder({
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [levels, setLevels] = useState<LevelSpec[]>([]);
   const [qrAnchorDepth, setQrAnchorDepth] = useState(0);
-  const [prunedKeys, setPrunedKeys] = useState<string[]>([]);
+  // Once a single branch is fine-tuned, the tree is hand-edited directly and no
+  // longer regenerated from `levels` (which becomes the "Start over" template).
+  const [customized, setCustomized] = useState(false);
+  const [editedTree, setEditedTree] = useState<LocationSpecNode[]>([]);
+  const [startOverOpen, setStartOverOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,40 +69,55 @@ export default function VisualLocationBuilder({
     setSelectedTypeId(null);
     setLevels([]);
     setQrAnchorDepth(0);
-    setPrunedKeys([]);
+    setCustomized(false);
+    setEditedTree([]);
+    setStartOverOpen(false);
     setCreating(false);
     setError(null);
   };
 
-  const baseSpec = useMemo(
+  const uniformTree = useMemo(
     () => buildSpecFromLevels(levels, { qrAnchorDepth, parentCode }),
     [levels, qrAnchorDepth, parentCode],
   );
-  const spec = useMemo(
-    () => prunedKeys.reduce((s, k) => removeSpecNode(s, k), baseSpec),
-    [baseSpec, prunedKeys],
-  );
-  const total = countSpecNodes(spec);
+  const tree = customized ? editedTree : uniformTree;
+  const total = countSpecNodes(tree);
 
   const pickType = (type: StorageType) => {
     setSelectedTypeId(type.id);
     setLevels(cloneLevels(type.defaultLevels));
     setQrAnchorDepth(0);
-    setPrunedKeys([]);
+    setCustomized(false);
+    setEditedTree([]);
     setActiveStep(1);
   };
 
-  const changeLevels = (next: LevelSpec[]) => {
-    setLevels(next);
-    setPrunedKeys([]); // keys shift with layout; drop stale prunes
-    if (qrAnchorDepth > next.length - 1) setQrAnchorDepth(Math.max(0, next.length - 1));
+  const changeQrDepth = (depth: number) => {
+    setQrAnchorDepth(depth);
+    if (customized) setEditedTree((t) => applyQrAnchorByDepth(t, depth));
+  };
+
+  // Direct manipulation from either the preview or the config chips.
+  const editRemove = (key: string) => {
+    setEditedTree(applyQrAnchorByDepth(removeSpecNode(tree, key), qrAnchorDepth));
+    setCustomized(true);
+  };
+  const editAdd = (parentKey: string) => {
+    setEditedTree(applyQrAnchorByDepth(addChildUnder(tree, parentKey), qrAnchorDepth));
+    setCustomized(true);
+  };
+
+  const confirmStartOver = () => {
+    setCustomized(false);
+    setEditedTree([]);
+    setStartOverOpen(false);
   };
 
   const handleCreate = async () => {
     setCreating(true);
     setError(null);
     try {
-      const created = await materializeLocationSpec(companyId, parentId, spec);
+      const created = await materializeLocationSpec(companyId, parentId, tree);
       onCreated(created.length);
       onClose();
     } catch (e) {
@@ -123,22 +149,23 @@ export default function VisualLocationBuilder({
 
         {activeStep === 1 && (
           <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            {/* Controls */}
-            <Box sx={{ flex: '1 1 300px', minWidth: 280 }}>
-              <LevelConfigStep levels={levels} onChange={changeLevels} total={total} />
+            {/* Controls (uniform) or per-branch chips (customized) */}
+            <Box sx={{ flex: '1 1 320px', minWidth: 280 }}>
+              <LevelConfigStep
+                levels={levels}
+                onChange={setLevels}
+                total={total}
+                customized={customized}
+                tree={tree}
+                onRemove={editRemove}
+                onAdd={editAdd}
+                onStartOver={() => setStartOverOpen(true)}
+              />
             </Box>
 
-            {/* Live preview */}
+            {/* Live spatial preview (also editable) */}
             <Box sx={{ flex: '1 1 340px', minWidth: 280 }}>
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  mb: 1.5,
-                  flexWrap: 'wrap',
-                }}
-              >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5, flexWrap: 'wrap' }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ flex: 1 }}>
                   Preview
                 </Typography>
@@ -146,7 +173,7 @@ export default function VisualLocationBuilder({
                   select
                   label="QR labels at"
                   value={qrAnchorDepth}
-                  onChange={(e) => setQrAnchorDepth(Number(e.target.value))}
+                  onChange={(e) => changeQrDepth(Number(e.target.value))}
                   size="small"
                   sx={{ minWidth: 160 }}
                 >
@@ -157,10 +184,7 @@ export default function VisualLocationBuilder({
                   ))}
                 </TextField>
               </Box>
-              <LocationBoardPreview
-                nodes={spec}
-                onPrune={(key) => setPrunedKeys((keys) => [...keys, key])}
-              />
+              <LocationBoardPreview nodes={tree} onRemove={editRemove} onAdd={editAdd} />
             </Box>
           </Box>
         )}
@@ -187,6 +211,21 @@ export default function VisualLocationBuilder({
           </>
         )}
       </DialogActions>
+
+      <Dialog open={startOverOpen} onClose={() => setStartOverOpen(false)}>
+        <DialogTitle>Start over?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This clears your individual tweaks and goes back to editing the layout by the numbers.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStartOverOpen(false)}>Keep editing</Button>
+          <Button onClick={confirmStartOver} color="error" variant="contained">
+            Start over
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }

@@ -1,9 +1,7 @@
 /**
- * VisualLocationBuilder: the no-AI stepper that turns a picked storage type +
- * configured divisions into a location tree. Asserts the happy path —
- * palette → layout → review board → Create calls materializeLocationSpec with
- * the assembled spec and reports the count. The spec math itself is covered by
- * locationSpec.test.ts; here we test the wiring.
+ * VisualLocationBuilder: pick a type, see the full nested live preview, fine-tune
+ * individual branches (non-uniform), and create. The spec math + per-branch
+ * edits are covered by locationSpec.test.ts; here we test the wiring.
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen } from '../../../test-utils';
@@ -24,45 +22,51 @@ import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
 beforeEach(() => vi.clearAllMocks());
 
 describe('VisualLocationBuilder', () => {
-  it('picks a type, shows the live build step, and creates the materialized spec', async () => {
+  it('picks a type, shows the full nested preview, and creates the spec', async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn();
-    const onClose = vi.fn();
-    render(
-      <VisualLocationBuilder open companyId="co1" onClose={onClose} onCreated={onCreated} />,
-    );
+    render(<VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={onCreated} />);
 
-    // Step 1 — palette: pick Cabinet (defaults to 1 cabinet × 5 rows × {Left,Right} = 16)
+    // Cabinet default: 1 cabinet × 5 rows × {Left, Right} = 16
     await user.click(screen.getByText('Cabinet'));
 
-    // Step 2 — Build: controls + live board together. The WHOLE nesting is
-    // visible without any drill-in click (cabinet → rows → bin leaves).
+    // whole nesting visible, no drill-in
     expect(await screen.findByText('Cabinet 1')).toBeInTheDocument();
-    expect(screen.getByText('Row 1')).toBeInTheDocument(); // level 2 section
-    expect(screen.getAllByText('Left').length).toBeGreaterThan(0); // level 3 leaf chips
-    const createBtn = await screen.findByRole('button', { name: /create 16 locations/i });
-    await user.click(createBtn);
+    expect(screen.getByText('Row 1')).toBeInTheDocument();
+    expect(screen.getAllByText('Left').length).toBeGreaterThan(0);
+
+    await user.click(await screen.findByRole('button', { name: /create 16 locations/i }));
 
     expect(materializeLocationSpec).toHaveBeenCalledTimes(1);
     const [companyId, parentId, spec] = (materializeLocationSpec as Mock).mock.calls[0];
     expect(companyId).toBe('co1');
     expect(parentId).toBeNull();
     expect(spec[0].name).toBe('Cabinet 1');
-    expect(spec[0].is_qr_anchor).toBe(true); // default QR anchor = top container
+    expect(spec[0].is_qr_anchor).toBe(true);
     expect(onCreated).toHaveBeenCalledWith(16);
   });
 
-  it('lets you prune a tile in the live preview, lowering the count', async () => {
+  it('fine-tunes one branch (remove + add), reflects it, and can start over', async () => {
     const user = userEvent.setup();
-    render(
-      <VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={vi.fn()} />,
-    );
+    render(<VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={vi.fn()} />);
 
-    await user.click(screen.getByText('Bins')); // flat: 6 bins, shown live on the build step
-    expect(await screen.findByRole('button', { name: /create 6 locations/i })).toBeInTheDocument();
+    await user.click(screen.getByText('Cabinet'));
+    expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
 
-    // remove one bin tile from the preview
-    await user.click(screen.getByRole('button', { name: /remove bin 1/i }));
-    expect(await screen.findByRole('button', { name: /create 5 locations/i })).toBeInTheDocument();
+    // remove one leaf from one branch → non-uniform, count drops, config reflects it
+    await user.click(screen.getAllByRole('button', { name: /^remove left$/i })[0]);
+    expect(await screen.findByRole('button', { name: /create 15 locations/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start over/i })).toBeInTheDocument(); // customized config
+
+    // add one back to that branch
+    await user.click(screen.getByRole('button', { name: /add to row 1/i }));
+    expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
+
+    // start over → confirm → back to the uniform numbers form
+    await user.click(screen.getByRole('button', { name: /start over/i }));
+    const confirms = screen.getAllByRole('button', { name: /start over/i });
+    await user.click(confirms[confirms.length - 1]); // the dialog's confirm
+    expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
+    expect(screen.getAllByText('Call them').length).toBeGreaterThan(0); // uniform controls back
   });
 });

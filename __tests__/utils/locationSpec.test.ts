@@ -3,6 +3,8 @@ import {
   buildSpecFromLevels,
   countSpecNodes,
   removeSpecNode,
+  addChildUnder,
+  applyQrAnchorByDepth,
   generatedCode,
   explicitCode,
 } from '@/utils/locationSpec';
@@ -103,5 +105,53 @@ describe('removeSpecNode (prune)', () => {
     // removed 1 row + its 2 sides = 3 fewer
     expect(countSpecNodes(pruned)).toBe(93 - 3);
     expect(pruned[0].children.find((c) => c.key === row1Key)).toBeUndefined();
+  });
+});
+
+// Non-uniform editing: Cabinet → {Left, Right} → 4 bins each (uniform start).
+const cabinetSidesBins: LevelSpec[] = [
+  { kind: 'cabinet', count: 1, namePattern: 'Cabinet {n}' },
+  { kind: 'side', names: ['Left', 'Right'] },
+  { kind: 'bin', count: 4, namePattern: 'Bin {n}' },
+];
+
+describe('non-uniform editing', () => {
+  it('removeSpecNode leaves ONE branch shorter (the gap case)', () => {
+    const roots = buildSpecFromLevels(cabinetSidesBins);
+    const [, right] = roots[0].children; // Left, Right
+    const rightBin3 = right.children[2]; // "Bin 3" under Right
+    const next = removeSpecNode(roots, rightBin3.key);
+
+    const [left2, right2] = next[0].children;
+    expect(left2.children.map((b) => b.name)).toEqual(['Bin 1', 'Bin 2', 'Bin 3', 'Bin 4']);
+    expect(right2.children.map((b) => b.name)).toEqual(['Bin 1', 'Bin 2', 'Bin 4']); // gap kept
+    expect(countSpecNodes(next)).toBe(1 + 2 + 4 + 3);
+  });
+
+  it('addChildUnder adds to that branch only, bumping the trailing number', () => {
+    const roots = buildSpecFromLevels(cabinetSidesBins);
+    const left = roots[0].children[0];
+    const next = addChildUnder(roots, left.key);
+
+    const [left2, right2] = next[0].children;
+    expect(left2.children.map((b) => b.name)).toEqual(['Bin 1', 'Bin 2', 'Bin 3', 'Bin 4', 'Bin 5']);
+    expect(left2.children[4].code).toBe('C01-L-B05'); // parent code + kind + padded index
+    expect(right2.children).toHaveLength(4); // untouched
+  });
+
+  it('addChildUnder on a container clones its last section (with its bins)', () => {
+    const roots = buildSpecFromLevels(cabinetSidesBins);
+    const cabinet = roots[0];
+    const next = addChildUnder(roots, cabinet.key);
+    // Right is the last section → a new section cloned with 4 bins under it
+    expect(next[0].children).toHaveLength(3);
+    expect(next[0].children[2].children).toHaveLength(4);
+  });
+
+  it('applyQrAnchorByDepth re-stamps anchors to a chosen depth', () => {
+    const roots = applyQrAnchorByDepth(buildSpecFromLevels(cabinetSidesBins), 2);
+    expect(roots[0].is_qr_anchor).toBe(false); // cabinet
+    expect(roots[0].children[0].is_qr_anchor).toBe(false); // side
+    expect(roots[0].children[0].children[0].is_qr_anchor).toBe(true); // bin (depth 2)
   });
 });

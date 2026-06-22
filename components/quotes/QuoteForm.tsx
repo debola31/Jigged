@@ -24,10 +24,12 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
+import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import type { QuoteFormData } from '@/types/quote';
+import type { QuoteFormData, LeadTimeUnit } from '@/types/quote';
+import { LEAD_TIME_UNITS, PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   createQuote,
   updateQuote,
@@ -45,6 +47,7 @@ import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
+import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import type {
   Customer,
@@ -213,6 +216,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [error, setError] = useState<string | null>(null);
 
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+
+  // Which address selector triggered the inline "+ Add new address" form
+  // (null = closed). The new address is created against the current customer
+  // and auto-selected into this field on save.
+  const [addressFormFor, setAddressFormFor] = useState<'shipping' | 'billing' | null>(null);
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -412,6 +420,34 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         billing_address_id: prev.shipping_address_id,
       }));
     }
+  };
+
+  /**
+   * A new address was created inline for the current customer. Patch it into
+   * the cached customer row (so the selector lists it) and auto-select it into
+   * the field that opened the form — mirroring billing→shipping when "same as
+   * shipping" is on. Then close the inline form.
+   */
+  const handleAddressCreated = (saved: CustomerAddress) => {
+    const target = addressFormFor;
+    if (formData.customer_id) {
+      setCustomersById((prev) => {
+        const existing = prev.get(formData.customer_id);
+        if (!existing) return prev;
+        const next = new Map(prev);
+        next.set(formData.customer_id, {
+          ...existing,
+          addresses: [...(existing.addresses ?? []), saved],
+        });
+        return next;
+      });
+    }
+    if (target === 'shipping') {
+      handleShippingAddressChange(saved.id);
+    } else if (target === 'billing') {
+      handleFieldChange('billing_address_id', saved.id);
+    }
+    setAddressFormFor(null);
   };
 
   /** Addresses + contacts for the currently-selected customer (or empty). */
@@ -677,7 +713,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const validationError = useMemo<string | null>(() => {
     if (!formData.customer_id) return 'Pick a customer.';
     if (partBlocks.length === 0) return 'Add at least one part to the quote.';
-    const leadRaw = formData.lead_time_days;
+    const leadRaw = formData.lead_time_value;
     const leadNum = Number(leadRaw);
     if (
       leadRaw === '' ||
@@ -685,7 +721,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       leadNum < 0 ||
       !Number.isInteger(leadNum)
     ) {
-      return 'Enter a lead time (whole number of days).';
+      return 'Enter a lead time (whole number).';
     }
     const seenParts = new Set<string>();
     for (const block of partBlocks) {
@@ -879,7 +915,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       value={formData.shipping_address_id}
                       onChange={(e) => {
                         if (e.target.value === ADD_NEW_ADDRESS_ID) {
-                          router.push(customerDetailHref);
+                          setAddressFormFor('shipping');
                           return;
                         }
                         handleShippingAddressChange(e.target.value);
@@ -899,6 +935,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       </MenuItem>
                     </Select>
                   </FormControl>
+                  <Collapse in={addressFormFor === 'shipping'} unmountOnExit>
+                    <Box sx={{ mt: 2, p: 2, borderRadius: 1, bgcolor: 'action.hover' }}>
+                      <CustomerAddressForm
+                        customerId={formData.customer_id}
+                        onSaved={handleAddressCreated}
+                        onCancel={() => setAddressFormFor(null)}
+                      />
+                    </Box>
+                  </Collapse>
                 </Grid>
               </Grid>
 
@@ -927,7 +972,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       value={formData.billing_address_id}
                       onChange={(e) => {
                         if (e.target.value === ADD_NEW_ADDRESS_ID) {
-                          router.push(customerDetailHref);
+                          setAddressFormFor('billing');
                           return;
                         }
                         handleFieldChange('billing_address_id', e.target.value);
@@ -947,6 +992,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       </MenuItem>
                     </Select>
                   </FormControl>
+                  <Collapse in={addressFormFor === 'billing'} unmountOnExit>
+                    <Box sx={{ mt: 2, p: 2, borderRadius: 1, bgcolor: 'action.hover' }}>
+                      <CustomerAddressForm
+                        customerId={formData.customer_id}
+                        onSaved={handleAddressCreated}
+                        onCancel={() => setAddressFormFor(null)}
+                      />
+                    </Box>
+                  </Collapse>
                 </Box>
               )}
             </Box>
@@ -1362,16 +1416,35 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                label="Lead time (days)"
-                type="number"
-                size="small"
-                fullWidth
-                required
-                value={formData.lead_time_days}
-                onChange={(e) => handleFieldChange('lead_time_days', e.target.value)}
-                inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
-              />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  label="Lead time"
+                  type="number"
+                  size="small"
+                  required
+                  value={formData.lead_time_value}
+                  onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
+                  inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
+                  sx={{ width: 120 }}
+                />
+                <FormControl size="small" sx={{ flex: 1 }}>
+                  <InputLabel id="lead-time-unit-label">Unit</InputLabel>
+                  <Select
+                    labelId="lead-time-unit-label"
+                    label="Unit"
+                    value={formData.lead_time_unit}
+                    onChange={(e) =>
+                      handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
+                    }
+                  >
+                    {LEAD_TIME_UNITS.map((u) => (
+                      <MenuItem key={u.value} value={u.value}>
+                        {u.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
@@ -1382,6 +1455,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 value={formData.expiration_date}
                 onChange={(e) => handleFieldChange('expiration_date', e.target.value)}
                 InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <Autocomplete
+                freeSolo
+                options={PAYMENT_TERM_PRESETS}
+                value={formData.payment_terms || null}
+                // freeSolo emits a string on free entry and on option pick; keep
+                // '' when cleared so the access layer stores NULL.
+                onChange={(_, v) => handleFieldChange('payment_terms', v ?? '')}
+                onInputChange={(_, v) => handleFieldChange('payment_terms', v)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Payment terms"
+                    size="small"
+                    placeholder="e.g. Net 30, 2/10 Net 30"
+                  />
+                )}
               />
             </Grid>
           </Grid>

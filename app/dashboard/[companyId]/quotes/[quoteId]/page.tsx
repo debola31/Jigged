@@ -37,6 +37,7 @@ import {
   quoteToFormData,
   isQuoteExpired,
   daysUntilExpiration,
+  formatLeadTime,
 } from '@/types/quote';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
@@ -305,9 +306,14 @@ export default function QuoteDetailPage() {
                   : `Expires ${formatDate(quote.expiration_date)}`}
               </Typography>
             )}
-            {quote.lead_time_days !== null && (
+            {quote.lead_time_value !== null && (
               <Typography variant="body2" color="text.secondary">
-                Lead time: {quote.lead_time_days} day{quote.lead_time_days === 1 ? '' : 's'}
+                Lead time: {formatLeadTime(quote.lead_time_value, quote.lead_time_unit)}
+              </Typography>
+            )}
+            {quote.payment_terms && (
+              <Typography variant="body2" color="text.secondary">
+                Payment terms: {quote.payment_terms}
               </Typography>
             )}
           </Box>

@@ -71,6 +71,9 @@ const baseQuote: QuoteWithRelations = {
   shipping_address_id: 'addr-1',
   contact_id: 'contact-1',
   lead_time_days: 14,
+  lead_time_value: 14,
+  lead_time_unit: 'calendar_days',
+  payment_terms: null,
   expiration_date: '2099-12-31',
   status: 'active',
   status_changed_at: null,
@@ -240,6 +243,7 @@ describe('generateQuotePdf', () => {
       ...baseQuote,
       expiration_date: null,
       lead_time_days: null,
+      lead_time_value: null,
     };
 
     await generateQuotePdf(barebonesQuote, baseCompany);

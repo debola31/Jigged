@@ -1940,6 +1940,9 @@ export type Database = {
           expiration_date: string | null
           id: string
           lead_time_days: number | null
+          lead_time_unit: string | null
+          lead_time_value: number | null
+          payment_terms: string | null
           quote_number: string
           shipping_address_id: string | null
           status: string
@@ -1957,6 +1960,9 @@ export type Database = {
           expiration_date?: string | null
           id?: string
           lead_time_days?: number | null
+          lead_time_unit?: string | null
+          lead_time_value?: number | null
+          payment_terms?: string | null
           quote_number: string
           shipping_address_id?: string | null
           status?: string
@@ -1974,6 +1980,9 @@ export type Database = {
           expiration_date?: string | null
           id?: string
           lead_time_days?: number | null
+          lead_time_unit?: string | null
+          lead_time_value?: number | null
+          payment_terms?: string | null
           quote_number?: string
           shipping_address_id?: string | null
           status?: string

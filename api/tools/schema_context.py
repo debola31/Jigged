@@ -125,7 +125,9 @@ SCHEMA_CONTEXT = """
 - status: TEXT -- one of: 'active', 'expired'
 - status_changed_at: TIMESTAMPTZ
 - converted_at: TIMESTAMPTZ (when accepted/converted to a job)
-- lead_time_days: INTEGER, expiration_date: DATE
+- lead_time_days: INTEGER (normalized calendar days, derived from lead_time_value/unit)
+- lead_time_value: INTEGER, lead_time_unit: TEXT -- business_days | calendar_days | weeks
+- payment_terms: TEXT (e.g. 'Net 30', '2/10 Net 30'), expiration_date: DATE
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: revenue is NOT on quotes anymore. Sum quote_line_items.total_price
   for per-quote revenue.

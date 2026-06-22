@@ -84,7 +84,10 @@ The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_
 | quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, … |
 | legacy_quote_number | Text | No | Original quote number from legacy system (migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| lead_time_days | Integer | No | Days to deliver; copied to `jobs.lead_time_days` on conversion |
+| lead_time_days | Integer | No | **Normalized** calendar days, derived from `lead_time_value`/`lead_time_unit` on save; copied to `jobs.lead_time_days` on conversion |
+| lead_time_value | Integer | No | Lead time as the user states it (the number; unit in `lead_time_unit`) |
+| lead_time_unit | Text | No | `business_days` \| `calendar_days` \| `weeks` (default `business_days`) |
+| payment_terms | Text | No | Payment terms shown on the quote (preset or custom free text), e.g. `Net 30`, `2/10 Net 30` |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
 | status_changed_at | Timestamp | No | When `status` last changed |
@@ -198,8 +201,9 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 ▸ **Terms**
 
-- Lead time (days, required — a whole number)
+- Lead time — a whole-number **value** plus a **unit** dropdown (Business days / Calendar days / Weeks; defaults to business days). Required. Normalized to a calendar-day count (`lead_time_days`) on save so quote→job conversion is unaffected.
 - Expiration date (defaults to today + 10 days)
+- Payment terms — a combobox of common presets (Net 15, Net 30, 2/10 Net 30, Net 45/60/90, Due on Receipt, COD, 50% Deposit / Balance Net 30) that also accepts custom free text (e.g. "Net 30, 1% late charge"). Optional.
 
 **Actions:**
 
@@ -212,7 +216,9 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 - A part may appear in only one block (its quantities go in that block's rows).
 - Every quantity row must be a whole number > 0; quantities must be unique within a part.
 - Each non-override row must resolve to a priced tier, or use a custom price.
-- Lead time is required: a whole number 0 – 3,650 days.
+- Lead time is required: a whole-number value (with unit) that normalizes to 0 – 3,650 days.
+
+**Inline address add:** the shipping / billing address selectors include a "+ Add new address" option that opens the `CustomerAddressForm` **inline** (in a `Collapse` below the selector) rather than navigating to the customer page. On save the new address is added to the customer and auto-selected into the field that opened it (and mirrored to billing when "billing same as shipping" is on).
 
 ### 3. Quote Detail View
 
@@ -222,7 +228,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Quote number (large)
 - Status pill (Active / Expired)
-- Created date, created by, expires-in, lead time
+- Created date, created by, expires-in, lead time (formatted with its unit, e.g. "6 weeks"), payment terms (when set)
 
 **Content cards:**
 
@@ -511,7 +517,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Form blocks submission until every part block has a part selected and at least one valid quantity row (quantities unique within a part)
 
-- [ ] Quote header is editable (customer, lead time, expiration). Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default
+- [ ] Quote header is editable (customer, lead time value + unit, payment terms, expiration), and all persist across reload. Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default
 
 - [ ] List page has no Total column (totals live on the detail page / PDF for firm quotes)
 
@@ -666,7 +672,9 @@ While creating a quote, users can create new entities without leaving the form:
 
 **Quantities:** each block needs at least one quantity row; every quantity must be a whole number > 0 and unique within the part. Each non-override row must resolve to a priced tier (or use a custom price).
 
-**Lead time (days):** required — a whole number 0 – 3,650.
+**Lead time:** required — a whole-number value plus a unit (business days / calendar days / weeks); normalizes to 0 – 3,650 days.
+
+**Payment terms:** optional — preset or custom free text.
 
 **Expiration date:** ISO date (defaults to created + 10 days)
 

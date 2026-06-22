@@ -67,12 +67,15 @@ test.describe('Parts and Routing workflow', () => {
     // editor row at the bottom of the Operations list (no dialog).
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // Open the Work center autocomplete. Pick `E2E Internal WC` explicitly
-    // — the seed (e2e/global-setup.ts) creates both an Internal and an
-    // External WC; selecting the external one would reshape the editor to
-    // vendor-price fields (no Cycle minutes per unit) and break the next
-    // assertion.
-    await page.getByLabel(/^Work center$/).click();
+    // The inline editor autofocuses the Work center field, which now opens its
+    // dropdown automatically (openOnFocus). Target the combobox by role — the
+    // open listbox shares the field's accessible name, so getByLabel would be
+    // ambiguous. Type to filter to `E2E Internal WC` and pick it explicitly:
+    // the seed (e2e/global-setup.ts) creates both an Internal and an External
+    // WC, and the external one would reshape the editor to vendor-price fields
+    // (no Cycle minutes per unit) and break the next assertion.
+    const workCenterField = page.getByRole('combobox', { name: /^Work center$/ });
+    await workCenterField.fill('E2E Internal WC');
 
     const listbox = page.getByRole('listbox');
     const internalWcOption = listbox.getByRole('option', { name: /E2E Internal WC/ });

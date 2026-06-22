@@ -284,11 +284,7 @@ export default function ConvertToJobModal({
               onChange={(e) => setDueDateInput(e.target.value)}
               disabled={loading}
               error={!dueDateValid}
-              helperText={
-                !dueDateValid
-                  ? 'Enter a valid date'
-                  : 'Defaults to today + the quoted lead time. Adjust if you committed to a different ship date.'
-              }
+              helperText={!dueDateValid ? 'Enter a valid date' : ' '}
               slotProps={{
                 inputLabel: { shrink: true },
               }}
@@ -297,16 +293,9 @@ export default function ConvertToJobModal({
               label="Customer PO #"
               size="small"
               fullWidth
-              required
               value={customerPoInput}
               onChange={(e) => setCustomerPoInput(e.target.value)}
               disabled={loading}
-              error={!poValid}
-              helperText={
-                poValid
-                  ? 'The PO number the customer referenced when accepting this quote.'
-                  : 'Customer PO is required to create a job.'
-              }
             />
             <AttachmentUploadField
               file={attachment}

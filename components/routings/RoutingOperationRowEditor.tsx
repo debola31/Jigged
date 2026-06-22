@@ -51,6 +51,22 @@ interface RoutingOperationRowEditorProps {
 
 const numToStr = numberToInputString;
 
+/**
+ * Seed value for the labor-rate field. The field always shows the work center's
+ * rate as the default and only persists an override when the user changes it —
+ * so when there's no saved override, fall back to the (internal) work center's
+ * current rate instead of leaving the field blank.
+ */
+function initialLaborStr(initial: OperationEditorValue | undefined): string {
+  if (!initial) return '';
+  if (initial.laborRateOverride !== null) return numToStr(initial.laborRateOverride);
+  const wc = initial.workCenter;
+  if (wc && wc.kind === 'internal' && wc.labor_rate !== null) {
+    return String(wc.labor_rate);
+  }
+  return '';
+}
+
 export default function RoutingOperationRowEditor({
   workCenters,
   initial,
@@ -64,9 +80,7 @@ export default function RoutingOperationRowEditor({
   );
   const [setupStr, setSetupStr] = useState(numToStr(initial?.setupMinutes));
   const [cycleStr, setCycleStr] = useState(numToStr(initial?.cycleMinutesPerUnit));
-  const [laborOverrideStr, setLaborOverrideStr] = useState(
-    numToStr(initial?.laborRateOverride),
-  );
+  const [laborOverrideStr, setLaborOverrideStr] = useState(initialLaborStr(initial));
   const [externalUnitPriceStr, setExternalUnitPriceStr] = useState(
     numToStr(initial?.externalUnitPrice),
   );
@@ -80,7 +94,7 @@ export default function RoutingOperationRowEditor({
     setWorkCenter(initial?.workCenter ?? null);
     setSetupStr(numToStr(initial?.setupMinutes));
     setCycleStr(numToStr(initial?.cycleMinutesPerUnit));
-    setLaborOverrideStr(numToStr(initial?.laborRateOverride));
+    setLaborOverrideStr(initialLaborStr(initial));
     setExternalUnitPriceStr(numToStr(initial?.externalUnitPrice));
     setExternalSetupCostStr(numToStr(initial?.externalSetupCost));
     setInstructions(initial?.instructions ?? '');
@@ -198,6 +212,7 @@ export default function RoutingOperationRowEditor({
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Autocomplete
             size="small"
+            openOnFocus
             options={workCenters}
             getOptionLabel={(wc) =>
               wc.vendor_name ? `${wc.name} (${wc.vendor_name})` : wc.name
@@ -234,13 +249,7 @@ export default function RoutingOperationRowEditor({
                 label="Work center"
                 placeholder="Pick a work center…"
                 error={wcError}
-                helperText={
-                  wcError
-                    ? 'Pick a work center to continue.'
-                    : isEdit
-                    ? 'Work center cannot be changed (delete and re-add to swap).'
-                    : ' '
-                }
+                helperText={wcError ? 'Pick a work center to continue.' : ' '}
               />
             )}
           />
@@ -261,11 +270,7 @@ export default function RoutingOperationRowEditor({
               if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalUnitPriceStr(v);
             }}
             error={!!extUnitPriceError}
-            helperText={
-              extUnitPriceError
-                ? 'Enter a non-negative number.'
-                : 'Charged for every unit produced.'
-            }
+            helperText={extUnitPriceError ? 'Enter a non-negative number.' : ' '}
             sx={{ flex: 1, minWidth: 180 }}
           />
           <TextField
@@ -279,11 +284,7 @@ export default function RoutingOperationRowEditor({
               if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalSetupCostStr(v);
             }}
             error={!!extSetupCostError}
-            helperText={
-              extSetupCostError
-                ? 'Enter a non-negative number.'
-                : 'One-time cost per batch.'
-            }
+            helperText={extSetupCostError ? 'Enter a non-negative number.' : ' '}
             sx={{ flex: 1, minWidth: 180 }}
           />
         </Box>
@@ -301,9 +302,7 @@ export default function RoutingOperationRowEditor({
               if (v === '' || /^\d*\.?\d*$/.test(v)) setCycleStr(v);
             }}
             error={!!cycleError}
-            helperText={
-              cycleError ? 'Enter a non-negative number.' : 'Repeated for every unit produced.'
-            }
+            helperText={cycleError ? 'Enter a non-negative number.' : ' '}
             sx={{ flex: 1, minWidth: 180 }}
           />
           <TextField
@@ -317,9 +316,7 @@ export default function RoutingOperationRowEditor({
               if (v === '' || /^\d*\.?\d*$/.test(v)) setSetupStr(v);
             }}
             error={!!setupError}
-            helperText={
-              setupError ? 'Enter a non-negative number.' : 'One-time setup/changeover per batch.'
-            }
+            helperText={setupError ? 'Enter a non-negative number.' : ' '}
             sx={{ flex: 1, minWidth: 180 }}
           />
           {workCenter && (
@@ -333,12 +330,7 @@ export default function RoutingOperationRowEditor({
                 const v = e.target.value;
                 if (v === '' || /^\d*\.?\d*$/.test(v)) setLaborOverrideStr(v);
               }}
-              placeholder="optional"
-              helperText={
-                workCenter.labor_rate !== null
-                  ? `Defaults to ${workCenter.name}'s rate ($${workCenter.labor_rate}/hr). Change to override for this operation.`
-                  : `${workCenter.name} has no default rate set. Enter a rate for this operation.`
-              }
+              helperText=" "
               sx={{ flex: 1, minWidth: 180 }}
             />
           )}

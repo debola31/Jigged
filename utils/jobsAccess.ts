@@ -553,31 +553,35 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 }
 
 /**
- * Bulk delete jobs.
+ * Bulk cancel jobs. Marks every part of each job as cancelled; the aggregation
+ * trigger on job_parts then flips each job's production_status to 'cancelled'.
+ * Like cancelJob, this relies on RLS for tenant isolation (job_parts has no
+ * company_id column of its own). Reversible per-job via reopenJob.
  */
-export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promise<void> {
+export async function bulkCancelJobs(jobIds: string[]): Promise<void> {
   if (jobIds.length === 0) return;
   const validIds = jobIds.filter((id) => id && typeof id === 'string');
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
   const BATCH_SIZE = 100;
+  const nowIso = new Date().toISOString();
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
-    // Clean each batch's attachment files from storage before the cascade
-    // deletes their job_attachments rows (best-effort; never blocks the delete).
-    await deleteStoredFilesForJobs(batch);
     const { error } = await supabase
-      .from('jobs')
-      .delete()
-      .in('id', batch)
-      .eq('company_id', companyId);
+      .from('job_parts')
+      .update({
+        production_status: 'cancelled',
+        status_changed_at: nowIso,
+        updated_at: nowIso,
+      })
+      .in('job_id', batch);
 
     if (error) {
-      console.error('Error bulk deleting jobs:', error);
+      console.error('Error bulk cancelling jobs:', error);
       throw new Error(
-        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete jobs.' }),
+        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to cancel jobs.' }),
       );
     }
   }
@@ -617,6 +621,79 @@ export async function cancelJob(jobId: string): Promise<Job> {
   return data as Job;
 }
 
+/**
+ * Reverse a cancellation. For every part on the job, clear the cancelled state
+ * by recomputing its production_status from its operations (none started →
+ * not_started, some → in_progress, all done → completed; a part with no
+ * operations → not_started). The aggregation trigger on job_parts then flips
+ * jobs.production_status back off 'cancelled'.
+ */
+export async function reopenJob(jobId: string): Promise<Job> {
+  const supabase = getSupabase();
+
+  const { data: parts, error: partsErr } = await supabase
+    .from('job_parts')
+    .select('id, started_at, completed_at')
+    .eq('job_id', jobId);
+  if (partsErr) {
+    console.error('Error loading job parts to reopen:', partsErr);
+    throw partsErr;
+  }
+  const partRows = parts ?? [];
+
+  // Operation statuses across all of the job's parts, grouped per part, so we
+  // can derive each part's resolved status without the cancelled-skip that the
+  // normal recompute path applies.
+  const partIds = partRows.map((p) => p.id);
+  const opsByPart = new Map<string, string[]>();
+  if (partIds.length > 0) {
+    const { data: ops, error: opsErr } = await supabase
+      .from('job_operations')
+      .select('job_part_id, status')
+      .in('job_part_id', partIds);
+    if (opsErr) {
+      console.error('Error loading operations to reopen:', opsErr);
+      throw opsErr;
+    }
+    for (const op of ops ?? []) {
+      const list = opsByPart.get(op.job_part_id) ?? [];
+      list.push(op.status);
+      opsByPart.set(op.job_part_id, list);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  for (const part of partRows) {
+    const newStatus = deriveStatusFromOps(opsByPart.get(part.id) ?? []);
+    const updates: JobPartUpdate = {
+      production_status: newStatus,
+      status_changed_at: nowIso,
+      updated_at: nowIso,
+      started_at: newStatus === 'not_started' ? null : part.started_at ?? nowIso,
+      completed_at: newStatus === 'completed' ? part.completed_at ?? nowIso : null,
+    };
+    const { error: updErr } = await supabase
+      .from('job_parts')
+      .update(updates)
+      .eq('id', part.id);
+    if (updErr) {
+      console.error('Error reopening job part:', updErr);
+      throw updErr;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+  if (error) {
+    console.error('Error fetching reopened job:', error);
+    throw error;
+  }
+  return data as Job;
+}
+
 // shipJob deleted in Shipments v2 PR 3. "Shipping" is no longer a
 // production-status transition — it's the side effect of creating a
 // shipment record against the job's parts. The Mark Shipped button on
@@ -644,6 +721,18 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
     throw error;
   }
   return (data || []) as JobOperation[];
+}
+
+/**
+ * Derive a job_part's production_status from its operation statuses:
+ * all completed → 'completed', any started → 'in_progress', otherwise
+ * 'not_started' (also the result when the part has no operations).
+ */
+function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
+  if (opStatuses.length === 0) return 'not_started';
+  if (opStatuses.every((s) => s === 'completed')) return 'completed';
+  if (opStatuses.some((s) => s !== 'pending')) return 'in_progress';
+  return 'not_started';
 }
 
 /**
@@ -676,19 +765,12 @@ async function recomputeJobPartStatus(
     .select('status')
     .eq('job_part_id', jobPartId);
   if (opsErr) throw opsErr;
-  type OpStatus = { status: string };
-  const opRows = (ops ?? []) as OpStatus[];
+  const opRows = ops ?? [];
   if (opRows.length === 0) {
     return { changed: false, newStatus: part.production_status as ProductionStatus };
   }
 
-  const allDone = opRows.every((o) => o.status === 'completed');
-  const anyTouched = opRows.some((o) => o.status !== 'pending');
-
-  let newStatus: ProductionStatus;
-  if (allDone) newStatus = 'completed';
-  else if (anyTouched) newStatus = 'in_progress';
-  else newStatus = 'not_started';
+  const newStatus = deriveStatusFromOps(opRows.map((o) => o.status));
 
   if (newStatus === part.production_status) {
     return { changed: false, newStatus };

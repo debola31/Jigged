@@ -26,11 +26,12 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   deleteJob,
-  bulkDeleteJobs,
+  bulkCancelJobs,
   createJobFromPurchaseOrder,
   getCustomersForSelect,
   getOverdueJobsCount,
   getReadyOperationsForJobs,
+  reopenJob,
   searchJobsByIdentifier,
   updateJobAddressContact,
 } from '@/utils/jobsAccess';
@@ -66,31 +67,31 @@ describe('jobsAccess', () => {
     });
   });
 
-  describe('bulkDeleteJobs', () => {
+  describe('bulkCancelJobs', () => {
     it('short-circuits on empty input without calling supabase', async () => {
-      await bulkDeleteJobs([], 'co-1');
+      await bulkCancelJobs([]);
       expect(mockSupabase.from).not.toHaveBeenCalled();
     });
 
-    it('filters out non-string ids before issuing the delete', async () => {
+    it('filters out non-string ids and marks job_parts cancelled by job_id', async () => {
       mockQueryBuilder.error = null;
       // @ts-expect-error — runtime defense exercise; the function filters
       // out anything that isn't a non-empty string.
-      await bulkDeleteJobs(['j1', null, '', 'j2'], 'co-1');
-      // deleteStoredFilesForJobs also issues an .in('job_id', …) for storage
-      // cleanup, so locate the jobs-delete call by its 'id' column.
-      const inCalls = (mockQueryBuilder.in as ReturnType<typeof vi.fn>).mock.calls;
-      const idCall = inCalls.find((c) => c[0] === 'id');
-      expect(idCall).toBeDefined();
-      expect(idCall![1]).toEqual(['j1', 'j2']);
+      await bulkCancelJobs(['j1', null, '', 'j2']);
+      expect(mockSupabase.from).toHaveBeenCalledWith('job_parts');
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch.production_status).toBe('cancelled');
+      const inCall = (mockQueryBuilder.in as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'job_id',
+      );
+      expect(inCall).toBeDefined();
+      expect(inCall![1]).toEqual(['j1', 'j2']);
     });
 
     it('throws a friendly (non-raw) error when supabase returns an error', async () => {
       // Raw "permission denied" must be translated, not surfaced verbatim.
       mockQueryBuilder.error = { message: 'permission denied' };
-      await expect(bulkDeleteJobs(['j1'], 'co-1')).rejects.toThrow(
-        /don't have permission/,
-      );
+      await expect(bulkCancelJobs(['j1'])).rejects.toThrow(/don't have permission/);
     });
   });
 
@@ -295,6 +296,82 @@ describe('jobsAccess', () => {
         /No routing defined/,
       );
       expect(mockSupabase.from).toHaveBeenCalledWith('routings');
+    });
+  });
+
+  describe('reopenJob', () => {
+    it('recomputes each part status from its operations (bypassing the cancelled-skip)', async () => {
+      // reopenJob deliberately ignores the parts' current (cancelled) status —
+      // it derives each one purely from its operations. Capture every update so
+      // we can assert the resolved status per part.
+      const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'job_parts') {
+          return {
+            // .select('id, started_at, completed_at').eq('job_id', jobId)
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: [
+                  { id: 'p-done', started_at: null, completed_at: null },
+                  { id: 'p-mixed', started_at: null, completed_at: null },
+                  { id: 'p-fresh', started_at: '2026-01-01T00:00:00Z', completed_at: '2026-02-01T00:00:00Z' },
+                ],
+                error: null,
+              }),
+            }),
+            // .update(patch).eq('id', id)
+            update: vi.fn().mockImplementation((patch: Record<string, unknown>) => ({
+              eq: vi.fn().mockImplementation((_col: string, id: string) => {
+                updates.push({ id, patch });
+                return Promise.resolve({ error: null });
+              }),
+            })),
+          };
+        }
+        if (table === 'job_operations') {
+          return {
+            // .select('job_part_id, status').in('job_part_id', ids)
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [
+                  { job_part_id: 'p-done', status: 'completed' },
+                  { job_part_id: 'p-done', status: 'completed' },
+                  { job_part_id: 'p-mixed', status: 'completed' },
+                  { job_part_id: 'p-mixed', status: 'pending' },
+                  // p-fresh intentionally has no operations
+                ],
+                error: null,
+              }),
+            }),
+          };
+        }
+        // jobs: .select('*').eq('id', jobId).single()
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({
+                data: { id: 'job-1', production_status: 'in_progress' },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      });
+
+      const job = await reopenJob('job-1');
+
+      const byId = (id: string) => updates.find((u) => u.id === id);
+      expect(byId('p-done')?.patch.production_status).toBe('completed');
+      expect(byId('p-mixed')?.patch.production_status).toBe('in_progress');
+      // No operations → reactivated to not_started, with started/completed cleared.
+      expect(byId('p-fresh')?.patch.production_status).toBe('not_started');
+      expect(byId('p-fresh')?.patch.started_at).toBeNull();
+      expect(byId('p-fresh')?.patch.completed_at).toBeNull();
+      expect(updates).toHaveLength(3);
+
+      // Returns the job row the aggregation trigger flipped off 'cancelled'.
+      expect(job).toEqual({ id: 'job-1', production_status: 'in_progress' });
     });
   });
 });

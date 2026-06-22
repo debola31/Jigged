@@ -21,6 +21,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import AddCommentIcon from '@mui/icons-material/AddComment';
 import PercentIcon from '@mui/icons-material/Percent';
 import NoteOutlinedIcon from '@mui/icons-material/NoteOutlined';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 
 import {
   getPartActivity,
@@ -34,6 +35,8 @@ import DeleteIconButton from '@/components/common/DeleteIconButton';
 interface HistoryTabProps {
   partId: string;
   companyId: string;
+  /** The part's created_at — rendered as the oldest entry at the bottom of the feed. */
+  createdAt: string | null;
 }
 
 const fmtWhen = (s: string): string => new Date(s).toLocaleString();
@@ -75,7 +78,7 @@ function matchesFilter(ev: PartActivityEvent, filter: ActivityFilter): boolean {
  * are not user-deletable (audit trail). Job/quote links were dropped — they're
  * already visible on the Jobs and Quotes pages.
  */
-export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
+export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabProps) {
   const [events, setEvents] = useState<PartActivityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [operator, setOperator] = useState<{ id: string; name: string | null } | null>(null);
@@ -150,6 +153,9 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
     () => (events ?? []).filter((ev) => matchesFilter(ev, filter)),
     [events, filter],
   );
+  // The part's creation is the oldest event — shown at the bottom of the feed,
+  // and only under "All" (it's neither a comment, pricing note, nor stock move).
+  const showCreated = filter === 'all' && !!createdAt;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -218,7 +224,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
               <CircularProgress size={24} />
             </Box>
-          ) : visible.length === 0 ? (
+          ) : visible.length === 0 && !showCreated ? (
             <Typography variant="body2" color="text.secondary">
               {filter === 'all' ? 'Nothing here yet.' : 'Nothing matches this filter.'}
             </Typography>
@@ -237,6 +243,17 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
                   onDelete={handleDelete}
                 />
               ))}
+              {showCreated && createdAt && (
+                <ListItem alignItems="flex-start" disableGutters>
+                  <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
+                    <AddCircleOutlineIcon fontSize="small" color="action" />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={<Typography variant="body2">Part created</Typography>}
+                    secondary={fmtWhen(createdAt)}
+                  />
+                </ListItem>
+              )}
             </List>
           )}
         </CardContent>

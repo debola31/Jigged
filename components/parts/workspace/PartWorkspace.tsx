@@ -7,7 +7,6 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import Divider from '@mui/material/Divider';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -39,10 +38,6 @@ import UsageTab from './tabs/UsageTab';
 import HistoryTab from './tabs/HistoryTab';
 import FilesTab from './tabs/FilesTab';
 
-const formatDate = (s: string | null): string => {
-  if (!s) return '—';
-  return new Date(s).toLocaleString();
-};
 
 /**
  * The part workspace: a maturity-adaptive record that leads with the
@@ -389,36 +384,9 @@ export default function PartWorkspace({
 
       {activeTab === 'files' && <FilesTab part={part} partId={partId} companyId={companyId} />}
 
-      {activeTab === 'history' && <HistoryTab partId={partId} companyId={companyId} />}
-
-      {/* Footer metadata strip — always visible below the active tab. */}
-      <Box sx={{ mt: 4 }}>
-        <Divider sx={{ mb: 2 }} />
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              Created
-            </Typography>
-            <Typography variant="body2">{formatDate(part.created_at)}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="body2" color="text.secondary">
-              Updated
-            </Typography>
-            <Typography variant="body2">{formatDate(part.updated_at)}</Typography>
-          </Box>
-          {part.legacy_id && (
-            <Box>
-              <Typography variant="body2" color="text.secondary">
-                Legacy ID
-              </Typography>
-              <Typography variant="body2" fontFamily="monospace">
-                {part.legacy_id}
-              </Typography>
-            </Box>
-          )}
-        </Box>
-      </Box>
+      {activeTab === 'history' && (
+        <HistoryTab partId={partId} companyId={companyId} createdAt={part.created_at} />
+      )}
 
       {/* Stock transaction modal (owned here; triggered from the Inventory tab) */}
       {part.is_stocked && (

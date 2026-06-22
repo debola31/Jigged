@@ -236,7 +236,7 @@ export default function CustomerForm({
                 value={formData.name}
                 onChange={handleChange('name')}
                 error={!!fieldErrors.name}
-                helperText={fieldErrors.name || 'Unique customer name'}
+                helperText={fieldErrors.name || ' '}
                 disabled={loading}
               />
             </Grid>

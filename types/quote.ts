@@ -31,7 +31,7 @@ export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = [
   'Net 45',
   'Net 60',
   'Net 90',
-  'COD',
+  'Cash on Delivery',
   '50% Deposit / Balance Net 30',
 ];
 

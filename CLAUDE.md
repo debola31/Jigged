@@ -386,22 +386,53 @@ by the specific change.
 pnpm exec playwright install chromium
 ```
 
-E2E reads two env files. Both are gitignored.
+E2E runs against an **ephemeral local Supabase** (`supabase start`), not
+staging. `e2e/global-setup.ts` provisions the test user, company, and the
+whole data graph itself (find-or-insert) with the local **service-role** key
+— so no committed login is needed, only two env vars taken from the running
+local stack:
 
-- `.env.test.local` (repo root) — `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`,
-  `E2E_TEST_COMPANY_ID`. Loaded by `playwright.config.ts`.
-- `e2e/.env.test.local` — `SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-  (same values as `.env.local`). Loaded by `e2e/global-setup.ts` for the
-  per-run fixture seed.
+- `TEST_SUPABASE_URL` = `API_URL` from `supabase status`
+- `TEST_SUPABASE_SECRET_KEY` = `SERVICE_ROLE_KEY` from `supabase status`
 
-`e2e/global-setup.ts` signs in as the test user via `signInWithPassword`
-and writes seed rows through RLS — no service-role key is plumbed
-through CI. The test user must already have a `user_company_access`
-row for `E2E_TEST_COMPANY_ID` (any role works).
+These are the local stack's keys and **rotate every `supabase start`** — fetch
+them fresh via the CLI, never hardcode. Standard local run (what
+`.github/workflows/e2e-tests.yml` does in CI):
+
+```bash
+supabase start                        # one local Postgres + Supabase stack
+eval "$(supabase status -o env)"      # exports API_URL / ANON_KEY / SERVICE_ROLE_KEY
+export TEST_SUPABASE_URL=$API_URL
+export TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
+export NEXT_PUBLIC_SUPABASE_URL=$API_URL          # point the app at the same stack
+export NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY
+pnpm exec playwright test --grep-invert "CSV Import"
+```
 
 Playwright auto-launches `pnpm dev` on `localhost:3000` when not in CI
 (see `playwright.config.ts`); reuses an existing dev server if one is
 already running.
+
+### Running E2E (or `pnpm dev`) from a git worktree
+
+Git worktrees do **not** inherit gitignored files, so a fresh worktree has no
+`.env.local` (or any `.env*`). `pnpm dev` and anything that reads Supabase
+creds will fail until you pull them from the **primary checkout** (the first
+entry in `git worktree list`). Do this once at the top of a worktree session:
+
+```bash
+PRIMARY=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
+cp "$PRIMARY/.env.local" .                   # dev server (staging creds)
+[ -f "$PRIMARY/.env.test.local" ] && cp "$PRIMARY/.env.test.local" .
+[ -f "$PRIMARY/e2e/.env.test.local" ] && cp "$PRIMARY/e2e/.env.test.local" e2e/
+```
+
+They land gitignored in the worktree, so they're never committed. Note the
+**E2E local-Supabase vars are *not* copied** — `TEST_SUPABASE_URL` /
+`TEST_SUPABASE_SECRET_KEY` come from `supabase status -o env` of the running
+local stack (above), so they're correct in any worktree without copying.
+(Claude can run `supabase status -o env`, and `supabase start` if the stack
+isn't up, to fetch them — they're local-only, not secrets.)
 
 ### E2E gotchas
 

@@ -553,31 +553,35 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 }
 
 /**
- * Bulk delete jobs.
+ * Bulk cancel jobs. Marks every part of each job as cancelled; the aggregation
+ * trigger on job_parts then flips each job's production_status to 'cancelled'.
+ * Like cancelJob, this relies on RLS for tenant isolation (job_parts has no
+ * company_id column of its own). Reversible per-job via reopenJob.
  */
-export async function bulkDeleteJobs(jobIds: string[], companyId: string): Promise<void> {
+export async function bulkCancelJobs(jobIds: string[]): Promise<void> {
   if (jobIds.length === 0) return;
   const validIds = jobIds.filter((id) => id && typeof id === 'string');
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
   const BATCH_SIZE = 100;
+  const nowIso = new Date().toISOString();
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
-    // Clean each batch's attachment files from storage before the cascade
-    // deletes their job_attachments rows (best-effort; never blocks the delete).
-    await deleteStoredFilesForJobs(batch);
     const { error } = await supabase
-      .from('jobs')
-      .delete()
-      .in('id', batch)
-      .eq('company_id', companyId);
+      .from('job_parts')
+      .update({
+        production_status: 'cancelled',
+        status_changed_at: nowIso,
+        updated_at: nowIso,
+      })
+      .in('job_id', batch);
 
     if (error) {
-      console.error('Error bulk deleting jobs:', error);
+      console.error('Error bulk cancelling jobs:', error);
       throw new Error(
-        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete jobs.' }),
+        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to cancel jobs.' }),
       );
     }
   }

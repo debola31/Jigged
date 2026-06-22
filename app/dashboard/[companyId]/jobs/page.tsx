@@ -20,7 +20,7 @@ import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import SearchIcon from '@mui/icons-material/Search';
-import DeleteIcon from '@mui/icons-material/Delete';
+import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
 
 import { AgGridReact } from 'ag-grid-react';
@@ -38,7 +38,7 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllJobs, bulkDeleteJobs, getCustomersForSelect } from '@/utils/jobsAccess';
+import { getAllJobs, bulkCancelJobs, getCustomersForSelect } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import { isJobOverdue } from '@/types/job';
 import Tooltip from '@mui/material/Tooltip';
@@ -135,13 +135,8 @@ export default function JobsPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<JobWithRelations>>(null);
 
-  const [deleteDialog, setDeleteDialog] = useState<{
-    open: boolean;
-    type: 'single' | 'bulk';
-    jobId?: string;
-    jobNumber?: string;
-  }>({ open: false, type: 'single' });
-  const [deleting, setDeleting] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'error' | 'success' }>({
     open: false,
@@ -269,29 +264,29 @@ export default function JobsPage() {
     }
   };
 
-  const handleBulkDeleteClick = () => {
-    setDeleteDialog({ open: true, type: 'bulk' });
+  const handleBulkCancelClick = () => {
+    setCancelDialogOpen(true);
   };
 
-  const handleDeleteConfirm = async () => {
-    setDeleting(true);
+  const handleCancelConfirm = async () => {
+    setCancelling(true);
     try {
-      await bulkDeleteJobs(selectedIds, companyId);
+      await bulkCancelJobs(selectedIds);
       setSelectedIds([]);
       if (gridRef.current?.api) {
         gridRef.current.api.deselectAll();
       }
       await fetchJobs();
-      setDeleteDialog({ open: false, type: 'single' });
+      setCancelDialogOpen(false);
     } catch (error) {
       setSnackbar({
         open: true,
         message: error instanceof Error ? error.message : 'An error occurred',
         severity: 'error',
       });
-      setDeleteDialog({ open: false, type: 'single' });
+      setCancelDialogOpen(false);
     } finally {
-      setDeleting(false);
+      setCancelling(false);
     }
   };
 
@@ -572,12 +567,12 @@ export default function JobsPage() {
               selectedCount={selectedIds.length}
             />
             <Button
-              variant="contained"
+              variant="outlined"
               color="error"
-              startIcon={<DeleteIcon />}
-              onClick={handleBulkDeleteClick}
+              startIcon={<CancelIcon />}
+              onClick={handleBulkCancelClick}
             >
-              Delete ({selectedIds.length})
+              Cancel ({selectedIds.length})
             </Button>
           </>
         )}
@@ -680,43 +675,43 @@ export default function JobsPage() {
         </Card>
       )}
 
-      {/* Delete Confirmation Dialog */}
+      {/* Cancel Confirmation Dialog */}
       <Dialog
-        open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false, type: 'single' })}
+        open={cancelDialogOpen}
+        onClose={() => !cancelling && setCancelDialogOpen(false)}
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle sx={{ pb: 2 }}>Delete Jobs</DialogTitle>
+        <DialogTitle sx={{ pb: 2 }}>Cancel Jobs</DialogTitle>
         <DialogContent sx={{ pt: 0 }}>
           <Box sx={{ mb: 2 }}>
             <Typography variant="body1" sx={{ mb: 1 }}>
-              Are you sure you want to delete <strong>{selectedIds.length}</strong> job
+              Cancel <strong>{selectedIds.length}</strong> selected job
               {selectedIds.length > 1 ? 's' : ''}?
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              This will also delete all associated operations and attachments. This action cannot be undone.
+              Every part on each job will be marked cancelled. You can reopen them later.
             </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button
-            onClick={() => setDeleteDialog({ open: false, type: 'single' })}
-            disabled={deleting}
+            onClick={() => setCancelDialogOpen(false)}
+            disabled={cancelling}
             color="inherit"
             size="large"
           >
-            Cancel
+            Keep Jobs
           </Button>
           <Button
-            onClick={handleDeleteConfirm}
+            onClick={handleCancelConfirm}
             variant="contained"
             color="error"
-            disabled={deleting}
+            disabled={cancelling}
             size="large"
-            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
+            startIcon={cancelling ? <CircularProgress size={16} color="inherit" /> : <CancelIcon />}
           >
-            {deleting ? 'Deleting...' : 'Delete'}
+            {cancelling ? 'Cancelling...' : 'Cancel Jobs'}
           </Button>
         </DialogActions>
       </Dialog>

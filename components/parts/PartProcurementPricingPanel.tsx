@@ -52,16 +52,6 @@ interface EditRow {
   cost: string;
 }
 
-function formatCurrency(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
-  return value.toLocaleString(undefined, {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  });
-}
-
 function parseNumber(s: string): number | null {
   if (s.trim() === '') return null;
   const n = Number(s);
@@ -532,7 +522,6 @@ export default function PartProcurementPricingPanel({
               </TableHead>
               <TableBody>
                 {rows.map((row, idx) => {
-                    const costNum = parseNumber(row.cost);
                     const rowKey = row.id ?? row.tempKey ?? `idx-${idx}`;
                     const status = rowStatus.get(rowKey);
                     return (
@@ -556,7 +545,6 @@ export default function PartProcurementPricingPanel({
                               }
                             }}
                             inputMode="decimal"
-                            placeholder="1"
                             sx={{ width: 110 }}
                           />
                         </TableCell>
@@ -579,7 +567,6 @@ export default function PartProcurementPricingPanel({
                               }
                             }}
                             inputMode="decimal"
-                            placeholder={costNum !== null ? formatCurrency(costNum) : '0.00'}
                             sx={{ width: 130 }}
                             slotProps={{
                               input: {

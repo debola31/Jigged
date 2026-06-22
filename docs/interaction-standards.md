@@ -16,6 +16,22 @@ to the consequence.
 - The destructive control is the same everywhere: an **error-colored trash
   icon shown at rest** (MUI `color="error"`), not grey-until-hover. A color's
   meaning must be consistent app-wide ([NN/g — Consistency & Standards](https://www.nngroup.com/articles/consistency-and-standards/)).
+- **Color is the constant: every delete is red (`color="error"`) at rest.** Red
+  reliably means "destructive" app-wide — a delete must never read grey, or it
+  becomes indistinguishable from a benign edit (this is why the grey note-delete
+  was a bug). Edit/neutral icons stay grey; the red-vs-grey contrast is the point.
+- **Fill scales emphasis, not color** — a two-tier glyph:
+  - **Solid `DeleteIcon`** — whole-record/entity deletes that should feel
+    deliberate: detail-page header deletes (part, customer, job, quote, vendor,
+    work-center…), list-row record deletes, and the danger confirm button in
+    dialogs.
+  - **Hollow `DeleteOutlineIcon`** — low-emphasis sub-item deletes inside an
+    editor: BOM materials, pricing tiers, routing operations, quote line items,
+    part notes. Use the shared [`components/common/DeleteIconButton`](../components/common/DeleteIconButton.tsx),
+    which bakes in the hollow icon + `color="error"` so it can't be hand-rolled grey.
+- Enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts):
+  a delete icon set to `text.secondary` fails CI. (Glyph choice is a per-call-site
+  judgment, not machine-enforced.)
 - Keep it low-emphasis (ghost icon, no filled-red background) for in-context row
   deletes ([Carbon — Button usage](https://carbondesignsystem.com/components/button/usage/)).
 - Never rely on red **alone** — pair it with an icon/label/confirmation copy.
@@ -40,6 +56,8 @@ Scale by impact + reversibility ([Apple — Alerts](https://developer.apple.com/
 ### Current state vs this standard (gaps to close)
 - ✅ Part delete: red icon + confirmation dialog.
 - ✅ Row deletes (BOM/tier/operation): red icons at rest.
+- ✅ Shared `DeleteIconButton` + a CI source-scan test enforce red-at-rest; the
+  grey note-delete and grey unit-conversion delete are fixed.
 - ⬜ Row deletes still lack **Undo**; the BOM row delete still shows a
   confirmation dialog (over-confirmed). Target end state: drop the BOM-row
   dialog and add an **Undo snackbar** to BOM/tier/operation deletes.

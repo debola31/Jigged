@@ -51,6 +51,13 @@ export interface Part {
  * (mirrors JobNote). `author_id` is the author's user_company_access id — used
  * to gate the delete affordance to the author; `author_name` is for display.
  */
+/**
+ * Kind of part note. `user` is a manually-typed note; `pricing` is an
+ * auto-logged entry written when pricing is saved. Extensible to future
+ * automated note types.
+ */
+export type PartNoteType = 'user' | 'pricing';
+
 export interface PartNote {
   id: string;
   part_id: string;
@@ -58,6 +65,7 @@ export interface PartNote {
   created_at: string;
   author_id: string | null;
   author_name: string | null;
+  note_type: PartNoteType;
 }
 
 /**

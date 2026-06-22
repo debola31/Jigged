@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-20T22:37:49Z
+-- Generated: 2026-06-22T00:11:52Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -30,10 +30,6 @@ CREATE TABLE IF NOT EXISTS "public"."companies"
     "state" text,
     "postal_code" text,
     "country" text,
-    "packing_slip_number_format" text NOT NULL DEFAULT 'PS-{YYYY}-{seq:0000}'::text,
-    "packing_slip_seq_year" integer,
-    "packing_slip_next_seq" integer NOT NULL DEFAULT 1,
-    "default_coc_text" text,
     CONSTRAINT "companies_pkey" PRIMARY KEY (id),
     CONSTRAINT "companies_slug_key" UNIQUE (slug)
 );
@@ -93,6 +89,14 @@ CREATE TABLE IF NOT EXISTS "public"."company_custom_units"
     CONSTRAINT "company_custom_units_company_id_unit_name_key" UNIQUE (company_id, unit_name)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."company_order_counters"
+(
+    "company_id" uuid NOT NULL,
+    "next_number" integer NOT NULL DEFAULT 1,
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "company_order_counters_pkey" PRIMARY KEY (company_id)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."customers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -101,12 +105,8 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "website" text,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
-    "default_shipping_arrangement" text,
-    "default_carrier" text,
-    "default_coc_text" text,
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name),
-    CONSTRAINT "customers_default_shipping_arrangement_check" CHECK (((default_shipping_arrangement IS NULL) OR (default_shipping_arrangement = ANY (ARRAY['prepaid_and_add'::text, 'prepaid'::text, 'collect'::text, 'third_party_account'::text, 'customer_pickup'::text, 'customer_arranged_freight'::text, 'other'::text]))))
+    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
@@ -248,6 +248,20 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     CONSTRAINT "jobs_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."job_attachments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "job_id" uuid NOT NULL,
+    "storage_path" text NOT NULL,
+    "file_name" text NOT NULL,
+    "mime_type" text,
+    "size_bytes" bigint,
+    "uploaded_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_attachments_pkey" PRIMARY KEY (id)
+);
+
 CREATE TABLE IF NOT EXISTS "public"."saved_insights"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -270,23 +284,17 @@ CREATE TABLE IF NOT EXISTS "public"."shipments"
     "packing_slip_number" text NOT NULL,
     "ship_date" date NOT NULL DEFAULT CURRENT_DATE,
     "carrier" text,
-    "tracking_number" text,
-    "shipping_arrangement" text,
-    "shipping_arrangement_other" text,
-    "weight_lbs" numeric(10,2),
-    "package_count" integer,
-    "package_type" text,
     "notes" text,
-    "coc_text" text,
     "created_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "voided_at" timestamp with time zone,
     "voided_by" uuid,
+    "shipping_method" text,
+    "job_id" uuid NOT NULL,
     CONSTRAINT "shipments_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipments_packing_slip_company_unique" UNIQUE (company_id, packing_slip_number),
-    CONSTRAINT "shipments_arrangement_other_text" CHECK (((shipping_arrangement IS DISTINCT FROM 'other'::text) OR (shipping_arrangement_other IS NOT NULL))),
     CONSTRAINT "shipments_one_address_source" CHECK ((((shipping_address_id IS NOT NULL) AND (one_time_address IS NULL)) OR ((shipping_address_id IS NULL) AND (one_time_address IS NOT NULL)))),
-    CONSTRAINT "shipments_shipping_arrangement_check" CHECK (((shipping_arrangement IS NULL) OR (shipping_arrangement = ANY (ARRAY['prepaid_and_add'::text, 'prepaid'::text, 'collect'::text, 'third_party_account'::text, 'customer_pickup'::text, 'customer_arranged_freight'::text, 'other'::text]))))
+    CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_fulfillment_audit"
@@ -381,8 +389,8 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_links"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "quote_id" uuid NOT NULL,
-    "job_id" uuid,
+    "quote_id" uuid,
+    "job_id" uuid NOT NULL,
     "realm_id" text NOT NULL,
     "qb_request_id" uuid NOT NULL,
     "qb_invoice_id" text,
@@ -394,7 +402,7 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_links"
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "qb_invoice_url" text,
     CONSTRAINT "quickbooks_invoice_links_pkey" PRIMARY KEY (id),
-    CONSTRAINT "quickbooks_invoice_links_quote_realm_key" UNIQUE (quote_id, realm_id),
+    CONSTRAINT "quickbooks_invoice_links_job_realm_key" UNIQUE (job_id, realm_id),
     CONSTRAINT "quickbooks_invoice_links_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'created'::text, 'error'::text])))
 );
 
@@ -451,6 +459,18 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
     CONSTRAINT "parts_requires_unit" CHECK ((primary_unit IS NOT NULL)),
     CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."part_notes"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "author_id" uuid,
+    "body" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "part_notes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_notes_body_not_blank" CHECK ((length(btrim(body)) > 0))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
@@ -554,6 +574,8 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "production_status" text NOT NULL,
     "fulfillment_status" text NOT NULL,
+    "unit_price" numeric(12,4),
+    "total_price" numeric(12,4),
     CONSTRAINT "job_parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_parts_job_part_unique" UNIQUE (job_id, part_id),
     CONSTRAINT "job_parts_job_sequence_unique" UNIQUE (job_id, sequence),
@@ -715,8 +737,6 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "work_center_id" uuid,
     "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
     "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
-    "actual_setup_minutes" numeric(8,2),
-    "actual_run_minutes" numeric(8,2),
     "status" text NOT NULL DEFAULT 'pending'::text,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -754,21 +774,6 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
     CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "operator_id" uuid NOT NULL,
-    "job_id" uuid NOT NULL,
-    "job_operation_id" uuid,
-    "work_center_id" uuid NOT NULL,
-    "started_at" timestamp with time zone DEFAULT now(),
-    "ended_at" timestamp with time zone,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "operator_sessions_pkey" PRIMARY KEY (id)
-);
-
 -- ============================================================
 -- 3. ROW LEVEL SECURITY
 -- ============================================================
@@ -777,6 +782,7 @@ ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."auth_audit_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."company_order_counters" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customer_addresses" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customer_contacts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
@@ -784,6 +790,7 @@ ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."feedback" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_fulfillment_audit" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_notes" ENABLE ROW LEVEL SECURITY;
@@ -791,7 +798,7 @@ ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
@@ -1063,6 +1070,24 @@ CREATE POLICY "Users can read invitations for their email"
    FROM auth.users
   WHERE (users.id = auth.uid())))::text));
 
+DROP POLICY IF EXISTS "Users can delete their company's job_attachments" ON "public"."job_attachments";
+CREATE POLICY "Users can delete their company's job_attachments"
+    ON "public"."job_attachments"
+    FOR DELETE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can insert their company's job_attachments" ON "public"."job_attachments";
+CREATE POLICY "Users can insert their company's job_attachments"
+    ON "public"."job_attachments"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view their company's job_attachments" ON "public"."job_attachments";
+CREATE POLICY "Users can view their company's job_attachments"
+    ON "public"."job_attachments"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can view job_fulfillment_audit" ON "public"."job_fulfillment_audit";
 CREATE POLICY "Users can view job_fulfillment_audit"
     ON "public"."job_fulfillment_audit"
@@ -1287,43 +1312,23 @@ CREATE POLICY "markup_rates_update"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
-DROP POLICY IF EXISTS "Admins can delete company sessions" ON "public"."operator_sessions";
-CREATE POLICY "Admins can delete company sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Authors and admins can delete part_notes" ON "public"."part_notes";
+CREATE POLICY "Authors and admins can delete part_notes"
+    ON "public"."part_notes"
     FOR DELETE
-    USING (is_company_admin(company_id));
+    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
 
-DROP POLICY IF EXISTS "Admins can read company sessions" ON "public"."operator_sessions";
-CREATE POLICY "Admins can read company sessions"
-    ON "public"."operator_sessions"
-    FOR SELECT
-    USING (is_company_admin(company_id));
-
-DROP POLICY IF EXISTS "Operators can insert own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can insert own sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Users can insert own part_notes" ON "public"."part_notes";
+CREATE POLICY "Users can insert own part_notes"
+    ON "public"."part_notes"
     FOR INSERT
-    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
 
-DROP POLICY IF EXISTS "Operators can read own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can read own sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Users can view part_notes" ON "public"."part_notes";
+CREATE POLICY "Users can view part_notes"
+    ON "public"."part_notes"
     FOR SELECT
-    USING ((operator_id = get_operator_access_id(company_id)));
-
-DROP POLICY IF EXISTS "Operators can update own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can update own sessions"
-    ON "public"."operator_sessions"
-    FOR UPDATE
-    USING ((operator_id = get_operator_access_id(company_id)))
-    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
-
-DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operator_sessions";
-CREATE POLICY "ai_readonly_select"
-    ON "public"."operator_sessions"
-    FOR SELECT
-    TO jigged_ai_readonly
-    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."part_pricing_tiers";
 CREATE POLICY "ai_readonly_select"
@@ -2113,6 +2118,9 @@ ALTER TABLE "public"."companies"
 ALTER TABLE "public"."company_custom_units"
     ADD CONSTRAINT "company_custom_units_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."company_order_counters"
+    ADD CONSTRAINT "company_order_counters_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."customer_addresses"
     ADD CONSTRAINT "customer_addresses_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
@@ -2151,6 +2159,15 @@ ALTER TABLE "public"."invitations"
 
 ALTER TABLE "public"."invitations"
     ADD CONSTRAINT "invitations_invited_by_fkey" FOREIGN KEY (invited_by) REFERENCES auth.users(id);
+
+ALTER TABLE "public"."job_attachments"
+    ADD CONSTRAINT "job_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_attachments"
+    ADD CONSTRAINT "job_attachments_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_attachments"
+    ADD CONSTRAINT "job_attachments_uploaded_by_fkey" FOREIGN KEY (uploaded_by) REFERENCES auth.users(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."job_fulfillment_audit"
     ADD CONSTRAINT "job_fulfillment_audit_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2239,17 +2256,14 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_job_operation_id_fkey" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_work_center_id_fkey" FOREIGN KEY (work_center_id) REFERENCES work_centers(id) ON DELETE RESTRICT;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2300,13 +2314,13 @@ ALTER TABLE "public"."quickbooks_invoice_links"
     ADD CONSTRAINT "quickbooks_invoice_links_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quickbooks_invoice_links"
-    ADD CONSTRAINT "quickbooks_invoice_links_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+    ADD CONSTRAINT "quickbooks_invoice_links_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quickbooks_invoice_links"
     ADD CONSTRAINT "quickbooks_invoice_links_pushed_by_fkey" FOREIGN KEY (pushed_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quickbooks_invoice_links"
-    ADD CONSTRAINT "quickbooks_invoice_links_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
+    ADD CONSTRAINT "quickbooks_invoice_links_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quote_line_items"
     ADD CONSTRAINT "quote_line_items_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2396,6 +2410,9 @@ ALTER TABLE "public"."shipments"
     ADD CONSTRAINT "shipments_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id);
 
 ALTER TABLE "public"."shipments"
+    ADD CONSTRAINT "shipments_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id);
+
+ALTER TABLE "public"."shipments"
     ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id);
 
 ALTER TABLE "public"."shipments"
@@ -2455,6 +2472,7 @@ CREATE INDEX IF NOT EXISTS inventory_transactions_part_id_created_at_idx ON publ
 CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON public.invitations USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON public.invitations USING btree (email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email_company ON public.invitations USING btree (email, company_id) WHERE ((status)::text = 'pending'::text);
+CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON public.job_attachments USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_fulfillment_audit_company ON public.job_fulfillment_audit USING btree (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_fulfillment_audit_job ON public.job_fulfillment_audit USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING btree (job_id);
@@ -2482,11 +2500,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_company ON public.operator_sessions USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions USING btree (job_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
+CREATE INDEX IF NOT EXISTS idx_part_notes_part_created ON public.part_notes USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_procurement_tiers_expiring ON public.part_procurement_tiers USING btree (part_id, expires_at) WHERE (expires_at IS NOT NULL);
@@ -2502,6 +2516,7 @@ CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btre
 CREATE INDEX IF NOT EXISTS idx_parts_bom_child ON public.parts_bom USING btree (child_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_parent ON public.parts_bom USING btree (parent_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_unit_conversions_part ON public.parts_unit_conversions USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_job ON public.quickbooks_invoice_links USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_quote ON public.quickbooks_invoice_links USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_company ON public.quote_line_items USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_part ON public.quote_line_items USING btree (part_id);
@@ -2525,6 +2540,7 @@ CREATE INDEX IF NOT EXISTS idx_shipment_line_items_job_part ON public.shipment_l
 CREATE INDEX IF NOT EXISTS idx_shipment_line_items_shipment ON public.shipment_line_items USING btree (shipment_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_company ON public.shipments USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_customer ON public.shipments USING btree (customer_id);
+CREATE INDEX IF NOT EXISTS idx_shipments_job_id ON public.shipments USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_shipments_packing_slip ON public.shipments USING btree (company_id, packing_slip_number);
 CREATE INDEX IF NOT EXISTS idx_shipments_packing_slip_trgm ON public.shipments USING gin (packing_slip_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_shipments_ship_date ON public.shipments USING btree (company_id, ship_date DESC);
@@ -3177,7 +3193,7 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.create_shipment_with_line_items(p_company_id uuid, p_customer_id uuid, p_shipping_address_id uuid, p_one_time_address jsonb, p_ship_date date, p_carrier text, p_tracking_number text, p_shipping_arrangement text, p_shipping_arrangement_other text, p_weight_lbs numeric, p_package_count integer, p_package_type text, p_notes text, p_coc_text text, p_line_items jsonb)
+CREATE OR REPLACE FUNCTION public.create_shipment_with_line_items(p_company_id uuid, p_customer_id uuid, p_shipping_address_id uuid, p_one_time_address jsonb, p_ship_date date, p_carrier text, p_shipping_method text, p_notes text, p_line_items jsonb)
  RETURNS uuid
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3189,7 +3205,11 @@ DECLARE
     v_user_id uuid := auth.uid();
     v_item jsonb;
     v_pre_status jsonb := '{}'::jsonb;
+    v_job_ids uuid[];
     v_job_id uuid;
+    v_job_number text;
+    v_base text;
+    v_seq int;
     r record;
 BEGIN
     IF NOT (p_company_id IN (SELECT get_user_company_ids())) THEN
@@ -3198,49 +3218,51 @@ BEGIN
             USING ERRCODE = 'insufficient_privilege';
     END IF;
 
-    -- 1. Acquire per-job advisory locks in sorted order to prevent
-    --    deadlock between concurrent RPCs touching the same job set.
-    --    pg_advisory_xact_lock is released at COMMIT/ROLLBACK.
-    FOR v_job_id IN
-        SELECT DISTINCT jp.job_id
-          FROM public.job_parts jp
-         WHERE jp.id IN (
-            SELECT (item->>'job_part_id')::uuid
-              FROM jsonb_array_elements(p_line_items) AS item
-         )
-         ORDER BY jp.job_id
-    LOOP
-        PERFORM pg_advisory_xact_lock(hashtext('job:' || v_job_id::text));
-    END LOOP;
+    -- 1. Resolve the job(s) behind the line items. A packing slip belongs to
+    --    exactly one job — reject empty or multi-job inputs.
+    SELECT array_agg(DISTINCT jp.job_id)
+      INTO v_job_ids
+      FROM public.job_parts jp
+     WHERE jp.id IN (
+        SELECT (item->>'job_part_id')::uuid
+          FROM jsonb_array_elements(p_line_items) AS item
+     );
 
-    -- 2. Snapshot pre-cascade fulfillment_status.
+    IF v_job_ids IS NULL OR array_length(v_job_ids, 1) IS NULL THEN
+        RAISE EXCEPTION 'create_shipment_with_line_items: no job parts resolved from line items';
+    END IF;
+    IF array_length(v_job_ids, 1) > 1 THEN
+        RAISE EXCEPTION 'create_shipment_with_line_items: a packing slip must belong to a single job (got % jobs)',
+            array_length(v_job_ids, 1);
+    END IF;
+    v_job_id := v_job_ids[1];
+
+    -- 2. Lock the job so the per-job packing-slip sequence is collision-free
+    --    under concurrent callers. Released at COMMIT/ROLLBACK.
+    PERFORM pg_advisory_xact_lock(hashtext('job:' || v_job_id::text));
+
+    -- 3. Snapshot pre-cascade fulfillment_status for the audit row.
     SELECT COALESCE(jsonb_object_agg(j.id::text, j.fulfillment_status), '{}'::jsonb)
       INTO v_pre_status
       FROM public.jobs j
-     WHERE j.id IN (
-        SELECT DISTINCT jp.job_id FROM public.job_parts jp
-         WHERE jp.id IN (
-            SELECT (item->>'job_part_id')::uuid
-              FROM jsonb_array_elements(p_line_items) AS item
-         )
-     );
+     WHERE j.id = v_job_id;
 
-    -- 3. Mint packing slip number.
-    v_packing_slip := public.next_packing_slip_number(p_company_id);
+    -- 4. Mint the job-derived packing-slip number: PS-{jobBase}-{n}, n from 1.
+    --    jobBase strips the alpha prefix off job_number (J-0141 -> 0141).
+    SELECT j.job_number INTO v_job_number FROM public.jobs j WHERE j.id = v_job_id;
+    v_base := regexp_replace(v_job_number, '^[A-Za-z]+-?', '');
+    SELECT count(*) + 1 INTO v_seq FROM public.shipments WHERE job_id = v_job_id;
+    v_packing_slip := 'PS-' || v_base || '-' || v_seq::text;
 
-    -- 4. Insert shipment + line items. Triggers A → C cascade automatically.
+    -- 5. Insert shipment + line items. Triggers cascade fulfillment_status.
     INSERT INTO public.shipments (
         company_id, customer_id, shipping_address_id, one_time_address,
-        packing_slip_number, ship_date, carrier, tracking_number,
-        shipping_arrangement, shipping_arrangement_other,
-        weight_lbs, package_count, package_type, notes, coc_text,
-        created_by
+        packing_slip_number, ship_date, job_id, carrier, shipping_method,
+        notes, created_by
     ) VALUES (
         p_company_id, p_customer_id, p_shipping_address_id, p_one_time_address,
-        v_packing_slip, COALESCE(p_ship_date, current_date), p_carrier, p_tracking_number,
-        p_shipping_arrangement, p_shipping_arrangement_other,
-        p_weight_lbs, p_package_count, p_package_type, p_notes, p_coc_text,
-        v_user_id
+        v_packing_slip, COALESCE(p_ship_date, current_date), v_job_id, p_carrier, p_shipping_method,
+        p_notes, v_user_id
     ) RETURNING id INTO v_shipment_id;
 
     FOR v_item IN SELECT * FROM jsonb_array_elements(p_line_items) LOOP
@@ -3252,9 +3274,7 @@ BEGIN
         );
     END LOOP;
 
-    -- 5. For each touched job, write an audit row IFF it crossed
-    --    forward into fully_shipped. v_pre_status defaults to '{}' so the
-    --    loop no-ops when p_line_items is empty.
+    -- 6. Audit the job iff it crossed forward into fully_shipped.
     FOR r IN
         SELECT j.id AS job_id, j.fulfillment_status AS new_status,
                v_pre_status->>(j.id::text) AS old_status
@@ -3465,27 +3485,14 @@ END $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.format_packing_slip_number(p_format text, p_year integer, p_seq integer)
+CREATE OR REPLACE FUNCTION public.generate_direct_job_number(company_uuid uuid)
  RETURNS text
  LANGUAGE plpgsql
- IMMUTABLE
- SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE
-    v_result text := p_format;
-    v_pad_match text;
-    v_width int;
 BEGIN
-    v_result := replace(v_result, '{YYYY}', p_year::text);
-    v_pad_match := substring(v_result FROM '\{seq:(0+)\}');
-    IF v_pad_match IS NOT NULL THEN
-        v_width := length(v_pad_match);
-        v_result := regexp_replace(v_result, '\{seq:0+\}', lpad(p_seq::text, v_width, '0'));
-    ELSE
-        v_result := replace(v_result, '{seq}', p_seq::text);
-    END IF;
-    RETURN v_result;
-END $function$
+  RETURN 'J-' || LPAD(public.next_order_number(company_uuid)::text, 4, '0');
+END;
+$function$
 
 ;
 
@@ -3493,18 +3500,8 @@ CREATE OR REPLACE FUNCTION public.generate_quote_number(company_uuid uuid)
  RETURNS text
  LANGUAGE plpgsql
 AS $function$
-DECLARE
-  next_num INTEGER;
 BEGIN
-  SELECT COALESCE(
-    MAX(CAST(SUBSTRING(quote_number FROM 'Q-(\d+)') AS INTEGER)), 0
-  ) + 1
-  INTO next_num
-  FROM quotes
-  WHERE company_id = company_uuid
-    AND quote_number ~ '^Q-\d+$';
-  
-  RETURN 'Q-' || LPAD(next_num::TEXT, 4, '0');
+  RETURN 'Q-' || LPAD(public.next_order_number(company_uuid)::text, 4, '0');
 END;
 $function$
 
@@ -3932,45 +3929,24 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.next_packing_slip_number(p_company_id uuid)
- RETURNS text
+CREATE OR REPLACE FUNCTION public.next_order_number(company_uuid uuid)
+ RETURNS integer
  LANGUAGE plpgsql
  SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
+ SET search_path TO 'public'
 AS $function$
 DECLARE
-    v_year int := EXTRACT(year FROM current_date)::int;
-    v_format text;
-    v_current_year int;
-    v_current_seq int;
-    v_seq int;
+  result integer;
 BEGIN
-    -- Defensive: a caller without company access must not be able to
-    -- advance another company's counter, even though SECURITY DEFINER
-    -- bypasses RLS.
-    IF NOT (p_company_id IN (SELECT get_user_company_ids())) THEN
-        RAISE EXCEPTION 'next_packing_slip_number: caller does not have access to company %', p_company_id
-            USING ERRCODE = 'insufficient_privilege';
-    END IF;
-
-    UPDATE public.companies
-       SET packing_slip_next_seq = CASE
-               WHEN packing_slip_seq_year = v_year THEN packing_slip_next_seq + 1
-               ELSE 2  -- next caller gets 2; this caller consumes seq 1
-           END,
-           packing_slip_seq_year = v_year,
-           updated_at = now()
-     WHERE id = p_company_id
-    RETURNING packing_slip_seq_year, packing_slip_next_seq, packing_slip_number_format
-        INTO v_current_year, v_current_seq, v_format;
-
-    IF v_current_year IS NULL THEN
-        RAISE EXCEPTION 'next_packing_slip_number: company % not found', p_company_id;
-    END IF;
-
-    v_seq := v_current_seq - 1;
-    RETURN public.format_packing_slip_number(v_format, v_year, v_seq);
-END $function$
+  INSERT INTO public.company_order_counters (company_id, next_number)
+  VALUES (company_uuid, 2)
+  ON CONFLICT (company_id) DO UPDATE
+    SET next_number = public.company_order_counters.next_number + 1,
+        updated_at = now()
+  RETURNING next_number - 1 INTO result;
+  RETURN result;
+END;
+$function$
 
 ;
 
@@ -4851,9 +4827,6 @@ CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs
 DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
 CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS "operator_sessions_updated_at" ON "public"."operator_sessions";
-CREATE TRIGGER operator_sessions_updated_at BEFORE UPDATE ON public.operator_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
 CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -4971,9 +4944,6 @@ COMMENT ON TABLE "public"."job_fulfillment_audit"
 
 COMMENT ON TABLE "public"."markup_rates"
     IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
-
-COMMENT ON TABLE "public"."operator_sessions"
-    IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
 COMMENT ON TABLE "public"."part_procurement_tiers"
     IS 'Vendor-keyed tiered pricing for bought parts. Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor''s tier sheet. vendor_id may be NULL for "internal estimate" rows. Ordering of tiers within a vendor sheet is derived from min_quantity ASC — no separate sequence column. Resolved at read time via get_procurement_cost(part_id, qty), which picks the cheapest non-expired tier where min_quantity <= qty across all vendors.';
@@ -5098,18 +5068,6 @@ COMMENT ON COLUMN "public"."companies"."created_at"
 COMMENT ON COLUMN "public"."companies"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
-COMMENT ON COLUMN "public"."companies"."packing_slip_number_format"
-    IS 'Template string for generated packing slip numbers. Tokens: {YYYY} = ship year, {seq:0000} = zero-padded sequence (zero count sets width). Default ''PS-{YYYY}-{seq:0000}''. Consumed by public.next_packing_slip_number() (PR 4).';
-
-COMMENT ON COLUMN "public"."companies"."packing_slip_seq_year"
-    IS 'Year of the most recent packing slip number issued. When the current year differs, next_packing_slip_number() resets the sequence to 1. Server-UTC; not customer-local.';
-
-COMMENT ON COLUMN "public"."companies"."packing_slip_next_seq"
-    IS 'Next sequence number to issue for a packing slip. Incremented atomically under a row lock by next_packing_slip_number(). Defaults to 1 for new companies; legacy-data backfill (PR 4) advances this past the synthetic-shipment count.';
-
-COMMENT ON COLUMN "public"."companies"."default_coc_text"
-    IS 'Shop-wide default Certificate of Conformance text. Last step in the cascade (shipment.coc_text → customer.default_coc_text → company.default_coc_text → omit).';
-
 COMMENT ON COLUMN "public"."company_custom_units"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -5154,15 +5112,6 @@ COMMENT ON COLUMN "public"."customers"."created_at"
 
 COMMENT ON COLUMN "public"."customers"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
-
-COMMENT ON COLUMN "public"."customers"."default_shipping_arrangement"
-    IS 'Per-customer default shipping arrangement (freight terms). Same enum as shipments.shipping_arrangement. Prefilled onto the Create Shipment form. NULL when no default has been set.';
-
-COMMENT ON COLUMN "public"."customers"."default_carrier"
-    IS 'Per-customer default carrier name (free text — UPS, FedEx, customer''s freight provider, etc.). Prefilled onto the Create Shipment form.';
-
-COMMENT ON COLUMN "public"."customers"."default_coc_text"
-    IS 'Per-customer default Certificate of Conformance text block printed on the packing slip when the shipment does not override it. Cascade order: shipment.coc_text → customer.default_coc_text → company.default_coc_text → omit.';
 
 COMMENT ON COLUMN "public"."demo_data_templates"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -5220,15 +5169,6 @@ COMMENT ON COLUMN "public"."jobs"."customer_po_number"
 
 COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
     IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';
-
-COMMENT ON COLUMN "public"."operator_sessions"."job_operation_id"
-    IS 'The specific job operation step being worked. Inferred from job + operation_type when session starts.';
-
-COMMENT ON COLUMN "public"."operator_sessions"."work_center_id"
-    IS 'FK to the work_center this session ran at (renamed from operation_type_id when operation_types was replaced by work_centers).';
-
-COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
-    IS 'NULL while session is active. Set when operator stops or completes work.';
 
 COMMENT ON COLUMN "public"."part_procurement_tiers"."vendor_id"
     IS 'Vendor whose sheet this tier belongs to. Cost resolution restricts to the part''s preferred_vendor_id — sheets under other vendors (and vendor_id=NULL "Internal estimate" rows) are reference-only and never drive cost. To switch which sheet drives cost, change the part''s preferred_vendor_id.';
@@ -5341,8 +5281,11 @@ COMMENT ON COLUMN "public"."saved_insights"."created_at"
 COMMENT ON COLUMN "public"."shipments"."one_time_address"
     IS 'Reserved for Phase 3 ad-hoc shipping. Either shipping_address_id OR one_time_address must be set (XOR shipments_one_address_source).';
 
-COMMENT ON COLUMN "public"."shipments"."shipping_arrangement"
-    IS 'Enum-via-CHECK. ''other'' requires shipping_arrangement_other (shipments_arrangement_other_text).';
+COMMENT ON COLUMN "public"."shipments"."shipping_method"
+    IS 'How the goods left: customer_pickup | personal_delivery | shipment | dropship (resale) | restock (to in-store stock). Replaces the retired shipping_arrangement. Enum-via-CHECK.';
+
+COMMENT ON COLUMN "public"."shipments"."job_id"
+    IS 'The single job this packing slip belongs to. All shipment_line_items resolve to job_parts of this job (enforced in create_shipment_with_line_items). Source of the PS-{jobBase}-{n} number.';
 
 COMMENT ON COLUMN "public"."system_admins"."id"
     IS 'Primary key. UUID auto-generated.';

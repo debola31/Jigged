@@ -9,7 +9,6 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
-import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Table from '@mui/material/Table';
@@ -23,11 +22,11 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Snackbar from '@mui/material/Snackbar';
+import DeleteIconButton from '@/components/common/DeleteIconButton';
 import {
   type MarkupRateFormData,
   EMPTY_MARKUP_RATE_FORM,
@@ -323,7 +322,6 @@ export default function MarkupRateForm({
                             if (v === '' || /^\d+$/.test(v)) updateRow(idx, { qty: v });
                           }}
                           inputMode="numeric"
-                          placeholder="1"
                           disabled={saving}
                           sx={{ width: 100 }}
                         />
@@ -338,21 +336,16 @@ export default function MarkupRateForm({
                               updateRow(idx, { markupPercent: v });
                           }}
                           inputMode="decimal"
-                          placeholder="25"
                           disabled={saving}
                           sx={{ width: 100 }}
                         />
                       </TableCell>
                       <TableCell align="right">
-                        <IconButton
-                          size="small"
-                          color="error"
+                        <DeleteIconButton
+                          ariaLabel="Remove breakpoint"
                           onClick={() => removeRow(idx)}
                           disabled={saving || rows.length <= 1}
-                          aria-label="Remove breakpoint"
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -15,15 +15,12 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import MuiLink from '@mui/material/Link';
-import NextLink from 'next/link';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
-import WorkIcon from '@mui/icons-material/Work';
-import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import AddCommentIcon from '@mui/icons-material/AddComment';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import PercentIcon from '@mui/icons-material/Percent';
+import NoteOutlinedIcon from '@mui/icons-material/NoteOutlined';
 
 import {
   getPartActivity,
@@ -32,6 +29,7 @@ import {
   type PartActivityEvent,
 } from '@/utils/partsAccess';
 import { getCurrentOperator } from '@/utils/operatorAccess';
+import DeleteIconButton from '@/components/common/DeleteIconButton';
 
 interface HistoryTabProps {
   partId: string;
@@ -46,10 +44,35 @@ const TXN_VERB: Record<string, string> = {
   adjustment: 'Adjusted to',
 };
 
+/** Which slice of the unified Notes feed is shown. */
+type NotesFilter = 'all' | 'user' | 'pricing' | 'stock';
+
+const FILTERS: { value: NotesFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'user', label: 'Notes' },
+  { value: 'pricing', label: 'Pricing' },
+  { value: 'stock', label: 'Stock' },
+];
+
+function matchesFilter(ev: PartActivityEvent, filter: NotesFilter): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'user':
+      return ev.kind === 'note' && ev.note.note_type === 'user';
+    case 'pricing':
+      return ev.kind === 'note' && ev.note.note_type === 'pricing';
+    case 'stock':
+      return ev.kind === 'transaction';
+  }
+}
+
 /**
- * Notes & Activity. Manual notes are kept in their own section (with the
- * composer) so they're never buried by the auto-logged activity feed below —
- * the two are split from the single merged list the first cut had.
+ * Notes. A single feed mixing manual notes, auto-logged pricing notes, and
+ * stock movements — every entry is typed and filterable. The composer adds
+ * 'user' notes; pricing notes are written automatically on a pricing save and
+ * are not user-deletable (audit trail). Job/quote links were dropped — they're
+ * already visible on the Jobs and Quotes pages.
  */
 export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   const [events, setEvents] = useState<PartActivityEvent[] | null>(null);
@@ -59,6 +82,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   const [submitting, setSubmitting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [filter, setFilter] = useState<NotesFilter>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +94,7 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load history');
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load notes');
       });
     return () => {
       cancelled = true;
@@ -121,17 +145,20 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   };
 
   const loading = events === null;
-  const noteEvents = (events ?? []).filter((e) => e.kind === 'note');
-  const activityEvents = (events ?? []).filter((e) => e.kind !== 'note');
+  const visible = useMemo(
+    () => (events ?? []).filter((ev) => matchesFilter(ev, filter)),
+    [events, filter],
+  );
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {/* Notes — manual, with the composer. Kept separate from activity. */}
       <Card elevation={2}>
         <CardContent>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Notes
           </Typography>
+
+          {/* Composer — manual notes only. */}
           <TextField
             fullWidth
             multiline
@@ -162,61 +189,23 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
 
           <Divider sx={{ my: 2 }} />
 
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-              <CircularProgress size={24} />
-            </Box>
-          ) : noteEvents.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No notes yet.
-            </Typography>
-          ) : (
-            <List disablePadding>
-              {noteEvents.map((ev) => {
-                if (ev.kind !== 'note') return null;
-                const canDelete = !!operator && ev.note.author_id === operator.id;
-                return (
-                  <ListItem
-                    key={ev.id}
-                    alignItems="flex-start"
-                    disableGutters
-                    secondaryAction={
-                      canDelete ? (
-                        <Tooltip title="Delete note">
-                          <IconButton
-                            edge="end"
-                            size="small"
-                            onClick={() => handleDelete(ev.note.id)}
-                            sx={{ color: 'text.secondary' }}
-                          >
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      ) : undefined
-                    }
-                  >
-                    <ListItemText
-                      primary={<Typography variant="body2">{ev.note.body}</Typography>}
-                      secondary={`${ev.note.author_name ?? 'Unknown'} · ${fmtWhen(ev.at)}`}
-                    />
-                  </ListItem>
-                );
-              })}
-            </List>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Activity — auto-logged events only (stock, jobs, quotes). */}
-      <Card elevation={2}>
-        <CardContent>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Activity
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Stock movements and the jobs &amp; quotes this part appears on.
-          </Typography>
-          <Divider sx={{ my: 2 }} />
+          {/* Filter — switches the slice of the unified feed shown below. */}
+          <ToggleButtonGroup
+            value={filter}
+            exclusive
+            size="small"
+            onChange={(_e, next) => {
+              if (next !== null) setFilter(next as NotesFilter);
+            }}
+            aria-label="Filter notes"
+            sx={{ mb: 2, flexWrap: 'wrap' }}
+          >
+            {FILTERS.map((f) => (
+              <ToggleButton key={f.value} value={f.value} sx={{ textTransform: 'none', px: 2 }}>
+                {f.label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
 
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -228,22 +217,24 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
               <CircularProgress size={24} />
             </Box>
-          ) : activityEvents.length === 0 ? (
+          ) : visible.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No activity yet.
+              {filter === 'all' ? 'Nothing here yet.' : 'Nothing matches this filter.'}
             </Typography>
           ) : (
             <List disablePadding>
-              {activityEvents.map((ev) => (
-                <ListItem key={ev.id} alignItems="flex-start" disableGutters>
-                  <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
-                    <ActivityIcon ev={ev} />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={<ActivityPrimary ev={ev} companyId={companyId} />}
-                    secondary={<ActivitySecondary ev={ev} />}
-                  />
-                </ListItem>
+              {visible.map((ev) => (
+                <FeedRow
+                  key={ev.id}
+                  ev={ev}
+                  canDelete={
+                    ev.kind === 'note' &&
+                    ev.note.note_type === 'user' &&
+                    !!operator &&
+                    ev.note.author_id === operator.id
+                  }
+                  onDelete={handleDelete}
+                />
               ))}
             </List>
           )}
@@ -253,66 +244,69 @@ export default function HistoryTab({ partId, companyId }: HistoryTabProps) {
   );
 }
 
-function ActivityIcon({ ev }: { ev: PartActivityEvent }) {
-  switch (ev.kind) {
-    case 'transaction':
-      return <Inventory2Icon fontSize="small" color="action" />;
-    case 'job':
-      return <WorkIcon fontSize="small" color="action" />;
-    case 'quote':
-      return <RequestQuoteIcon fontSize="small" color="action" />;
-    default:
-      return null;
-  }
+function FeedRow({
+  ev,
+  canDelete,
+  onDelete,
+}: {
+  ev: PartActivityEvent;
+  canDelete: boolean;
+  onDelete: (noteId: string) => void;
+}) {
+  return (
+    <ListItem
+      alignItems="flex-start"
+      disableGutters
+      secondaryAction={
+        canDelete && ev.kind === 'note' ? (
+          <DeleteIconButton
+            edge="end"
+            ariaLabel="Delete note"
+            onClick={() => onDelete(ev.note.id)}
+          />
+        ) : undefined
+      }
+    >
+      <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
+        <FeedIcon ev={ev} />
+      </ListItemIcon>
+      <ListItemText primary={<FeedPrimary ev={ev} />} secondary={<FeedSecondary ev={ev} />} />
+    </ListItem>
+  );
 }
 
-function ActivityPrimary({ ev, companyId }: { ev: PartActivityEvent; companyId: string }) {
-  switch (ev.kind) {
-    case 'transaction':
-      return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="body2">
-            {TXN_VERB[ev.txn.type] ?? ev.txn.type} {ev.txn.quantity} {ev.txn.unit}
-          </Typography>
-          {ev.txn.has_discrepancy && <Chip size="small" color="warning" label="Discrepancy" />}
-        </Box>
-      );
-    case 'job':
-      return (
-        <Typography variant="body2">
-          Added to job{' '}
-          <MuiLink
-            component={NextLink}
-            href={`/dashboard/${companyId}/jobs/${ev.job.job_id}`}
-            underline="hover"
-          >
-            {ev.job.job_number}
-          </MuiLink>{' '}
-          (qty {ev.job.quantity})
-        </Typography>
-      );
-    case 'quote':
-      return (
-        <Typography variant="body2">
-          Added to quote{' '}
-          <MuiLink
-            component={NextLink}
-            href={`/dashboard/${companyId}/quotes/${ev.quote.quote_id}`}
-            underline="hover"
-          >
-            {ev.quote.quote_number}
-          </MuiLink>
-        </Typography>
-      );
-    default:
-      return null;
-  }
+function FeedIcon({ ev }: { ev: PartActivityEvent }) {
+  if (ev.kind === 'transaction') return <Inventory2Icon fontSize="small" color="action" />;
+  if (ev.note.note_type === 'pricing') return <PercentIcon fontSize="small" color="action" />;
+  return <NoteOutlinedIcon fontSize="small" color="action" />;
 }
 
-function ActivitySecondary({ ev }: { ev: PartActivityEvent }) {
+function FeedPrimary({ ev }: { ev: PartActivityEvent }) {
+  if (ev.kind === 'transaction') {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Typography variant="body2">
+          {TXN_VERB[ev.txn.type] ?? ev.txn.type} {ev.txn.quantity} {ev.txn.unit}
+        </Typography>
+        {ev.txn.has_discrepancy && <Chip size="small" color="warning" label="Discrepancy" />}
+      </Box>
+    );
+  }
+  if (ev.note.note_type === 'pricing') {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Chip size="small" color="info" variant="outlined" label="Auto · Pricing" />
+        <Typography variant="body2">{ev.note.body}</Typography>
+      </Box>
+    );
+  }
+  return <Typography variant="body2">{ev.note.body}</Typography>;
+}
+
+function FeedSecondary({ ev }: { ev: PartActivityEvent }) {
   const when = fmtWhen(ev.at);
   if (ev.kind === 'transaction') {
     return <>{ev.txn.notes ? `${when} · ${ev.txn.notes}` : when}</>;
   }
-  return <>{when}</>;
+  return <>{`${ev.note.author_name ?? 'Unknown'} · ${when}`}</>;
 }

@@ -147,11 +147,8 @@ export default function WorkCenterDetailPage() {
                 onClick={() => setDeleteDialogOpen(true)}
                 disabled={actionLoading || hasReferences}
                 sx={{
-                  color: 'text.secondary',
-                  '&:hover': {
-                    color: 'error.main',
-                    bgcolor: 'rgba(239, 68, 68, 0.1)',
-                  },
+                  color: 'error.main',
+                  '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
                 }}
               >
                 <DeleteIcon />

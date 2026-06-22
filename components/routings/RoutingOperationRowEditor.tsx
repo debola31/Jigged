@@ -260,7 +260,6 @@ export default function RoutingOperationRowEditor({
               const v = e.target.value;
               if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalUnitPriceStr(v);
             }}
-            placeholder="e.g. 5.50"
             error={!!extUnitPriceError}
             helperText={
               extUnitPriceError
@@ -279,7 +278,6 @@ export default function RoutingOperationRowEditor({
               const v = e.target.value;
               if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalSetupCostStr(v);
             }}
-            placeholder="e.g. 50"
             error={!!extSetupCostError}
             helperText={
               extSetupCostError
@@ -302,7 +300,6 @@ export default function RoutingOperationRowEditor({
               const v = e.target.value;
               if (v === '' || /^\d*\.?\d*$/.test(v)) setCycleStr(v);
             }}
-            placeholder="e.g. 2.5"
             error={!!cycleError}
             helperText={
               cycleError ? 'Enter a non-negative number.' : 'Repeated for every unit produced.'
@@ -319,7 +316,6 @@ export default function RoutingOperationRowEditor({
               const v = e.target.value;
               if (v === '' || /^\d*\.?\d*$/.test(v)) setSetupStr(v);
             }}
-            placeholder="e.g. 10"
             error={!!setupError}
             helperText={
               setupError ? 'Enter a non-negative number.' : 'One-time setup/changeover per batch.'

@@ -1146,7 +1146,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                 if (v !== '' && !/^\d+$/.test(v)) return;
                                 updateRow(idx, rowIdx, { quantity: v });
                               }}
-                              placeholder="Qty"
                               inputProps={{ 'aria-label': 'Order quantity', inputMode: 'numeric' }}
                               sx={{ width: 110 }}
                               error={hasOrderQty && !isOverride && matched?.below_min === true}

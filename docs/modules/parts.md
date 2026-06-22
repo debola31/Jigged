@@ -82,6 +82,34 @@ Quantity price break-points that live on the part. One row per tier; selected ti
 - `unit_price` is always recomputed against the current routing. Routing change → unit prices drift to reflect the new cost basis. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#per-quote-price-overrides)).
 - Typing in the unit-price input is shorthand for "compute the markup % that would yield this price"; the editor back-calculates and stores the markup, then keeps `unit_price` in lockstep.
 
+### File Attachments (`part_attachments`)
+
+Engineering files attached to a part — drawings (PDF), CAD models (STEP), and legacy CAD (DWG). The file bytes live in the private `attachments` storage bucket under `{companyId}/parts/{partId}/{uuid}_{filename}`; this table is the metadata index. Mirrors `job_attachments`, widened to multiple file kinds. Managed by `utils/partAttachmentsAccess.ts`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | UUID | Yes | Primary key |
+| company_id | UUID (FK) | Yes | Multi-tenant isolation (cascade delete) |
+| part_id | UUID (FK) | Yes | Part the file belongs to (cascade delete) |
+| storage_path | Text | Yes | Object path in the `attachments` bucket |
+| file_name | Text | Yes | Original filename (shown in the UI) |
+| kind | Text | Yes | `pdf` \| `step` \| `dwg` \| `other` (CHECK). Computed from the file extension at upload; drives viewer dispatch |
+| mime_type | Text | No | Browser-reported MIME (advisory; STEP/DWG often report `application/octet-stream`) |
+| size_bytes | Bigint | No | File size |
+| uploaded_by | UUID (FK) | No | Uploader's `user_company_access` row; `ON DELETE SET NULL` |
+| created_at | Timestamp | Yes | Auto-generated |
+
+**Index:** `(part_id, created_at DESC)` — the newest-first list query.
+
+**RLS** (mirrors `part_notes`):
+- **SELECT** — any company member can read the company's attachments.
+- **INSERT** — a member can upload, but only as themselves (`uploaded_by = get_operator_access_id(company_id)`).
+- **DELETE** — the uploader **or** a company admin (`uploaded_by = get_operator_access_id(company_id) OR is_company_admin(company_id)`).
+
+**SET NULL consequence:** once an uploader's access row is removed, their name shows as "Unknown" and only admins can delete that attachment. Acceptable — admins retain control.
+
+**Per-kind size caps:** PDF 25 MB; STEP/DWG 100 MB (CAD models run large).
+
 ---
 
 ## UI Screens
@@ -168,6 +196,26 @@ Editing model — markup % is the source of truth:
 **Auto-save**: every edit triggers a debounced save (~600ms after the last keystroke) via `replaceTiersForPart(companyId, partId, tiers)`. A "Saving… / All changes saved" indicator next to the card title mirrors the routing panel's pattern.
 
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's `base_cost_per_unit` and `unit_price` against the new cost basis.
+
+▸ **Files tab (`FilesTab`)**
+
+A workspace tab (`?tab=files`, always visible) for engineering file attachments. This surface is part of the **office/admin dashboard** — it is not the operator shop-floor view, so nothing here is operator-facing.
+
+- **Upload**: a multi-file picker accepting `.pdf,.step,.stp,.dwg`. Each file is validated client-side (allowlist + per-kind size cap) before upload; rejected files surface a clear message and are not stored. Uploads are immediate (no draft staging).
+- **List**: newest-first, each row showing the filename, a **kind chip** (PDF / STEP / DWG), size, and the uploader + date.
+- **Row actions**:
+  - **Open** — PDF opens inline in a viewer modal (`AttachmentViewerModal`, native `<iframe>` off a fresh signed URL); STEP and DWG download (STEP gains an in-app 3D viewer in Phase 2 — `online-3d-viewer`).
+  - **Download** — available for every kind (fresh signed URL).
+  - **Delete** — shown only to the uploader or a company admin (RLS enforces the same rule). Removes the row and the stored file.
+
+**Upload-after-creation:** part creation has no draft row — the part id exists only after the **Create part** button (`createPart` → redirect to `/parts/{id}`). So files are uploaded on the live detail page; the redirect supports `?tab=files` to land directly on the Files tab. There is no temp-path staging.
+
+**Viewer dispatch by kind:**
+| Kind | Viewer | Notes |
+|---|---|---|
+| PDF | Native `<iframe>` + signed URL | No library; renders inline |
+| STEP (.step/.stp) | Download-only (Phase 1) → in-app 3D viewer (Phase 2) | `online-3d-viewer` (three.js + occt-import-js WASM), lazy-loaded via `next/dynamic({ ssr: false })` |
+| DWG | Download-only | No in-browser render; Contour standardizes on PDF, so DWG is converted upstream |
 
 ---
 
@@ -259,6 +307,20 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 - [ ] **Copy from another part**: opens a part picker; on confirm, source qty + markup are copied; unit prices recompute against this part's routing; subsequent edits to the source do not affect the copy
 - [ ] Tiers belonging to a part are deleted when the part is deleted (cascade)
 
+### File Attachments
+
+- [ ] Files tab is always visible on the part workspace (`?tab=files`)
+- [ ] Can upload one or more `.pdf`/`.step`/`.stp`/`.dwg` files; each appears in the list with a kind chip, size, and uploader
+- [ ] Uploading a `.png` (or other disallowed type) is rejected with a clear message and nothing is stored
+- [ ] Uploading a PDF over 25 MB (or a STEP/DWG over 100 MB) is rejected with a size message
+- [ ] Opening a PDF renders it inline in the viewer modal
+- [ ] Opening a STEP or DWG downloads it (Phase 1; STEP gains an in-app 3D viewer in Phase 2)
+- [ ] Download is available for every attachment kind
+- [ ] The delete affordance is shown only to the uploader or a company admin
+- [ ] Deleting an attachment removes both the metadata row and the stored file
+- [ ] Deleting a part removes its attachment rows (cascade) and best-effort removes the stored files
+- [ ] After creating a part, the user can immediately add files (the Files tab works on the live detail page)
+
 ### AI-Powered Import
 
 - [ ] Can upload CSV file and see preview
@@ -278,5 +340,7 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 ## Delete Behavior
 
 A part can be deleted only when no quote line items or jobs reference it. The delete dialog surfaces the related-record counts; if any exist, the Delete button is disabled. Pricing tiers are removed by cascade when the part is deleted.
+
+Attachment metadata rows cascade with the part, but the stored files do not — so `deletePart` captures the attachment storage paths first, deletes the part row, and only then best-effort removes the files. (Capture-then-clean, not clean-then-delete: a part blocked by FK references must keep its files when the delete is refused.)
 
 Quote line items are immutable historical records — deleting a part that's been quoted requires first removing the dependent quotes (or accepting that the historical record stays).

@@ -69,6 +69,37 @@ export interface PartNote {
 }
 
 /**
+ * Viewer-dispatch kind for a part attachment, computed from the file extension
+ * at upload time and persisted (so the Files tab dispatches on one column). The
+ * closed set is enforced by a DB CHECK. `other` is defensive — the upload
+ * validator only admits pdf/step/dwg, so it isn't reachable on the happy path.
+ */
+export type PartAttachmentKind = 'pdf' | 'step' | 'dwg' | 'other';
+
+/**
+ * An engineering file attached to a part — a drawing (PDF), CAD model (STEP), or
+ * legacy CAD (DWG). The bytes live in the private `attachments` storage bucket at
+ * `storage_path`; this is the metadata row. `kind` drives the Files-tab viewer
+ * dispatch. Mirrors JobAttachment, widened with `kind` + the joined uploader
+ * name. See utils/partAttachmentsAccess.ts and
+ * components/parts/workspace/tabs/FilesTab.tsx.
+ */
+export interface PartAttachment {
+  id: string;
+  company_id: string;
+  part_id: string;
+  storage_path: string;
+  file_name: string;
+  kind: PartAttachmentKind;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  /** Joined from user_company_access(name); null ("Unknown" in UI) if access removed. */
+  uploaded_by_name: string | null;
+  created_at: string;
+}
+
+/**
  * A secondary unit of measure for a part with a conversion factor back to
  * the part's `primary_unit`. Replaces the old `inventory_unit_conversions`.
  */

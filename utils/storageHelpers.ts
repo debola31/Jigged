@@ -26,7 +26,7 @@ export function sanitizeFilename(filename: string): string {
  */
 export function generateStoragePath(
   companyId: string,
-  entityType: 'quotes' | 'jobs',
+  entityType: 'quotes' | 'jobs' | 'parts',
   entityId: string,
   filename: string
 ): string {

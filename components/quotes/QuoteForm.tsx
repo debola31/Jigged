@@ -195,6 +195,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() =>
     groupPartsIntoBlocks(initialData.parts),
   );
+  // Index of the part block whose part picker should grab focus after it
+  // mounts — set when the user clicks "Add part" so the new (empty) entry
+  // gets focus and scrolls into view. Cleared once consumed so later
+  // re-renders (e.g. removing a block) don't steal focus.
+  const [focusBlockIndex, setFocusBlockIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (focusBlockIndex !== null) setFocusBlockIndex(null);
+  }, [focusBlockIndex]);
 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   // Full customer rows (with addresses + contacts) keyed by id so the
@@ -502,6 +511,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const customerDetailHref = `/dashboard/${companyId}/customers/${formData.customer_id}`;
 
   const addPartBlock = () => {
+    // New block lands at the current end, so its index is the current length.
+    setFocusBlockIndex(partBlocks.length);
     setPartBlocks((prev) => [...prev, emptyBlock()]);
   };
 
@@ -1099,6 +1110,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         )
                       }
                       label={`Part ${idx + 1}`}
+                      autoFocus={idx === focusBlockIndex}
                     />
                   </Box>
                   <IconButton

@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import NextLink from 'next/link';
 import {
   Card,
   CardContent,
@@ -8,6 +10,7 @@ import {
   Typography,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   CircularProgress,
 } from '@mui/material';
@@ -27,6 +30,8 @@ interface JobPartMaterialsCardProps {
  * page reflects the current BOM. Quantities are per unit of the part.
  */
 export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardProps) {
+  const params = useParams();
+  const companyId = params.companyId as string;
   const [lines, setLines] = useState<BomLineWithChildPart[] | null>(null);
 
   useEffect(() => {
@@ -68,12 +73,9 @@ export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardPro
           </Typography>
         ) : (
           <List dense disablePadding>
-            {lines.map((line, idx) => (
-              <ListItem
-                key={line.id}
-                divider={idx < lines.length - 1}
-                sx={{ alignItems: 'flex-start', py: 1 }}
-              >
+            {lines.map((line, idx) => {
+              const childPartId = line.child_part?.id;
+              const text = (
                 <ListItemText
                   primary={
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
@@ -86,8 +88,29 @@ export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardPro
                     </Typography>
                   }
                 />
-              </ListItem>
-            ))}
+              );
+              // Each BOM material is a real part — link the row to its detail
+              // page. Rows without a resolvable child part stay non-clickable.
+              return childPartId ? (
+                <ListItemButton
+                  key={line.id}
+                  component={NextLink}
+                  href={`/dashboard/${companyId}/parts/${childPartId}`}
+                  divider={idx < lines.length - 1}
+                  sx={{ alignItems: 'flex-start', py: 1 }}
+                >
+                  {text}
+                </ListItemButton>
+              ) : (
+                <ListItem
+                  key={line.id}
+                  divider={idx < lines.length - 1}
+                  sx={{ alignItems: 'flex-start', py: 1 }}
+                >
+                  {text}
+                </ListItem>
+              );
+            })}
           </List>
         )}
       </CardContent>

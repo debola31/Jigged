@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-20T22:37:43Z
+-- Generated: 2026-06-22T00:11:44Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -453,6 +453,20 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."part_notes"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "author_id" uuid,
+    "body" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "note_type" text NOT NULL DEFAULT 'user'::text,
+    CONSTRAINT "part_notes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_notes_body_not_blank" CHECK ((length(btrim(body)) > 0)),
+    CONSTRAINT "part_notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'pricing'::text])))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -715,8 +729,6 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "work_center_id" uuid,
     "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
     "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
-    "actual_setup_minutes" numeric(8,2),
-    "actual_run_minutes" numeric(8,2),
     "status" text NOT NULL DEFAULT 'pending'::text,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -754,21 +766,6 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
     CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."operator_sessions"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "operator_id" uuid NOT NULL,
-    "job_id" uuid NOT NULL,
-    "job_operation_id" uuid,
-    "work_center_id" uuid NOT NULL,
-    "started_at" timestamp with time zone DEFAULT now(),
-    "ended_at" timestamp with time zone,
-    "created_at" timestamp with time zone DEFAULT now(),
-    "updated_at" timestamp with time zone DEFAULT now(),
-    CONSTRAINT "operator_sessions_pkey" PRIMARY KEY (id)
-);
-
 -- ============================================================
 -- 3. ROW LEVEL SECURITY
 -- ============================================================
@@ -791,7 +788,7 @@ ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."operator_sessions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
@@ -1287,43 +1284,23 @@ CREATE POLICY "markup_rates_update"
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
 
-DROP POLICY IF EXISTS "Admins can delete company sessions" ON "public"."operator_sessions";
-CREATE POLICY "Admins can delete company sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Authors and admins can delete part_notes" ON "public"."part_notes";
+CREATE POLICY "Authors and admins can delete part_notes"
+    ON "public"."part_notes"
     FOR DELETE
-    USING (is_company_admin(company_id));
+    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
 
-DROP POLICY IF EXISTS "Admins can read company sessions" ON "public"."operator_sessions";
-CREATE POLICY "Admins can read company sessions"
-    ON "public"."operator_sessions"
-    FOR SELECT
-    USING (is_company_admin(company_id));
-
-DROP POLICY IF EXISTS "Operators can insert own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can insert own sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Users can insert own part_notes" ON "public"."part_notes";
+CREATE POLICY "Users can insert own part_notes"
+    ON "public"."part_notes"
     FOR INSERT
-    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
 
-DROP POLICY IF EXISTS "Operators can read own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can read own sessions"
-    ON "public"."operator_sessions"
+DROP POLICY IF EXISTS "Users can view part_notes" ON "public"."part_notes";
+CREATE POLICY "Users can view part_notes"
+    ON "public"."part_notes"
     FOR SELECT
-    USING ((operator_id = get_operator_access_id(company_id)));
-
-DROP POLICY IF EXISTS "Operators can update own sessions" ON "public"."operator_sessions";
-CREATE POLICY "Operators can update own sessions"
-    ON "public"."operator_sessions"
-    FOR UPDATE
-    USING ((operator_id = get_operator_access_id(company_id)))
-    WITH CHECK ((operator_id = get_operator_access_id(company_id)));
-
-DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."operator_sessions";
-CREATE POLICY "ai_readonly_select"
-    ON "public"."operator_sessions"
-    FOR SELECT
-    TO jigged_ai_readonly
-    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."part_pricing_tiers";
 CREATE POLICY "ai_readonly_select"
@@ -2239,17 +2216,14 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_job_operation_id_fkey" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."operator_sessions"
-    ADD CONSTRAINT "operator_sessions_work_center_id_fkey" FOREIGN KEY (work_center_id) REFERENCES work_centers(id) ON DELETE RESTRICT;
+ALTER TABLE "public"."part_notes"
+    ADD CONSTRAINT "part_notes_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2482,11 +2456,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_active ON public.operator_sessions USING btree (operator_id) WHERE (ended_at IS NULL);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_company ON public.operator_sessions USING btree (company_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_job ON public.operator_sessions USING btree (job_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_job_op ON public.operator_sessions USING btree (job_operation_id);
-CREATE INDEX IF NOT EXISTS idx_operator_sessions_operator ON public.operator_sessions USING btree (operator_id);
+CREATE INDEX IF NOT EXISTS idx_part_notes_part_created ON public.part_notes USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_procurement_tiers_expiring ON public.part_procurement_tiers USING btree (part_id, expires_at) WHERE (expires_at IS NOT NULL);
@@ -4816,9 +4786,6 @@ CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs
 DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
 CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS "operator_sessions_updated_at" ON "public"."operator_sessions";
-CREATE TRIGGER operator_sessions_updated_at BEFORE UPDATE ON public.operator_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
 CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -4936,9 +4903,6 @@ COMMENT ON TABLE "public"."job_fulfillment_audit"
 
 COMMENT ON TABLE "public"."markup_rates"
     IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
-
-COMMENT ON TABLE "public"."operator_sessions"
-    IS 'Work sessions tracking when operators are working on jobs. Used for time tracking and job progress.';
 
 COMMENT ON TABLE "public"."part_procurement_tiers"
     IS 'Vendor-keyed tiered pricing for bought parts. Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor''s tier sheet. vendor_id may be NULL for "internal estimate" rows. Ordering of tiers within a vendor sheet is derived from min_quantity ASC — no separate sequence column. Resolved at read time via get_procurement_cost(part_id, qty), which picks the cheapest non-expired tier where min_quantity <= qty across all vendors.';
@@ -5185,15 +5149,6 @@ COMMENT ON COLUMN "public"."jobs"."customer_po_number"
 
 COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
     IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';
-
-COMMENT ON COLUMN "public"."operator_sessions"."job_operation_id"
-    IS 'The specific job operation step being worked. Inferred from job + operation_type when session starts.';
-
-COMMENT ON COLUMN "public"."operator_sessions"."work_center_id"
-    IS 'FK to the work_center this session ran at (renamed from operation_type_id when operation_types was replaced by work_centers).';
-
-COMMENT ON COLUMN "public"."operator_sessions"."ended_at"
-    IS 'NULL while session is active. Set when operator stops or completes work.';
 
 COMMENT ON COLUMN "public"."part_procurement_tiers"."vendor_id"
     IS 'Vendor whose sheet this tier belongs to. Cost resolution restricts to the part''s preferred_vendor_id — sheets under other vendors (and vendor_id=NULL "Internal estimate" rows) are reference-only and never drive cost. To switch which sheet drives cost, change the part''s preferred_vendor_id.';

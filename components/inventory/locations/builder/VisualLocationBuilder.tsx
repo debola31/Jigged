@@ -13,7 +13,7 @@ import StepLabel from '@mui/material/StepLabel';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Alert from '@mui/material/Alert';
-import Stack from '@mui/material/Stack';
+import Typography from '@mui/material/Typography';
 
 import type { LevelSpec } from '@/types/inventoryLocations';
 import { buildSpecFromLevels, countSpecNodes, removeSpecNode } from '@/utils/locationSpec';
@@ -23,7 +23,7 @@ import LevelConfigStep from './LevelConfigStep';
 import LocationBoardPreview from './LocationBoardPreview';
 import { cloneLevels, type StorageType } from './storageTypes';
 
-const STEPS = ['Type', 'Layout', 'Review'];
+const STEPS = ['Type', 'Build'];
 
 interface VisualLocationBuilderProps {
   open: boolean;
@@ -105,13 +105,13 @@ export default function VisualLocationBuilder({
     <Dialog
       open={open}
       onClose={creating ? undefined : onClose}
-      maxWidth="md"
+      maxWidth="lg"
       fullWidth
       TransitionProps={{ onEnter: reset }}
     >
       <DialogTitle>Build storage visually</DialogTitle>
-      <DialogContent dividers sx={{ minHeight: 420 }}>
-        <Stepper activeStep={activeStep} sx={{ mb: 3 }}>
+      <DialogContent dividers sx={{ minHeight: 460 }}>
+        <Stepper activeStep={activeStep} sx={{ mb: 3, maxWidth: 360 }}>
           {STEPS.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
@@ -122,38 +122,46 @@ export default function VisualLocationBuilder({
         {activeStep === 0 && <StorageTypePalette selectedId={selectedTypeId} onSelect={pickType} />}
 
         {activeStep === 1 && (
-          <LevelConfigStep levels={levels} onChange={changeLevels} total={countSpecNodes(baseSpec)} />
-        )}
+          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {/* Controls */}
+            <Box sx={{ flex: '1 1 300px', minWidth: 280 }}>
+              <LevelConfigStep levels={levels} onChange={changeLevels} total={total} />
+            </Box>
 
-        {activeStep === 2 && (
-          <Box>
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              spacing={2}
-              alignItems={{ sm: 'center' }}
-              sx={{ mb: 2 }}
-            >
-              <TextField
-                select
-                label="Print QR labels at"
-                value={qrAnchorDepth}
-                onChange={(e) => setQrAnchorDepth(Number(e.target.value))}
-                size="small"
-                sx={{ minWidth: 220 }}
-                helperText="Scanning drills down to what's inside"
+            {/* Live preview */}
+            <Box sx={{ flex: '1 1 340px', minWidth: 280 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  mb: 1.5,
+                  flexWrap: 'wrap',
+                }}
               >
-                {levels.map((l, i) => (
-                  <MenuItem key={i} value={i}>
-                    {capitalize(l.kind)} (level {i + 1})
-                  </MenuItem>
-                ))}
-              </TextField>
-              <Box sx={{ flex: 1 }} />
-            </Stack>
-            <LocationBoardPreview
-              nodes={spec}
-              onPrune={(key) => setPrunedKeys((keys) => [...keys, key])}
-            />
+                <Typography variant="subtitle2" color="text.secondary" sx={{ flex: 1 }}>
+                  Preview
+                </Typography>
+                <TextField
+                  select
+                  label="QR labels at"
+                  value={qrAnchorDepth}
+                  onChange={(e) => setQrAnchorDepth(Number(e.target.value))}
+                  size="small"
+                  sx={{ minWidth: 160 }}
+                >
+                  {levels.map((l, i) => (
+                    <MenuItem key={i} value={i}>
+                      {capitalize(l.kind)}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+              <LocationBoardPreview
+                nodes={spec}
+                onPrune={(key) => setPrunedKeys((keys) => [...keys, key])}
+              />
+            </Box>
           </Box>
         )}
 
@@ -168,20 +176,15 @@ export default function VisualLocationBuilder({
           Cancel
         </Button>
         <Box sx={{ flex: 1 }} />
-        {activeStep > 0 && (
-          <Button onClick={() => setActiveStep((s) => s - 1)} disabled={creating}>
-            Back
-          </Button>
-        )}
         {activeStep === 1 && (
-          <Button variant="contained" onClick={() => setActiveStep(2)} disabled={total === 0}>
-            Review
-          </Button>
-        )}
-        {activeStep === 2 && (
-          <Button variant="contained" onClick={handleCreate} disabled={creating || total === 0}>
-            Create {total} location{total === 1 ? '' : 's'}
-          </Button>
+          <>
+            <Button onClick={() => setActiveStep(0)} disabled={creating}>
+              Back
+            </Button>
+            <Button variant="contained" onClick={handleCreate} disabled={creating || total === 0}>
+              Create {total} location{total === 1 ? '' : 's'}
+            </Button>
+          </>
         )}
       </DialogActions>
     </Dialog>

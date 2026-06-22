@@ -54,7 +54,7 @@ export const STORAGE_TYPES: StorageType[] = [
     defaultLevels: [
       { kind: 'rack', count: 1, namePattern: 'Rack {n}' },
       { kind: 'level', count: 4, namePattern: 'Level {n}' },
-      { kind: 'position', count: 3, namePattern: 'Pos {n}' },
+      { kind: 'position', count: 3, namePattern: 'Position {n}' },
     ],
   },
   {

@@ -28,24 +28,28 @@ function findPath(
   return null;
 }
 
+const CHIP_LIMIT = 10;
+
 interface LocationBoardPreviewProps {
   nodes: LocationSpecNode[];
   onPrune: (key: string) => void;
 }
 
-/** Step 3: a read-only board of the assembled spec. Click a tile to drill in;
- *  the × removes that tile (and its subtree) before commit. Pure projection of
- *  the spec — no drag, no stored geometry. */
+/** Live, read-only board of the assembled spec: each container card shows its
+ *  contents nested inside (rows/bins as chips). Click a card to drill in; the ×
+ *  removes that node (and its subtree). Pure projection of the spec — no drag,
+ *  no stored geometry. */
 export default function LocationBoardPreview({ nodes, onPrune }: LocationBoardPreviewProps) {
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
+  // Stay valid if the focused node was pruned or the layout changed underneath us.
   const focusPath = focusKey ? findPath(nodes, focusKey) : null;
   const focusNode = focusPath?.[focusPath.length - 1] ?? null;
   const displayed = focusNode ? focusNode.children : nodes;
 
   return (
     <Box>
-      <Breadcrumbs sx={{ mb: 2 }}>
+      <Breadcrumbs sx={{ mb: 1.5 }}>
         <Link
           component="button"
           type="button"
@@ -70,62 +74,65 @@ export default function LocationBoardPreview({ nodes, onPrune }: LocationBoardPr
       </Breadcrumbs>
 
       {displayed.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          Nothing here.
+        <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
+          Set a count above to see your storage take shape.
         </Typography>
       ) : (
         <Box
           sx={{
             display: 'grid',
             gap: 1.5,
-            gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)', md: 'repeat(4, 1fr)' },
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' },
           }}
         >
           {displayed.map((node) => {
-            const childCount = node.children.length;
-            const drillable = childCount > 0;
+            const children = node.children;
+            const drillable = children.length > 0;
             return (
               <Paper
                 key={node.key}
                 variant="outlined"
                 sx={{
                   p: 1.5,
-                  minHeight: 72,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
                   cursor: drillable ? 'pointer' : 'default',
                   '&:hover': drillable ? { borderColor: 'primary.main' } : undefined,
                 }}
                 onClick={drillable ? () => setFocusKey(node.key) : undefined}
               >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography noWrap sx={{ fontWeight: 500 }}>
+                <Stack direction="row" alignItems="center" spacing={0.5}>
+                  <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
                     {node.name}
                   </Typography>
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.25 }}>
-                    {node.code && (
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {node.code}
-                      </Typography>
+                  {node.is_qr_anchor && <Chip size="small" color="info" label="QR" />}
+                  <IconButton
+                    size="small"
+                    aria-label={`Remove ${node.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPrune(node.key);
+                    }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                  {drillable && <ChevronRightIcon fontSize="small" color="action" />}
+                </Stack>
+
+                {node.code && (
+                  <Typography variant="caption" color="text.secondary">
+                    {node.code}
+                  </Typography>
+                )}
+
+                {drillable && (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
+                    {children.slice(0, CHIP_LIMIT).map((c) => (
+                      <Chip key={c.key} size="small" variant="outlined" label={c.name} />
+                    ))}
+                    {children.length > CHIP_LIMIT && (
+                      <Chip size="small" label={`+${children.length - CHIP_LIMIT}`} />
                     )}
-                    {drillable && (
-                      <Chip size="small" variant="outlined" label={`${childCount} inside`} />
-                    )}
-                    {node.is_qr_anchor && <Chip size="small" color="info" label="QR" />}
-                  </Stack>
-                </Box>
-                <IconButton
-                  size="small"
-                  aria-label={`Remove ${node.name}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPrune(node.key);
-                  }}
-                >
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-                {drillable && <ChevronRightIcon fontSize="small" color="action" />}
+                  </Box>
+                )}
               </Paper>
             );
           })}

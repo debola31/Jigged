@@ -24,7 +24,7 @@ import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
 beforeEach(() => vi.clearAllMocks());
 
 describe('VisualLocationBuilder', () => {
-  it('walks palette → layout → review → create and materializes the spec', async () => {
+  it('picks a type, shows the live build step, and creates the materialized spec', async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn();
     const onClose = vi.fn();
@@ -35,11 +35,7 @@ describe('VisualLocationBuilder', () => {
     // Step 1 — palette: pick Cabinet (defaults to 1 cabinet × 5 rows × {Left,Right} = 16)
     await user.click(screen.getByText('Cabinet'));
 
-    // Step 2 — layout: advances and a Review action appears
-    const reviewBtn = await screen.findByRole('button', { name: /review/i });
-    await user.click(reviewBtn);
-
-    // Step 3 — review board shows the top container and a Create button with the count
+    // Step 2 — Build: controls + live board are shown together, Create carries the count
     expect(await screen.findByText('Cabinet 1')).toBeInTheDocument();
     const createBtn = await screen.findByRole('button', { name: /create 16 locations/i });
     await user.click(createBtn);
@@ -53,17 +49,16 @@ describe('VisualLocationBuilder', () => {
     expect(onCreated).toHaveBeenCalledWith(16);
   });
 
-  it('lets you prune a tile before creating, lowering the count', async () => {
+  it('lets you prune a tile in the live preview, lowering the count', async () => {
     const user = userEvent.setup();
     render(
       <VisualLocationBuilder open companyId="co1" onClose={vi.fn()} onCreated={vi.fn()} />,
     );
 
-    await user.click(screen.getByText('Bins')); // flat: 6 bins
-    await user.click(await screen.findByRole('button', { name: /review/i }));
+    await user.click(screen.getByText('Bins')); // flat: 6 bins, shown live on the build step
     expect(await screen.findByRole('button', { name: /create 6 locations/i })).toBeInTheDocument();
 
-    // remove one bin tile
+    // remove one bin tile from the preview
     await user.click(screen.getByRole('button', { name: /remove bin 1/i }));
     expect(await screen.findByRole('button', { name: /create 5 locations/i })).toBeInTheDocument();
   });

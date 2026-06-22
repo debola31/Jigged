@@ -575,6 +575,7 @@ export type Database = {
           job_id: string | null
           job_operation_id: string | null
           location_id: string | null
+          location_name: string | null
           notes: string | null
           operator_id: string | null
           part_id: string | null
@@ -594,6 +595,7 @@ export type Database = {
           job_id?: string | null
           job_operation_id?: string | null
           location_id?: string | null
+          location_name?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
@@ -613,6 +615,7 @@ export type Database = {
           job_id?: string | null
           job_operation_id?: string | null
           location_id?: string | null
+          location_name?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
@@ -2853,6 +2856,7 @@ export type Database = {
         }
         Returns: string
       }
+      delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
         Args: {
           p_converted_quantity: number
@@ -2922,6 +2926,10 @@ export type Database = {
       inv_assert_location_in_company: {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
+      }
+      inv_location_path_label: {
+        Args: { p_location_id: string }
+        Returns: string
       }
       is_company_admin: { Args: { check_company_id: string }; Returns: boolean }
       is_system_admin: { Args: { check_user_id: string }; Returns: boolean }

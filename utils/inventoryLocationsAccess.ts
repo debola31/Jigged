@@ -10,7 +10,6 @@
  * both the display values and the converted quantity.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import type {
   BulkGenerateSpec,
@@ -189,36 +188,25 @@ export async function moveLocation(
 }
 
 /**
- * Delete a location. Refuses when it has children or any stock balances
- * (part_location_stock is SELECT-only, so the client can't clean those up).
- * A location with ledger history is blocked by the ON DELETE RESTRICT FK; we
- * translate that into a friendly message.
+ * Delete a location via the delete_location RPC. An EMPTY location is deletable
+ * even after activity history: the RPC refuses only when it has children or
+ * qty>0 balances, cleans up any leftover zero-qty balance rows (SELECT-only for
+ * clients), and lets the ON DELETE SET NULL FK null the link on historical
+ * ledger rows — which keep their location_name snapshot for audit.
  */
 export async function deleteLocation(id: string): Promise<void> {
   const supabase = getSupabase();
-
-  const [{ count: childCount }, { count: balanceCount }] = await Promise.all([
-    supabase.from('inventory_locations').select('id', { count: 'exact', head: true }).eq('parent_id', id),
-    supabase.from('part_location_stock').select('id', { count: 'exact', head: true }).eq('location_id', id),
-  ]);
-
-  if ((childCount ?? 0) > 0) {
-    throw new Error('This location has sub-locations. Delete or move them first.');
-  }
-  if ((balanceCount ?? 0) > 0) {
-    throw new Error('This location still holds stock. Move the stock out (or disable tracking) first.');
-  }
-
-  const { error } = await supabase.from('inventory_locations').delete().eq('id', id);
+  const { error } = await supabase.rpc('delete_location', { p_location_id: id });
   if (error) {
     console.error('Error deleting inventory location:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
-        entity: 'location',
-        fallback:
-          'Failed to delete location. It may have transaction history, which is preserved for audit.',
-      }),
-    );
+    const msg = error.message ?? '';
+    if (msg.includes('sub-locations')) {
+      throw new Error('This location has sub-locations. Delete or move them first.');
+    }
+    if (msg.includes('still holds stock')) {
+      throw new Error('This location still holds stock. Move it out (or disable tracking) first.');
+    }
+    throw new Error('Failed to delete location.');
   }
 }
 

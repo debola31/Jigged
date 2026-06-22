@@ -156,26 +156,19 @@ describe('moveLocation', () => {
 
 // ---------------------------------------------------------------------------
 describe('deleteLocation', () => {
-  it('refuses when sub-locations exist', async () => {
-    queueFrom({ data: null, error: null }); // child count query (count read below)
-    queueFrom({ data: null, error: null }); // balance count query
-    // counts come back via the `count` field; emulate by patching the builders:
-    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      select: () => ({ eq: () => ({ count: 2, error: null, then: (r: (v: unknown) => unknown) => r({ count: 2, error: null }) }) }),
-    }));
-    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      select: () => ({ eq: () => ({ count: 0, error: null, then: (r: (v: unknown) => unknown) => r({ count: 0, error: null }) }) }),
-    }));
+  it('calls the delete_location RPC and resolves on success', async () => {
+    state.rpc = { data: null, error: null };
+    await expect(deleteLocation('node')).resolves.toBeUndefined();
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('delete_location', { p_location_id: 'node' });
+  });
+
+  it('maps the RPC sub-locations error to a friendly message', async () => {
+    state.rpc = { data: null, error: { message: 'location has sub-locations' } };
     await expect(deleteLocation('node')).rejects.toThrow(/sub-locations/i);
   });
 
-  it('refuses when stock balances exist', async () => {
-    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      select: () => ({ eq: () => ({ then: (r: (v: unknown) => unknown) => r({ count: 0, error: null }) }) }),
-    }));
-    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      select: () => ({ eq: () => ({ then: (r: (v: unknown) => unknown) => r({ count: 3, error: null }) }) }),
-    }));
+  it('maps the RPC stock error to a friendly message', async () => {
+    state.rpc = { data: null, error: { message: 'location still holds stock' } };
     await expect(deleteLocation('node')).rejects.toThrow(/still holds stock/i);
   });
 });

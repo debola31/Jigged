@@ -48,6 +48,19 @@ function formatCurrency(value: number): string {
 }
 
 /**
+ * Today as a local YYYY-MM-DD string — used as the date input's `min` and the
+ * not-in-the-past comparison. Local (not UTC) so it matches isJobOverdue and
+ * the server-side due-date filter. Mirrors the private helper in jobsAccess.ts.
+ */
+function todayLocalISODate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
  * Accept a customer Purchase Order and create a job directly — no quote.
  * Existing parts only (each must already have a routing). The agreed price is
  * captured per line and stored on the job; an optional PO PDF is attached after
@@ -103,7 +116,21 @@ export default function AcceptPurchaseOrderModal({
   const removeLine = (key: string) =>
     setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
 
-  const dueDateValid = dueDate === '' || !Number.isNaN(new Date(dueDate).getTime());
+  // Due date is mandatory and may not be in the past — a job created today
+  // can't legitimately be due before today (this is what let a wrong-year
+  // entry slip through and render the job instantly overdue).
+  const today = todayLocalISODate();
+  const dueDateEmpty = dueDate === '';
+  const dueDateParseable = !Number.isNaN(new Date(dueDate).getTime());
+  const dueDateInPast = !dueDateEmpty && dueDateParseable && dueDate < today;
+  const dueDateValid = !dueDateEmpty && dueDateParseable && !dueDateInPast;
+  const dueDateHelper = dueDateEmpty
+    ? 'Due date is required'
+    : !dueDateParseable
+      ? 'Enter a valid date'
+      : dueDateInPast
+        ? "Due date can't be in the past"
+        : ' ';
   const poValid = poNumber.trim() !== '';
   const completeLines = lines.filter(
     (l) =>
@@ -215,12 +242,13 @@ export default function AcceptPurchaseOrderModal({
                 type="date"
                 size="small"
                 fullWidth
+                required
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 disabled={loading}
                 error={!dueDateValid}
-                helperText={!dueDateValid ? 'Enter a valid date' : ' '}
-                slotProps={{ inputLabel: { shrink: true } }}
+                helperText={dueDateHelper}
+                slotProps={{ htmlInput: { min: today }, inputLabel: { shrink: true } }}
               />
             </Box>
           </Box>

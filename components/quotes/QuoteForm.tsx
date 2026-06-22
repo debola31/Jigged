@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import NextLink from 'next/link';
 import Box from '@mui/material/Box';
-import InputAdornment from '@mui/material/InputAdornment';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
@@ -116,6 +115,8 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 /** Sentinel option IDs for "add new" actions inside the dropdowns. */
 const ADD_NEW_CONTACT_ID = '__add_new_contact__';
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
+/** Sentinel for the "Other (specify)…" choice in the payment-terms picker. */
+const PAYMENT_TERMS_OTHER = '__payment_other__';
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -238,6 +239,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // inline-add: the new contact is created against the current customer and
   // auto-selected into the Contact field on save.
   const [contactFormOpen, setContactFormOpen] = useState(false);
+
+  // Payment terms: true when the user is entering custom terms (the "Other
+  // (specify)…" path). Seeded true when editing a quote whose saved terms
+  // aren't one of the presets, so the custom field shows with that value.
+  const [paymentOther, setPaymentOther] = useState<boolean>(
+    () =>
+      !!initialData.payment_terms &&
+      !PAYMENT_TERM_PRESETS.includes(initialData.payment_terms),
+  );
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -1477,53 +1487,60 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              {/* Lead time reads as one control: a number with the unit picker
-                  docked on the right. The unit has no default — it shows a
-                  "Select unit…" placeholder and is required (validationError),
-                  so a quote can't ship with a silently-wrong unit. */}
-              <TextField
-                label="Lead time"
-                type="number"
-                size="small"
-                required
-                fullWidth
-                value={formData.lead_time_value}
-                onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <Select
-                        variant="standard"
-                        disableUnderline
-                        displayEmpty
-                        inputProps={{ 'aria-label': 'Lead time unit' }}
-                        value={formData.lead_time_unit}
-                        onChange={(e) =>
-                          handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
-                        }
-                        renderValue={(selected) =>
-                          selected ? (
-                            LEAD_TIME_UNITS.find((u) => u.value === selected)?.label
-                          ) : (
-                            <Box component="span" sx={{ color: 'text.secondary' }}>
-                              Select unit…
-                            </Box>
-                          )
-                        }
-                        sx={{ minWidth: 130, ml: 1 }}
-                      >
-                        {LEAD_TIME_UNITS.map((u) => (
-                          <MenuItem key={u.value} value={u.value}>
-                            {u.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              {/* Two clean fields: a plain number (native spinner arrows
+                  hidden) + a separate unit dropdown. The unit has no default —
+                  it shows a "Select…" placeholder and is required
+                  (validationError), so a quote can't ship with a wrong unit. */}
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  label="Lead time"
+                  type="number"
+                  size="small"
+                  required
+                  value={formData.lead_time_value}
+                  onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
+                  sx={{
+                    width: 120,
+                    // Hide the native number spinner arrows — they crowd the
+                    // unit field and add no value for a small whole number.
+                    '& input[type=number]': { MozAppearance: 'textfield' },
+                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button':
+                      { WebkitAppearance: 'none', margin: 0 },
+                  }}
+                />
+                <FormControl size="small" required sx={{ flex: 1 }}>
+                  <InputLabel id="lead-time-unit-label" shrink>
+                    Unit
+                  </InputLabel>
+                  <Select
+                    labelId="lead-time-unit-label"
+                    label="Unit"
+                    notched
+                    displayEmpty
+                    value={formData.lead_time_unit}
+                    onChange={(e) =>
+                      handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
+                    }
+                    renderValue={(selected) =>
+                      selected ? (
+                        LEAD_TIME_UNITS.find((u) => u.value === selected)?.label
+                      ) : (
+                        <Box component="span" sx={{ color: 'text.secondary' }}>
+                          Select…
+                        </Box>
+                      )
+                    }
+                  >
+                    {LEAD_TIME_UNITS.map((u) => (
+                      <MenuItem key={u.value} value={u.value}>
+                        {u.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
@@ -1537,23 +1554,64 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              <Autocomplete
-                freeSolo
-                options={PAYMENT_TERM_PRESETS}
-                value={formData.payment_terms || null}
-                // freeSolo emits a string on free entry and on option pick; keep
-                // '' when cleared so the access layer stores NULL.
-                onChange={(_, v) => handleFieldChange('payment_terms', v ?? '')}
-                onInputChange={(_, v) => handleFieldChange('payment_terms', v)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Payment terms"
-                    size="small"
-                    placeholder="Select or type your own…"
-                  />
-                )}
-              />
+              {/* Presets + an explicit "Other (specify)…" that reveals a free
+                  text field — discoverable custom entry without losing the
+                  common presets. payment_terms stays a single string column. */}
+              <FormControl size="small" fullWidth>
+                <InputLabel id="payment-terms-label" shrink>
+                  Payment terms
+                </InputLabel>
+                <Select
+                  labelId="payment-terms-label"
+                  label="Payment terms"
+                  notched
+                  displayEmpty
+                  value={paymentOther ? PAYMENT_TERMS_OTHER : formData.payment_terms}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === PAYMENT_TERMS_OTHER) {
+                      setPaymentOther(true);
+                      handleFieldChange('payment_terms', '');
+                      return;
+                    }
+                    setPaymentOther(false);
+                    handleFieldChange('payment_terms', v);
+                  }}
+                  renderValue={(selected) => {
+                    if (paymentOther || selected === PAYMENT_TERMS_OTHER) {
+                      return 'Other (specify)…';
+                    }
+                    return selected ? (
+                      (selected as string)
+                    ) : (
+                      <Box component="span" sx={{ color: 'text.secondary' }}>
+                        Select…
+                      </Box>
+                    );
+                  }}
+                >
+                  {PAYMENT_TERM_PRESETS.map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {p}
+                    </MenuItem>
+                  ))}
+                  <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
+                    Other (specify)…
+                  </MenuItem>
+                </Select>
+              </FormControl>
+              {paymentOther && (
+                <TextField
+                  sx={{ mt: 1 }}
+                  fullWidth
+                  size="small"
+                  label="Custom payment terms"
+                  placeholder="e.g. Net 30, 1% late charge"
+                  value={formData.payment_terms}
+                  onChange={(e) => handleFieldChange('payment_terms', e.target.value)}
+                  autoFocus
+                />
+              )}
             </Grid>
           </Grid>
         </CardContent>

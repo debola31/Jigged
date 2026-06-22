@@ -88,7 +88,7 @@ test.describe('Quote to Job workflow', () => {
     // EMPTY_QUOTE_FORM so we don't touch it. Without these the submit button
     // stays disabled and the next step times out waiting to click.
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
-    await page.getByRole('combobox', { name: 'Lead time unit' }).click();
+    await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)

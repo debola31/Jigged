@@ -188,7 +188,7 @@ test.describe('Quote edit — reload contract', () => {
     });
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     // Lead time unit is required (no default) — pick one before submitting.
-    await page.getByRole('combobox', { name: 'Lead time unit' }).click();
+    await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -321,7 +321,7 @@ test.describe('Quote edit — reload contract', () => {
 
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     // Lead time unit is required (no default) — pick one before submitting.
-    await page.getByRole('combobox', { name: 'Lead time unit' }).click();
+    await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -436,7 +436,7 @@ test.describe('Quote edit — reload contract', () => {
     expect(snapshottedDollar).toBeTruthy();
     await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
     // Lead time unit is required (no default) — pick one before submitting.
-    await page.getByRole('combobox', { name: 'Lead time unit' }).click();
+    await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),

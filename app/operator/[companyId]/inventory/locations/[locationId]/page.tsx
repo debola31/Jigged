@@ -1,0 +1,255 @@
+'use client';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Card from '@mui/material/Card';
+import CardActionArea from '@mui/material/CardActionArea';
+import CardContent from '@mui/material/CardContent';
+import Button from '@mui/material/Button';
+import Stack from '@mui/material/Stack';
+import Chip from '@mui/material/Chip';
+import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
+import TuneIcon from '@mui/icons-material/Tune';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+
+import { resolveScan } from '@/utils/inventoryLocationsAccess';
+import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getStandardUnitsForUnit } from '@/lib/unitPresets';
+import type { ResolvedScan, LocationContent } from '@/types/inventoryLocations';
+import OperatorLocationActionModal, {
+  type OperatorLocationAction,
+} from '@/components/operator/OperatorLocationActionModal';
+
+const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+export default function OperatorBinViewPage() {
+  const params = useParams();
+  const router = useRouter();
+  const companyId = params.companyId as string;
+  const locationId = params.locationId as string;
+
+  const [scan, setScan] = useState<ResolvedScan | null>(null);
+  const [operatorId, setOperatorId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [modal, setModal] = useState<{ action: OperatorLocationAction; part: LocationContent } | null>(
+    null,
+  );
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setScan(await resolveScan(locationId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open this location.');
+    } finally {
+      setLoading(false);
+    }
+  }, [locationId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  // Operator id stamps the ledger; best-effort, never blocks the view.
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentOperator(companyId)
+      .then((op) => {
+        if (!cancelled) setOperatorId(op?.id ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOperatorId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
+  const node = scan?.node ?? null;
+  const path = scan?.path ?? [];
+  const parent = path.length > 1 ? path[path.length - 2] : null;
+
+  const goBack = () => {
+    if (parent) router.push(`/operator/${companyId}/inventory/locations/${parent.id}`);
+    else router.push(`/operator/${companyId}/jobs`);
+  };
+
+  const modalUnit = modal?.part.primary_unit || 'ea';
+  const unitOptions = useMemo(
+    () => Array.from(new Set([modalUnit, ...getStandardUnitsForUnit(modalUnit)])).filter(Boolean),
+    [modalUnit],
+  );
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error || !node) {
+    return (
+      <Box>
+        <IconButton onClick={() => router.push(`/operator/${companyId}/jobs`)} aria-label="Back" sx={{ mb: 2 }}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Alert severity="error">{error ?? 'Location not found.'}</Alert>
+      </Box>
+    );
+  }
+
+  const children = scan?.children ?? [];
+  const contents = scan?.contents ?? [];
+
+  return (
+    <Box sx={{ pb: 4 }}>
+      {/* Header: back + name + full path */}
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 3 }}>
+        <IconButton onClick={goBack} aria-label="Back" sx={{ mt: 0.5 }}>
+          <ArrowBackIcon />
+        </IconButton>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>
+              {node.name}
+            </Typography>
+            {node.code && <Chip size="small" label={node.code} variant="outlined" />}
+          </Stack>
+          {path.length > 1 && (
+            <Typography variant="body2" color="text.secondary">
+              {path.map((p) => p.name).join(' › ')}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+
+      {/* Sub-locations: drill down */}
+      {children.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="overline" color="text.secondary">
+            Sub-locations
+          </Typography>
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {children.map((child) => (
+              <Card key={child.id} elevation={2}>
+                <CardActionArea
+                  onClick={() => router.push(`/operator/${companyId}/inventory/locations/${child.id}`)}
+                  sx={{ minHeight: 56 }}
+                >
+                  <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 600 }}>{child.name}</Typography>
+                      {child.code && (
+                        <Typography variant="caption" color="text.secondary">
+                          {child.code}
+                        </Typography>
+                      )}
+                    </Box>
+                    <KeyboardArrowRightIcon color="action" />
+                  </CardContent>
+                </CardActionArea>
+              </Card>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      {/* Stock here: act on each part */}
+      <Box>
+        <Typography variant="overline" color="text.secondary">
+          Stock here
+        </Typography>
+        {contents.length === 0 ? (
+          <Card elevation={2} sx={{ mt: 0.5 }}>
+            <CardContent sx={{ textAlign: 'center', py: 4 }}>
+              <Inventory2OutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+              <Typography color="text.secondary">
+                {children.length > 0
+                  ? 'No stock recorded directly here — open a sub-location above.'
+                  : 'Nothing stored here yet.'}
+              </Typography>
+            </CardContent>
+          </Card>
+        ) : (
+          <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {contents.map((part) => (
+              <Card key={part.part_id} elevation={2}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+                    <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }}>
+                      {part.part_name}
+                    </Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                      {num(part.quantity)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {part.primary_unit ?? ''}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      color="success"
+                      startIcon={<AddIcon />}
+                      onClick={() => setModal({ action: 'add', part })}
+                    >
+                      Add
+                    </Button>
+                    <Button
+                      fullWidth
+                      variant="contained"
+                      color="error"
+                      startIcon={<RemoveIcon />}
+                      onClick={() => setModal({ action: 'deplete', part })}
+                    >
+                      Remove
+                    </Button>
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      color="info"
+                      startIcon={<TuneIcon />}
+                      onClick={() => setModal({ action: 'adjust', part })}
+                    >
+                      Set
+                    </Button>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      {modal && (
+        <OperatorLocationActionModal
+          open
+          action={modal.action}
+          partId={modal.part.part_id}
+          partName={modal.part.part_name}
+          currentQuantity={modal.part.quantity}
+          primaryUnit={modalUnit}
+          unitOptions={unitOptions}
+          locationId={node.id}
+          locationName={node.name}
+          operatorId={operatorId}
+          onClose={() => setModal(null)}
+          onDone={reload}
+        />
+      )}
+    </Box>
+  );
+}

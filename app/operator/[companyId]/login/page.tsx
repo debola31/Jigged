@@ -35,12 +35,16 @@ export default function OperatorLoginPage() {
   const jobId = searchParams.get('job') || undefined;
   const partId = searchParams.get('part') || undefined;
   const operationId = searchParams.get('operation') || undefined;
+  const locationId = searchParams.get('location') || undefined;
 
-  // Where to land after auth, given the scanned QR's params. A per-operation QR
-  // (job + part + operation) jumps straight to that step's action view; a
-  // per-part QR (legacy travelers) to the part traveler; anything else — incl. a
-  // job-only scan, which we no longer print — falls back to the station jobs list.
+  // Where to land after auth, given the scanned QR's params. A location QR
+  // (printed on a bin/cabinet label) opens that location's bin view; a
+  // per-operation QR (job + part + operation) jumps straight to that step's
+  // action view; a per-part QR (legacy travelers) to the part traveler;
+  // anything else — incl. a job-only scan, which we no longer print — falls back
+  // to the station jobs list.
   const postLoginPath = () => {
+    if (locationId) return `/operator/${companyId}/inventory/locations/${locationId}`;
     if (jobId && partId && operationId) {
       return `/operator/${companyId}/jobs/${jobId}/parts/${partId}/operations/${operationId}`;
     }
@@ -95,7 +99,7 @@ export default function OperatorLoginPage() {
 
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, router, stationId, jobId, partId, operationId, supabase]);
+  }, [companyId, router, stationId, jobId, partId, operationId, locationId, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

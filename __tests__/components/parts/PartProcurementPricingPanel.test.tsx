@@ -70,8 +70,11 @@ describe('PartProcurementPricingPanel — explicit save + red no-cost state', ()
 
     await screen.findByText(/Add at least one cost tier/i);
 
-    // The two table inputs are the only textboxes (the vendor picker is a combobox).
-    const inputs = screen.getAllByRole('textbox');
+    // The empty starter row is seeded by an effect one render after the red
+    // prompt appears, so AWAIT the inputs — a synchronous getAllByRole can race
+    // the seed render under CI's slower/instrumented run. The two table inputs
+    // are the only textboxes (the vendor picker is a combobox).
+    const inputs = await screen.findAllByRole('textbox');
     await user.type(inputs[0], '10'); // Min qty
     await user.type(inputs[1], '2.5'); // Unit cost
 

@@ -9,7 +9,9 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
+import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
+import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import {
@@ -17,6 +19,18 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
 } from '@/utils/inventoryLocationsAccess';
+import { getAllJobs } from '@/utils/jobsAccess';
+import type { JobWithRelations, ProductionStatus } from '@/types/job';
+
+// Active jobs an operator could be consuming material for.
+const ACTIVE_STATUSES: ProductionStatus[] = ['not_started', 'in_progress'];
+
+/** "Part A, Part B" — the job's parts, to disambiguate look-alike job numbers. */
+const jobPartsLabel = (j: JobWithRelations): string =>
+  (j.job_parts ?? [])
+    .map((jp) => jp.parts?.part_name)
+    .filter((n): n is string => Boolean(n))
+    .join(', ');
 
 export type OperatorLocationAction = 'add' | 'deplete' | 'adjust';
 
@@ -35,6 +49,7 @@ const CONFIRM: Record<OperatorLocationAction, string> = {
 interface OperatorLocationActionModalProps {
   open: boolean;
   action: OperatorLocationAction;
+  companyId: string;
   partId: string;
   partName: string;
   /** Current on-hand at this location, for context. */
@@ -59,6 +74,7 @@ interface OperatorLocationActionModalProps {
 export default function OperatorLocationActionModal({
   open,
   action,
+  companyId,
   partId,
   partName,
   currentQuantity,
@@ -76,11 +92,27 @@ export default function OperatorLocationActionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleEnter = () => {
+  // Optional job tag, deplete only. Loaded on open via onEnter (house
+  // convention — not a useEffect, which would trip set-state-in-effect lint).
+  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [job, setJob] = useState<JobWithRelations | null>(null);
+
+  const handleEnter = async () => {
     setQuantity('');
     setUnit(primaryUnit);
     setNotes('');
     setError(null);
+    setJob(null);
+    if (action !== 'deplete') return;
+    setLoadingJobs(true);
+    try {
+      setJobs(await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES }));
+    } catch {
+      setJobs([]); // job tag is optional — never block the removal
+    } finally {
+      setLoadingJobs(false);
+    }
   };
 
   const qtyLabel = action === 'adjust' ? 'New quantity here' : 'Quantity';
@@ -101,6 +133,7 @@ export default function OperatorLocationActionModal({
           graceful: true,
           notes: notes || undefined,
           operatorId: operatorId || undefined,
+          jobId: job?.id || undefined, // tie to the job, not an operation
         });
       } else {
         await adjustStockAtLocation(partId, locationId, qty, unit, notes || undefined);
@@ -158,6 +191,34 @@ export default function OperatorLocationActionModal({
               Removing more than is here records the shortfall and sets the count to zero — it
               won&apos;t block you.
             </Typography>
+          )}
+          {action === 'deplete' && (
+            <Autocomplete
+              options={jobs}
+              loading={loadingJobs}
+              value={job}
+              onChange={(_, v) => setJob(v)}
+              getOptionLabel={(j) => j.job_number}
+              isOptionEqualToValue={(a, b) => a.id === b.id}
+              renderOption={(props, j) => {
+                const { key, ...rest } = props;
+                return (
+                  <Box component="li" key={key} {...rest}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Typography variant="body2">{j.job_number}</Typography>
+                      {jobPartsLabel(j) && (
+                        <Typography variant="caption" color="text.secondary">
+                          {jobPartsLabel(j)}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                );
+              }}
+              renderInput={(params) => <TextField {...params} label="Tag to a job (optional)" />}
+              noOptionsText="No active jobs"
+              loadingText="Loading jobs…"
+            />
           )}
           <TextField
             label="Notes (optional)"

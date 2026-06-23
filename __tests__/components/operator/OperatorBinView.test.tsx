@@ -29,11 +29,14 @@ vi.mock('@/utils/operatorAccess', () => ({
   getCurrentOperator: vi.fn(),
 }));
 
-// The bin view embeds the "Stock a part" receive modal, which imports
-// partsAccess (→ lib/supabase). Mock it so the module graph doesn't eval the
-// real Supabase client. The modal isn't opened in these tests.
+// The bin view embeds modals that import partsAccess + jobsAccess
+// (→ lib/supabase). Mock them so the module graph doesn't eval the real
+// Supabase client. (getAllJobs loads on the deplete modal's onEnter.)
 vi.mock('@/utils/partsAccess', () => ({
   getStockedParts: vi.fn().mockResolvedValue([]),
+}));
+vi.mock('@/utils/jobsAccess', () => ({
+  getAllJobs: vi.fn().mockResolvedValue([]),
 }));
 
 const loc = (over: { id: string; name: string; code?: string | null; parent_id?: string | null }) => ({

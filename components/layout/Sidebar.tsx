@@ -11,6 +11,7 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Skeleton from '@mui/material/Skeleton';
 import DashboardIcon from '@mui/icons-material/Dashboard';
+import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import WorkIcon from '@mui/icons-material/Work';
 import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
@@ -45,6 +46,7 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
+  { name: 'Activity', path: '/activity', icon: DynamicFeedIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },

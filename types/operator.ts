@@ -62,6 +62,8 @@ export interface OperatorJobDetail {
   id: string;
   /** Parent job id (for the back-to-parts-hub navigation). */
   job_id: string;
+  /** The made part this job_part produces (for part-scoped guidance). */
+  part_id: string;
   job_number: string;
   customer_name: string | null;
   part_name: string | null;
@@ -174,6 +176,20 @@ export interface JobNote {
   author_name: string | null;
   /** Attached photos/videos, in insertion order. */
   media: JobNoteMedia[];
+}
+
+/**
+ * A prior completed run of the same part, used as operator guidance ("last time
+ * we ran this part"). Part-centric, never operator-comparative. `notes` are that
+ * run's feed entries (with media); when fetched for a specific step they're
+ * filtered to that step's matching operation.
+ */
+export interface PreviousRun {
+  jobId: string;
+  jobNumber: string;
+  /** When the part finished on that run; null if not recorded. */
+  completedAt: string | null;
+  notes: JobNote[];
 }
 
 // ============================================================================

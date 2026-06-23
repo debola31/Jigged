@@ -24,6 +24,7 @@ import {
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
+import PreviousRunCard from '@/components/operator/PreviousRunCard';
 import type { OperatorJobDetail } from '@/types/operator';
 
 /**
@@ -263,6 +264,17 @@ export default function OperatorOperationActionPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Setup guidance: how THIS step went on the last run of this part. */}
+      <Box sx={{ mb: 3 }}>
+        <PreviousRunCard
+          partId={job.part_id}
+          companyId={companyId}
+          excludeJobId={jobId}
+          jobOperationId={jobOperationId}
+          title="Last time, this step"
+        />
+      </Box>
 
       {isCompleted ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

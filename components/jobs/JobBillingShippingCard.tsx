@@ -61,9 +61,13 @@ export default function JobBillingShippingCard({
     !job.billing_address_id || job.billing_address_id === job.shipping_address_id,
   );
 
-  const shippingAddress = addresses.find((a) => a.id === job.shipping_address_id) ?? null;
-  const billingAddress = addresses.find((a) => a.id === job.billing_address_id) ?? null;
-  const contact = contacts.find((c) => c.id === job.contact_id) ?? null;
+  // Read-only display renders the job's frozen snapshots (Document Snapshot
+  // Standard), not the live address book — so a deleted/edited address doesn't
+  // blank or rewrite what the job was issued with. Editing still picks from the
+  // live book (addresses/contacts) below.
+  const shippingAddress = job.ship_to_address;
+  const billingAddress = job.bill_to_address;
+  const contact = job.contact_snapshot;
   const billingSameAsShipping =
     !!job.shipping_address_id && job.billing_address_id === job.shipping_address_id;
 

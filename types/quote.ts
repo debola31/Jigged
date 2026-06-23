@@ -1,3 +1,5 @@
+import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot';
+
 /**
  * Quote status values
  */
@@ -126,6 +128,13 @@ export interface Quote {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Document Snapshot Standard: frozen customer/address/contact block captured
+  // at issue time by the snapshot_document_party trigger. The quote PDF renders
+  // these, not the live FKs, so editing/deleting the master never rewrites it.
+  customer_name: string | null;
+  bill_to_address: AddressSnapshot | null;
+  ship_to_address: AddressSnapshot | null;
+  contact_snapshot: ContactSnapshot | null;
 }
 
 /**

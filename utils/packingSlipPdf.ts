@@ -30,7 +30,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Company } from '@/utils/companyAccess';
-import type { CustomerAddress } from '@/types/customer';
+import type { AddressSnapshot } from '@/types/documentSnapshot';
 import { SHIPPING_METHOD_LABELS, type ShipmentWithRelations } from '@/types/shipment';
 import { resolveAttentionLine } from '@/utils/shipmentsAccess';
 
@@ -100,7 +100,7 @@ export function buildShopHeaderLines(company: Company): string[] {
 
 function buildAddressBlockLines(
   customerName: string | null | undefined,
-  address: CustomerAddress | null,
+  address: AddressSnapshot | null,
   attentionText: string | null,
 ): string[] {
   const lines: string[] = [];
@@ -300,19 +300,19 @@ export async function generatePackingSlipPdf(
   const leftX = MARGIN;
   const rightX = MARGIN + colWidth + 8;
 
+  // Render the frozen snapshots captured on the shipment at issue time
+  // (Document Snapshot Standard — snapshot_shipment_party trigger), not the live
+  // address rows, so the slip is unchanged after the master address edits/deletes.
   const attention = resolveAttentionLine(shipment);
-  const shipToAddress = shipment.shipping_address ?? null;
   const shipLines = buildAddressBlockLines(
-    shipment.customer?.name ?? null,
-    shipToAddress,
+    shipment.customer_name,
+    shipment.ship_to_address,
     attention.text,
   );
 
-  const billToAddress =
-    shipment.customer?.addresses?.find((a) => a.default_billing) ?? null;
   const billLines = buildAddressBlockLines(
-    shipment.customer?.name ?? null,
-    billToAddress,
+    shipment.customer_name,
+    shipment.bill_to_address,
     null,
   );
 

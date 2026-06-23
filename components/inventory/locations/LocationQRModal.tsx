@@ -27,8 +27,8 @@ interface LocationQRModalProps {
   node: InventoryLocation | null;
   /** Full path of `node`, root → node. */
   path: string[];
-  /** Labels for every QR-anchor at/under `node` (incl. node if it is an anchor). */
-  anchorLabels: LocationLabel[];
+  /** Labels for `node` and every descendant (every location is printable). */
+  labels: LocationLabel[];
   onClose: () => void;
 }
 
@@ -38,7 +38,7 @@ export default function LocationQRModal({
   companyName,
   node,
   path,
-  anchorLabels,
+  labels,
   onClose,
 }: LocationQRModalProps) {
   const [busy, setBusy] = useState(false);
@@ -63,7 +63,7 @@ export default function LocationQRModal({
     }
   };
 
-  const subtreeAnchors = anchorLabels.length;
+  const subtreeCount = labels.length;
   const thisLabel: LocationLabel = { id: node.id, path, code: node.code };
 
   return (
@@ -94,12 +94,12 @@ export default function LocationQRModal({
               fullWidth
               variant="contained"
               startIcon={<PictureAsPdfIcon />}
-              onClick={() => download(anchorLabels, `${fileStem}-qr-anchors`)}
-              disabled={busy || subtreeAnchors === 0}
+              onClick={() => download(labels, `${fileStem}-labels`)}
+              disabled={busy || subtreeCount <= 1}
             >
-              {subtreeAnchors > 0
-                ? `Download sheet — ${subtreeAnchors} QR anchor${subtreeAnchors === 1 ? '' : 's'} below`
-                : 'No QR anchors below'}
+              {subtreeCount > 1
+                ? `Download sheet — ${subtreeCount} labels (this + below)`
+                : 'No sub-locations to print'}
             </Button>
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>

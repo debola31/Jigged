@@ -15,6 +15,7 @@ import QrCode2Icon from '@mui/icons-material/QrCode2';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddIcon from '@mui/icons-material/Add';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
@@ -24,6 +25,7 @@ export interface LocationTreeCallbacks {
   onAddChild: (node: InventoryLocationNode) => void;
   onBulkGenerate: (node: InventoryLocationNode) => void;
   onPrintQR: (node: InventoryLocationNode) => void;
+  onDuplicate: (node: InventoryLocationNode) => void;
   onEdit: (node: InventoryLocationNode) => void;
   onDelete: (node: InventoryLocationNode) => void;
 }
@@ -69,35 +71,45 @@ function LocationRow({ node, cb }: { node: InventoryLocationNode; cb: LocationTr
             {node.kind}
           </Typography>
         )}
-        {node.is_qr_anchor && <QrCode2Icon fontSize="small" color="action" titleAccess="QR anchor" />}
 
         <Box sx={{ flex: 1 }} />
 
-        <IconButton size="small" aria-label="Actions" onClick={(e) => setMenuEl(e.currentTarget)}>
-          <MoreVertIcon />
-        </IconButton>
-        <Menu anchorEl={menuEl} open={Boolean(menuEl)} onClose={() => setMenuEl(null)}>
-          <MenuItem onClick={act(cb.onAddChild)}>
-            <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Add sub-location</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={act(cb.onBulkGenerate)}>
-            <ListItemIcon><AutoAwesomeMotionIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Bulk-generate…</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={act(cb.onPrintQR)}>
-            <ListItemIcon><QrCode2Icon fontSize="small" /></ListItemIcon>
-            <ListItemText>Print QR…</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={act(cb.onEdit)}>
-            <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Edit</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={act(cb.onDelete)}>
-            <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
-            <ListItemText sx={{ color: 'error.main' }}>Delete</ListItemText>
-          </MenuItem>
-        </Menu>
+        {/* The auto-managed system 'Unassigned' bucket has no manual actions —
+            renaming it would split the backfill bucket (the RPC resolves it by
+            name), and it can't be added under, duplicated, printed, or deleted. */}
+        {node.kind !== 'system' && (
+          <>
+            <IconButton size="small" aria-label="Actions" onClick={(e) => setMenuEl(e.currentTarget)}>
+              <MoreVertIcon />
+            </IconButton>
+            <Menu anchorEl={menuEl} open={Boolean(menuEl)} onClose={() => setMenuEl(null)}>
+              <MenuItem onClick={act(cb.onAddChild)}>
+                <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Add sub-location</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={act(cb.onBulkGenerate)}>
+                <ListItemIcon><AutoAwesomeMotionIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Bulk-generate…</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={act(cb.onPrintQR)}>
+                <ListItemIcon><QrCode2Icon fontSize="small" /></ListItemIcon>
+                <ListItemText>Print QR…</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={act(cb.onDuplicate)}>
+                <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Duplicate</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={act(cb.onEdit)}>
+                <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
+                <ListItemText>Edit</ListItemText>
+              </MenuItem>
+              <MenuItem onClick={act(cb.onDelete)}>
+                <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
+                <ListItemText sx={{ color: 'error.main' }}>Delete</ListItemText>
+              </MenuItem>
+            </Menu>
+          </>
+        )}
       </Box>
 
       {hasChildren && expanded && (

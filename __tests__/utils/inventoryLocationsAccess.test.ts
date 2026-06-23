@@ -46,6 +46,8 @@ import {
   createLocation,
   deleteLocation,
   moveLocation,
+  materializeLocationSpec,
+  duplicateLocation,
   getBalancesForPart,
   addStockAtLocation,
   depleteStockAtLocation,
@@ -305,5 +307,80 @@ describe('RPC wrappers', () => {
     queueFrom(partCtx());
     state.rpc = { data: null, error: { message: 'access denied to company X' } };
     await expect(addStockAtLocation('part1', 'loc1', 1, 'ft')).rejects.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('materializeLocationSpec', () => {
+  it('recursively creates parent-then-child and returns every created row', async () => {
+    const spec = [
+      {
+        key: '0',
+        name: 'Cabinet 1',
+        kind: 'cabinet',
+        code: 'C01',
+        children: [
+          {
+            key: '0/0',
+            name: 'Row 1',
+            kind: 'row',
+            code: 'C01-R01',
+            children: [],
+          },
+        ],
+      },
+    ];
+    // createLocation(A): insert (no parent check, parent_id null)
+    queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1', code: 'C01' }), error: null });
+    // createLocation(B): assertParentInCompany('a') -> getLocation, then insert
+    queueFrom({ data: loc({ id: 'a', company_id: 'co1' }), error: null });
+    queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a', code: 'C01-R01' }), error: null });
+
+    const created = await materializeLocationSpec('co1', null, spec);
+
+    expect(created.map((r) => r.id)).toEqual(['a', 'b']);
+    // first from() is the cabinet insert; assert the payload carries the spec fields
+    const cabinetBuilder = mockSupabase.from.mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(cabinetBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent_id: null,
+        name: 'Cabinet 1',
+        code: 'C01',
+        sort_order: 0,
+      }),
+    );
+  });
+});
+
+describe('duplicateLocation', () => {
+  it('deep-copies a subtree as a bumped sibling, codes re-derived, structure only', async () => {
+    // Existing: Cabinet 1 (C01) → Bin 1 (C01-B01)
+    queueFrom({
+      data: [
+        loc({ id: 'cab', name: 'Cabinet 1', kind: 'cabinet', code: 'C01' }),
+        loc({ id: 'b1', name: 'Bin 1', kind: 'bin', parent_id: 'cab', code: 'C01-B01' }),
+      ],
+      error: null,
+    });
+    // materialize → new cabinet insert (parent_id null, no parent check)
+    queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2', code: 'C02' }), error: null });
+    // copied bin → assertParentInCompany('cab2') getLocation, then insert
+    queueFrom({ data: loc({ id: 'cab2', company_id: 'co1' }), error: null });
+    queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2', code: 'C02-B01' }), error: null });
+
+    const created = await duplicateLocation('co1', 'cab');
+
+    expect(created.map((r) => r.id)).toEqual(['cab2', 'b2']);
+    // from() #0 = getLocations; #1 = new cabinet insert. sort_order lands AFTER
+    // the one existing sibling (sort_order 0), so the copy doesn't jump to front.
+    const cabInsert = mockSupabase.from.mock.results[1].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(cabInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ parent_id: null, name: 'Cabinet 2', code: 'C02', sort_order: 1 }),
+    );
+    // #3 = copied bin insert, code re-derived under the new cabinet
+    const binInsert = mockSupabase.from.mock.results[3].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(binInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1', code: 'C02-B01' }),
+    );
   });
 });

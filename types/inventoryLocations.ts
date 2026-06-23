@@ -60,6 +60,36 @@ export interface BulkGenerateSpec {
   leafKind?: string;
 }
 
+/**
+ * One configured division level in the visual builder, e.g. "10 rows named
+ * Row {n}" or "{Left, Right}". Either a generated count+pattern OR explicit
+ * names. Levels are ordered shallow → deep.
+ */
+export interface LevelSpec {
+  kind: string;
+  /** Generated mode: how many, with `{n}` substitution in namePattern. */
+  count?: number;
+  namePattern?: string;
+  /** Explicit mode: fixed child names (e.g. ['Left', 'Right']). */
+  names?: string[];
+}
+
+/**
+ * In-memory location tree the visual builder assembles entirely client-side,
+ * before any DB write. `materializeLocationSpec` inserts it into
+ * inventory_locations on Create. `key` is a stable client id for board
+ * rendering / prune (NOT the DB id); `code` is precomputed during assembly
+ * (parent-prefixed, zero-padded) to match the manual bulk generator. Every
+ * location can hold stock and be printed, so no per-node stockable/QR flags.
+ */
+export interface LocationSpecNode {
+  key: string;
+  name: string;
+  kind: string | null;
+  code: string | null;
+  children: LocationSpecNode[];
+}
+
 export interface PartLocationBalance {
   id: string;
   company_id: string;

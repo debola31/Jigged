@@ -16,6 +16,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
+import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaicOutlined';
 
 import type {
   BulkGenerateSpec,
@@ -28,6 +29,7 @@ import {
   createLocation,
   updateLocation,
   bulkGenerateChildren,
+  duplicateLocation,
   deleteLocation,
 } from '@/utils/inventoryLocationsAccess';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
@@ -35,6 +37,7 @@ import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import BulkGenerateModal from './BulkGenerateModal';
 import LocationQRModal from './LocationQRModal';
+import VisualLocationBuilder from './builder/VisualLocationBuilder';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -49,10 +52,13 @@ function computePath(id: string, byId: Map<string, InventoryLocation>): string[]
   return names;
 }
 
-function collectAnchorLabels(node: InventoryLocationNode, byId: Map<string, InventoryLocation>): LocationLabel[] {
+// Every real location is printable, so a label is collected for the node and
+// every descendant. The auto-managed system 'Unassigned' bucket is virtual (no
+// physical shelf), so it never gets a printed label.
+function collectLabels(node: InventoryLocationNode, byId: Map<string, InventoryLocation>): LocationLabel[] {
   const out: LocationLabel[] = [];
   const walk = (n: InventoryLocationNode) => {
-    if (n.is_qr_anchor) out.push({ id: n.id, path: computePath(n.id, byId), code: n.code });
+    if (n.kind !== 'system') out.push({ id: n.id, path: computePath(n.id, byId), code: n.code });
     n.children.forEach(walk);
   };
   walk(node);
@@ -69,6 +75,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -87,8 +94,8 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     open: boolean;
     node: InventoryLocation | null;
     path: string[];
-    anchorLabels: LocationLabel[];
-  }>({ open: false, node: null, path: [], anchorLabels: [] });
+    labels: LocationLabel[];
+  }>({ open: false, node: null, path: [], labels: [] });
 
   const [deleteState, setDeleteState] = useState<{ open: boolean; node: InventoryLocationNode | null }>({
     open: false,
@@ -97,7 +104,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
   const tree = useMemo(() => buildLocationTree(locations), [locations]);
-  const allAnchors = useMemo(() => tree.flatMap((n) => collectAnchorLabels(n, byId)), [tree, byId]);
+  const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -127,8 +134,17 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         open: true,
         node,
         path: computePath(node.id, byId),
-        anchorLabels: collectAnchorLabels(node, byId),
+        labels: collectLabels(node, byId),
       }),
+    onDuplicate: async (node: InventoryLocationNode) => {
+      try {
+        const created = await duplicateLocation(companyId, node.id);
+        await reload();
+        setToast(`Duplicated ${node.name} (${created.length} location${created.length === 1 ? '' : 's'}).`);
+      } catch (e) {
+        setToast(e instanceof Error ? e.message : 'Failed to duplicate location.');
+      }
+    },
     onDelete: (node: InventoryLocationNode) => setDeleteState({ open: true, node }),
   };
 
@@ -159,18 +175,18 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     }
   };
 
-  const printAllAnchors = async () => {
-    if (allAnchors.length === 0) {
-      setToast('No QR anchors yet. Mark a location as a QR anchor first.');
+  const printAllLabels = async () => {
+    if (allLabels.length === 0) {
+      setToast('No locations to print yet.');
       return;
     }
     const doc = await generateLocationLabelSheet({
       companyId,
       baseUrl: window.location.origin,
-      labels: allAnchors,
+      labels: allLabels,
       heading: companyName,
     });
-    doc.save('inventory-qr-anchors.pdf');
+    doc.save('inventory-labels.pdf');
   };
 
   return (
@@ -181,17 +197,24 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         <Button
           variant="outlined"
           startIcon={<QrCode2Icon />}
-          onClick={printAllAnchors}
-          disabled={loading || allAnchors.length === 0}
+          onClick={printAllLabels}
+          disabled={loading || allLabels.length === 0}
         >
-          Print all QR anchors
+          Print all labels
         </Button>
         <Button
-          variant="contained"
+          variant="outlined"
           startIcon={<AddIcon />}
           onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
         >
           New top-level location
+        </Button>
+        <Button
+          variant="contained"
+          startIcon={<AutoAwesomeMosaicOutlinedIcon />}
+          onClick={() => setBuilderOpen(true)}
+        >
+          Build visually
         </Button>
       </Box>
 
@@ -205,16 +228,25 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              No storage locations yet. Build your shelving, cabinets, and bins here, then print QR
-              labels to scan from the shop floor.
+              No storage locations yet. Build your cabinets, shelving, and bins visually in a couple of
+              taps, then print QR labels to scan from the shop floor.
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
-            >
-              New top-level location
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                startIcon={<AutoAwesomeMosaicOutlinedIcon />}
+                onClick={() => setBuilderOpen(true)}
+              >
+                Build visually
+              </Button>
+              <Button
+                variant="text"
+                startIcon={<AddIcon />}
+                onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+              >
+                Add manually
+              </Button>
+            </Box>
           </CardContent>
         </Card>
       ) : (
@@ -244,8 +276,17 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         companyName={companyName}
         node={qrState.node}
         path={qrState.path}
-        anchorLabels={qrState.anchorLabels}
+        labels={qrState.labels}
         onClose={() => setQrState((s) => ({ ...s, open: false }))}
+      />
+      <VisualLocationBuilder
+        open={builderOpen}
+        companyId={companyId}
+        onClose={() => setBuilderOpen(false)}
+        onCreated={(n) => {
+          void reload();
+          setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
+        }}
       />
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>

@@ -246,6 +246,7 @@ export default function OperatorBinViewPage() {
         <OperatorLocationActionModal
           open
           action={modal.action}
+          companyId={companyId}
           partId={modal.part.part_id}
           partName={modal.part.part_name}
           currentQuantity={modal.part.quantity}

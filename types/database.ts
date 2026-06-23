@@ -1112,13 +1112,16 @@ export type Database = {
       }
       jobs: {
         Row: {
+          bill_to_address: Json | null
           billing_address_id: string | null
           company_id: string
           completed_at: string | null
           contact_id: string | null
+          contact_snapshot: Json | null
           created_at: string | null
           created_by: string | null
           customer_id: string | null
+          customer_name: string | null
           customer_po_number: string | null
           due_date: string | null
           fulfillment_status: string
@@ -1127,19 +1130,23 @@ export type Database = {
           lead_time_days: number | null
           production_status: string
           quote_id: string | null
+          ship_to_address: Json | null
           shipping_address_id: string | null
           started_at: string | null
           status_changed_at: string | null
           updated_at: string | null
         }
         Insert: {
+          bill_to_address?: Json | null
           billing_address_id?: string | null
           company_id: string
           completed_at?: string | null
           contact_id?: string | null
+          contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
+          customer_name?: string | null
           customer_po_number?: string | null
           due_date?: string | null
           fulfillment_status: string
@@ -1148,19 +1155,23 @@ export type Database = {
           lead_time_days?: number | null
           production_status: string
           quote_id?: string | null
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
         }
         Update: {
+          bill_to_address?: Json | null
           billing_address_id?: string | null
           company_id?: string
           completed_at?: string | null
           contact_id?: string | null
+          contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
+          customer_name?: string | null
           customer_po_number?: string | null
           due_date?: string | null
           fulfillment_status?: string
@@ -1169,6 +1180,7 @@ export type Database = {
           lead_time_days?: number | null
           production_status?: string
           quote_id?: string | null
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           started_at?: string | null
           status_changed_at?: string | null
@@ -2116,13 +2128,16 @@ export type Database = {
       }
       quotes: {
         Row: {
+          bill_to_address: Json | null
           billing_address_id: string | null
           company_id: string
           contact_id: string | null
+          contact_snapshot: Json | null
           converted_at: string | null
           created_at: string | null
           created_by: string | null
           customer_id: string | null
+          customer_name: string | null
           expiration_date: string | null
           id: string
           lead_time_days: number | null
@@ -2130,19 +2145,23 @@ export type Database = {
           lead_time_value: number | null
           payment_terms: string | null
           quote_number: string
+          ship_to_address: Json | null
           shipping_address_id: string | null
           status: string
           status_changed_at: string | null
           updated_at: string | null
         }
         Insert: {
+          bill_to_address?: Json | null
           billing_address_id?: string | null
           company_id: string
           contact_id?: string | null
+          contact_snapshot?: Json | null
           converted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
+          customer_name?: string | null
           expiration_date?: string | null
           id?: string
           lead_time_days?: number | null
@@ -2150,19 +2169,23 @@ export type Database = {
           lead_time_value?: number | null
           payment_terms?: string | null
           quote_number: string
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           status?: string
           status_changed_at?: string | null
           updated_at?: string | null
         }
         Update: {
+          bill_to_address?: Json | null
           billing_address_id?: string | null
           company_id?: string
           contact_id?: string | null
+          contact_snapshot?: Json | null
           converted_at?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_id?: string | null
+          customer_name?: string | null
           expiration_date?: string | null
           id?: string
           lead_time_days?: number | null
@@ -2170,6 +2193,7 @@ export type Database = {
           lead_time_value?: number | null
           payment_terms?: string | null
           quote_number?: string
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           status?: string
           status_changed_at?: string | null
@@ -2403,51 +2427,60 @@ export type Database = {
       }
       shipments: {
         Row: {
+          bill_to_address: Json | null
           carrier: string | null
           company_id: string
           created_at: string
           created_by: string | null
           customer_id: string
+          customer_name: string | null
           id: string
           job_id: string
           notes: string | null
           one_time_address: Json | null
           packing_slip_number: string
           ship_date: string
+          ship_to_address: Json | null
           shipping_address_id: string | null
           shipping_method: string | null
           voided_at: string | null
           voided_by: string | null
         }
         Insert: {
+          bill_to_address?: Json | null
           carrier?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
           customer_id: string
+          customer_name?: string | null
           id?: string
           job_id: string
           notes?: string | null
           one_time_address?: Json | null
           packing_slip_number: string
           ship_date?: string
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           shipping_method?: string | null
           voided_at?: string | null
           voided_by?: string | null
         }
         Update: {
+          bill_to_address?: Json | null
           carrier?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null
           customer_id?: string
+          customer_name?: string | null
           id?: string
           job_id?: string
           notes?: string | null
           one_time_address?: Json | null
           packing_slip_number?: string
           ship_date?: string
+          ship_to_address?: Json | null
           shipping_address_id?: string | null
           shipping_method?: string | null
           voided_at?: string | null
@@ -2792,6 +2825,7 @@ export type Database = {
         }
         Returns: Json
       }
+      address_block_snapshot: { Args: { p_address_id: string }; Returns: Json }
       adjust_stock_at_location: {
         Args: {
           p_converted_new_quantity: number
@@ -2830,6 +2864,7 @@ export type Database = {
           unit_cost: number
         }[]
       }
+      contact_block_snapshot: { Args: { p_contact_id: string }; Returns: Json }
       create_demo_company: {
         Args: {
           p_source_company_id: string

@@ -553,9 +553,11 @@ export async function getOpenJobPartsForCustomer(
  * the PDF so they can't drift.
  */
 export function resolveAttentionLine(
-  shipment: Pick<ShipmentWithRelations, 'shipping_address'> | null | undefined,
+  shipment: Pick<ShipmentWithRelations, 'ship_to_address'> | null | undefined,
 ): ResolvedAttention {
-  const text = shipment?.shipping_address?.attention_to?.trim() ?? '';
+  // Read the frozen ship-to snapshot, not the live address row, so the ATTN line
+  // matches what the slip was issued with even after the address changes/deletes.
+  const text = shipment?.ship_to_address?.attention_to?.trim() ?? '';
   if (!text) return { source: 'none', text: null };
   return { source: 'address', text };
 }

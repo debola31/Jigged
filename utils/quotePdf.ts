@@ -8,6 +8,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable, { type RowInput } from 'jspdf-autotable';
 import type { QuoteWithRelations } from '@/types/quote';
+import type { AddressSnapshot } from '@/types/documentSnapshot';
 import type { Company } from '@/utils/companyAccess';
 import { isQuoteExpired, daysUntilExpiration, formatLeadTime } from '@/types/quote';
 
@@ -66,38 +67,9 @@ function buildShopHeaderLines(company: Company): string[] {
   return lines;
 }
 
-type QuoteCustomer = NonNullable<QuoteWithRelations['customers']>;
-type QuoteCustomerAddress = NonNullable<QuoteCustomer['addresses']>[number];
-type QuoteCustomerContact = NonNullable<QuoteCustomer['customer_contacts']>[number];
-
-/**
- * Resolve an embedded customer_addresses row by id. The quote carries
- * billing_address_id (rendered on the PDF under the CUSTOMER block) and
- * shipping_address_id (stored for downstream fulfillment, not rendered) —
- * both point at the address rows joined under quote.customers.addresses.
- * Returns null when the FK is null or the lookup misses (e.g. address was
- * deleted after the quote was issued).
- */
-function findAddressById(
-  addresses: QuoteCustomerAddress[] | undefined,
-  addressId: string | null | undefined,
-): QuoteCustomerAddress | null {
-  if (!addressId || !addresses || addresses.length === 0) return null;
-  return addresses.find((a) => a.id === addressId) ?? null;
-}
-
-/**
- * Resolve an embedded customer_contacts row by id. Used for the Customer
- * Contact section rendered below the metadata block. Returns null when
- * the FK is null or the lookup misses.
- */
-function findContactById(
-  contacts: QuoteCustomerContact[] | undefined,
-  contactId: string | null | undefined,
-): QuoteCustomerContact | null {
-  if (!contactId || !contacts || contacts.length === 0) return null;
-  return contacts.find((c) => c.id === contactId) ?? null;
-}
+// The customer/address/contact block is now read from the quote's frozen
+// snapshot columns (see generateQuotePdf), not resolved from the live joined
+// customer rows — so editing or deleting the master never rewrites a past quote.
 
 /**
  * The address-only lines (line1, line2, city/state/zip, non-US country) for a
@@ -105,7 +77,7 @@ function findContactById(
  * SHIP TO column (the customer name already heads the CUSTOMER column) and as
  * the address half of the Customer block.
  */
-function buildAddressOnlyLines(address: QuoteCustomerAddress | null): string[] {
+function buildAddressOnlyLines(address: AddressSnapshot | null): string[] {
   if (!address) return [];
   const lines: string[] = [];
   const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
@@ -126,14 +98,13 @@ function buildAddressOnlyLines(address: QuoteCustomerAddress | null): string[] {
  * or contact info either.
  */
 function buildBillingAddressLines(
-  customer: QuoteCustomer | null | undefined,
-  address: QuoteCustomerAddress | null,
+  customerName: string | null,
+  address: AddressSnapshot | null,
 ): string[] {
-  if (!customer) return ['(No customer)'];
   const lines: string[] = [];
-  if (customer.name) lines.push(customer.name);
+  if (customerName) lines.push(customerName);
   lines.push(...buildAddressOnlyLines(address));
-  return lines;
+  return lines.length > 0 ? lines : ['(No customer)'];
 }
 
 /**
@@ -243,23 +214,21 @@ export async function generateQuotePdf(
   cursorY += 20;
 
   // ---------- CUSTOMER · SHIP TO (if different) · CUSTOMER CONTACT ----------
-  // Order: Customer (name + billing address) | Ship to (only when the shipping
-  // address differs from billing) | Customer contact. When shipping == billing
-  // we show just two columns. These FKs are set at quote creation (legacy
-  // quotes were backfilled in migrations 20260520 + 20260522) so the printed
-  // quote always renders what the customer originally saw. "Prepared by" is no
-  // longer a column here — it moved to the acceptance block below now that a
-  // quote is accepted by returning a PO rather than a signature.
-  const billingAddress = findAddressById(quote.customers?.addresses, quote.billing_address_id);
-  const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
-  const contact = findContactById(quote.customers?.customer_contacts, quote.contact_id);
-  const billingLines = buildBillingAddressLines(quote.customers ?? null, billingAddress);
+  // Render the frozen customer/address/contact snapshot captured on the quote at
+  // issue time (Document Snapshot Standard — snapshot_document_party trigger;
+  // legacy rows backfilled in 20260623021524). The printed quote shows what the
+  // customer originally saw even if the master address/customer/contact is later
+  // edited or deleted. "Prepared by" is not a column here — it lives in the
+  // acceptance block now that a quote is accepted by returning a PO.
+  const shippingAddress = quote.ship_to_address;
+  const contact = quote.contact_snapshot ?? null;
+  const billingLines = buildBillingAddressLines(quote.customer_name, quote.bill_to_address);
 
-  // Shipping is its own column only when a distinct shipping address is set.
+  // Shipping is its own column only when a distinct shipping address snapshot is
+  // set (compared by value, so it survives the master address being deleted).
   const shippingDiffers =
-    !!quote.shipping_address_id &&
-    quote.shipping_address_id !== quote.billing_address_id &&
-    shippingAddress !== null;
+    shippingAddress !== null &&
+    JSON.stringify(shippingAddress) !== JSON.stringify(quote.bill_to_address);
 
   const customerBody: Array<{ text: string; bold: boolean }> = billingLines.map(
     (line: string, i: number) => ({ text: line, bold: i === 0 }),
@@ -270,7 +239,7 @@ export async function generateQuotePdf(
 
   const contactLines: Array<{ text: string; bold: boolean }> = [];
   if (contact) {
-    contactLines.push({ text: contact.name, bold: true });
+    if (contact.name) contactLines.push({ text: contact.name, bold: true });
     if (contact.email) contactLines.push({ text: contact.email, bold: false });
     if (contact.phone) contactLines.push({ text: contact.phone, bold: false });
   }

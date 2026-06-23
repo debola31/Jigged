@@ -13,6 +13,7 @@
  */
 
 import type { CustomerAddress } from '@/types/customer';
+import type { AddressSnapshot } from '@/types/documentSnapshot';
 
 export type ShippingMethod =
   | 'customer_pickup'
@@ -45,6 +46,12 @@ export interface Shipment {
   created_at: string;
   voided_at: string | null;
   voided_by: string | null;
+  // Document Snapshot Standard: frozen bill-to/ship-to block + customer name,
+  // captured by the snapshot_shipment_party trigger. The packing slip renders
+  // these, not the live address rows. See docs/architecture.md.
+  customer_name: string | null;
+  bill_to_address: AddressSnapshot | null;
+  ship_to_address: AddressSnapshot | null;
 }
 
 export interface ShipmentLineItem {

@@ -3,6 +3,8 @@
  * by recomputeJobPartStatus, aggregated to the parent job via the
  * sync_job_production_status_from_parts trigger.
  */
+import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot';
+
 export type ProductionStatus = 'not_started' | 'in_progress' | 'completed' | 'cancelled';
 
 /**
@@ -76,6 +78,12 @@ export interface Job {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Document Snapshot Standard: frozen customer/address/contact block captured
+  // by the snapshot_document_party trigger. See docs/architecture.md.
+  customer_name: string | null;
+  bill_to_address: AddressSnapshot | null;
+  ship_to_address: AddressSnapshot | null;
+  contact_snapshot: ContactSnapshot | null;
 }
 
 /**

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -21,6 +21,8 @@ import PartAutocomplete, { type PartSelectOption } from '@/components/parts/Part
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
 import { createJobFromPurchaseOrder, getCustomersForSelect } from '@/utils/jobsAccess';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
+import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
+import { resolveTier } from '@/utils/quotePricingResolver';
 
 interface AcceptPurchaseOrderModalProps {
   open: boolean;
@@ -35,12 +37,24 @@ interface PoLineDraft {
   part: PartSelectOption | null;
   quantity: string;
   unitPrice: string;
+  /** Computed sell price (cost + markup) at the chosen qty, or null if it can't
+   *  be resolved (e.g. the part has no priced tier). Advisory only. */
+  expectedPrice: number | null;
+  /** True while the async expected-price lookup is in flight for this line. */
+  priceLoading: boolean;
 }
 
 let lineKeySeq = 0;
 function emptyLine(): PoLineDraft {
   lineKeySeq += 1;
-  return { key: `line-${lineKeySeq}`, part: null, quantity: '1', unitPrice: '' };
+  return {
+    key: `line-${lineKeySeq}`,
+    part: null,
+    quantity: '1',
+    unitPrice: '',
+    expectedPrice: null,
+    priceLoading: false,
+  };
 }
 
 function formatCurrency(value: number): string {
@@ -100,6 +114,12 @@ export default function AcceptPurchaseOrderModal({
     getCustomersForSelect(companyId)
       .then(setCustomers)
       .catch((err) => console.error('Error loading customers:', err));
+    const timers = priceTimers.current;
+    return () => {
+      // Cancel any pending expected-price lookups on close/unmount.
+      timers.forEach((t) => clearTimeout(t));
+      timers.clear();
+    };
   }, [open, companyId]);
 
   const customerOptions: SelectOption[] = useMemo(
@@ -115,6 +135,65 @@ export default function AcceptPurchaseOrderModal({
   const addLine = () => setLines((prev) => [...prev, emptyLine()]);
   const removeLine = (key: string) =>
     setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)));
+
+  // Per-line debounce timers + a monotonically-increasing token so a slow
+  // lookup that resolves after the part/qty changed again is discarded.
+  const priceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const priceTokens = useRef<Map<string, number>>(new Map());
+
+  /**
+   * Resolve the expected SELL price (cost + markup) for a line at its qty using
+   * the SAME resolver quote line items use — `resolveTier` over the part's
+   * computed pricing tiers. Debounced ~350ms on part/qty change. Pure DB reads,
+   * no AI. Pre-fills the price only when the user hasn't typed one yet; the
+   * entered price is never overwritten.
+   */
+  const resolveExpected = (
+    key: string,
+    part: PartSelectOption | null,
+    quantity: string,
+  ) => {
+    const timers = priceTimers.current;
+    const existing = timers.get(key);
+    if (existing) clearTimeout(existing);
+
+    const qty = Number(quantity);
+    if (!part || !Number.isInteger(qty) || qty <= 0) {
+      updateLine(key, { expectedPrice: null, priceLoading: false });
+      return;
+    }
+
+    updateLine(key, { priceLoading: true });
+    const token = (priceTokens.current.get(key) ?? 0) + 1;
+    priceTokens.current.set(key, token);
+
+    const partId = part.id;
+    const timer = setTimeout(async () => {
+      try {
+        const tiers = await getTiersWithComputedPrices(partId);
+        const resolved = resolveTier(tiers, qty);
+        if (priceTokens.current.get(key) !== token) return; // stale — superseded
+        const expected = resolved?.unit_price ?? null;
+        setLines((prev) =>
+          prev.map((l) => {
+            if (l.key !== key) return l;
+            // Seed the override only when the user hasn't typed a price yet.
+            const shouldPrefill = expected !== null && l.unitPrice.trim() === '';
+            return {
+              ...l,
+              expectedPrice: expected,
+              priceLoading: false,
+              unitPrice: shouldPrefill ? String(expected) : l.unitPrice,
+            };
+          }),
+        );
+      } catch {
+        if (priceTokens.current.get(key) !== token) return;
+        updateLine(key, { expectedPrice: null, priceLoading: false });
+      }
+    }, 350);
+    timers.set(key, timer);
+  };
 
   // Due date is mandatory and may not be in the past — a job created today
   // can't legitimately be due before today (this is what let a wrong-year
@@ -260,52 +339,102 @@ export default function AcceptPurchaseOrderModal({
           </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {lines.map((line) => (
-              <Box key={line.key} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <PartAutocomplete
-                    companyId={companyId}
-                    value={line.part}
-                    onChange={(part) => updateLine(line.key, { part })}
-                    excludeIds={pickedPartIds.filter((id) => id !== line.part?.id)}
-                    label="Part"
-                    size="small"
-                    disabled={loading}
-                  />
+            {lines.map((line) => {
+              const enteredPrice = Number(line.unitPrice);
+              const priceDiffers =
+                line.expectedPrice !== null &&
+                line.unitPrice.trim() !== '' &&
+                Number.isFinite(enteredPrice) &&
+                Math.abs(enteredPrice - line.expectedPrice) > 0.005;
+              const qtyLabel = Number.isInteger(Number(line.quantity)) && Number(line.quantity) > 0
+                ? Number(line.quantity)
+                : '—';
+              return (
+                <Box key={line.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <PartAutocomplete
+                        companyId={companyId}
+                        value={line.part}
+                        onChange={(part) => {
+                          updateLine(line.key, { part });
+                          resolveExpected(line.key, part, line.quantity);
+                        }}
+                        excludeIds={pickedPartIds.filter((id) => id !== line.part?.id)}
+                        label="Part"
+                        size="small"
+                        disabled={loading}
+                      />
+                    </Box>
+                    <TextField
+                      label="Qty"
+                      size="small"
+                      value={line.quantity}
+                      onChange={(e) => {
+                        const q = e.target.value;
+                        updateLine(line.key, { quantity: q });
+                        resolveExpected(line.key, line.part, q);
+                      }}
+                      disabled={loading}
+                      sx={{ width: 80 }}
+                      slotProps={{ htmlInput: { inputMode: 'numeric' } }}
+                    />
+                    <TextField
+                      label="Unit price"
+                      size="small"
+                      value={line.unitPrice}
+                      onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
+                      disabled={loading}
+                      error={priceDiffers}
+                      sx={{ width: 120 }}
+                      slotProps={{
+                        htmlInput: { inputMode: 'decimal' },
+                        input: {
+                          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                        },
+                      }}
+                    />
+                    <IconButton
+                      onClick={() => removeLine(line.key)}
+                      disabled={loading || lines.length === 1}
+                      aria-label="Remove part"
+                      sx={{ mt: 0.5 }}
+                    >
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+
+                  {/* Expected price (cost + markup at qty) — advisory; never blocks
+                      submit. Drift from the entered price is flagged in warning. */}
+                  {line.priceLoading ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ pl: 0.5 }}>
+                      Calculating expected price…
+                    </Typography>
+                  ) : line.expectedPrice !== null ? (
+                    priceDiffers ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 0.5, flexWrap: 'wrap' }}>
+                        <Typography variant="caption" color="warning.main">
+                          Differs from expected {formatCurrency(line.expectedPrice)} (cost + markup at qty {qtyLabel})
+                        </Typography>
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            updateLine(line.key, { unitPrice: String(line.expectedPrice) })
+                          }
+                          sx={{ minWidth: 'auto', p: 0, textTransform: 'none' }}
+                        >
+                          Reset
+                        </Button>
+                      </Box>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary" sx={{ pl: 0.5 }}>
+                        Expected {formatCurrency(line.expectedPrice)} (cost + markup at qty {qtyLabel})
+                      </Typography>
+                    )
+                  ) : null}
                 </Box>
-                <TextField
-                  label="Qty"
-                  size="small"
-                  value={line.quantity}
-                  onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                  disabled={loading}
-                  sx={{ width: 80 }}
-                  slotProps={{ htmlInput: { inputMode: 'numeric' } }}
-                />
-                <TextField
-                  label="Unit price"
-                  size="small"
-                  value={line.unitPrice}
-                  onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
-                  disabled={loading}
-                  sx={{ width: 120 }}
-                  slotProps={{
-                    htmlInput: { inputMode: 'decimal' },
-                    input: {
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                    },
-                  }}
-                />
-                <IconButton
-                  onClick={() => removeLine(line.key)}
-                  disabled={loading || lines.length === 1}
-                  aria-label="Remove part"
-                  sx={{ mt: 0.5 }}
-                >
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            ))}
+              );
+            })}
           </Box>
 
           <Button

@@ -32,6 +32,7 @@ import type {
   JobTraveler,
   JobTravelerOperation,
   JobNote,
+  JobNoteMedia,
 } from '@/types/operator';
 
 // Operator type from user_company_access. role and created_at are
@@ -747,9 +748,74 @@ export async function getJobPartTraveler(
   };
 }
 
+// One read shape backs the whole job feed (traveler read-only + operation page).
+// Each note carries its optional step tag (job_operations) and its media so the
+// feed renders thumbnails without a second round-trip.
+const JOB_NOTE_SELECT =
+  'id, job_id, job_operation_id, body, created_at, ' +
+  'author:user_company_access(name), ' +
+  'operation:job_operations(operation_name, sequence), ' +
+  'media:job_note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+
+type JobNoteRow = {
+  id: string;
+  job_id: string;
+  job_operation_id: string | null;
+  body: string | null;
+  created_at: string;
+  author: { name: string | null } | { name: string | null }[] | null;
+  operation:
+    | { operation_name: string | null; sequence: number | null }
+    | { operation_name: string | null; sequence: number | null }[]
+    | null;
+  media: Array<{
+    id: string;
+    note_id: string;
+    storage_path: string;
+    thumbnail_path: string | null;
+    kind: string;
+    mime_type: string | null;
+    width: number | null;
+    height: number | null;
+  }> | null;
+};
+
+function mapJobNoteRow(n: JobNoteRow): JobNote {
+  const author = Array.isArray(n.author) ? n.author[0] : n.author;
+  const op = Array.isArray(n.operation) ? n.operation[0] : n.operation;
+  const operationLabel = op?.operation_name
+    ? op.sequence != null
+      ? `Op ${op.sequence} · ${op.operation_name}`
+      : op.operation_name
+    : null;
+  const media: JobNoteMedia[] = (n.media ?? []).map((m) => ({
+    id: m.id,
+    note_id: m.note_id,
+    storage_path: m.storage_path,
+    thumbnail_path: m.thumbnail_path,
+    kind: m.kind === 'video' ? 'video' : 'photo',
+    mime_type: m.mime_type,
+    width: m.width,
+    height: m.height,
+  }));
+  return {
+    id: n.id,
+    job_id: n.job_id,
+    job_operation_id: n.job_operation_id,
+    operation_label: operationLabel,
+    body: n.body,
+    created_at: n.created_at,
+    author_name: author?.name ?? null,
+    media,
+  };
+}
+
 /**
- * Job-level notes feed (newest first). General notes about the job, not tied to
- * any operation. Authored by operators/admins over time.
+ * The job feed (newest first): one append-only stream per job. Returns both
+ * job-level notes and operation-scoped notes — operation notes roll up here
+ * automatically because they still carry job_id. Each note includes its step
+ * tag label (if any) and its attached media. Backs both the traveler (read-only)
+ * and the operation page.
  */
 export async function getJobNotes(
   jobId: string,
@@ -759,47 +825,37 @@ export async function getJobNotes(
 
   const { data, error } = await supabase
     .from('job_notes')
-    .select('id, job_id, body, created_at, author:user_company_access(name)')
+    .select(JOB_NOTE_SELECT)
     .eq('job_id', jobId)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
 
-  type NoteRow = {
-    id: string;
-    job_id: string;
-    body: string;
-    created_at: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-
-  return ((data ?? []) as NoteRow[]).map((n) => {
-    const author = Array.isArray(n.author) ? n.author[0] : n.author;
-    return {
-      id: n.id,
-      job_id: n.job_id,
-      body: n.body,
-      created_at: n.created_at,
-      author_name: author?.name ?? null,
-    };
-  });
+  return ((data ?? []) as unknown as JobNoteRow[]).map(mapJobNoteRow);
 }
 
 /**
- * Append a job-level note. `authorId` is the author's user_company_access id
- * (from getCurrentOperator); RLS requires it to match the caller's access row.
+ * Append a note to the job feed. `authorId` is the author's user_company_access
+ * id (from getCurrentOperator); RLS requires it to match the caller's access row.
+ *
+ * `opts.jobOperationId` is the optional step tag. The operation page always
+ * passes it (with `jobPartId`) so operator captures are step-scoped; the
+ * read-only traveler never calls this. `body` may be null/blank for a media-only
+ * note — callers must guarantee body-or-media (a fully empty note is useless);
+ * the returned note's `media` is empty until media is attached via
+ * addJobNoteMedia.
  */
 export async function addJobNote(
   jobId: string,
   companyId: string,
   authorId: string,
-  body: string,
+  body: string | null,
+  opts?: { jobPartId?: string | null; jobOperationId?: string | null },
 ): Promise<JobNote> {
   const supabase = getSupabase();
 
-  const trimmed = body.trim();
-  if (!trimmed) throw new Error('Note cannot be empty.');
+  const trimmed = body?.trim() || null;
 
   const { data, error } = await supabase
     .from('job_notes')
@@ -808,8 +864,10 @@ export async function addJobNote(
       job_id: jobId,
       author_id: authorId,
       body: trimmed,
+      job_part_id: opts?.jobPartId ?? null,
+      job_operation_id: opts?.jobOperationId ?? null,
     })
-    .select('id, job_id, body, created_at, author:user_company_access(name)')
+    .select(JOB_NOTE_SELECT)
     .single();
 
   if (error) {
@@ -821,20 +879,5 @@ export async function addJobNote(
     );
   }
 
-  type NoteRow = {
-    id: string;
-    job_id: string;
-    body: string;
-    created_at: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-  const n = data as NoteRow;
-  const author = Array.isArray(n.author) ? n.author[0] : n.author;
-  return {
-    id: n.id,
-    job_id: n.job_id,
-    body: n.body,
-    created_at: n.created_at,
-    author_name: author?.name ?? null,
-  };
+  return mapJobNoteRow(data as unknown as JobNoteRow);
 }

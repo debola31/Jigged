@@ -138,16 +138,42 @@ export interface JobTraveler {
 }
 
 /**
- * One job-level note in the traveler's notes feed. Notes are general (not tied
- * to an operation) and append-only — many notes by different people over time.
+ * A photo (or, later, short video) attached to a job note. Bytes live in the
+ * private `attachments` bucket; the feed renders thumbnails via signed URLs.
+ */
+export interface JobNoteMedia {
+  id: string;
+  note_id: string;
+  /** Object key in the attachments bucket — pass to getJobNoteMediaUrl(). */
+  storage_path: string;
+  /** Optional poster/thumbnail key (video, or a smaller image variant). */
+  thumbnail_path: string | null;
+  kind: 'photo' | 'video';
+  mime_type: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/**
+ * One note in the job feed. The feed is one append-only stream per job: every
+ * note carries `job_id` (the rollup key) and may optionally be tagged to a step
+ * via `job_operation_id` — operation-scoped notes (captured on the operation
+ * page) roll up into the same feed. A note may carry text, media, or both.
  */
 export interface JobNote {
   id: string;
   job_id: string;
-  body: string;
+  /** Optional step tag — null for job-level notes, set for operation-scoped ones. */
+  job_operation_id: string | null;
+  /** Human label for the tagged step, e.g. "Op 20 · Mill"; null when untagged. */
+  operation_label: string | null;
+  /** Free text. Null when the note is media-only. */
+  body: string | null;
   created_at: string;
   /** Author display name (from user_company_access.name); null if unknown. */
   author_name: string | null;
+  /** Attached photos/videos, in insertion order. */
+  media: JobNoteMedia[];
 }
 
 // ============================================================================

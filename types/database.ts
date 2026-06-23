@@ -869,30 +869,99 @@ export type Database = {
           },
         ]
       }
+      job_note_media: {
+        Row: {
+          company_id: string
+          created_at: string
+          duration_seconds: number | null
+          height: number | null
+          id: string
+          kind: string
+          mime_type: string | null
+          note_id: string
+          size_bytes: number | null
+          storage_path: string
+          thumbnail_path: string | null
+          width: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          duration_seconds?: number | null
+          height?: number | null
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          note_id: string
+          size_bytes?: number | null
+          storage_path: string
+          thumbnail_path?: string | null
+          width?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          duration_seconds?: number | null
+          height?: number | null
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          note_id?: string
+          size_bytes?: number | null
+          storage_path?: string
+          thumbnail_path?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_note_media_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_note_media_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "job_notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_notes: {
         Row: {
           author_id: string | null
-          body: string
+          body: string | null
           company_id: string
           created_at: string
           id: string
           job_id: string
+          job_operation_id: string | null
+          job_part_id: string | null
+          note_type: string
         }
         Insert: {
           author_id?: string | null
-          body: string
+          body?: string | null
           company_id: string
           created_at?: string
           id?: string
           job_id: string
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          note_type?: string
         }
         Update: {
           author_id?: string | null
-          body?: string
+          body?: string | null
           company_id?: string
           created_at?: string
           id?: string
           job_id?: string
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          note_type?: string
         }
         Relationships: [
           {
@@ -914,6 +983,20 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: false
             referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_job_operation_id_fkey"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_job_part_id_fkey"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
             referencedColumns: ["id"]
           },
         ]

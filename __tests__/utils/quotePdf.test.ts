@@ -468,27 +468,20 @@ describe('generateQuotePdf', () => {
 
     vi.clearAllMocks();
 
-    // Distinct shipping address → SHIP TO column with the shipping address lines.
+    // Distinct shipping-address snapshot → SHIP TO column with its lines. The
+    // PDF reads the frozen ship_to_address snapshot (compared by value against
+    // bill_to_address), not the live address book.
     const twoAddr: QuoteWithRelations = {
       ...baseQuote,
       shipping_address_id: 'addr-2',
-      customers: {
-        ...baseQuote.customers!,
-        addresses: [
-          baseQuote.customers!.addresses![0],
-          {
-            id: 'addr-2',
-            address_line1: '99 Dock Road',
-            address_line2: null,
-            city: 'Toledo',
-            state: 'OH',
-            postal_code: '43601',
-            country: 'USA',
-            default_billing: false,
-            default_shipping: true,
-            attention_to: null,
-          },
-        ],
+      ship_to_address: {
+        address_line1: '99 Dock Road',
+        address_line2: null,
+        city: 'Toledo',
+        state: 'OH',
+        postal_code: '43601',
+        country: 'USA',
+        attention_to: null,
       },
     };
     await generateQuotePdf(twoAddr, baseCompany);

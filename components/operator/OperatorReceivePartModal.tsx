@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -53,34 +53,25 @@ export default function OperatorReceivePartModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the offerable parts (tracked, not already here) each time it opens.
-  useEffect(() => {
-    if (!open) return;
+  // Reset + load the offerable parts each time the dialog opens (house
+  // convention: Dialog onEnter, not a setState-in-effect).
+  const handleEnter = async () => {
     setPart(null);
     setQuantity('');
     setUnit('');
     setNotes('');
     setError(null);
     setLoadingParts(true);
-    let cancelled = false;
-    getStockedParts(companyId)
-      .then((all) => {
-        if (cancelled) return;
-        const exclude = new Set(excludePartIds);
-        setParts(all.filter((p) => p.is_location_tracked && !exclude.has(p.id)));
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load parts.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingParts(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // excludePartIds is read at load time; not a dep (avoids reload churn).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, companyId]);
+    try {
+      const all = await getStockedParts(companyId);
+      const exclude = new Set(excludePartIds);
+      setParts(all.filter((p) => p.is_location_tracked && !exclude.has(p.id)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load parts.');
+    } finally {
+      setLoadingParts(false);
+    }
+  };
 
   const unitOptions = useMemo(() => {
     const pu = part?.primary_unit || 'ea';
@@ -116,7 +107,13 @@ export default function OperatorReceivePartModal({
   };
 
   return (
-    <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={saving ? undefined : onClose}
+      maxWidth="xs"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>Stock a part — {locationName}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>

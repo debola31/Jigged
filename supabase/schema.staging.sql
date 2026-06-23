@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-23T13:49:44Z
+-- Generated: 2026-06-23T15:02:27Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -528,13 +528,13 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "part_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
+    "quantity" numeric NOT NULL,
     "markup_percent" numeric(10,6),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
     CONSTRAINT "part_pricing_tiers_unique_seq" UNIQUE (part_id, sequence),
-    CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_procurement_tiers"
@@ -592,7 +592,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "part_id" uuid NOT NULL,
     "source_tier_id" uuid,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
+    "quantity" numeric NOT NULL,
     "unit_price" numeric(12,4) NOT NULL,
     "total_price" numeric(12,4),
     "markup_percent" numeric(5,2),
@@ -603,7 +603,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "basis_unknown" boolean NOT NULL DEFAULT false,
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
-    CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_parts"
@@ -614,7 +614,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     "part_id" uuid NOT NULL,
     "source_quote_line_item_id" uuid,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
+    "quantity" numeric NOT NULL,
     "status_changed_at" timestamp with time zone,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -630,7 +630,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     CONSTRAINT "job_parts_job_sequence_unique" UNIQUE (job_id, sequence),
     CONSTRAINT "job_parts_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
     CONSTRAINT "job_parts_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text]))),
-    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_materials"
@@ -701,7 +701,7 @@ CREATE TABLE IF NOT EXISTS "public"."shipment_line_items"
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "shipment_id" uuid NOT NULL,
     "job_part_id" uuid NOT NULL,
-    "quantity" numeric(12,2) NOT NULL,
+    "quantity" numeric NOT NULL,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "shipment_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipment_line_items_quantity_positive" CHECK ((quantity > (0)::numeric))
@@ -4315,7 +4315,7 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.get_ready_operations_for_station(p_company_id uuid, p_work_center_id uuid)
- RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity integer)
+ RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity numeric)
  LANGUAGE plpgsql
  STABLE
 AS $function$

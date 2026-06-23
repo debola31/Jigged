@@ -24,6 +24,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
+import InputAdornment from '@mui/material/InputAdornment';
 import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -45,6 +46,8 @@ import {
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
+import { isValidQuantityInput } from '@/lib/quantityInput';
+import { quantityUnitSuffix, unitShortLabel } from '@/lib/standardUnits';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
@@ -816,7 +819,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         if (!Number.isFinite(orderQty) || orderQty <= 0) {
           return 'Every quantity must be greater than zero.';
         }
-        if (!Number.isInteger(orderQty)) return 'Quantity must be a whole number.';
         if (seenQty.has(orderQty)) return 'Each quantity can appear only once per part.';
         seenQty.add(orderQty);
         if (!block.override_open) {
@@ -1156,6 +1158,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // Part-level custom price — when active it overrides every row.
             const blockOverrideActive =
               block.override_open && block.override_unit_price.trim() !== '';
+            // Unit symbol for the order-qty field (e.g. "in") so a fractional
+            // quantity isn't ambiguous. null for count/unitless parts.
+            const orderQtyUnitLabel = quantityUnitSuffix(block.part?.primary_unit);
+            // Tier caption reads "Tier 0.5 in" / "Tier 1 ea" — always show a
+            // unit here (full label, fallback "ea") so counts stay unchanged.
+            const tierUnitLabel = unitShortLabel(block.part?.primary_unit) ?? 'ea';
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -1273,10 +1281,24 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                               value={row.quantity}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                if (v !== '' && !/^\d+$/.test(v)) return;
+                                // Order quantities are decimal-capable (up to 4 dp)
+                                // so a part sold by length/weight can be quoted as
+                                // 0.32. isValidQuantityInput allows the empty string.
+                                if (!isValidQuantityInput(v)) return;
                                 updateRow(idx, rowIdx, { quantity: v });
                               }}
-                              inputProps={{ 'aria-label': 'Order quantity', inputMode: 'numeric' }}
+                              inputProps={{ 'aria-label': 'Order quantity', inputMode: 'decimal' }}
+                              InputProps={
+                                orderQtyUnitLabel
+                                  ? {
+                                      endAdornment: (
+                                        <InputAdornment position="end">
+                                          {orderQtyUnitLabel}
+                                        </InputAdornment>
+                                      ),
+                                    }
+                                  : undefined
+                              }
                               sx={{ width: 110 }}
                               error={hasOrderQty && !isOverride && matched?.below_min === true}
                             />
@@ -1305,8 +1327,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                     color={matched.below_min ? 'warning.main' : 'text.secondary'}
                                   >
                                     {matched.below_min
-                                      ? `Below min · Tier ${matched.matched_tier_quantity} ea`
-                                      : `Tier ${matched.matched_tier_quantity} ea`}
+                                      ? `Below min · Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`
+                                      : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
                                   </Typography>
                                 </>
                               ) : (

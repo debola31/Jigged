@@ -48,6 +48,8 @@ import {
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
+import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
+import { quantityUnitSuffix } from '@/lib/standardUnits';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 
 interface PartPricingProps {
@@ -144,6 +146,10 @@ export default function PartPricing({
 }: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
+  // Label the Min qty column with the part's unit (e.g. "Min qty (in)") so a
+  // fractional break reads unambiguously. null unit -> plain "Min qty".
+  const qtyUnitLabel = quantityUnitSuffix(part.primary_unit);
+  const qtyColumnHeader = qtyUnitLabel ? `Min qty (${qtyUnitLabel})` : 'Min qty';
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
@@ -238,10 +244,10 @@ export default function PartPricing({
   const handleSave = async (): Promise<void> => {
     const allValid = rows.every((r) => {
       const q = parseNumber(r.quantity);
-      return q !== null && q > 0;
+      return q !== null && isValidQuantityValue(q);
     });
     if (!allValid) {
-      setError('Every tier needs a quantity of at least 1.');
+      setError('Every tier needs a quantity greater than 0.');
       return;
     }
     setSaveState('saving');
@@ -302,7 +308,9 @@ export default function PartPricing({
   };
 
   const handleQuantityChange = (idx: number, value: string): void => {
-    if (!/^\d*$/.test(value)) return;
+    // Tier minimum quantities are decimal-capable (universal, up to 4 dp) so a
+    // part sold by length/weight/volume can set a fractional break like 0.32.
+    if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
       next[idx] = recomputeRow({ ...next[idx], quantity: value }, breakdown);
@@ -611,7 +619,7 @@ export default function PartPricing({
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Min qty</TableCell>
+                      <TableCell>{qtyColumnHeader}</TableCell>
                       {!isBought && <TableCell align="right">Base / unit</TableCell>}
                       <TableCell align="right">Markup %</TableCell>
                       {!isBought && <TableCell align="right">Unit price</TableCell>}
@@ -664,7 +672,7 @@ export default function PartPricing({
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Min qty</TableCell>
+                      <TableCell>{qtyColumnHeader}</TableCell>
                       {!isBought && <TableCell align="right">Base / unit</TableCell>}
                       <TableCell align="right">Markup %</TableCell>
                       {!isBought && <TableCell align="right">Unit price</TableCell>}
@@ -680,7 +688,7 @@ export default function PartPricing({
                               size="small"
                               value={row.quantity}
                               onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                              inputMode="numeric"
+                              inputMode="decimal"
                             />
                           </TableCell>
                           {!isBought && (

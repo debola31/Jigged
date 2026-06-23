@@ -20,6 +20,7 @@ import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired, formatLeadTime } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
+import { unitShortLabel } from '@/lib/standardUnits';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
 
@@ -87,14 +88,22 @@ export default function ConvertToJobModal({
   // quantity converts as-is; a part with several quantities (price options)
   // needs the salesperson to pick the accepted quantity before converting.
   const partGroups = useMemo(() => {
-    const groups: { part_id: string; part_name: string; items: QuoteLineItem[] }[] = [];
+    const groups: { part_id: string; part_name: string; unit: string; items: QuoteLineItem[] }[] =
+      [];
     const index = new Map<string, number>();
     for (const li of lineItems) {
       let gi = index.get(li.part_id);
       if (gi === undefined) {
         gi = groups.length;
         index.set(li.part_id, gi);
-        groups.push({ part_id: li.part_id, part_name: li.parts?.part_name ?? 'Part', items: [] });
+        groups.push({
+          part_id: li.part_id,
+          part_name: li.parts?.part_name ?? 'Part',
+          // Real unit so a fractional order reads "0.32 in" not "0.32 ea";
+          // count parts still show "ea". Falls back to "ea" for a unitless part.
+          unit: unitShortLabel(li.parts?.primary_unit) ?? 'ea',
+          items: [],
+        });
       }
       groups[gi].items.push(li);
     }
@@ -220,7 +229,8 @@ export default function ConvertToJobModal({
                       {group.part_name}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {group.items[0].quantity} ea @ {formatCurrency(group.items[0].unit_price)} ={' '}
+                      {group.items[0].quantity} {group.unit} @{' '}
+                      {formatCurrency(group.items[0].unit_price)} ={' '}
                       {formatCurrency(
                         group.items[0].total_price ??
                           group.items[0].unit_price * group.items[0].quantity,
@@ -248,7 +258,7 @@ export default function ConvertToJobModal({
                             key={li.id}
                             value={li.id}
                             control={<Radio size="small" />}
-                            label={`${li.quantity} ea @ ${formatCurrency(
+                            label={`${li.quantity} ${group.unit} @ ${formatCurrency(
                               li.unit_price,
                             )} = ${formatCurrency(li.total_price ?? li.unit_price * li.quantity)}`}
                           />

@@ -436,11 +436,19 @@ export function calculateUnitPriceFromMarkup(baseCost: number, markupPercent: nu
 /**
  * Back-calculate markup percentage from base cost and unit price.
  * markup = ((unit_price - base_cost) / base_cost) × 100
+ *
+ * Rounded to 6 decimals to match `part_pricing_tiers.markup_percent`'s
+ * numeric(10,6) precision. Markup is the stored source of truth for a part
+ * tier, so a unit price the user types is persisted as this markup and
+ * re-expanded on read. Rounding any coarser (the old numeric(5,2) / 2-dp)
+ * quantized achievable prices ~1.4¢ apart near a typical base, so an exact
+ * $140.00 snapped down to $139.99 on reload. 6 decimals lets the typed price
+ * round-trip to the cent.
  */
 export function calculateMarkupFromUnitPrice(baseCost: number, unitPrice: number): number | null {
   if (isNaN(baseCost) || baseCost <= 0) return null;
   if (isNaN(unitPrice) || unitPrice < 0) return null;
-  return Math.round(((unitPrice - baseCost) / baseCost) * 100 * 100) / 100;
+  return Math.round(((unitPrice - baseCost) / baseCost) * 100 * 1e6) / 1e6;
 }
 
 /**

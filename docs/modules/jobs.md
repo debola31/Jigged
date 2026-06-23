@@ -137,7 +137,7 @@ A job can be created two ways:
 
 **(a) Convert a quote.** Build a quote, open its detail page, and use **Convert to Job**; one job is produced with one work cell per `(part, selected quantity)`. This flow lives in [Quotes](quotes.md).
 
-**(b) New Job from PO (direct).** When a customer sends a PO with no prior quote, click **New Job from PO** on the jobs list. The "Accept Purchase Order" modal (a modal, not a `/jobs/new` route) captures the customer, PO #, due date, and one-or-more **existing** parts — each with a quantity and the agreed unit price — plus an optional PO PDF. On accept, `createJobFromPurchaseOrder` (`utils/jobsAccess.ts`) creates the job (`quote_id` null, job number `J-NNNN` from the shared per-company order counter — same sequence as quotes) and clones each part's routing into operations + materials via the same `create_job_part_operations_from_routing` RPC the quote path uses. v1 is **existing parts only** — every part must already have a routing (the create fails fast otherwise).
+**(b) New Job from PO (direct).** When a customer sends a PO with no prior quote, click **New Job from PO** on the jobs list. The "Accept Purchase Order" modal (a modal, not a `/jobs/new` route) captures the customer, PO #, due date, and one-or-more **existing** parts — each with a quantity and the agreed unit price — plus an optional PO PDF. When a part + quantity are chosen, the modal **pre-fills the expected sell price** (cost + markup at that quantity, resolved by the *same* `getTiersWithComputedPrices` + `resolveTier` path quote line items use — pure DB reads, no AI). The user can override it; if the entered price differs from expected, a non-blocking "Differs from expected $X" hint appears with a one-tap **Reset**. A part with no priced tier just leaves the price blank. On accept, `createJobFromPurchaseOrder` (`utils/jobsAccess.ts`) creates the job (`quote_id` null, job number `J-NNNN` from the shared per-company order counter — same sequence as quotes) and clones each part's routing into operations + materials via the same `create_job_part_operations_from_routing` RPC the quote path uses. v1 is **existing parts only** — every part must already have a routing (the create fails fast otherwise).
 
 Both paths store the agreed price on each `job_part` (`unit_price` / `total_price`), so PO-sourced and quote-sourced jobs invoice identically.
 
@@ -159,7 +159,7 @@ Both paths store the agreed price on each `job_part` (`unit_price` / `total_pric
 
 ▸ **Attachments**
 
-- Customer PO PDFs and other reference files — listed with download + delete and an "Upload PDF" button. File bytes live in the private `attachments` bucket; metadata in `job_attachments`. Attached during PO intake / quote conversion (optional) or added here later. Backed by `utils/jobAttachmentsAccess.ts` + `components/jobs/JobAttachmentsCard.tsx`.
+- Customer PO PDFs and other reference files — listed with **view (inline)**, download, and delete actions plus an "Upload PDF" button. **View** opens the file in a dialog (an `<iframe>` for PDFs, an `<img>` for images) off a fresh signed URL, so the user can read the PO without leaving the job page; download/delete still work as before. File bytes live in the private `attachments` bucket; metadata in `job_attachments`. Attached during PO intake / quote conversion (optional) or added here later. Backed by `utils/jobAttachmentsAccess.ts` + `components/jobs/JobAttachmentsCard.tsx`.
 
 ▸ **Invoicing (QuickBooks)**
 

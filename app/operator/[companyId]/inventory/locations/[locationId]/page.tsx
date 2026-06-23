@@ -18,6 +18,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
 import { resolveScan } from '@/utils/inventoryLocationsAccess';
@@ -27,6 +28,7 @@ import type { ResolvedScan, LocationContent } from '@/types/inventoryLocations';
 import OperatorLocationActionModal, {
   type OperatorLocationAction,
 } from '@/components/operator/OperatorLocationActionModal';
+import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -44,6 +46,7 @@ export default function OperatorBinViewPage() {
   const [modal, setModal] = useState<{ action: OperatorLocationAction; part: LocationContent } | null>(
     null,
   );
+  const [receiveOpen, setReceiveOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -168,9 +171,14 @@ export default function OperatorBinViewPage() {
 
       {/* Stock here: act on each part */}
       <Box>
-        <Typography variant="overline" color="text.secondary">
-          Stock here
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ flex: 1 }}>
+            Stock here
+          </Typography>
+          <Button size="small" startIcon={<AddCircleOutlineIcon />} onClick={() => setReceiveOpen(true)}>
+            Stock a part
+          </Button>
+        </Stack>
         {contents.length === 0 ? (
           <Card elevation={2} sx={{ mt: 0.5 }}>
             <CardContent sx={{ textAlign: 'center', py: 4 }}>
@@ -250,6 +258,16 @@ export default function OperatorBinViewPage() {
           onDone={reload}
         />
       )}
+
+      <OperatorReceivePartModal
+        open={receiveOpen}
+        companyId={companyId}
+        locationId={node.id}
+        locationName={node.name}
+        excludePartIds={contents.map((c) => c.part_id)}
+        onClose={() => setReceiveOpen(false)}
+        onDone={reload}
+      />
     </Box>
   );
 }

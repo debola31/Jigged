@@ -148,6 +148,7 @@ export default function WorkspaceTab({
                       companyId={companyId}
                       primaryUnit={part.primary_unit}
                       preferredVendorId={part.preferred_vendor_id}
+                      onSaved={() => refreshAfterMutation()}
                     />
                   </CardContent>
                 </Card>

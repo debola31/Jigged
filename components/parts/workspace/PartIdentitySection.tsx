@@ -71,7 +71,11 @@ export default function PartIdentitySection({
   const [saveStatus, setSaveStatus] = useState<SaveState>('idle');
 
   const showReorder = formData.is_stocked;
-  const showVendor = formData.source === 'bought';
+  // Preferred vendor lives on the Cost card (PartProcurementPricingPanel) for an
+  // existing bought part — so we only surface it here in the CREATE flow, where
+  // the Cost card doesn't exist yet. This avoids the two-controls-for-one-value
+  // duplication on the live part page.
+  const showVendor = formData.source === 'bought' && mode === 'create';
 
   const collectErrors = async (data: PartFormData): Promise<Record<string, string>> => {
     const errors: Record<string, string> = {};

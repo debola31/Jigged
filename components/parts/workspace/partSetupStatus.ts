@@ -61,11 +61,14 @@ export function getPartSetupStatus(
     };
   }
 
-  // Bought parts, or made parts that have some structure but still don't
-  // resolve to a price (missing labour rates / material costs / vendor cost).
+  // Made parts that have some structure but still don't resolve to a price
+  // (missing labour rates / material costs) get a guidance banner. Bought parts
+  // surface the same gap INLINE in the Cost card instead (a red starter tier in
+  // PartProcurementPricingPanel), so we emit no banner for them — the chip still
+  // reads "Needs cost", but the workspace doesn't double up with a yellow alert.
   const nextStep =
     part.source === 'bought'
-      ? 'Add a vendor cost so this part can be priced and quoted.'
+      ? null
       : 'This part isn’t priceable yet — check that operations have labour rates and materials have costs.';
 
   return {

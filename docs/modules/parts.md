@@ -197,6 +197,14 @@ Editing model — markup % is the source of truth:
 
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's `base_cost_per_unit` and `unit_price` against the new cost basis.
 
+▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
+
+For **bought** parts, the workspace shows a **Cost** card with a single **Preferred vendor** picker (the *only* preferred-vendor control — it is no longer duplicated on the part-details/identity card; that field now appears only in the create flow) and a per-vendor qty-break cost-tier sheet (Min qty / Unit cost).
+
+- **Explicit Save** — cost is financial data, so edits are committed via a **Save costs** button (with an "Unsaved changes" hint), not auto-saved on blur, matching the made-part Pricing card. Deletes and additions are reconciled against the persisted sheet on save.
+- **No-cost state** — when the selected vendor has no saved tier yet, the sheet shows **one empty starter row highlighted red** plus a short red prompt ("Add at least one cost tier so this part can be priced and quoted."), replacing the previous yellow banner/"Add first tier" bubble. The red styling uses the theme `error` palette (never a hardcoded hex).
+- **Indicator clears on save** — the panel calls an `onSaved` callback so the workspace re-derives priceability immediately; the "Needs cost" chip (and the red prompt) clear on Save **without a page reload**. (Previously the chip lingered until reload because the panel had no refresh callback.)
+
 ▸ **Files tab (`FilesTab`)**
 
 A workspace tab (`?tab=files`, always visible) for engineering file attachments. This surface is part of the **office/admin dashboard** — it is not the operator shop-floor view, so nothing here is operator-facing.

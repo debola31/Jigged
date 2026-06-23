@@ -233,7 +233,10 @@ async def _load_gated_job(db: Client, company_id: str, job_id: str) -> dict:
     quote_id provenance, billing_address_id)."""
     job = (
         db.table("jobs")
-        .select("id, company_id, customer_id, job_number, quote_id, billing_address_id")
+        .select(
+            "id, company_id, customer_id, job_number, customer_po_number, "
+            "quote_id, billing_address_id"
+        )
         .eq("id", job_id)
         .eq("company_id", company_id)
         .limit(1)
@@ -445,6 +448,7 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             customer_ref=customer_ref,
             item_ref=item_ref,
             job_number=job.get("job_number"),
+            customer_po_number=job.get("customer_po_number"),
             bill_addr=bill_addr,
             lines=lines,
         )

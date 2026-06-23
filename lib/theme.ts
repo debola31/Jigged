@@ -54,7 +54,10 @@ const jiggedTheme = createTheme({
     },
     text: {
       primary: '#ffffff',
-      secondary: '#B0B3B8',
+      // Lightened from #B0B3B8: the old grey lost contrast on the lighter end of
+      // the card gradient (labels like "Customer PO" were hard to read). This value
+      // keeps a muted label feel while staying legible across the whole gradient.
+      secondary: '#C8CCD4',
     },
     success: { main: '#10b981' },
     warning: { main: '#f59e0b' },
@@ -70,7 +73,7 @@ const jiggedTheme = createTheme({
     h5: { fontSize: '1.25rem', fontWeight: 600, lineHeight: 1.4, color: '#ffffff' },
     h6: { fontSize: '1rem', fontWeight: 600, lineHeight: 1.5, color: '#ffffff' },
     body1: { fontSize: '1rem', lineHeight: 1.6, color: '#ffffff' },
-    body2: { fontSize: '0.875rem', lineHeight: 1.5, color: '#B0B3B8' },
+    body2: { fontSize: '0.875rem', lineHeight: 1.5, color: '#C8CCD4' },
     button: { textTransform: 'none', fontWeight: 500 },
   },
   shape: {

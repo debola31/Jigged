@@ -597,6 +597,7 @@ def quote_to_invoice_payload(
     customer_ref: str,
     item_ref: str,
     job_number: str | None,
+    customer_po_number: str | None = None,
     bill_addr: dict | None,
     lines: list[dict],
 ) -> dict:
@@ -606,7 +607,9 @@ def quote_to_invoice_payload(
 
     DocNumber is intentionally omitted -> QBO auto-assigns the next invoice number, so
     Jigged never collides with the shop's existing/manual/previous-system numbering. The
-    Jigged job number is stamped into PrivateNote for traceability + QBO-side search."""
+    Jigged job number is stamped into PrivateNote for traceability + QBO-side search, along
+    with the customer's PO number (also appended to each line Description) when present."""
+    po_suffix = f" (PO Number: {customer_po_number})" if customer_po_number else ""
     qb_lines: list[dict] = []
     for ln in lines:
         unit_price = ln.get("unit_price")
@@ -619,6 +622,7 @@ def quote_to_invoice_payload(
         description = ln.get("part_name") or "Part"
         if ln.get("description"):
             description = f"{description} — {ln['description']}"
+        description = f"{description}{po_suffix}"
         qb_lines.append(
             {
                 "DetailType": "SalesItemLineDetail",
@@ -633,8 +637,13 @@ def quote_to_invoice_payload(
             }
         )
     payload: dict = {"CustomerRef": {"value": customer_ref}, "Line": qb_lines}
+    note_parts: list[str] = []
     if job_number:
-        payload["PrivateNote"] = f"Jigged job {job_number}"
+        note_parts.append(f"Jigged job {job_number}")
+    if customer_po_number:
+        note_parts.append(f"PO Number: {customer_po_number}")
+    if note_parts:
+        payload["PrivateNote"] = " · ".join(note_parts)
     if bill_addr:
         payload["BillAddr"] = bill_addr
     return payload

@@ -236,6 +236,51 @@ def test_payload_basic_taxcode_and_item():
     assert payload["Line"][1]["Description"] == "Shaft"
 
 
+def test_payload_includes_customer_po_in_memo_and_lines():
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="42",
+        item_ref="7",
+        job_number="J-2026-0001",
+        customer_po_number="PO-789",
+        bill_addr=None,
+        lines=[
+            {"quantity": 1, "unit_price": 5.0, "part_name": "Bracket", "description": "Rev C"},
+            {"quantity": 2, "unit_price": 3.0, "part_name": "Shaft", "description": None},
+        ],
+    )
+    # PO number is appended to the memo alongside the job number.
+    assert payload["PrivateNote"] == "Jigged job J-2026-0001 · PO Number: PO-789"
+    # ...and to every line Description, after the part identity.
+    assert payload["Line"][0]["Description"] == "Bracket — Rev C (PO Number: PO-789)"
+    assert payload["Line"][1]["Description"] == "Shaft (PO Number: PO-789)"
+
+
+def test_payload_po_only_memo_without_job_number():
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1",
+        item_ref="1",
+        job_number=None,
+        customer_po_number="PO-12",
+        bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+    )
+    assert payload["PrivateNote"] == "PO Number: PO-12"
+    assert payload["Line"][0]["Description"] == "P (PO Number: PO-12)"
+
+
+def test_payload_no_po_leaves_lines_and_memo_unchanged():
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1",
+        item_ref="1",
+        job_number="J-0007",
+        customer_po_number=None,
+        bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+    )
+    assert payload["PrivateNote"] == "Jigged job J-0007"
+    assert payload["Line"][0]["Description"] == "P"
+
+
 def test_payload_rounding_reconciles_to_total():
     lines = [
         {"quantity": 3, "unit_price": 12.3456, "part_name": "A", "description": None},

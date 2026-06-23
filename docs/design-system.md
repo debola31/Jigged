@@ -73,7 +73,8 @@ See `lib/theme.ts` for exact values. Primary colors:
 
 - **Deep Indigo:** `#111439` - Foundation color, background base
 
-- **Neutral Gray:** `#B0B3B8` - Secondary text, disabled states
+- **Neutral Gray:** `#B0B3B8` - Disabled states, subtle UI elements
+- **Muted Label Gray:** `#C8CCD4` - Secondary text (`text.secondary` / `body2`); lightened from Neutral Gray so labels stay legible across the lighter end of the card gradient
 
 ### Glass Morphism Cards (Critical Styling)
 
@@ -373,7 +374,8 @@ See `lib/theme.ts` for exact values:
 
 - **Deep Indigo:** `#111439` - Background base, gradient foundation
 
-- **Neutral Gray:** `#B0B3B8` - Secondary text
+- **Neutral Gray:** `#B0B3B8` - Disabled states, subtle UI elements
+- **Muted Label Gray:** `#C8CCD4` - Secondary text (`text.secondary` / `body2`)
 
 ### Status Colors
 
@@ -443,7 +445,7 @@ MUI provides elevation levels from 0-24:
 
 - All status colors tested for sufficient contrast
 
-- Secondary text (#B0B3B8) meets minimum 4.5:1 ratio
+- Secondary text (#C8CCD4) meets minimum 4.5:1 ratio across the card gradient
 
 **Keyboard Navigation:**
 

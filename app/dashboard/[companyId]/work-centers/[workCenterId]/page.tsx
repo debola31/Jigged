@@ -251,8 +251,8 @@ export default function WorkCenterDetailPage() {
                     <Typography variant="body2" sx={{ mt: 0.5 }}>
                       External work centers price per routing operation. Each
                       routing op sets its own{' '}
-                      <strong>external_unit_price</strong> and{' '}
-                      <strong>external_setup_cost</strong> for this vendor.
+                      <strong>vendor unit price</strong> for this vendor — external
+                      work bills once per part, so there is no setup cost.
                     </Typography>
                   </Box>
                 )}

@@ -123,7 +123,6 @@ describe('routingsAccess', () => {
           cycle_minutes_per_unit: '2.5',
           labor_rate_override: '',
           external_unit_price: '',
-          external_setup_cost: '',
           instructions: '  do the thing  ',
         },
         30,

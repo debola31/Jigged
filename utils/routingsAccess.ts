@@ -33,7 +33,7 @@ import type {
 // ============================================
 
 const ROUTING_OP_COLUMNS =
-  'id, routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, external_setup_cost, instructions, metadata, created_at, updated_at';
+  'id, routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, instructions, metadata, created_at, updated_at';
 
 const WC_JOIN = 'work_center:work_centers(id, name, kind, labor_rate, vendor:vendors(id, name))';
 
@@ -324,7 +324,6 @@ function formDataToOpInsert(
     cycle_minutes_per_unit: parseNumOrNull(formData.cycle_minutes_per_unit),
     labor_rate_override: parseNumOrNull(formData.labor_rate_override),
     external_unit_price: parseNumOrNull(formData.external_unit_price),
-    external_setup_cost: parseNumOrNull(formData.external_setup_cost),
     instructions: formData.instructions.trim() || null,
   };
 }
@@ -412,7 +411,6 @@ export interface PendingOperation {
   cycleMinutesPerUnit: number | null;
   laborRateOverride: number | null;
   externalUnitPrice: number | null;
-  externalSetupCost: number | null;
   instructions: string | null;
 }
 
@@ -504,7 +502,6 @@ export async function saveRoutingWithOperations(
         cycle_minutes_per_unit: op.cycleMinutesPerUnit,
         labor_rate_override: op.laborRateOverride,
         external_unit_price: op.externalUnitPrice,
-        external_setup_cost: op.externalSetupCost,
         instructions: op.instructions,
         sequence: seq,
       };

@@ -42,10 +42,8 @@ export interface OperationRowData {
    *  `laborRateOverride` this flags a missing rate (neither set → the
    *  operation can't be priced), highlighted inline on the row. */
   workCenterLaborRate: number | null;
-  /** External: per-unit price the vendor charges. */
+  /** External: per-unit price the vendor charges (external work has no setup). */
   externalUnitPrice: number | null;
-  /** External: flat per-batch setup cost the vendor charges. */
-  externalSetupCost: number | null;
   instructions: string | null;
 }
 
@@ -79,7 +77,7 @@ export default function RoutingOperationRow({
   // Localized validation: surface the exact blocker on the offending row
   // (instead of only a top-of-card "Heads up" banner). An internal op with no
   // labor rate (override or work-center default) can't be priced; an external
-  // op needs at least a unit price or a setup cost.
+  // op needs a unit price (external work has no setup cost).
   const missingLaborRate =
     !placeholder &&
     !isExternal &&
@@ -88,12 +86,11 @@ export default function RoutingOperationRow({
   const missingExternalPricing =
     !placeholder &&
     isExternal &&
-    !(row.externalUnitPrice && row.externalUnitPrice > 0) &&
-    !(row.externalSetupCost && row.externalSetupCost > 0);
+    !(row.externalUnitPrice && row.externalUnitPrice > 0);
   const errorMessage = missingLaborRate
     ? 'Missing labor rate — set a rate on this operation, or a default on its work center.'
     : missingExternalPricing
-      ? 'Missing pricing — add a unit price or setup cost for this external step.'
+      ? 'Missing pricing — add a unit price for this external step.'
       : null;
 
   // Build the per-row caption based on kind.
@@ -101,9 +98,7 @@ export default function RoutingOperationRow({
   let captionRight: string;
   let captionRightWarning = false;
   if (isExternal) {
-    captionLeft = row.externalSetupCost && row.externalSetupCost > 0
-      ? `Setup $${row.externalSetupCost.toFixed(2)}`
-      : 'No setup cost';
+    captionLeft = 'External';
     captionRight = row.externalUnitPrice && row.externalUnitPrice > 0
       ? `$${row.externalUnitPrice.toFixed(2)}/unit`
       : 'No unit price';

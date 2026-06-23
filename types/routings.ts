@@ -37,8 +37,8 @@ export interface Routing {
  * The cost-relevant fields split by the work_center's kind:
  * - kind='internal' uses `setup_minutes` + `cycle_minutes_per_unit` priced at
  *   `COALESCE(labor_rate_override, work_center.labor_rate)`.
- * - kind='external' uses `external_unit_price` + `external_setup_cost` and
- *   ignores the time/rate fields.
+ * - kind='external' uses `external_unit_price` only (external work bills once
+ *   per part, so there is no setup cost) and ignores the time/rate fields.
  */
 export interface RoutingOperation {
   id: string;
@@ -49,7 +49,6 @@ export interface RoutingOperation {
   cycle_minutes_per_unit: number | null;
   labor_rate_override: number | null;
   external_unit_price: number | null;
-  external_setup_cost: number | null;
   instructions: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -118,7 +117,6 @@ export interface RoutingOperationFormData {
   cycle_minutes_per_unit: string;
   labor_rate_override: string;
   external_unit_price: string;
-  external_setup_cost: string;
   instructions: string;
 }
 
@@ -128,7 +126,6 @@ export const EMPTY_OPERATION_FORM: RoutingOperationFormData = {
   cycle_minutes_per_unit: '',
   labor_rate_override: '',
   external_unit_price: '',
-  external_setup_cost: '',
   instructions: '',
 };
 
@@ -144,7 +141,6 @@ export function routingOperationToFormData(op: RoutingOperation): RoutingOperati
       op.cycle_minutes_per_unit !== null ? String(op.cycle_minutes_per_unit) : '',
     labor_rate_override: op.labor_rate_override !== null ? String(op.labor_rate_override) : '',
     external_unit_price: op.external_unit_price !== null ? String(op.external_unit_price) : '',
-    external_setup_cost: op.external_setup_cost !== null ? String(op.external_setup_cost) : '',
     instructions: op.instructions || '',
   };
 }

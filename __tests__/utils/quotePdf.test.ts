@@ -81,6 +81,28 @@ const baseQuote: QuoteWithRelations = {
   created_by: null,
   created_at: '2026-04-16T10:00:00Z',
   updated_at: '2026-04-16T10:00:00Z',
+  // Document Snapshot Standard: the PDF renders these frozen snapshots, not the
+  // live customers/addresses join below (which now only feeds the edit form).
+  customer_name: 'Acme Machining',
+  bill_to_address: {
+    address_line1: '500 Industrial Ave',
+    address_line2: null,
+    city: 'Detroit',
+    state: 'MI',
+    postal_code: '48201',
+    country: 'USA',
+    attention_to: null,
+  },
+  ship_to_address: {
+    address_line1: '500 Industrial Ave',
+    address_line2: null,
+    city: 'Detroit',
+    state: 'MI',
+    postal_code: '48201',
+    country: 'USA',
+    attention_to: null,
+  },
+  contact_snapshot: { name: 'Jane Smith', email: 'jane@acme.example', phone: '555-0123' },
   customers: {
     id: 'customer-1',
     name: 'Acme Machining',
@@ -340,10 +362,7 @@ describe('generateQuotePdf', () => {
   it('does not render the billing address attention_to (Attn:) line in the CUSTOMER block', async () => {
     const quoteWithAttn: QuoteWithRelations = {
       ...baseQuote,
-      customers: {
-        ...baseQuote.customers!,
-        addresses: [{ ...baseQuote.customers!.addresses![0], attention_to: 'Receiving Dept' }],
-      },
+      bill_to_address: { ...baseQuote.bill_to_address!, attention_to: 'Receiving Dept' },
     };
 
     await generateQuotePdf(quoteWithAttn, baseCompany);
@@ -356,6 +375,31 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('CUSTOMER');
     expect(rendered).not.toContain('Attn: Receiving Dept');
     expect(rendered.some((t) => t.includes('Receiving Dept'))).toBe(false);
+  });
+
+  it('renders the customer block from the frozen snapshot, surviving address deletion (FK nulled)', async () => {
+    // Simulate an address deleted after the quote was issued: ON DELETE SET NULL
+    // nulls billing_address_id and strips it from the live customers join, but
+    // the snapshot persists and is what the PDF must render.
+    const afterDelete: QuoteWithRelations = {
+      ...baseQuote,
+      billing_address_id: null,
+      shipping_address_id: null,
+      customers: { ...baseQuote.customers!, addresses: [] },
+    };
+
+    await generateQuotePdf(afterDelete, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(rendered).toContain('Acme Machining');
+    expect(rendered).toContain('500 Industrial Ave');
+    expect(rendered.some((t) => t.includes('Detroit'))).toBe(true);
+    // Contact snapshot still renders too.
+    expect(rendered).toContain('Jane Smith');
   });
 
   it('renders the ACCEPTANCE block with reply-with-a-PO copy and NO signature/date lines', async () => {

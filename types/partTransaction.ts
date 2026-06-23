@@ -26,6 +26,11 @@ export interface InventoryTransaction {
   operator_id: string | null;
   notes: string | null;
   has_discrepancy: boolean;
+  // Location where this happened (null for non-location-tracked parts). Nulled
+  // if the location is later deleted; location_name keeps the snapshot.
+  location_id: string | null;
+  location_name: string | null;
+  transfer_group_id: string | null;
   created_at: string;
   created_by: string | null;
 }

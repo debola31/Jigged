@@ -506,6 +506,63 @@ export type Database = {
           },
         ]
       }
+      inventory_locations: {
+        Row: {
+          code: string | null
+          company_id: string
+          created_at: string
+          id: string
+          is_qr_anchor: boolean
+          is_stockable: boolean
+          kind: string | null
+          name: string
+          parent_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          is_qr_anchor?: boolean
+          is_stockable?: boolean
+          kind?: string | null
+          name: string
+          parent_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_qr_anchor?: boolean
+          is_stockable?: boolean
+          kind?: string | null
+          name?: string
+          parent_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_locations_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_locations_parent_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_transactions: {
         Row: {
           company_id: string
@@ -517,10 +574,13 @@ export type Database = {
           item_name: string
           job_id: string | null
           job_operation_id: string | null
+          location_id: string | null
+          location_name: string | null
           notes: string | null
           operator_id: string | null
           part_id: string | null
           quantity: number
+          transfer_group_id: string | null
           type: string
           unit: string
         }
@@ -534,10 +594,13 @@ export type Database = {
           item_name: string
           job_id?: string | null
           job_operation_id?: string | null
+          location_id?: string | null
+          location_name?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
           quantity: number
+          transfer_group_id?: string | null
           type: string
           unit: string
         }
@@ -551,10 +614,13 @@ export type Database = {
           item_name?: string
           job_id?: string | null
           job_operation_id?: string | null
+          location_id?: string | null
+          location_name?: string | null
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
           quantity?: number
+          transfer_group_id?: string | null
           type?: string
           unit?: string
         }
@@ -578,6 +644,13 @@ export type Database = {
             columns: ["job_operation_id"]
             isOneToOne: false
             referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_transactions_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
             referencedColumns: ["id"]
           },
           {
@@ -1245,6 +1318,55 @@ export type Database = {
           },
         ]
       }
+      part_location_stock: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          location_id: string
+          part_id: string
+          quantity: number
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          location_id: string
+          part_id: string
+          quantity?: number
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          location_id?: string
+          part_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_part_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       part_notes: {
         Row: {
           author_id: string | null
@@ -1405,6 +1527,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          is_location_tracked: boolean
           is_stocked: boolean
           legacy_id: string | null
           markup_rate_id: string | null
@@ -1421,6 +1544,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_location_tracked?: boolean
           is_stocked?: boolean
           legacy_id?: string | null
           markup_rate_id?: string | null
@@ -1437,6 +1561,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          is_location_tracked?: boolean
           is_stocked?: boolean
           legacy_id?: string | null
           markup_rate_id?: string | null
@@ -2656,6 +2781,28 @@ export type Database = {
         Args: { p_invitation_id: string; p_user_id: string }
         Returns: string
       }
+      add_stock_at_location: {
+        Args: {
+          p_converted_quantity: number
+          p_location_id: string
+          p_notes?: string
+          p_part_id: string
+          p_quantity: number
+          p_unit: string
+        }
+        Returns: Json
+      }
+      adjust_stock_at_location: {
+        Args: {
+          p_converted_new_quantity: number
+          p_location_id: string
+          p_new_quantity: number
+          p_notes?: string
+          p_part_id: string
+          p_unit: string
+        }
+        Returns: Json
+      }
       bulk_apply_markup_rate: {
         Args: { p_company_id: string; p_part_ids: string[]; p_rate_id: string }
         Returns: Json
@@ -2709,6 +2856,27 @@ export type Database = {
         }
         Returns: string
       }
+      delete_location: { Args: { p_location_id: string }; Returns: undefined }
+      deplete_stock_at_location: {
+        Args: {
+          p_converted_quantity: number
+          p_graceful?: boolean
+          p_job_id?: string
+          p_job_operation_id?: string
+          p_location_id: string
+          p_notes?: string
+          p_operator_id?: string
+          p_part_id: string
+          p_quantity: number
+          p_unit: string
+        }
+        Returns: Json
+      }
+      disable_location_tracking: { Args: { p_part_id: string }; Returns: Json }
+      enable_location_tracking: {
+        Args: { p_initial_location_id?: string; p_part_id: string }
+        Returns: Json
+      }
       generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string
@@ -2755,6 +2923,14 @@ export type Database = {
         }[]
       }
       get_user_company_ids: { Args: never; Returns: string[] }
+      inv_assert_location_in_company: {
+        Args: { p_company_id: string; p_location_id: string }
+        Returns: undefined
+      }
+      inv_location_path_label: {
+        Args: { p_location_id: string }
+        Returns: string
+      }
       is_company_admin: { Args: { check_company_id: string }; Returns: boolean }
       is_system_admin: { Args: { check_user_id: string }; Returns: boolean }
       job_last_ship_date: { Args: { p_job_id: string }; Returns: string }
@@ -2787,6 +2963,18 @@ export type Database = {
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined
+      }
+      transfer_stock: {
+        Args: {
+          p_converted_quantity: number
+          p_from_location_id: string
+          p_notes?: string
+          p_part_id: string
+          p_quantity: number
+          p_to_location_id: string
+          p_unit: string
+        }
+        Returns: Json
       }
     }
     Enums: {

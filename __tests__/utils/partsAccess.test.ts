@@ -97,6 +97,7 @@ describe('partsAccess utilities', () => {
     reorder_point: null,
     preferred_vendor_id: null,
     legacy_id: null,
+    is_location_tracked: false,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -563,6 +564,7 @@ describe('partsAccess utilities', () => {
         reorder_point: null,
         preferred_vendor_id: null,
         legacy_id: null,
+        is_location_tracked: false,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };

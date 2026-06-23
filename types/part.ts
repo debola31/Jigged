@@ -31,6 +31,9 @@ export interface Part {
   // caller did not request the join.
   markup_rate_name?: string | null;
   legacy_id: string | null;
+  // When true, parts.quantity is a trigger-maintained rollup of
+  // part_location_stock and stock is managed per-location (see InventoryTab).
+  is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
   // Optional relation counts (populated by getPartWithRelations)

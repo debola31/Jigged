@@ -149,6 +149,7 @@ export default function PartTransactionHistoryTable({
               <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
               <TableCell sx={{ fontWeight: 600 }} align="right">Quantity</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Related Job</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Location</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Notes</TableCell>
             </TableRow>
           </TableHead>
@@ -221,6 +222,11 @@ export default function PartTransactionHistoryTable({
                         —
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" color="text.secondary">
+                      {transaction.location_name || '—'}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     {editingId === transaction.id ? (

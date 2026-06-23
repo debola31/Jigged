@@ -9,8 +9,6 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
-import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
@@ -19,14 +17,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import StickyNote2Icon from '@mui/icons-material/StickyNote2';
-import {
-  getJobPartTraveler,
-  getJobNotes,
-  addJobNote,
-  getCurrentOperator,
-} from '@/utils/operatorAccess';
-import type { JobTraveler, JobTravelerOperation, JobNote } from '@/types/operator';
+import { getJobPartTraveler } from '@/utils/operatorAccess';
+import JobFeed from '@/components/operator/JobFeed';
+import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 
@@ -44,17 +37,6 @@ function formatDate(value: string | null): string | null {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatTimestamp(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
 function StepIcon({ status }: { status: string }) {
   if (status === 'completed') return <CheckCircleIcon color="success" />;
   if (status === 'in_progress') return <PlayCircleFilledIcon color="primary" />;
@@ -65,7 +47,9 @@ function StepIcon({ status }: { status: string }) {
  * Operator job traveler. When an operator opens a job_part (scanning a job QR
  * lands here for a single-part job, or via the parts hub for multi-part jobs),
  * they see the full step list — like a printed shop traveler — and pick which
- * step to action. Job-level notes (general, not tied to any step) live here too.
+ * step to action. The whole job's feed (notes + photos, captured per step on
+ * the operation pages) is shown read-only up top; capture happens on the
+ * operation page where the operator is working.
  */
 export default function OperatorJobTravelerPage() {
   const params = useParams();
@@ -75,14 +59,8 @@ export default function OperatorJobTravelerPage() {
   const jobPartId = params.jobPartId as string;
 
   const [traveler, setTraveler] = useState<JobTraveler | null>(null);
-  const [notes, setNotes] = useState<JobNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [operatorId, setOperatorId] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
-  const [noteError, setNoteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,8 +72,6 @@ export default function OperatorJobTravelerPage() {
         return;
       }
       setTraveler(data);
-      const noteRows = await getJobNotes(data.job_id, companyId);
-      setNotes(noteRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load job');
     } finally {
@@ -107,37 +83,8 @@ export default function OperatorJobTravelerPage() {
     load();
   }, [load]);
 
-  useEffect(() => {
-    async function loadOperator() {
-      const operator = await getCurrentOperator(companyId);
-      if (operator) setOperatorId(operator.id);
-    }
-    loadOperator();
-  }, [companyId]);
-
   const openStep = (op: JobTravelerOperation) => {
     router.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);
-  };
-
-  const handleAddNote = async () => {
-    if (!traveler) return;
-    const body = noteDraft.trim();
-    if (!body) return;
-    if (!operatorId) {
-      setNoteError('Operator not found. Please log in again.');
-      return;
-    }
-    setSavingNote(true);
-    setNoteError(null);
-    try {
-      const created = await addJobNote(traveler.job_id, companyId, operatorId, body);
-      setNotes((prev) => [created, ...prev]);
-      setNoteDraft('');
-    } catch (err) {
-      setNoteError(err instanceof Error ? err.message : 'Failed to add note');
-    } finally {
-      setSavingNote(false);
-    }
   };
 
   if (loading) {
@@ -240,11 +187,17 @@ export default function OperatorJobTravelerPage() {
         </CardContent>
       </Card>
 
+      {/* Job feed (read-only here) — notes + photos for the whole job, captured
+          per step on the operation pages. Bumped up top: operators use it a lot. */}
+      <Box sx={{ mb: 3 }}>
+        <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
+      </Box>
+
       {/* Operations / steps — tap one to action it */}
       <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>
         Operations
       </Typography>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 0.5, mb: 3 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 0.5 }}>
         {traveler.operations.length === 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ px: 0.5, py: 2 }}>
             This part has no operations.
@@ -289,65 +242,6 @@ export default function OperatorJobTravelerPage() {
           );
         })}
       </Box>
-
-      {/* Job-level notes feed */}
-      <Card elevation={2} sx={cardSx}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-            <StickyNote2Icon fontSize="small" color="action" />
-            <Typography variant="h6" color="text.secondary">
-              Job Notes
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-            <TextField
-              multiline
-              minRows={2}
-              placeholder="Add a note about this job…"
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              fullWidth
-              size="small"
-            />
-            {noteError && <Alert severity="error">{noteError}</Alert>}
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Button
-                variant="contained"
-                onClick={handleAddNote}
-                disabled={savingNote || !noteDraft.trim()}
-              >
-                {savingNote ? <CircularProgress size={20} /> : 'Add note'}
-              </Button>
-            </Box>
-          </Box>
-
-          {notes.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No notes yet.
-            </Typography>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-              {notes.map((note, idx) => (
-                <Box key={note.id}>
-                  {idx > 0 && <Divider sx={{ my: 1 }} />}
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.25 }}>
-                    <Typography variant="subtitle2" fontWeight={700}>
-                      {note.author_name || 'Unknown'}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {formatTimestamp(note.created_at)}
-                    </Typography>
-                  </Box>
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                    {note.body}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </CardContent>
-      </Card>
     </Box>
   );
 }

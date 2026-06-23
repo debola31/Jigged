@@ -23,6 +23,7 @@ import {
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
+import JobFeed from '@/components/operator/JobFeed';
 import type { OperatorJobDetail } from '@/types/operator';
 
 /**
@@ -329,6 +330,21 @@ export default function OperatorOperationActionPage() {
           {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
         </Button>
       )}
+
+      {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read
+          the whole job's feed. This is the primary capture surface: operators
+          land here from the per-operation QR. */}
+      <Box sx={{ mt: 3 }}>
+        <JobFeed
+          jobId={jobId}
+          companyId={companyId}
+          operationContext={{
+            jobPartId,
+            jobOperationId,
+            operationLabel: job.operation_name,
+          }}
+        />
+      </Box>
     </Box>
   );
 }

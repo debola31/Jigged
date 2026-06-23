@@ -52,14 +52,17 @@ describe('getPartSetupStatus', () => {
     }
   });
 
-  it('a not-priceable bought part warns needs_cost and points at a vendor cost', () => {
+  it('a not-priceable bought part is needs_cost for the chip but emits NO banner (nextStep null)', () => {
+    // Bought parts surface the missing-cost gap inline in the Cost card (a red
+    // starter tier in PartProcurementPricingPanel), not as a workspace banner —
+    // so the chip still reads "Needs cost" (warning) but nextStep is null.
     const status = getPartSetupStatus(
       { source: 'bought', routing: null, bom_lines_count: 0 },
       false,
     );
     expect(status.state).toBe('needs_cost');
     expect(status.color).toBe('warning');
-    expect(status.nextStep).toMatch(/vendor/i);
+    expect(status.nextStep).toBeNull();
   });
 
   it('only ever emits theme palette colour keys (never a hardcoded hex)', () => {

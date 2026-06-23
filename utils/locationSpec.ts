@@ -3,9 +3,9 @@
  *
  * The builder collects an ordered list of LevelSpecs (level 0 = the top
  * containers, level 1 = their divisions, …) and this module turns them into a
- * LocationSpecNode tree with names, zero-padded sortable codes, is_stockable on
- * the deepest level only, and is_qr_anchor on a chosen level. The code scheme is
- * shared with bulkGenerateChildren so the visual and manual builders agree.
+ * LocationSpecNode tree with names and zero-padded sortable codes. The code
+ * scheme is shared with bulkGenerateChildren so the visual and manual builders
+ * agree. Every location can hold stock and be printed — no per-node flags.
  */
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
@@ -34,9 +34,6 @@ export function explicitCode(parentCode: string | null, name: string): string {
 export interface BuildSpecOptions {
   /** Code of the parent the tree will be created under (null = top-level). */
   parentCode?: string | null;
-  /** Which level (0-based) gets printed QR anchors. Default 0 = top containers
-   *  (container-level QR + on-screen drill-down, per the inventory design). */
-  qrAnchorDepth?: number;
 }
 
 /**
@@ -48,9 +45,6 @@ export function buildSpecFromLevels(
   levels: LevelSpec[],
   opts: BuildSpecOptions = {},
 ): LocationSpecNode[] {
-  const deepest = levels.length - 1;
-  const qrDepth = opts.qrAnchorDepth ?? 0;
-
   const buildLevel = (
     depth: number,
     parentCode: string | null,
@@ -58,7 +52,6 @@ export function buildSpecFromLevels(
   ): LocationSpecNode[] => {
     if (depth >= levels.length) return [];
     const level = levels[depth];
-    const isLeafLevel = depth === deepest;
 
     const makeNode = (i: number, name: string, code: string): LocationSpecNode => {
       const key = parentKey ? `${parentKey}/${i}` : `${i}`;
@@ -67,8 +60,6 @@ export function buildSpecFromLevels(
         name,
         kind: level.kind || null,
         code,
-        is_stockable: isLeafLevel,
-        is_qr_anchor: depth === qrDepth,
         children: buildLevel(depth + 1, code, key),
       };
     };
@@ -132,8 +123,6 @@ function cloneSubtree(node: LocationSpecNode, parentCode: string | null, overrid
     name,
     kind: node.kind,
     code,
-    is_stockable: node.is_stockable,
-    is_qr_anchor: node.is_qr_anchor,
     children: node.children.map((c) => cloneSubtree(c, code)),
   };
 }
@@ -181,8 +170,6 @@ export function addChildUnder(tree: LocationSpecNode[], parentKey: string): Loca
         name: 'Item 1',
         kind: 'item',
         code: deriveCodeFor('Item 1', 'item', parent.code),
-        is_stockable: true,
-        is_qr_anchor: false,
         children: [],
       };
     } else {
@@ -191,14 +178,6 @@ export function addChildUnder(tree: LocationSpecNode[], parentKey: string): Loca
     }
     return { ...parent, children: [...parent.children, child] };
   });
-}
-
-/** Re-stamp is_qr_anchor by depth across the whole tree (after the QR-level
- *  selector changes while the tree is hand-edited). */
-export function applyQrAnchorByDepth(nodes: LocationSpecNode[], depth: number): LocationSpecNode[] {
-  const walk = (ns: LocationSpecNode[], d: number): LocationSpecNode[] =>
-    ns.map((n) => ({ ...n, is_qr_anchor: d === depth, children: walk(n.children, d + 1) }));
-  return walk(nodes, 0);
 }
 
 /** Parent's code, inferred from a child's code ("C01-R03" → "C01", "C01" → null). */
@@ -225,4 +204,22 @@ export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSp
     return out;
   };
   return walk(tree);
+}
+
+/**
+ * Duplicate a single (DB-sourced) subtree as a sibling: a bumped name past the
+ * EXISTING sibling names (Cabinet 1 → Cabinet 2), fresh keys, and codes
+ * re-derived under `parentCode`. Used by the Locations manager's Duplicate —
+ * unlike duplicateNode it takes the real sibling names + parent code explicitly
+ * (rather than inferring from an in-memory forest), so it can't collide with
+ * siblings the in-memory tree doesn't know about.
+ */
+export function duplicateSubtreeAsSibling(
+  rootNode: LocationSpecNode,
+  parentCode: string | null,
+  existingSiblingNames: string[],
+): LocationSpecNode {
+  const siblings = existingSiblingNames.map((name) => ({ ...rootNode, name, children: [] }));
+  const name = nextSiblingName(siblings, rootNode);
+  return cloneSubtree(rootNode, parentCode, name);
 }

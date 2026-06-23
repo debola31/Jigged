@@ -146,8 +146,7 @@ export default function LevelConfigStep({
                       key={leaf.key}
                       size="small"
                       label={leaf.name}
-                      color={leaf.is_qr_anchor ? 'info' : 'default'}
-                      variant={leaf.is_qr_anchor ? 'filled' : 'outlined'}
+                      variant="outlined"
                       onDelete={() => onRemove(leaf.key)}
                     />
                   ))}
@@ -198,19 +197,17 @@ export default function LevelConfigStep({
   return (
     <Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Each level nests inside the one above. The deepest level holds the stock.
+        Each level nests inside the one above.
       </Typography>
 
       <Stack spacing={2}>
         {levels.map((level, i) => {
           const mode: 'count' | 'names' = level.names ? 'names' : 'count';
-          const deepest = i === levels.length - 1;
           return (
             <Paper key={i} variant="outlined" sx={{ p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ flex: 1 }}>
                   Level {i + 1}
-                  {deepest ? ' · holds stock' : ''}
                 </Typography>
                 {levels.length > 1 && (
                   <IconButton size="small" aria-label="Remove level" onClick={() => removeLevel(i)}>

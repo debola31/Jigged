@@ -11,7 +11,7 @@
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
-import { generatedCode, explicitCode } from '@/utils/locationSpec';
+import { generatedCode, explicitCode, duplicateSubtreeAsSibling } from '@/utils/locationSpec';
 import type {
   BulkGenerateSpec,
   CreateLocationInput,
@@ -239,7 +239,6 @@ export async function bulkGenerateChildren(
       name: pattern.replace('{n}', String(idx)),
       kind: spec.kind ?? null,
       code: generatedCode(parent?.code ?? null, spec.kind ?? '', idx, width),
-      is_stockable: !spec.leaves || spec.leaves.length === 0,
       sort_order: idx,
     });
     created.push(node);
@@ -251,7 +250,6 @@ export async function bulkGenerateChildren(
         name: leafName,
         kind: spec.leafKind ?? 'side',
         code: explicitCode(node.code, leafName),
-        is_stockable: true,
         sort_order: j,
       });
       created.push(leaf);
@@ -264,8 +262,9 @@ export async function bulkGenerateChildren(
  * Materialize a LocationSpecNode forest (built client-side by the visual
  * builder) into inventory_locations. Recursively composes the existing
  * `createLocation` — parent before children — so all the company/parent
- * validation and code handling is shared with the manual flow. Names, codes,
- * is_stockable and is_qr_anchor come straight from the precomputed spec.
+ * validation and code handling is shared with the manual flow. Names and codes
+ * come straight from the precomputed spec; every location is stockable +
+ * printable (createLocation defaults).
  *
  * Sequential inserts mirror bulkGenerateChildren; a single multi-row insert is
  * a cheap future optimization if specs ever get large.
@@ -274,17 +273,16 @@ export async function materializeLocationSpec(
   companyId: string,
   parentId: string | null,
   nodes: LocationSpecNode[],
+  startSortOrder = 0,
 ): Promise<InventoryLocation[]> {
   const created: InventoryLocation[] = [];
-  let sortOrder = 0;
+  let sortOrder = startSortOrder;
   for (const node of nodes) {
     const row = await createLocation(companyId, {
       parent_id: parentId,
       name: node.name,
       kind: node.kind,
       code: node.code,
-      is_stockable: node.is_stockable,
-      is_qr_anchor: node.is_qr_anchor,
       sort_order: sortOrder++,
     });
     created.push(row);
@@ -293,6 +291,49 @@ export async function materializeLocationSpec(
     }
   }
   return created;
+}
+
+/**
+ * Duplicate a location and its entire subtree as a new sibling — structure
+ * only, no stock. The copy's root is named past the existing siblings
+ * (Cabinet 1 → Cabinet 2) and sorted after them; every code is re-derived under
+ * the same parent from the bumped name + kind (the shared builder/bulk-generate
+ * scheme, so a custom edited code is not preserved). Sequential inserts via
+ * materializeLocationSpec.
+ */
+export async function duplicateLocation(
+  companyId: string,
+  locationId: string,
+): Promise<InventoryLocation[]> {
+  const all = await getLocations(companyId);
+  const target = all.find((l) => l.id === locationId);
+  if (!target) throw new Error('Location not found.');
+
+  // getLocations is already ordered by sort_order then name, so children keep
+  // their display order.
+  const childrenOf = (parentId: string | null) => all.filter((l) => l.parent_id === parentId);
+
+  const toSpec = (loc: InventoryLocation): LocationSpecNode => ({
+    key: loc.id, // ignored by materialize; cloneSubtree assigns fresh keys
+    name: loc.name,
+    kind: loc.kind,
+    code: loc.code,
+    children: childrenOf(loc.id).map(toSpec),
+  });
+
+  const parentCode = target.parent_id
+    ? (all.find((l) => l.id === target.parent_id)?.code ?? null)
+    : null;
+  const siblings = childrenOf(target.parent_id);
+  const clone = duplicateSubtreeAsSibling(
+    toSpec(target),
+    parentCode,
+    siblings.map((l) => l.name),
+  );
+  // Sort the copy after the existing siblings (sort_order ASC, name ASC read
+  // order) rather than letting it default to 0 and jump to the front.
+  const nextSortOrder = siblings.reduce((max, s) => Math.max(max, s.sort_order), -1) + 1;
+  return materializeLocationSpec(companyId, target.parent_id, [clone], nextSortOrder);
 }
 
 // ===========================================================================

@@ -86,7 +86,6 @@ export default function PartLocationInventory({
   const locationOptions = useMemo<LocationOption[]>(
     () =>
       locations
-        .filter((l) => l.is_stockable)
         .map((l) => ({ id: l.id, label: pathLabel(l.id, byId) }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [locations, byId],

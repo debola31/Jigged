@@ -5,7 +5,7 @@ import {
   removeSpecNode,
   addChildUnder,
   duplicateNode,
-  applyQrAnchorByDepth,
+  duplicateSubtreeAsSibling,
   generatedCode,
   explicitCode,
 } from '@/utils/locationSpec';
@@ -52,30 +52,14 @@ describe('buildSpecFromLevels', () => {
     expect(left.code).toBe('C01-R03-L');
   });
 
-  it('marks is_stockable ONLY on the deepest level (leaves)', () => {
-    const [cab1] = buildSpecFromLevels(cabinetsRowsSides);
-    expect(cab1.is_stockable).toBe(false); // cabinet
-    expect(cab1.children[0].is_stockable).toBe(false); // row
-    expect(cab1.children[0].children[0].is_stockable).toBe(true); // side (leaf)
-  });
-
-  it('defaults QR anchors to the top container level; honors qrAnchorDepth override', () => {
-    const [cabTop] = buildSpecFromLevels(cabinetsRowsSides);
-    expect(cabTop.is_qr_anchor).toBe(true); // depth 0 default
-    expect(cabTop.children[0].is_qr_anchor).toBe(false);
-
-    const [cabDeep] = buildSpecFromLevels(cabinetsRowsSides, { qrAnchorDepth: 2 });
-    expect(cabDeep.is_qr_anchor).toBe(false);
-    expect(cabDeep.children[0].children[0].is_qr_anchor).toBe(true); // leaves
-  });
-
-  it('a 2-level spec makes the middle level the leaves', () => {
+  it('a 2-level spec nests the second level under the first', () => {
     const roots = buildSpecFromLevels([
       { kind: 'cabinet', count: 1, namePattern: 'Cabinet {n}' },
       { kind: 'shelf', count: 5, namePattern: 'Shelf {n}' },
     ]);
     expect(countSpecNodes(roots)).toBe(6); // 1 + 5
-    expect(roots[0].children[0].is_stockable).toBe(true); // shelves are leaves now
+    expect(roots[0].children).toHaveLength(5);
+    expect(roots[0].children[0].name).toBe('Shelf 1');
   });
 
   it('zero-pads to a uniform width across the level', () => {
@@ -173,10 +157,30 @@ describe('non-uniform editing', () => {
     expect(next[0].children[1].children).toHaveLength(4);
   });
 
-  it('applyQrAnchorByDepth re-stamps anchors to a chosen depth', () => {
-    const roots = applyQrAnchorByDepth(buildSpecFromLevels(cabinetSidesBins), 2);
-    expect(roots[0].is_qr_anchor).toBe(false); // cabinet
-    expect(roots[0].children[0].is_qr_anchor).toBe(false); // side
-    expect(roots[0].children[0].children[0].is_qr_anchor).toBe(true); // bin (depth 2)
+  it('duplicateSubtreeAsSibling names past EXISTING db siblings and re-derives codes', () => {
+    // One DB cabinet "Cabinet 1" (C01) with 2 bins; duplicate it as a sibling.
+    const [root] = buildSpecFromLevels([
+      { kind: 'cabinet', count: 1, namePattern: 'Cabinet {n}' },
+      { kind: 'bin', count: 2, namePattern: 'Bin {n}' },
+    ]);
+    // Existing siblings in the DB are ["Cabinet 1", "Cabinet 2"] (a gap-free run),
+    // so the copy must land on "Cabinet 3" — not collide with the existing 2.
+    const clone = duplicateSubtreeAsSibling(root, null, ['Cabinet 1', 'Cabinet 2']);
+    expect(clone.name).toBe('Cabinet 3');
+    expect(clone.code).toBe('C03');
+    expect(clone.children.map((b) => b.code)).toEqual(['C03-B01', 'C03-B02']);
+    expect(clone.key).not.toBe(root.key); // fresh keys
+  });
+
+  it('duplicateSubtreeAsSibling re-derives nested codes under a parent code', () => {
+    const [root] = buildSpecFromLevels([
+      { kind: 'row', count: 1, namePattern: 'Row {n}' },
+      { kind: 'side', names: ['Left', 'Right'] },
+    ]);
+    // Duplicating "Row 1" under parent "C01" with one existing sibling.
+    const clone = duplicateSubtreeAsSibling(root, 'C01', ['Row 1']);
+    expect(clone.name).toBe('Row 2');
+    expect(clone.code).toBe('C01-R02');
+    expect(clone.children.map((s) => s.code)).toEqual(['C01-R02-L', 'C01-R02-R']);
   });
 });

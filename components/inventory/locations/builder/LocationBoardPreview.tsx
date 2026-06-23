@@ -3,31 +3,18 @@
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
 import { alpha } from '@mui/material/styles';
 
 import type { LocationSpecNode } from '@/types/inventoryLocations';
 
 // READ-ONLY, type-aware depiction (editing lives in the config). Each top
 // container is drawn to resemble its kind; a section's leaves fill the width as
-// evenly-divided compartments. A QR-code icon marks wherever a label would be
-// printed. Big/deep sets are summarized. A 3D diorama is a tracked follow-up.
+// evenly-divided compartments. Big/deep sets are summarized. A 3D diorama is a
+// tracked follow-up.
 const TOP_LIMIT = 24;
 const SECTION_LIMIT = 16;
 const CELL_LIMIT = 20;
 const FILL_MAX = 8; // up to this many leaves fill the width; beyond, wrap centered
-
-const qrCellBg = (t: { palette: { info: { main: string } } }) => alpha(t.palette.info.main, 0.18);
-
-/** A little QR-code glyph marking where a printed label would go. */
-function QrMark({ size = 15 }: { size?: number }) {
-  return (
-    <QrCode2Icon
-      sx={{ fontSize: size, color: 'info.main', verticalAlign: 'middle', flexShrink: 0 }}
-      titleAccess="A QR label prints here"
-    />
-  );
-}
 
 /** Leaves spanning the section width as evenly-divided compartments. */
 function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
@@ -48,12 +35,10 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
               py: 0.25,
               border: 1,
               borderRadius: 0.5,
-              borderColor: n.is_qr_anchor ? 'info.main' : 'divider',
-              bgcolor: n.is_qr_anchor ? qrCellBg : 'transparent',
+              borderColor: 'divider',
               whiteSpace: 'nowrap',
             }}
           >
-            {n.is_qr_anchor && <QrMark size={12} />}
             {n.name}
             {n.children.length ? ` ·${n.children.length}` : ''}
           </Box>
@@ -82,14 +67,12 @@ function Compartments({ nodes }: { nodes: LocationSpecNode[] }) {
             px: 0.5,
             borderRight: i < nodes.length - 1 ? '1px solid' : 0,
             borderColor: 'divider',
-            color: n.is_qr_anchor ? 'info.light' : 'text.primary',
-            bgcolor: n.is_qr_anchor ? qrCellBg : 'transparent',
+            color: 'text.primary',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
           }}
           title={n.name}
         >
-          {n.is_qr_anchor && <QrMark size={12} />}
           <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {n.name}
             {n.children.length ? ` ·${n.children.length}` : ''}
@@ -106,7 +89,6 @@ function SectionLabel({ node }: { node: LocationSpecNode }) {
       <Typography variant="caption" color="text.secondary">
         {node.name}
       </Typography>
-      {node.is_qr_anchor && <QrMark size={13} />}
     </Box>
   );
 }
@@ -184,7 +166,6 @@ function StorageUnit({ node }: { node: LocationSpecNode }) {
         <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
           {node.name}
         </Typography>
-        {node.is_qr_anchor && <QrMark size={18} />}
         {node.code && (
           <Typography variant="caption" color="text.secondary">
             {node.code}
@@ -204,9 +185,8 @@ function StorageUnit({ node }: { node: LocationSpecNode }) {
                   {bay.children.slice(0, CELL_LIMIT).map((leaf) => (
                     <Box
                       key={leaf.key}
-                      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25, fontSize: 12, border: 1, borderColor: leaf.is_qr_anchor ? 'info.main' : 'divider', borderRadius: 0.5, py: 0.25 }}
+                      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.25, fontSize: 12, border: 1, borderColor: 'divider', borderRadius: 0.5, py: 0.25 }}
                     >
-                      {leaf.is_qr_anchor && <QrMark size={12} />}
                       {leaf.name}
                     </Box>
                   ))}

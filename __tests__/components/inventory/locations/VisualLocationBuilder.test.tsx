@@ -42,7 +42,6 @@ describe('VisualLocationBuilder', () => {
     expect(companyId).toBe('co1');
     expect(parentId).toBeNull();
     expect(spec[0].name).toBe('Cabinet 1');
-    expect(spec[0].is_qr_anchor).toBe(true);
     expect(onCreated).toHaveBeenCalledWith(16);
   });
 

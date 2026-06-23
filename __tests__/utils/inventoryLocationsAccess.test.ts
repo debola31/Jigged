@@ -47,6 +47,7 @@ import {
   deleteLocation,
   moveLocation,
   materializeLocationSpec,
+  duplicateLocation,
   getBalancesForPart,
   addStockAtLocation,
   depleteStockAtLocation,
@@ -323,16 +324,12 @@ describe('materializeLocationSpec', () => {
         name: 'Cabinet 1',
         kind: 'cabinet',
         code: 'C01',
-        is_stockable: false,
-        is_qr_anchor: true,
         children: [
           {
             key: '0/0',
             name: 'Row 1',
             kind: 'row',
             code: 'C01-R01',
-            is_stockable: true,
-            is_qr_anchor: false,
             children: [],
           },
         ],
@@ -354,10 +351,41 @@ describe('materializeLocationSpec', () => {
         parent_id: null,
         name: 'Cabinet 1',
         code: 'C01',
-        is_qr_anchor: true,
-        is_stockable: false,
         sort_order: 0,
       }),
+    );
+  });
+});
+
+describe('duplicateLocation', () => {
+  it('deep-copies a subtree as a bumped sibling, codes re-derived, structure only', async () => {
+    // Existing: Cabinet 1 (C01) → Bin 1 (C01-B01)
+    queueFrom({
+      data: [
+        loc({ id: 'cab', name: 'Cabinet 1', kind: 'cabinet', code: 'C01' }),
+        loc({ id: 'b1', name: 'Bin 1', kind: 'bin', parent_id: 'cab', code: 'C01-B01' }),
+      ],
+      error: null,
+    });
+    // materialize → new cabinet insert (parent_id null, no parent check)
+    queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2', code: 'C02' }), error: null });
+    // copied bin → assertParentInCompany('cab2') getLocation, then insert
+    queueFrom({ data: loc({ id: 'cab2', company_id: 'co1' }), error: null });
+    queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2', code: 'C02-B01' }), error: null });
+
+    const created = await duplicateLocation('co1', 'cab');
+
+    expect(created.map((r) => r.id)).toEqual(['cab2', 'b2']);
+    // from() #0 = getLocations; #1 = new cabinet insert. sort_order lands AFTER
+    // the one existing sibling (sort_order 0), so the copy doesn't jump to front.
+    const cabInsert = mockSupabase.from.mock.results[1].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(cabInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ parent_id: null, name: 'Cabinet 2', code: 'C02', sort_order: 1 }),
+    );
+    // #3 = copied bin insert, code re-derived under the new cabinet
+    const binInsert = mockSupabase.from.mock.results[3].value as Record<string, ReturnType<typeof vi.fn>>;
+    expect(binInsert.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1', code: 'C02-B01' }),
     );
   });
 });

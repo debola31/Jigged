@@ -9,8 +9,6 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Autocomplete from '@mui/material/Autocomplete';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Switch from '@mui/material/Switch';
 import Alert from '@mui/material/Alert';
 
 import type { InventoryLocation } from '@/types/inventoryLocations';
@@ -21,8 +19,6 @@ export interface LocationFormValues {
   name: string;
   kind: string | null;
   code: string | null;
-  is_stockable: boolean;
-  is_qr_anchor: boolean;
 }
 
 interface LocationFormModalProps {
@@ -45,8 +41,6 @@ export default function LocationFormModal({
   const [name, setName] = useState('');
   const [kind, setKind] = useState<string | null>(null);
   const [code, setCode] = useState('');
-  const [isStockable, setIsStockable] = useState(true);
-  const [isQrAnchor, setIsQrAnchor] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,8 +50,6 @@ export default function LocationFormModal({
     setName(location?.name ?? '');
     setKind(location?.kind ?? null);
     setCode(location?.code ?? '');
-    setIsStockable(location?.is_stockable ?? true);
-    setIsQrAnchor(location?.is_qr_anchor ?? false);
     setError(null);
   };
 
@@ -73,8 +65,6 @@ export default function LocationFormModal({
         name: name.trim(),
         kind: kind?.trim() || null,
         code: code.trim() || null,
-        is_stockable: isStockable,
-        is_qr_anchor: isQrAnchor,
       });
       onClose();
     } catch (e) {
@@ -126,14 +116,6 @@ export default function LocationFormModal({
             placeholder="CAB1-R3-L"
             helperText="Printed on the label; the QR itself always encodes the location ID."
             fullWidth
-          />
-          <FormControlLabel
-            control={<Switch checked={isStockable} onChange={(e) => setIsStockable(e.target.checked)} />}
-            label="Can hold stock"
-          />
-          <FormControlLabel
-            control={<Switch checked={isQrAnchor} onChange={(e) => setIsQrAnchor(e.target.checked)} />}
-            label="QR anchor (print a scannable label here)"
           />
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>

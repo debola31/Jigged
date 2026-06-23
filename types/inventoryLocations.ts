@@ -63,8 +63,7 @@ export interface BulkGenerateSpec {
 /**
  * One configured division level in the visual builder, e.g. "10 rows named
  * Row {n}" or "{Left, Right}". Either a generated count+pattern OR explicit
- * names. Levels are ordered shallow → deep; the deepest level's nodes are the
- * stockable leaves.
+ * names. Levels are ordered shallow → deep.
  */
 export interface LevelSpec {
   kind: string;
@@ -80,15 +79,14 @@ export interface LevelSpec {
  * before any DB write. `materializeLocationSpec` inserts it into
  * inventory_locations on Create. `key` is a stable client id for board
  * rendering / prune (NOT the DB id); `code` is precomputed during assembly
- * (parent-prefixed, zero-padded) to match the manual bulk generator.
+ * (parent-prefixed, zero-padded) to match the manual bulk generator. Every
+ * location can hold stock and be printed, so no per-node stockable/QR flags.
  */
 export interface LocationSpecNode {
   key: string;
   name: string;
   kind: string | null;
   code: string | null;
-  is_stockable: boolean;
-  is_qr_anchor: boolean;
   children: LocationSpecNode[];
 }
 

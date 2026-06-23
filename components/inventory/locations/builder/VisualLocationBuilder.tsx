@@ -12,8 +12,6 @@ import Stepper from '@mui/material/Stepper';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Divider from '@mui/material/Divider';
-import TextField from '@mui/material/TextField';
-import MenuItem from '@mui/material/MenuItem';
 import Alert from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 
@@ -24,7 +22,6 @@ import {
   removeSpecNode,
   addChildUnder,
   duplicateNode,
-  applyQrAnchorByDepth,
 } from '@/utils/locationSpec';
 import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
 import StorageTypePalette from './StorageTypePalette';
@@ -44,8 +41,6 @@ interface VisualLocationBuilderProps {
   onCreated: (count: number) => void;
 }
 
-const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-
 export default function VisualLocationBuilder({
   open,
   companyId,
@@ -57,7 +52,6 @@ export default function VisualLocationBuilder({
   const [activeStep, setActiveStep] = useState(0);
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [levels, setLevels] = useState<LevelSpec[]>([]);
-  const [qrAnchorDepth, setQrAnchorDepth] = useState(0);
   // Once a single branch is fine-tuned, the tree is hand-edited directly and no
   // longer regenerated from `levels` (which becomes the "Start over" template).
   const [customized, setCustomized] = useState(false);
@@ -70,7 +64,6 @@ export default function VisualLocationBuilder({
     setActiveStep(0);
     setSelectedTypeId(null);
     setLevels([]);
-    setQrAnchorDepth(0);
     setCustomized(false);
     setEditedTree([]);
     setStartOverOpen(false);
@@ -79,8 +72,8 @@ export default function VisualLocationBuilder({
   };
 
   const uniformTree = useMemo(
-    () => buildSpecFromLevels(levels, { qrAnchorDepth, parentCode }),
-    [levels, qrAnchorDepth, parentCode],
+    () => buildSpecFromLevels(levels, { parentCode }),
+    [levels, parentCode],
   );
   const tree = customized ? editedTree : uniformTree;
   const total = countSpecNodes(tree);
@@ -88,32 +81,26 @@ export default function VisualLocationBuilder({
   const pickType = (type: StorageType) => {
     setSelectedTypeId(type.id);
     setLevels(cloneLevels(type.defaultLevels));
-    setQrAnchorDepth(0);
     setCustomized(false);
     setEditedTree([]);
     setActiveStep(1);
   };
 
-  const changeQrDepth = (depth: number) => {
-    setQrAnchorDepth(depth);
-    if (customized) setEditedTree((t) => applyQrAnchorByDepth(t, depth));
-  };
-
   // Editing lives in the config; the preview is read-only.
   const enterCustomize = () => {
-    setEditedTree(applyQrAnchorByDepth(tree, qrAnchorDepth));
+    setEditedTree(tree);
     setCustomized(true);
   };
   const editRemove = (key: string) => {
-    setEditedTree(applyQrAnchorByDepth(removeSpecNode(tree, key), qrAnchorDepth));
+    setEditedTree(removeSpecNode(tree, key));
     setCustomized(true);
   };
   const editAdd = (parentKey: string) => {
-    setEditedTree(applyQrAnchorByDepth(addChildUnder(tree, parentKey), qrAnchorDepth));
+    setEditedTree(addChildUnder(tree, parentKey));
     setCustomized(true);
   };
   const editDuplicate = (key: string) => {
-    setEditedTree(applyQrAnchorByDepth(duplicateNode(tree, key), qrAnchorDepth));
+    setEditedTree(duplicateNode(tree, key));
     setCustomized(true);
   };
 
@@ -187,25 +174,13 @@ export default function VisualLocationBuilder({
 
             {/* Read-only type-aware preview */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5, flexWrap: 'wrap' }}>
-                <Typography variant="overline" color="text.secondary" sx={{ flex: 1, letterSpacing: 1 }}>
-                  Preview
-                </Typography>
-                <TextField
-                  select
-                  label="QR labels at"
-                  value={qrAnchorDepth}
-                  onChange={(e) => changeQrDepth(Number(e.target.value))}
-                  size="small"
-                  sx={{ minWidth: 160 }}
-                >
-                  {levels.map((l, i) => (
-                    <MenuItem key={i} value={i}>
-                      {capitalize(l.kind)}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Box>
+              <Typography
+                variant="overline"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 1.5, letterSpacing: 1 }}
+              >
+                Preview
+              </Typography>
               <LocationBoardPreview nodes={tree} />
             </Box>
           </Box>

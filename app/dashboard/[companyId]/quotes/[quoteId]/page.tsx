@@ -25,13 +25,18 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Chip from '@mui/material/Chip';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
+import QuoteEmailDialog from '@/components/quotes/QuoteEmailDialog';
 import EmailIcon from '@mui/icons-material/Email';
-import { buildQuoteMailto } from '@/utils/quoteMailto';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -63,6 +68,8 @@ export default function QuoteDetailPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const fetchQuote = useCallback(async () => {
     try {
       setLoading(true);
@@ -127,14 +134,15 @@ export default function QuoteDetailPage() {
     setError(null);
     setPreviewLoading(true);
     try {
+      // Ensure the company is loaded so the email dialog can render the
+      // example message and generate the PDF for download. The dialog itself
+      // owns the To/CC entry, the mailto launch, and the PDF download.
       const c = company ?? (await getCompany(companyId));
       if (!c) {
         throw new Error('Company info unavailable — cannot draft email.');
       }
       setCompany(c);
-      // Open the user's own mail client with the quote pre-filled via mailto —
-      // no server send, no attachment. Replies/sent-copy come from their mailbox.
-      window.location.href = buildQuoteMailto(quote, c);
+      setEmailOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open email draft');
     } finally {
@@ -202,10 +210,12 @@ export default function QuoteDetailPage() {
   const shippingAddress = customerAddresses.find((a) => a.id === quote.shipping_address_id) ?? null;
   const billingAddress = customerAddresses.find((a) => a.id === quote.billing_address_id) ?? null;
   const quoteContact = customerContacts.find((c) => c.id === quote.contact_id) ?? null;
-  // When billing points at the same address as shipping, don't repeat it —
-  // just flag the match.
-  const billingSameAsShipping =
-    !!quote.shipping_address_id && quote.billing_address_id === quote.shipping_address_id;
+  // Ship-to is its own column only when a distinct shipping address is set;
+  // otherwise the card is just Customer (name + billing) + Contact.
+  const showShippingColumn =
+    !!quote.shipping_address_id &&
+    quote.shipping_address_id !== quote.billing_address_id &&
+    shippingAddress !== null;
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {
@@ -244,24 +254,91 @@ export default function QuoteDetailPage() {
         >
           Back to Quotes
         </Button>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={<EmailIcon />}
-            onClick={handleEmailQuote}
-            disabled={previewLoading || actionLoading}
+        {/* One action row: the single primary action ("Convert to Job") plus an
+            overflow menu for the rest. Keeps the page to one line of actions and
+            uses labelled menu items (not bare icons) — better for the shop-floor
+            tablet / older-user audience than an icon row. */}
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          {!convertedLocked && (
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<PlayArrowIcon />}
+              onClick={() => setConvertModalOpen(true)}
+              disabled={actionLoading}
+            >
+              Convert to Job
+            </Button>
+          )}
+          <Tooltip title="Quote actions">
+            <IconButton
+              aria-label="Quote actions"
+              onClick={(e) => setMenuAnchor(e.currentTarget)}
+              disabled={actionLoading}
+              sx={{ minWidth: 48, minHeight: 48 }}
+            >
+              {previewLoading ? <CircularProgress size={20} color="inherit" /> : <MoreVertIcon />}
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={menuAnchor}
+            open={Boolean(menuAnchor)}
+            onClose={() => setMenuAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
           >
-            Email
-          </Button>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : <VisibilityIcon />}
-            onClick={handleOpenPreview}
-            disabled={previewLoading || actionLoading}
-          >
-            View PDF
-          </Button>
+            {isEditable && (
+              <MenuItem
+                onClick={() => {
+                  setMenuAnchor(null);
+                  setEditMode(true);
+                }}
+                sx={{ minHeight: 48 }}
+              >
+                <ListItemIcon>
+                  <EditIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>Edit</ListItemText>
+              </MenuItem>
+            )}
+            <MenuItem
+              onClick={() => {
+                setMenuAnchor(null);
+                handleOpenPreview();
+              }}
+              sx={{ minHeight: 48 }}
+            >
+              <ListItemIcon>
+                <VisibilityIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>View PDF</ListItemText>
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setMenuAnchor(null);
+                handleEmailQuote();
+              }}
+              sx={{ minHeight: 48 }}
+            >
+              <ListItemIcon>
+                <EmailIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>Email</ListItemText>
+            </MenuItem>
+            <Divider />
+            <MenuItem
+              onClick={() => {
+                setMenuAnchor(null);
+                setDeleteDialogOpen(true);
+              }}
+              sx={{ minHeight: 48, color: 'error.main' }}
+            >
+              <ListItemIcon>
+                <DeleteIcon fontSize="small" sx={{ color: 'error.main' }} />
+              </ListItemIcon>
+              <ListItemText>Delete</ListItemText>
+            </MenuItem>
+          </Menu>
         </Box>
       </Box>
 
@@ -285,14 +362,8 @@ export default function QuoteDetailPage() {
             <Typography variant="body2" color="text.secondary">
               Created {formatDate(quote.created_at)}
             </Typography>
-            {(quote.created_by_member?.name || quote.created_by_member?.email) && (
-              <Typography variant="body2" color="text.secondary">
-                Created by{' '}
-                <Typography component="span" variant="body2" color="text.primary" sx={{ fontWeight: 500 }}>
-                  {quote.created_by_member.name || quote.created_by_member.email}
-                </Typography>
-              </Typography>
-            )}
+            {/* "Created by" moved lower (see "Prepared by" below the line items),
+                mirroring the PDF now that acceptance no longer needs a signature. */}
             {quote.expiration_date && (
               <Typography
                 variant="body2"
@@ -317,50 +388,9 @@ export default function QuoteDetailPage() {
             )}
           </Box>
         </Box>
-
-        {/* Action Buttons */}
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {isEditable && (
-            <Button
-              variant="outlined"
-              startIcon={<EditIcon />}
-              onClick={() => setEditMode(true)}
-              disabled={actionLoading}
-            >
-              Edit
-            </Button>
-          )}
-
-          {!convertedLocked && (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<PlayArrowIcon />}
-              onClick={() => setConvertModalOpen(true)}
-              disabled={actionLoading}
-            >
-              Convert to Job
-            </Button>
-          )}
-
-          {/* Invoicing lives on the Job now (job-keyed). The converted-jobs
-              banner below links through to the job, where invoices are created. */}
-
-          <Box sx={{ flex: 1 }} />
-
-          <Tooltip title="Delete Quote">
-            <IconButton
-              onClick={() => setDeleteDialogOpen(true)}
-              disabled={actionLoading}
-              sx={{
-                color: 'error.main',
-                '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
-              }}
-            >
-              <DeleteIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
+        {/* Document-level + lifecycle actions moved to the single top toolbar
+            row (primary "Convert to Job" + overflow menu). Invoicing lives on
+            the Job (job-keyed); the converted-jobs banner below links through. */}
       </Box>
 
       {error && (
@@ -400,19 +430,33 @@ export default function QuoteDetailPage() {
               <Divider sx={{ mb: 2 }} />
               {quote.customers ? (
                 <Grid container spacing={2}>
-                  <Grid size={{ xs: 12 }}>
+                  {/* Customer — name + billing address. Ship-to gets its own
+                      column only when it differs; otherwise just Customer +
+                      Contact (two columns). */}
+                  <Grid size={{ xs: 12, sm: 6, md: showShippingColumn ? 4 : 6 }}>
                     <Typography variant="body2" color="text.secondary">
                       Customer
                     </Typography>
                     <MuiLink
                       component={Link}
                       href={`/dashboard/${companyId}/customers/${quote.customer_id}`}
-                      sx={{ fontWeight: 500 }}
+                      sx={{ fontWeight: 500, display: 'block' }}
                     >
                       {quote.customers.name}
                     </MuiLink>
+                    <Box sx={{ mt: 0.5 }}>
+                      <AddressDisplay address={billingAddress} />
+                    </Box>
                   </Grid>
-                  <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  {showShippingColumn && (
+                    <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Ship to
+                      </Typography>
+                      <AddressDisplay address={shippingAddress} />
+                    </Grid>
+                  )}
+                  <Grid size={{ xs: 12, sm: 6, md: showShippingColumn ? 4 : 6 }}>
                     <Typography variant="body2" color="text.secondary">
                       Contact
                     </Typography>
@@ -436,24 +480,6 @@ export default function QuoteDetailPage() {
                       <Typography variant="body1" color="text.secondary">
                         Not set
                       </Typography>
-                    )}
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Shipping address
-                    </Typography>
-                    <AddressDisplay address={shippingAddress} />
-                  </Grid>
-                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Billing address
-                    </Typography>
-                    {billingSameAsShipping ? (
-                      <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                        Same as shipping
-                      </Typography>
-                    ) : (
-                      <AddressDisplay address={billingAddress} />
                     )}
                   </Grid>
                 </Grid>
@@ -555,6 +581,16 @@ export default function QuoteDetailPage() {
         </Grid>
       </Grid>
 
+      {/* Prepared by — relocated from the header, mirroring the PDF footer. */}
+      {(quote.created_by_member?.name || quote.created_by_member?.email) && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 3 }}>
+          Prepared by{' '}
+          <Typography component="span" variant="body2" color="text.primary" sx={{ fontWeight: 500 }}>
+            {quote.created_by_member.name || quote.created_by_member.email}
+          </Typography>
+        </Typography>
+      )}
+
       {/* Preview PDF Dialog */}
       {company && (
         <QuotePdfPreviewDialog
@@ -566,6 +602,16 @@ export default function QuoteDetailPage() {
             setPreviewOpen(false);
             handleEmailQuote();
           }}
+        />
+      )}
+
+      {/* Email Quote Dialog — To/CC entry, example message, PDF download */}
+      {company && (
+        <QuoteEmailDialog
+          open={emailOpen}
+          onClose={() => setEmailOpen(false)}
+          quote={quote}
+          company={company}
         />
       )}
 

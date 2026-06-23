@@ -190,6 +190,9 @@ test.describe('Quote edit — reload contract', () => {
     // Lead time unit is required (no default) — pick one before submitting.
     await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
+    // Payment terms are required — pick a preset before submitting.
+    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new
@@ -199,7 +202,8 @@ test.describe('Quote edit — reload contract', () => {
     // ── Edit pass: bump qty on the existing line, add a new part, then
     //    save. (Removal is exercised in the second edit pass below — doing
     //    too much at once obscures which step regressed when this fails.)
-    await page.getByRole('button', { name: /^Edit$/ }).click();
+    await page.getByRole('button', { name: /Quote actions/i }).click();
+    await page.getByRole('menuitem', { name: /^Edit$/i }).click();
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeVisible();
 
     // Bump the existing line from 1 → 5.
@@ -237,7 +241,7 @@ test.describe('Quote edit — reload contract', () => {
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeEnabled();
     await page.getByRole('button', { name: /Save changes/i }).click();
     // Save returns to the read-only detail page.
-    await expect(page.getByRole('button', { name: /^Edit$/ })).toBeVisible({
+    await expect(page.getByRole('button', { name: /Convert to Job/i })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -255,13 +259,14 @@ test.describe('Quote edit — reload contract', () => {
 
     // ── Second edit pass: remove the just-added part. After reload, only
     //    the original line should remain.
-    await page.getByRole('button', { name: /^Edit$/ }).click();
+    await page.getByRole('button', { name: /Quote actions/i }).click();
+    await page.getByRole('menuitem', { name: /^Edit$/i }).click();
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeVisible();
     // Two "Remove part" icons exist — click the one on the second block.
     const removeBtns = page.getByRole('button', { name: /Remove part/i });
     await removeBtns.nth(1).click();
     await page.getByRole('button', { name: /Save changes/i }).click();
-    await expect(page.getByRole('button', { name: /^Edit$/ })).toBeVisible({
+    await expect(page.getByRole('button', { name: /Convert to Job/i })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -323,6 +328,9 @@ test.describe('Quote edit — reload contract', () => {
     // Lead time unit is required (no default) — pick one before submitting.
     await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
+    // Payment terms are required — pick a preset before submitting.
+    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new
@@ -363,7 +371,8 @@ test.describe('Quote edit — reload contract', () => {
     // which let toHaveURL return immediately on the still-current /new
     // before navigation to the post-create /quotes/<uuid> completed.
     await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
-    await page.getByRole('button', { name: /^Edit$/ }).click();
+    await page.getByRole('button', { name: /Quote actions/i }).click();
+    await page.getByRole('menuitem', { name: /^Edit$/i }).click();
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeVisible();
 
     // Drift summary alert should be visible.
@@ -374,7 +383,7 @@ test.describe('Quote edit — reload contract', () => {
     // forced-choice, so Save must be enabled here.
     await expect(page.getByRole('button', { name: /Save changes/i })).toBeEnabled();
     await page.getByRole('button', { name: /Save changes/i }).click();
-    await expect(page.getByRole('button', { name: /^Edit$/ })).toBeVisible({
+    await expect(page.getByRole('button', { name: /Convert to Job/i })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -438,6 +447,9 @@ test.describe('Quote edit — reload contract', () => {
     // Lead time unit is required (no default) — pick one before submitting.
     await page.getByRole('combobox', { name: 'Unit' }).click();
     await page.getByRole('option', { name: 'Weeks' }).click();
+    // Payment terms are required — pick a preset before submitting.
+    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
     // which let toHaveURL return immediately on the still-current /new
@@ -468,13 +480,14 @@ test.describe('Quote edit — reload contract', () => {
     // which let toHaveURL return immediately on the still-current /new
     // before navigation to the post-create /quotes/<uuid> completed.
     await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
-    await page.getByRole('button', { name: /^Edit$/ }).click();
+    await page.getByRole('button', { name: /Quote actions/i }).click();
+    await page.getByRole('menuitem', { name: /^Edit$/i }).click();
     await expect(page.getByTestId('quote-drift-summary')).toBeVisible({
       timeout: 10_000,
     });
     await page.getByTestId('drift-update-0').click();
     await page.getByRole('button', { name: /Save changes/i }).click();
-    await expect(page.getByRole('button', { name: /^Edit$/ })).toBeVisible({
+    await expect(page.getByRole('button', { name: /Convert to Job/i })).toBeVisible({
       timeout: 15_000,
     });
 

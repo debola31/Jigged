@@ -5,13 +5,28 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 // ============== Types ==============
 
+export type ActivityType = 'quote' | 'job' | 'shipment' | 'note' | 'photo' | 'operation';
+
+export type ActivityAction =
+  | 'created'
+  | 'started'
+  | 'completed'
+  | 'shipped'
+  | 'noted'
+  | 'photo_added';
+
 export interface ActivityItem {
   id: string;
-  type: 'quote' | 'job';
+  type: ActivityType;
+  /** The job/quote number the event hangs off (the row's bold label). */
   entityNumber: string;
-  action: 'created' | 'started' | 'completed' | 'shipped';
+  action: ActivityAction;
   timestamp: string;
   customerName?: string;
+  /** For note/photo events: who authored it. */
+  authorName?: string;
+  /** Deep link to the underlying record. */
+  href?: string;
 }
 
 // ============== Pinned Metrics ==============
@@ -407,4 +422,310 @@ export async function getPinnedMetricValues(
     })
   );
   return Object.fromEntries(results) as Record<MetricKey, MetricValue>;
+}
+
+// ============== Activity feed ==============
+//
+// A cross-module "what happened" stream, built UNION-on-read over the
+// authoritative tables (jobs, quotes, shipments, job_notes, job_operations) —
+// NOT a materialized/fan-out activity table. Per-tenant volume is tiny and the
+// status/timestamps already live on those rows, so a second source of truth
+// would only invite drift (mirrors the getPartActivity aggregate-on-read).
+// All reads are plain Supabase (no AI on mount). company_id leads every query.
+
+/** Cap pulled per source before the in-memory merge, so one busy source can't starve the feed. */
+const ACTIVITY_PER_SOURCE = 50;
+
+/** Flatten a Supabase joined relation (object | array | null) to a single row. */
+function firstRel<T>(rel: T | T[] | null | undefined): T | null {
+  if (!rel) return null;
+  return Array.isArray(rel) ? rel[0] ?? null : rel;
+}
+
+interface CollectOptions {
+  /** Only items strictly older than this ISO timestamp (pagination cursor). */
+  before?: string;
+  /** Restrict to these activity types. Undefined = all. */
+  types?: ActivityType[];
+  /** Rows to pull per source query. */
+  perSource?: number;
+}
+
+type JobRow = {
+  id: string;
+  job_number: string;
+  created_at: string | null;
+  completed_at: string | null;
+  customer: { name: string | null } | { name: string | null }[] | null;
+};
+
+async function fetchJobActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+
+  let createdQ = supabase
+    .from('jobs')
+    .select('id, job_number, created_at, completed_at, customer:customers(name)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) createdQ = createdQ.lt('created_at', before);
+
+  let completedQ = supabase
+    .from('jobs')
+    .select('id, job_number, created_at, completed_at, customer:customers(name)')
+    .eq('company_id', companyId)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(perSource);
+  if (before) completedQ = completedQ.lt('completed_at', before);
+
+  const [created, completed] = await Promise.all([createdQ, completedQ]);
+  const items: ActivityItem[] = [];
+
+  for (const r of (created.data ?? []) as unknown as JobRow[]) {
+    if (!r.created_at) continue;
+    items.push({
+      id: `job-created-${r.id}`,
+      type: 'job',
+      action: 'created',
+      entityNumber: r.job_number,
+      timestamp: r.created_at,
+      customerName: firstRel(r.customer)?.name ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.id}`,
+    });
+  }
+  for (const r of (completed.data ?? []) as unknown as JobRow[]) {
+    if (!r.completed_at) continue;
+    items.push({
+      id: `job-completed-${r.id}`,
+      type: 'job',
+      action: 'completed',
+      entityNumber: r.job_number,
+      timestamp: r.completed_at,
+      customerName: firstRel(r.customer)?.name ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.id}`,
+    });
+  }
+  return items;
+}
+
+type QuoteRow = {
+  id: string;
+  quote_number: string;
+  created_at: string | null;
+  customer: { name: string | null } | { name: string | null }[] | null;
+};
+
+async function fetchQuoteActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  let q = supabase
+    .from('quotes')
+    .select('id, quote_number, created_at, customer:customers(name)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  for (const r of (data ?? []) as unknown as QuoteRow[]) {
+    if (!r.created_at) continue;
+    items.push({
+      id: `quote-created-${r.id}`,
+      type: 'quote',
+      action: 'created',
+      entityNumber: r.quote_number,
+      timestamp: r.created_at,
+      customerName: firstRel(r.customer)?.name ?? undefined,
+      href: `/dashboard/${companyId}/quotes/${r.id}`,
+    });
+  }
+  return items;
+}
+
+type ShipmentRow = {
+  id: string;
+  created_at: string;
+  job_id: string;
+  job: { job_number: string } | { job_number: string }[] | null;
+  customer: { name: string | null } | { name: string | null }[] | null;
+};
+
+async function fetchShipmentActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  let q = supabase
+    .from('shipments')
+    .select('id, created_at, job_id, job:jobs(job_number), customer:customers(name)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  for (const r of (data ?? []) as unknown as ShipmentRow[]) {
+    if (!r.created_at) continue;
+    items.push({
+      id: `shipment-${r.id}`,
+      type: 'shipment',
+      action: 'shipped',
+      entityNumber: firstRel(r.job)?.job_number ?? '',
+      timestamp: r.created_at,
+      customerName: firstRel(r.customer)?.name ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+    });
+  }
+  return items;
+}
+
+type NoteActivityRow = {
+  id: string;
+  created_at: string;
+  job_id: string;
+  job: { job_number: string } | { job_number: string }[] | null;
+  author: { name: string | null } | { name: string | null }[] | null;
+  media: { id: string }[] | null;
+};
+
+async function fetchNoteActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  let q = supabase
+    .from('job_notes')
+    .select('id, created_at, job_id, job:jobs(job_number), author:user_company_access(name), media:job_note_media(id)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  for (const r of (data ?? []) as unknown as NoteActivityRow[]) {
+    if (!r.created_at) continue;
+    const hasMedia = (r.media ?? []).length > 0;
+    items.push({
+      id: `note-${r.id}`,
+      // A note carrying photos surfaces as a 'photo' event so the /activity
+      // filter can separate the two; text-only notes are 'note'.
+      type: hasMedia ? 'photo' : 'note',
+      action: hasMedia ? 'photo_added' : 'noted',
+      entityNumber: firstRel(r.job)?.job_number ?? '',
+      timestamp: r.created_at,
+      authorName: firstRel(r.author)?.name ?? undefined,
+      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+    });
+  }
+  return items;
+}
+
+type OperationActivityRow = {
+  id: string;
+  completed_at: string | null;
+  job_id: string;
+  jobs: { job_number: string } | { job_number: string }[] | null;
+};
+
+async function fetchOperationActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+  // job_operations has no company_id; scope through the inner jobs join.
+  let q = supabase
+    .from('job_operations')
+    .select('id, completed_at, job_id, jobs!inner(job_number, company_id)')
+    .eq('jobs.company_id', companyId)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('completed_at', before);
+
+  const { data } = await q;
+  const items: ActivityItem[] = [];
+  for (const r of (data ?? []) as unknown as OperationActivityRow[]) {
+    if (!r.completed_at) continue;
+    items.push({
+      id: `op-${r.id}`,
+      type: 'operation',
+      action: 'completed',
+      entityNumber: firstRel(r.jobs)?.job_number ?? '',
+      timestamp: r.completed_at,
+      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+    });
+  }
+  return items;
+}
+
+async function collectActivity(
+  companyId: string,
+  { before, types, perSource = ACTIVITY_PER_SOURCE }: CollectOptions,
+): Promise<ActivityItem[]> {
+  const want = (t: ActivityType) => !types || types.includes(t);
+
+  const tasks: Promise<ActivityItem[]>[] = [];
+  if (want('job')) tasks.push(fetchJobActivity(companyId, before, perSource));
+  if (want('quote')) tasks.push(fetchQuoteActivity(companyId, before, perSource));
+  if (want('shipment')) tasks.push(fetchShipmentActivity(companyId, before, perSource));
+  // 'note' and 'photo' both come from job_notes (one query yields both kinds).
+  if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
+  if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));
+
+  const results = await Promise.all(tasks.map((t) => t.catch(() => [] as ActivityItem[])));
+  let items = results.flat();
+  if (types) items = items.filter((i) => types.includes(i.type));
+  items.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return items;
+}
+
+/**
+ * Compact dashboard "Recent Activity" card: the latest manager-relevant
+ * business milestones (jobs created/completed, quotes created, shipments) —
+ * deliberately NOT the high-volume per-note/photo floor chatter, which lives on
+ * the dedicated /activity page. Newest first, capped (default 6).
+ */
+export async function getDashboardActivity(
+  companyId: string,
+  opts?: { limit?: number },
+): Promise<ActivityItem[]> {
+  const limit = opts?.limit ?? 6;
+  const items = await collectActivity(companyId, {
+    types: ['job', 'quote', 'shipment'],
+    perSource: Math.max(limit * 3, 12),
+  });
+  return items.slice(0, limit);
+}
+
+/**
+ * The dedicated /activity page stream: the full cross-module feed including
+ * floor activity (notes, photos, operation completions). Optionally filtered by
+ * type and paginated with a `before` cursor (pass the last item's timestamp to
+ * load older). Newest first.
+ */
+export async function getActivityStream(
+  companyId: string,
+  opts?: { types?: ActivityType[]; limit?: number; before?: string },
+): Promise<ActivityItem[]> {
+  const limit = opts?.limit ?? 30;
+  const items = await collectActivity(companyId, {
+    before: opts?.before,
+    types: opts?.types,
+    perSource: Math.max(limit, ACTIVITY_PER_SOURCE),
+  });
+  return items.slice(0, limit);
 }

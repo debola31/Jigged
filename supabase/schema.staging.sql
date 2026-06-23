@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-22T00:21:17Z
+-- Generated: 2026-06-23T13:00:20Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -169,6 +169,21 @@ CREATE TABLE IF NOT EXISTS "public"."feedback"
     CONSTRAINT "feedback_pkey" PRIMARY KEY (id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."inventory_locations"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "parent_id" uuid,
+    "name" text NOT NULL,
+    "kind" text,
+    "code" text,
+    "sort_order" integer NOT NULL DEFAULT 0,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "inventory_locations_pkey" PRIMARY KEY (id),
+    CONSTRAINT "inventory_locations_name_not_blank" CHECK ((length(btrim(name)) > 0))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."invitations"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -216,8 +231,16 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "billing_address_id" uuid,
     "shipping_address_id" uuid,
     "contact_id" uuid,
+    "payment_terms" text,
+    "lead_time_value" integer,
+    "lead_time_unit" text DEFAULT 'business_days'::text,
+    "customer_name" text,
+    "bill_to_address" jsonb,
+    "ship_to_address" jsonb,
+    "contact_snapshot" jsonb,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
+    CONSTRAINT "quotes_lead_time_unit_check" CHECK ((lead_time_unit = ANY (ARRAY['business_days'::text, 'calendar_days'::text, 'weeks'::text]))),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
 );
 
@@ -242,6 +265,10 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "billing_address_id" uuid,
     "shipping_address_id" uuid,
     "contact_id" uuid,
+    "customer_name" text,
+    "bill_to_address" jsonb,
+    "ship_to_address" jsonb,
+    "contact_snapshot" jsonb,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -291,9 +318,11 @@ CREATE TABLE IF NOT EXISTS "public"."shipments"
     "voided_by" uuid,
     "shipping_method" text,
     "job_id" uuid NOT NULL,
+    "customer_name" text,
+    "bill_to_address" jsonb,
+    "ship_to_address" jsonb,
     CONSTRAINT "shipments_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipments_packing_slip_company_unique" UNIQUE (company_id, packing_slip_number),
-    CONSTRAINT "shipments_one_address_source" CHECK ((((shipping_address_id IS NOT NULL) AND (one_time_address IS NULL)) OR ((shipping_address_id IS NULL) AND (one_time_address IS NOT NULL)))),
     CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text]))))
 );
 
@@ -333,18 +362,6 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
     CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text, 'operator'::text])))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."job_notes"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "job_id" uuid NOT NULL,
-    "author_id" uuid,
-    "body" text NOT NULL,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "job_notes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_notes_body_not_blank" CHECK ((length(btrim(body)) > 0))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
@@ -453,12 +470,42 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "source" text NOT NULL DEFAULT 'made'::text,
     "markup_rate_id" uuid,
+    "is_location_tracked" boolean NOT NULL DEFAULT false,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
     CONSTRAINT "parts_requires_unit" CHECK ((primary_unit IS NOT NULL)),
     CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."part_attachments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "storage_path" text NOT NULL,
+    "file_name" text NOT NULL,
+    "kind" text NOT NULL DEFAULT 'other'::text,
+    "mime_type" text,
+    "size_bytes" bigint,
+    "uploaded_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "part_attachments_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_attachments_kind_check" CHECK ((kind = ANY (ARRAY['pdf'::text, 'step'::text, 'dwg'::text, 'other'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."part_location_stock"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "location_id" uuid NOT NULL,
+    "quantity" numeric NOT NULL DEFAULT 0,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "part_location_stock_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_location_stock_part_location_unique" UNIQUE (part_id, location_id),
+    CONSTRAINT "part_location_stock_quantity_non_negative" CHECK ((quantity >= (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_notes"
@@ -469,8 +516,10 @@ CREATE TABLE IF NOT EXISTS "public"."part_notes"
     "author_id" uuid,
     "body" text NOT NULL,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "note_type" text NOT NULL DEFAULT 'user'::text,
     CONSTRAINT "part_notes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "part_notes_body_not_blank" CHECK ((length(btrim(body)) > 0))
+    CONSTRAINT "part_notes_body_not_blank" CHECK ((length(btrim(body)) > 0)),
+    CONSTRAINT "part_notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'pricing'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
@@ -718,7 +767,6 @@ CREATE TABLE IF NOT EXISTS "public"."routing_operations"
     "cycle_minutes_per_unit" numeric(8,4),
     "labor_rate_override" numeric(10,2),
     "external_unit_price" numeric(12,4),
-    "external_setup_cost" numeric(12,4),
     "instructions" text,
     "metadata" jsonb DEFAULT '{}'::jsonb,
     "created_at" timestamp with time zone DEFAULT now(),
@@ -769,9 +817,47 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
     "created_at" timestamp with time zone DEFAULT now(),
     "created_by" uuid,
     "has_discrepancy" boolean NOT NULL DEFAULT false,
+    "location_id" uuid,
+    "transfer_group_id" uuid,
+    "location_name" text,
     CONSTRAINT "inventory_transactions_pkey" PRIMARY KEY (id),
     CONSTRAINT "inventory_transactions_quantity_positive" CHECK ((quantity >= (0)::numeric)),
     CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_notes"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "job_id" uuid NOT NULL,
+    "author_id" uuid,
+    "body" text,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "job_part_id" uuid,
+    "job_operation_id" uuid,
+    "note_type" text NOT NULL DEFAULT 'user'::text,
+    CONSTRAINT "job_notes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_notes_body_blank_or_null" CHECK (((body IS NULL) OR (length(btrim(body)) > 0))),
+    CONSTRAINT "job_notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'event'::text]))),
+    CONSTRAINT "job_notes_operation_requires_part" CHECK (((job_operation_id IS NULL) OR (job_part_id IS NOT NULL)))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."job_note_media"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "note_id" uuid NOT NULL,
+    "storage_path" text NOT NULL,
+    "thumbnail_path" text,
+    "kind" text NOT NULL DEFAULT 'photo'::text,
+    "mime_type" text,
+    "size_bytes" bigint,
+    "width" integer,
+    "height" integer,
+    "duration_seconds" numeric,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_note_media_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_note_media_kind_check" CHECK ((kind = ANY (ARRAY['photo'::text, 'video'::text])))
 );
 
 -- ============================================================
@@ -788,16 +874,20 @@ ALTER TABLE "public"."customer_contacts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."demo_data_templates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."feedback" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."inventory_locations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."inventory_transactions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_fulfillment_audit" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_note_media" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_attachments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_location_stock" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
@@ -1031,6 +1121,31 @@ CREATE POLICY "Users can insert feedback for their companies"
    FROM user_company_access uca
   WHERE (uca.user_id = auth.uid()))));
 
+DROP POLICY IF EXISTS "Users can delete inventory_locations" ON "public"."inventory_locations";
+CREATE POLICY "Users can delete inventory_locations"
+    ON "public"."inventory_locations"
+    FOR DELETE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can insert inventory_locations" ON "public"."inventory_locations";
+CREATE POLICY "Users can insert inventory_locations"
+    ON "public"."inventory_locations"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can update inventory_locations" ON "public"."inventory_locations";
+CREATE POLICY "Users can update inventory_locations"
+    ON "public"."inventory_locations"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view inventory_locations" ON "public"."inventory_locations";
+CREATE POLICY "Users can view inventory_locations"
+    ON "public"."inventory_locations"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can insert inventory_transactions" ON "public"."inventory_transactions";
 CREATE POLICY "Users can insert inventory_transactions"
     ON "public"."inventory_transactions"
@@ -1141,6 +1256,26 @@ CREATE POLICY "ai_readonly_select"
     USING ((EXISTS ( SELECT 1
    FROM jobs
   WHERE ((jobs.id = job_materials.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
+
+DROP POLICY IF EXISTS "Authors and admins can delete job_note_media" ON "public"."job_note_media";
+CREATE POLICY "Authors and admins can delete job_note_media"
+    ON "public"."job_note_media"
+    FOR DELETE
+    USING ((is_company_admin(company_id) OR (EXISTS ( SELECT 1
+   FROM job_notes n
+  WHERE ((n.id = job_note_media.note_id) AND (n.author_id = get_operator_access_id(n.company_id)))))));
+
+DROP POLICY IF EXISTS "Users can insert job_note_media" ON "public"."job_note_media";
+CREATE POLICY "Users can insert job_note_media"
+    ON "public"."job_note_media"
+    FOR INSERT
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (get_operator_access_id(company_id) IS NOT NULL)));
+
+DROP POLICY IF EXISTS "Users can view job_note_media" ON "public"."job_note_media";
+CREATE POLICY "Users can view job_note_media"
+    ON "public"."job_note_media"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "Authors and admins can delete job_notes" ON "public"."job_notes";
 CREATE POLICY "Authors and admins can delete job_notes"
@@ -1311,6 +1446,30 @@ CREATE POLICY "markup_rates_update"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "Uploaders and admins can delete part_attachments" ON "public"."part_attachments";
+CREATE POLICY "Uploaders and admins can delete part_attachments"
+    ON "public"."part_attachments"
+    FOR DELETE
+    USING (((uploaded_by = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+
+DROP POLICY IF EXISTS "Users can insert own part_attachments" ON "public"."part_attachments";
+CREATE POLICY "Users can insert own part_attachments"
+    ON "public"."part_attachments"
+    FOR INSERT
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (uploaded_by = get_operator_access_id(company_id))));
+
+DROP POLICY IF EXISTS "Users can view part_attachments" ON "public"."part_attachments";
+CREATE POLICY "Users can view part_attachments"
+    ON "public"."part_attachments"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view part_location_stock" ON "public"."part_location_stock";
+CREATE POLICY "Users can view part_location_stock"
+    ON "public"."part_location_stock"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
 DROP POLICY IF EXISTS "Authors and admins can delete part_notes" ON "public"."part_notes";
 CREATE POLICY "Authors and admins can delete part_notes"
@@ -2139,6 +2298,12 @@ ALTER TABLE "public"."feedback"
 ALTER TABLE "public"."feedback"
     ADD CONSTRAINT "feedback_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."inventory_locations"
+    ADD CONSTRAINT "inventory_locations_company_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."inventory_locations"
+    ADD CONSTRAINT "inventory_locations_parent_fkey" FOREIGN KEY (parent_id) REFERENCES inventory_locations(id) ON DELETE RESTRICT;
+
 ALTER TABLE "public"."inventory_transactions"
     ADD CONSTRAINT "inventory_transactions_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2147,6 +2312,9 @@ ALTER TABLE "public"."inventory_transactions"
 
 ALTER TABLE "public"."inventory_transactions"
     ADD CONSTRAINT "inventory_transactions_job_operation_id_fkey" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."inventory_transactions"
+    ADD CONSTRAINT "inventory_transactions_location_fkey" FOREIGN KEY (location_id) REFERENCES inventory_locations(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."inventory_transactions"
     ADD CONSTRAINT "inventory_transactions_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE SET NULL;
@@ -2193,6 +2361,12 @@ ALTER TABLE "public"."job_materials"
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_parts_bom_id_fkey" FOREIGN KEY (parts_bom_id) REFERENCES parts_bom(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."job_note_media"
+    ADD CONSTRAINT "job_note_media_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_note_media"
+    ADD CONSTRAINT "job_note_media_note_id_fkey" FOREIGN KEY (note_id) REFERENCES job_notes(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."job_notes"
     ADD CONSTRAINT "job_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
@@ -2201,6 +2375,12 @@ ALTER TABLE "public"."job_notes"
 
 ALTER TABLE "public"."job_notes"
     ADD CONSTRAINT "job_notes_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_notes"
+    ADD CONSTRAINT "job_notes_job_operation_id_fkey" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."job_notes"
+    ADD CONSTRAINT "job_notes_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_assigned_to_fkey" FOREIGN KEY (assigned_to) REFERENCES auth.users(id);
@@ -2255,6 +2435,24 @@ ALTER TABLE "public"."jobs"
 
 ALTER TABLE "public"."markup_rates"
     ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_attachments"
+    ADD CONSTRAINT "part_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_attachments"
+    ADD CONSTRAINT "part_attachments_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_attachments"
+    ADD CONSTRAINT "part_attachments_uploaded_by_fkey" FOREIGN KEY (uploaded_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."part_location_stock"
+    ADD CONSTRAINT "part_location_stock_company_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_location_stock"
+    ADD CONSTRAINT "part_location_stock_location_fkey" FOREIGN KEY (location_id) REFERENCES inventory_locations(id) ON DELETE RESTRICT;
+
+ALTER TABLE "public"."part_location_stock"
+    ADD CONSTRAINT "part_location_stock_part_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT;
 
 ALTER TABLE "public"."part_notes"
     ADD CONSTRAINT "part_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
@@ -2356,7 +2554,7 @@ ALTER TABLE "public"."quote_operations"
     ADD CONSTRAINT "quote_operations_quote_id_fkey" FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_billing_address_id_fkey" FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id);
+    ADD CONSTRAINT "quotes_billing_address_id_fkey" FOREIGN KEY (billing_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2371,7 +2569,7 @@ ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id);
+    ADD CONSTRAINT "quotes_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."routing_operations"
     ADD CONSTRAINT "routing_operations_routing_id_fkey" FOREIGN KEY (routing_id) REFERENCES routings(id) ON DELETE CASCADE;
@@ -2413,7 +2611,7 @@ ALTER TABLE "public"."shipments"
     ADD CONSTRAINT "shipments_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id);
 
 ALTER TABLE "public"."shipments"
-    ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id);
+    ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."shipments"
     ADD CONSTRAINT "shipments_voided_by_fkey" FOREIGN KEY (voided_by) REFERENCES auth.users(id) ON DELETE SET NULL;
@@ -2464,11 +2662,15 @@ CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_con
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS idx_customers_name_trgm ON public.customers USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS inventory_locations_company_parent_idx ON public.inventory_locations USING btree (company_id, parent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS inventory_locations_one_unassigned_per_company ON public.inventory_locations USING btree (company_id) WHERE (name = 'Unassigned'::text);
 CREATE INDEX IF NOT EXISTS inventory_transactions_company_id_created_at_idx ON public.inventory_transactions USING btree (company_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS inventory_transactions_discrepancy_idx ON public.inventory_transactions USING btree (company_id, created_at DESC) WHERE (has_discrepancy = true);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_id_idx ON public.inventory_transactions USING btree (job_id) WHERE (job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_job_operation_id_idx ON public.inventory_transactions USING btree (job_operation_id) WHERE (job_operation_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS inventory_transactions_location_idx ON public.inventory_transactions USING btree (location_id) WHERE (location_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS inventory_transactions_part_id_created_at_idx ON public.inventory_transactions USING btree (part_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS inventory_transactions_transfer_group_idx ON public.inventory_transactions USING btree (transfer_group_id) WHERE (transfer_group_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON public.invitations USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON public.invitations USING btree (email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email_company ON public.invitations USING btree (email, company_id) WHERE ((status)::text = 'pending'::text);
@@ -2479,6 +2681,7 @@ CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING b
 CREATE INDEX IF NOT EXISTS idx_job_materials_job_part_id ON public.job_materials USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_material_part ON public.job_materials USING btree (material_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_parts_bom ON public.job_materials USING btree (parts_bom_id);
+CREATE INDEX IF NOT EXISTS idx_job_note_media_note ON public.job_note_media USING btree (note_id);
 CREATE INDEX IF NOT EXISTS idx_job_notes_job_created ON public.job_notes USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_operations_job_part_id ON public.job_operations USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_assigned ON public.job_operations USING btree (assigned_to) WHERE (assigned_to IS NOT NULL);
@@ -2500,6 +2703,10 @@ CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
 CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
 CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
+CREATE INDEX IF NOT EXISTS idx_part_attachments_part_created ON public.part_attachments USING btree (part_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS part_location_stock_company_idx ON public.part_location_stock USING btree (company_id);
+CREATE INDEX IF NOT EXISTS part_location_stock_location_idx ON public.part_location_stock USING btree (location_id);
+CREATE INDEX IF NOT EXISTS part_location_stock_part_idx ON public.part_location_stock USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_part_notes_part_created ON public.part_notes USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
@@ -2671,6 +2878,131 @@ BEGIN
     WHERE id = v_inv.id;
 
     RETURN v_inv.company_id;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.add_stock_at_location(p_part_id uuid, p_location_id uuid, p_quantity numeric, p_unit text, p_converted_quantity numeric, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_item_name text; v_tracked boolean;
+    v_new_balance numeric; v_rollup numeric;
+BEGIN
+    IF p_quantity <= 0 OR p_converted_quantity <= 0 THEN
+        RAISE EXCEPTION 'Quantity must be positive' USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT company_id, part_name, is_location_tracked
+      INTO v_company, v_item_name, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NOT v_tracked THEN
+        RAISE EXCEPTION 'part % is not location-tracked; enable tracking first', p_part_id USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM public.inv_assert_location_in_company(p_location_id, v_company);
+
+    INSERT INTO public.part_location_stock AS pls (company_id, part_id, location_id, quantity)
+    VALUES (v_company, p_part_id, p_location_id, p_converted_quantity)
+    ON CONFLICT (part_id, location_id)
+        DO UPDATE SET quantity = pls.quantity + EXCLUDED.quantity
+    RETURNING pls.quantity INTO v_new_balance;
+
+    INSERT INTO public.inventory_transactions
+        (company_id, part_id, item_name, type, quantity, unit, converted_quantity,
+         location_id, notes, created_by)
+    VALUES
+        (v_company, p_part_id, v_item_name, 'addition', p_quantity, p_unit, p_converted_quantity,
+         p_location_id, p_notes, auth.uid());
+
+    SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
+    RETURN jsonb_build_object('location_balance', v_new_balance, 'part_quantity', v_rollup);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.address_block_snapshot(p_address_id uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE
+AS $function$
+  SELECT jsonb_build_object(
+           'address_line1', a.address_line1,
+           'address_line2', a.address_line2,
+           'city',          a.city,
+           'state',         a.state,
+           'postal_code',   a.postal_code,
+           'country',       a.country,
+           'attention_to',  a.attention_to
+         )
+    FROM public.customer_addresses a
+   WHERE a.id = p_address_id;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.adjust_stock_at_location(p_part_id uuid, p_location_id uuid, p_new_quantity numeric, p_unit text, p_converted_new_quantity numeric, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_item_name text; v_primary_unit text; v_tracked boolean;
+    v_current numeric; v_diff numeric; v_rollup numeric; v_notes text;
+BEGIN
+    IF p_converted_new_quantity < 0 THEN
+        RAISE EXCEPTION 'Quantity cannot be negative' USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT company_id, part_name, primary_unit, is_location_tracked
+      INTO v_company, v_item_name, v_primary_unit, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NOT v_tracked THEN
+        RAISE EXCEPTION 'part % is not location-tracked; enable tracking first', p_part_id USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM public.inv_assert_location_in_company(p_location_id, v_company);
+
+    SELECT quantity INTO v_current
+      FROM public.part_location_stock
+     WHERE part_id = p_part_id AND location_id = p_location_id
+       FOR UPDATE;
+    v_current := COALESCE(v_current, 0);
+    v_diff := p_converted_new_quantity - v_current;
+
+    INSERT INTO public.part_location_stock (company_id, part_id, location_id, quantity)
+    VALUES (v_company, p_part_id, p_location_id, p_converted_new_quantity)
+    ON CONFLICT (part_id, location_id) DO UPDATE SET quantity = EXCLUDED.quantity;
+
+    v_notes := COALESCE(
+        p_notes,
+        format('Adjusted from %s to %s %s', v_current, p_converted_new_quantity, v_primary_unit));
+
+    INSERT INTO public.inventory_transactions
+        (company_id, part_id, item_name, type, quantity, unit, converted_quantity,
+         location_id, notes, created_by)
+    VALUES
+        (v_company, p_part_id, v_item_name, 'adjustment', abs(v_diff), v_primary_unit, abs(v_diff),
+         p_location_id, v_notes, auth.uid());
+
+    SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
+    RETURN jsonb_build_object('location_balance', p_converted_new_quantity, 'part_quantity', v_rollup);
 END;
 $function$
 
@@ -2907,7 +3239,6 @@ BEGIN
                    ro.cycle_minutes_per_unit,
                    ro.labor_rate_override,
                    ro.external_unit_price,
-                   ro.external_setup_cost,
                    wc.kind          AS wc_kind,
                    wc.labor_rate    AS wc_labor_rate
               FROM public.routing_operations ro
@@ -2926,14 +3257,13 @@ BEGIN
                              * COALESCE(v_op.labor_rate_override, v_op.wc_labor_rate)
                              / 60.0;
             ELSE
-                IF v_op.external_unit_price IS NULL AND v_op.external_setup_cost IS NULL THEN
+                IF v_op.external_unit_price IS NULL THEN
                     RAISE EXCEPTION
-                        'Cannot compute cost for part %: external routing op has no pricing (neither external_unit_price nor external_setup_cost)',
+                        'Cannot compute cost for part %: external routing op has no unit price (external_unit_price is required)',
                         v_part_name
                         USING ERRCODE = 'check_violation';
                 END IF;
-                v_op_cost := COALESCE(v_op.external_unit_price, 0)
-                             + COALESCE(v_op.external_setup_cost, 0) / p_qty;
+                v_op_cost := COALESCE(v_op.external_unit_price, 0);
             END IF;
             v_total := v_total + v_op_cost;
         END LOOP;
@@ -3056,6 +3386,22 @@ BEGIN
     missing_leaves := v_missing;
     RETURN NEXT;
 END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.contact_block_snapshot(p_contact_id uuid)
+ RETURNS jsonb
+ LANGUAGE sql
+ STABLE
+AS $function$
+  SELECT jsonb_build_object(
+           'name',  c.name,
+           'email', c.email,
+           'phone', c.phone
+         )
+    FROM public.customer_contacts c
+   WHERE c.id = p_contact_id;
 $function$
 
 ;
@@ -3298,6 +3644,257 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.delete_location(p_location_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid;
+    v_guard   integer := 0;
+BEGIN
+    SELECT company_id INTO v_company FROM public.inventory_locations WHERE id = p_location_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'location % not found', p_location_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- Refuse only if any location in the subtree still holds stock.
+    IF EXISTS (
+        WITH RECURSIVE sub AS (
+            SELECT id FROM public.inventory_locations WHERE id = p_location_id
+            UNION ALL
+            SELECT l.id FROM public.inventory_locations l JOIN sub s ON l.parent_id = s.id
+        )
+        SELECT 1
+          FROM public.part_location_stock pls
+          JOIN sub ON pls.location_id = sub.id
+         WHERE pls.quantity > 0
+    ) THEN
+        RAISE EXCEPTION 'location subtree still holds stock' USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    -- Drop leftover zero-qty balance rows across the subtree (clients can't —
+    -- part_location_stock is SELECT-only). part_location_stock.location_id is
+    -- ON DELETE RESTRICT, so these must go before their locations.
+    DELETE FROM public.part_location_stock
+     WHERE location_id IN (
+        WITH RECURSIVE sub AS (
+            SELECT id FROM public.inventory_locations WHERE id = p_location_id
+            UNION ALL
+            SELECT l.id FROM public.inventory_locations l JOIN sub s ON l.parent_id = s.id
+        )
+        SELECT id FROM sub
+     );
+
+    -- Delete the subtree bottom-up. inventory_locations.parent_id is ON DELETE
+    -- RESTRICT, so a parent can't be removed while children exist; repeatedly
+    -- delete the current leaves of the subtree until the target is gone.
+    LOOP
+        v_guard := v_guard + 1;
+        IF v_guard > 1000 THEN
+            RAISE EXCEPTION 'delete_location: subtree too deep or cyclic for %', p_location_id;
+        END IF;
+
+        DELETE FROM public.inventory_locations loc
+         WHERE loc.id IN (
+            WITH RECURSIVE sub AS (
+                SELECT id FROM public.inventory_locations WHERE id = p_location_id
+                UNION ALL
+                SELECT l.id FROM public.inventory_locations l JOIN sub s ON l.parent_id = s.id
+            )
+            SELECT s.id
+              FROM sub s
+             WHERE NOT EXISTS (
+                SELECT 1 FROM public.inventory_locations c WHERE c.parent_id = s.id
+             )
+         );
+
+        EXIT WHEN NOT EXISTS (SELECT 1 FROM public.inventory_locations WHERE id = p_location_id);
+    END LOOP;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.deplete_stock_at_location(p_part_id uuid, p_location_id uuid, p_quantity numeric, p_unit text, p_converted_quantity numeric, p_graceful boolean DEFAULT false, p_notes text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid, p_job_operation_id uuid DEFAULT NULL::uuid, p_operator_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_item_name text; v_primary_unit text; v_tracked boolean;
+    v_current numeric; v_new numeric; v_rollup numeric;
+    v_discrepancy boolean := false; v_shortfall numeric := 0;
+    v_notes text; v_disc_note text;
+BEGIN
+    IF p_quantity <= 0 OR p_converted_quantity <= 0 THEN
+        RAISE EXCEPTION 'Quantity must be positive' USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT company_id, part_name, primary_unit, is_location_tracked
+      INTO v_company, v_item_name, v_primary_unit, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NOT v_tracked THEN
+        RAISE EXCEPTION 'part % is not location-tracked; enable tracking first', p_part_id USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM public.inv_assert_location_in_company(p_location_id, v_company);
+
+    -- Lock the balance row (treat a missing row as 0 on hand).
+    SELECT quantity INTO v_current
+      FROM public.part_location_stock
+     WHERE part_id = p_part_id AND location_id = p_location_id
+       FOR UPDATE;
+    v_current := COALESCE(v_current, 0);
+
+    v_new := v_current - p_converted_quantity;
+    v_notes := p_notes;
+
+    IF v_new < 0 THEN
+        IF p_graceful THEN
+            v_shortfall := p_converted_quantity - v_current;
+            v_new := 0;
+            v_discrepancy := true;
+            v_disc_note := format(
+                '[DISCREPANCY: Confirmed %s %s, but only %s %s was available. Shortfall: %s %s]',
+                p_converted_quantity, v_primary_unit, v_current, v_primary_unit, v_shortfall, v_primary_unit);
+            v_notes := CASE WHEN v_notes IS NULL OR v_notes = '' THEN v_disc_note
+                            ELSE v_notes || ' ' || v_disc_note END;
+        ELSE
+            RAISE EXCEPTION 'Insufficient stock at location (have %, need %)', v_current, p_converted_quantity
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    INSERT INTO public.part_location_stock (company_id, part_id, location_id, quantity)
+    VALUES (v_company, p_part_id, p_location_id, v_new)
+    ON CONFLICT (part_id, location_id) DO UPDATE SET quantity = EXCLUDED.quantity;
+
+    INSERT INTO public.inventory_transactions
+        (company_id, part_id, item_name, type, quantity, unit, converted_quantity,
+         location_id, job_id, job_operation_id, operator_id, notes, has_discrepancy, created_by)
+    VALUES
+        (v_company, p_part_id, v_item_name, 'depletion', p_quantity, p_unit, p_converted_quantity,
+         p_location_id, p_job_id, p_job_operation_id, p_operator_id, v_notes, v_discrepancy, auth.uid());
+
+    SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
+    RETURN jsonb_build_object(
+        'location_balance', v_new, 'part_quantity', v_rollup,
+        'has_discrepancy', v_discrepancy, 'shortfall', v_shortfall);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.disable_location_tracking(p_part_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_tracked boolean; v_total numeric;
+BEGIN
+    SELECT company_id, is_location_tracked
+      INTO v_company, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF NOT v_tracked THEN
+        RETURN jsonb_build_object('part_quantity',
+            (SELECT quantity FROM public.parts WHERE id = p_part_id), 'tracked', false, 'noop', true);
+    END IF;
+
+    v_total := COALESCE(
+        (SELECT SUM(quantity) FROM public.part_location_stock WHERE part_id = p_part_id), 0);
+
+    -- Flip the flag FIRST (so the subsequent DELETE's rollup is a no-op) and set
+    -- the collapsed total in the same statement (allowed: tracked is now false).
+    UPDATE public.parts
+       SET is_location_tracked = false, quantity = v_total, updated_at = now()
+     WHERE id = p_part_id;
+
+    DELETE FROM public.part_location_stock WHERE part_id = p_part_id;
+
+    RETURN jsonb_build_object('part_quantity', v_total, 'tracked', false);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.enable_location_tracking(p_part_id uuid, p_initial_location_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_qty numeric; v_tracked boolean; v_loc uuid; v_rollup numeric;
+BEGIN
+    SELECT company_id, quantity, is_location_tracked
+      INTO v_company, v_qty, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- Idempotent: already tracked -> no-op.
+    IF v_tracked THEN
+        SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
+        RETURN jsonb_build_object('part_quantity', v_rollup, 'tracked', true, 'noop', true);
+    END IF;
+
+    -- Resolve the backfill location: caller-chosen, else find-or-create "Unassigned".
+    IF p_initial_location_id IS NOT NULL THEN
+        PERFORM public.inv_assert_location_in_company(p_initial_location_id, v_company);
+        v_loc := p_initial_location_id;
+    ELSE
+        PERFORM pg_advisory_xact_lock(hashtext('inv_unassigned:' || v_company::text));
+        SELECT id INTO v_loc
+          FROM public.inventory_locations
+         WHERE company_id = v_company AND name = 'Unassigned';
+        IF v_loc IS NULL THEN
+            INSERT INTO public.inventory_locations (company_id, name, kind)
+            VALUES (v_company, 'Unassigned', 'system')
+            RETURNING id INTO v_loc;
+        END IF;
+    END IF;
+
+    -- Flip the flag FIRST (quantity unchanged -> guard skipped), THEN seed the
+    -- backfill balance equal to the pre-existing quantity so the rollup overwrites
+    -- parts.quantity with the same SUM. Never let a standalone value coexist.
+    UPDATE public.parts SET is_location_tracked = true, updated_at = now() WHERE id = p_part_id;
+
+    INSERT INTO public.part_location_stock AS pls (company_id, part_id, location_id, quantity)
+    VALUES (v_company, p_part_id, v_loc, v_qty)
+    ON CONFLICT (part_id, location_id)
+        DO UPDATE SET quantity = pls.quantity + EXCLUDED.quantity;
+
+    SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
+    RETURN jsonb_build_object('location_id', v_loc, 'part_quantity', v_rollup, 'tracked', true);
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.enforce_job_address_contact_customer()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -3485,6 +4082,33 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.enforce_tracked_part_quantity()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_expected numeric;
+BEGIN
+    IF NEW.is_location_tracked AND NEW.quantity IS DISTINCT FROM OLD.quantity THEN
+        v_expected := COALESCE(
+            (SELECT SUM(quantity) FROM public.part_location_stock WHERE part_id = NEW.id),
+            0);
+
+        IF NEW.quantity IS DISTINCT FROM v_expected THEN
+            RAISE EXCEPTION 'parts.quantity for location-tracked part % is maintained from part_location_stock; direct quantity writes are not allowed (attempted %, expected %)',
+                NEW.id, NEW.quantity, v_expected
+                USING ERRCODE = 'integrity_constraint_violation';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.generate_direct_job_number(company_uuid uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -3580,8 +4204,7 @@ BEGIN
                         AND wc.labor_rate IS NULL)
                     OR
                     (wc.kind <> 'internal'
-                        AND ro.external_unit_price IS NULL
-                        AND ro.external_setup_cost IS NULL)
+                        AND ro.external_unit_price IS NULL)
                 )
           )
           -- Every BOM child must already be priceable. A made part with no
@@ -3870,6 +4493,46 @@ AS '$libdir/pg_trgm', $function$gtrgm_union$function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.inv_assert_location_in_company(p_location_id uuid, p_company_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF p_location_id IS NULL THEN
+        RAISE EXCEPTION 'location_id is required' USING ERRCODE = 'null_value_not_allowed';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.inventory_locations
+         WHERE id = p_location_id AND company_id = p_company_id
+    ) THEN
+        RAISE EXCEPTION 'location % is not in company %', p_location_id, p_company_id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.inv_location_path_label(p_location_id uuid)
+ RETURNS text
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH RECURSIVE chain AS (
+    SELECT id, parent_id, name, 0 AS depth
+      FROM public.inventory_locations WHERE id = p_location_id
+    UNION ALL
+    SELECT l.id, l.parent_id, l.name, c.depth + 1
+      FROM public.inventory_locations l JOIN chain c ON l.id = c.parent_id
+  )
+  SELECT string_agg(name, ' › ' ORDER BY depth DESC) FROM chain;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.is_company_admin(check_company_id uuid)
  RETURNS boolean
  LANGUAGE sql
@@ -4008,6 +4671,33 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.recompute_part_quantity_from_locations()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_part_id uuid := COALESCE(NEW.part_id, OLD.part_id);
+    v_tracked boolean;
+BEGIN
+    SELECT is_location_tracked INTO v_tracked FROM public.parts WHERE id = v_part_id;
+
+    IF COALESCE(v_tracked, false) THEN
+        UPDATE public.parts
+           SET quantity = COALESCE(
+                   (SELECT SUM(quantity) FROM public.part_location_stock WHERE part_id = v_part_id),
+                   0),
+               updated_at = now()
+         WHERE id = v_part_id;
+    END IF;
+
+    RETURN NULL; -- AFTER trigger: return value is ignored
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.reset_demo_company(p_source_company_id uuid, p_user_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -4082,6 +4772,8 @@ BEGIN
        OR OLD.created_at       IS DISTINCT FROM NEW.created_at
        OR OLD.created_by       IS DISTINCT FROM NEW.created_by
        OR OLD.has_discrepancy  IS DISTINCT FROM NEW.has_discrepancy
+       OR OLD.location_name     IS DISTINCT FROM NEW.location_name
+       OR OLD.transfer_group_id IS DISTINCT FROM NEW.transfer_group_id
     THEN
         RAISE EXCEPTION 'Only the notes field can be updated on inventory transactions';
     END IF;
@@ -4342,7 +5034,7 @@ BEGIN
                         routing_id, work_center_id, sequence,
                         setup_minutes, cycle_minutes_per_unit,
                         labor_rate_override,
-                        external_unit_price, external_setup_cost,
+                        external_unit_price,
                         instructions
                     ) VALUES (
                         v_routing_id,
@@ -4352,7 +5044,6 @@ BEGIN
                         NULLIF(v_inner->>'cycle_minutes_per_unit', '')::numeric,
                         NULLIF(v_inner->>'labor_rate_override', '')::numeric,
                         NULLIF(v_inner->>'external_unit_price', '')::numeric,
-                        NULLIF(v_inner->>'external_setup_cost', '')::numeric,
                         v_inner->>'instructions'
                     );
                 END LOOP;
@@ -4516,6 +5207,88 @@ CREATE OR REPLACE FUNCTION public.similarity_op(text, text)
  LANGUAGE c
  STABLE PARALLEL SAFE STRICT
 AS '$libdir/pg_trgm', $function$similarity_op$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.snapshot_document_party()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF TG_OP = 'INSERT' OR NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
+        IF NEW.customer_id IS NOT NULL THEN
+            NEW.customer_name := (SELECT name FROM public.customers WHERE id = NEW.customer_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' OR NEW.billing_address_id IS DISTINCT FROM OLD.billing_address_id THEN
+        IF NEW.billing_address_id IS NOT NULL THEN
+            NEW.bill_to_address := public.address_block_snapshot(NEW.billing_address_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' OR NEW.shipping_address_id IS DISTINCT FROM OLD.shipping_address_id THEN
+        IF NEW.shipping_address_id IS NOT NULL THEN
+            NEW.ship_to_address := public.address_block_snapshot(NEW.shipping_address_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' OR NEW.contact_id IS DISTINCT FROM OLD.contact_id THEN
+        IF NEW.contact_id IS NOT NULL THEN
+            NEW.contact_snapshot := public.contact_block_snapshot(NEW.contact_id);
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.snapshot_shipment_party()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF TG_OP = 'INSERT' OR NEW.customer_id IS DISTINCT FROM OLD.customer_id THEN
+        IF NEW.customer_id IS NOT NULL THEN
+            NEW.customer_name := (SELECT name FROM public.customers WHERE id = NEW.customer_id);
+            NEW.bill_to_address := public.address_block_snapshot(
+                (SELECT a.id FROM public.customer_addresses a
+                  WHERE a.customer_id = NEW.customer_id AND a.default_billing
+                  LIMIT 1));
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' OR NEW.shipping_address_id IS DISTINCT FROM OLD.shipping_address_id THEN
+        IF NEW.shipping_address_id IS NOT NULL THEN
+            NEW.ship_to_address := public.address_block_snapshot(NEW.shipping_address_id);
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.snapshot_transaction_location_name()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF NEW.location_id IS NOT NULL AND NEW.location_name IS NULL THEN
+        NEW.location_name := public.inv_location_path_label(NEW.location_id);
+    END IF;
+    RETURN NEW;
+END;
+$function$
 
 ;
 
@@ -4684,6 +5457,86 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.transfer_stock(p_part_id uuid, p_from_location_id uuid, p_to_location_id uuid, p_quantity numeric, p_unit text, p_converted_quantity numeric, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_company uuid; v_item_name text; v_tracked boolean;
+    v_src numeric; v_from_balance numeric; v_to_balance numeric;
+    v_group uuid; v_from_name text; v_to_name text;
+    v_from_notes text; v_to_notes text; v_base text;
+BEGIN
+    IF p_quantity <= 0 OR p_converted_quantity <= 0 THEN
+        RAISE EXCEPTION 'Quantity must be positive' USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_from_location_id = p_to_location_id THEN
+        RAISE EXCEPTION 'Source and destination locations must differ' USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT company_id, part_name, is_location_tracked
+      INTO v_company, v_item_name, v_tracked
+      FROM public.parts WHERE id = p_part_id;
+    IF v_company IS NULL THEN
+        RAISE EXCEPTION 'part % not found', p_part_id USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT (v_company IN (SELECT public.get_user_company_ids())) THEN
+        RAISE EXCEPTION 'access denied to company %', v_company USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NOT v_tracked THEN
+        RAISE EXCEPTION 'part % is not location-tracked; enable tracking first', p_part_id USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM public.inv_assert_location_in_company(p_from_location_id, v_company);
+    PERFORM public.inv_assert_location_in_company(p_to_location_id, v_company);
+
+    -- Lock + verify source has enough (hard fail — you can't move stock you lack).
+    SELECT quantity INTO v_src
+      FROM public.part_location_stock
+     WHERE part_id = p_part_id AND location_id = p_from_location_id
+       FOR UPDATE;
+    IF v_src IS NULL OR v_src < p_converted_quantity THEN
+        RAISE EXCEPTION 'Insufficient stock at source location (have %, need %)',
+            COALESCE(v_src, 0), p_converted_quantity USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE public.part_location_stock
+       SET quantity = v_src - p_converted_quantity
+     WHERE part_id = p_part_id AND location_id = p_from_location_id
+    RETURNING quantity INTO v_from_balance;
+
+    INSERT INTO public.part_location_stock AS pls (company_id, part_id, location_id, quantity)
+    VALUES (v_company, p_part_id, p_to_location_id, p_converted_quantity)
+    ON CONFLICT (part_id, location_id)
+        DO UPDATE SET quantity = pls.quantity + EXCLUDED.quantity
+    RETURNING pls.quantity INTO v_to_balance;
+
+    v_group := gen_random_uuid();
+    SELECT name INTO v_from_name FROM public.inventory_locations WHERE id = p_from_location_id;
+    SELECT name INTO v_to_name   FROM public.inventory_locations WHERE id = p_to_location_id;
+    v_base := COALESCE(NULLIF(p_notes, ''), '');
+
+    v_from_notes := btrim(v_base || ' ' || format('[Transfer to %s]', v_to_name));
+    v_to_notes   := btrim(v_base || ' ' || format('[Transfer from %s]', v_from_name));
+
+    INSERT INTO public.inventory_transactions
+        (company_id, part_id, item_name, type, quantity, unit, converted_quantity,
+         location_id, transfer_group_id, notes, created_by)
+    VALUES
+        (v_company, p_part_id, v_item_name, 'depletion', p_quantity, p_unit, p_converted_quantity,
+         p_from_location_id, v_group, v_from_notes, auth.uid()),
+        (v_company, p_part_id, v_item_name, 'addition', p_quantity, p_unit, p_converted_quantity,
+         p_to_location_id, v_group, v_to_notes, auth.uid());
+
+    RETURN jsonb_build_object(
+        'transfer_group_id', v_group,
+        'from_balance', v_from_balance, 'to_balance', v_to_balance);
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.update_inventory_items_updated_at()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4788,6 +5641,9 @@ CREATE TRIGGER feedback AFTER INSERT ON public.feedback FOR EACH ROW EXECUTE FUN
 DROP TRIGGER IF EXISTS "enforce_transaction_notes_only_update" ON "public"."inventory_transactions";
 CREATE TRIGGER enforce_transaction_notes_only_update BEFORE UPDATE ON public.inventory_transactions FOR EACH ROW EXECUTE FUNCTION restrict_transaction_update_to_notes();
 
+DROP TRIGGER IF EXISTS "trg_snapshot_txn_location" ON "public"."inventory_transactions";
+CREATE TRIGGER trg_snapshot_txn_location BEFORE INSERT ON public.inventory_transactions FOR EACH ROW EXECUTE FUNCTION snapshot_transaction_location_name();
+
 DROP TRIGGER IF EXISTS "job_materials_updated_at" ON "public"."job_materials";
 CREATE TRIGGER job_materials_updated_at BEFORE UPDATE ON public.job_materials FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -4821,11 +5677,17 @@ CREATE TRIGGER enforce_job_address_contact_customer_trg BEFORE INSERT OR UPDATE 
 DROP TRIGGER IF EXISTS "jobs_updated_at" ON "public"."jobs";
 CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trg_snapshot_job_party" ON "public"."jobs";
+CREATE TRIGGER trg_snapshot_job_party BEFORE INSERT OR UPDATE OF customer_id, billing_address_id, shipping_address_id, contact_id ON public.jobs FOR EACH ROW EXECUTE FUNCTION snapshot_document_party();
+
 DROP TRIGGER IF EXISTS "trigger_job_production_status_change" ON "public"."jobs";
 CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_production_status_change();
 
 DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
 CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_recompute_part_quantity" ON "public"."part_location_stock";
+CREATE TRIGGER trg_recompute_part_quantity AFTER INSERT OR DELETE OR UPDATE ON public.part_location_stock FOR EACH ROW EXECUTE FUNCTION recompute_part_quantity_from_locations();
 
 DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
 CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -4835,6 +5697,9 @@ CREATE TRIGGER part_procurement_tiers_updated_at BEFORE UPDATE ON public.part_pr
 
 DROP TRIGGER IF EXISTS "parts_updated_at" ON "public"."parts";
 CREATE TRIGGER parts_updated_at BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_enforce_tracked_part_quantity" ON "public"."parts";
+CREATE TRIGGER trg_enforce_tracked_part_quantity BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION enforce_tracked_part_quantity();
 
 DROP TRIGGER IF EXISTS "parts_bom_no_cycles" ON "public"."parts_bom";
 CREATE TRIGGER parts_bom_no_cycles BEFORE INSERT OR UPDATE OF parent_part_id, child_part_id ON public.parts_bom FOR EACH ROW EXECUTE FUNCTION enforce_no_bom_cycles();
@@ -4856,6 +5721,9 @@ CREATE TRIGGER enforce_quote_address_contact_customer_trg BEFORE INSERT OR UPDAT
 
 DROP TRIGGER IF EXISTS "quotes_updated_at" ON "public"."quotes";
 CREATE TRIGGER quotes_updated_at BEFORE UPDATE ON public.quotes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_snapshot_quote_party" ON "public"."quotes";
+CREATE TRIGGER trg_snapshot_quote_party BEFORE INSERT OR UPDATE OF customer_id, billing_address_id, shipping_address_id, contact_id ON public.quotes FOR EACH ROW EXECUTE FUNCTION snapshot_document_party();
 
 DROP TRIGGER IF EXISTS "trigger_quote_status_change" ON "public"."quotes";
 CREATE TRIGGER trigger_quote_status_change BEFORE UPDATE ON public.quotes FOR EACH ROW EXECUTE FUNCTION track_quote_status_change();
@@ -4886,6 +5754,9 @@ CREATE TRIGGER enforce_shipment_address_contact_customer_trg BEFORE INSERT OR UP
 
 DROP TRIGGER IF EXISTS "enforce_shipment_customer_id_immutable_trg" ON "public"."shipments";
 CREATE TRIGGER enforce_shipment_customer_id_immutable_trg BEFORE UPDATE OF customer_id ON public.shipments FOR EACH ROW EXECUTE FUNCTION enforce_shipment_customer_id_immutable();
+
+DROP TRIGGER IF EXISTS "trg_snapshot_shipment_party" ON "public"."shipments";
+CREATE TRIGGER trg_snapshot_shipment_party BEFORE INSERT OR UPDATE OF customer_id, shipping_address_id ON public.shipments FOR EACH ROW EXECUTE FUNCTION snapshot_shipment_party();
 
 DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_void" ON "public"."shipments";
 CREATE TRIGGER trigger_recompute_jp_fulfillment_on_void AFTER UPDATE OF voided_at ON public.shipments FOR EACH ROW EXECUTE FUNCTION recompute_job_part_fulfillment_from_void();
@@ -4936,6 +5807,9 @@ COMMENT ON TABLE "public"."demo_data_templates"
 COMMENT ON TABLE "public"."feedback"
     IS 'In-app user feedback submissions';
 
+COMMENT ON TABLE "public"."inventory_locations"
+    IS 'Company-scoped, arbitrary-depth storage-location tree (cabinet › row › side, etc.). is_qr_anchor marks nodes with a printed QR.';
+
 COMMENT ON TABLE "public"."inventory_transactions"
     IS 'Append-only ledger of inventory changes (addition / depletion / adjustment). Notes are the only mutable column post-insert (enforced by trigger).';
 
@@ -4944,6 +5818,9 @@ COMMENT ON TABLE "public"."job_fulfillment_audit"
 
 COMMENT ON TABLE "public"."markup_rates"
     IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
+
+COMMENT ON TABLE "public"."part_location_stock"
+    IS 'Per-location stock balances; source of truth for location-tracked parts. SELECT-only via RLS — mutated only through SECURITY DEFINER RPCs that also write inventory_transactions.';
 
 COMMENT ON TABLE "public"."part_procurement_tiers"
     IS 'Vendor-keyed tiered pricing for bought parts. Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor''s tier sheet. vendor_id may be NULL for "internal estimate" rows. Ordering of tiers within a vendor sheet is derived from min_quantity ASC — no separate sequence column. Resolved at read time via get_procurement_cost(part_id, qty), which picks the cheapest non-expired tier where min_quantity <= qty across all vendors.';
@@ -5146,6 +6023,9 @@ COMMENT ON COLUMN "public"."inventory_transactions"."part_id"
 COMMENT ON COLUMN "public"."inventory_transactions"."item_name"
     IS 'Snapshot of the part name at transaction time. Survives part renames so historical ledger entries stay readable.';
 
+COMMENT ON COLUMN "public"."inventory_transactions"."location_name"
+    IS 'Snapshot of the location''s full path at transaction time, so deleted locations remain referrable in history (mirrors item_name for deleted parts).';
+
 COMMENT ON COLUMN "public"."job_materials"."parts_bom_id"
     IS 'Source parts_bom row this job_material was snapshotted from at job-start (renamed from routing_material_id; BOM is now part-attached, not routing-attached).';
 
@@ -5203,6 +6083,9 @@ COMMENT ON COLUMN "public"."parts"."legacy_id"
 COMMENT ON COLUMN "public"."parts"."source"
     IS 'How this part is sourced. ''made'' = produced in-shop (will have a routing); ''bought'' = procured from a vendor. Combined with is_stocked, classifies the part into one of four quadrants (Custom Made / Sub-assembly / Raw Material / Service+Drop-ship). Replaces the prior is_manufacturable boolean — see the 20260504 migration header for the (false,false)→''made'' orphan-default rationale.';
 
+COMMENT ON COLUMN "public"."parts"."is_location_tracked"
+    IS 'When true, parts.quantity is a trigger-maintained rollup of part_location_stock and direct quantity writes are rejected.';
+
 COMMENT ON COLUMN "public"."parts_bom"."quantity"
     IS 'Quantity of child consumed per unit of parent, expressed in `unit`. Cost rollups convert to the child part primary_unit via parts_unit_conversions if `unit` differs.';
 
@@ -5239,6 +6122,27 @@ COMMENT ON COLUMN "public"."quotes"."shipping_address_id"
 COMMENT ON COLUMN "public"."quotes"."contact_id"
     IS 'Customer contact the quote is addressed to. Renders as the Customer Contact section on the printed quote (name, role, email, phone). Defaults at quote creation to the customer''s primary contact (is_primary=true in customer_contacts); editable per-quote.';
 
+COMMENT ON COLUMN "public"."quotes"."payment_terms"
+    IS 'Payment terms shown on the quote (preset or custom free text), e.g. Net 30, 2/10 Net 30.';
+
+COMMENT ON COLUMN "public"."quotes"."lead_time_value"
+    IS 'Lead time as stated by the user, in the unit given by lead_time_unit. Normalized into lead_time_days on save.';
+
+COMMENT ON COLUMN "public"."quotes"."lead_time_unit"
+    IS 'Unit for lead_time_value: business_days | calendar_days | weeks.';
+
+COMMENT ON COLUMN "public"."quotes"."customer_name"
+    IS 'Immutable snapshot of the customer name at quote issue time.';
+
+COMMENT ON COLUMN "public"."quotes"."bill_to_address"
+    IS 'Immutable snapshot of the billing address block at quote issue time (Document Snapshot Standard). The rendered quote reads this, not the live billing_address_id row.';
+
+COMMENT ON COLUMN "public"."quotes"."ship_to_address"
+    IS 'Immutable snapshot of the shipping address block at quote issue time.';
+
+COMMENT ON COLUMN "public"."quotes"."contact_snapshot"
+    IS 'Immutable snapshot of the customer contact { name, email, phone } at quote issue time.';
+
 COMMENT ON COLUMN "public"."routing_operations"."sequence"
     IS 'Linear order within the routing. Lower values execute first. Steps of 10 (10, 20, 30...) leave room for inserts.';
 
@@ -5253,9 +6157,6 @@ COMMENT ON COLUMN "public"."routing_operations"."labor_rate_override"
 
 COMMENT ON COLUMN "public"."routing_operations"."external_unit_price"
     IS 'For kind=external only: cost per output unit charged by the vendor.';
-
-COMMENT ON COLUMN "public"."routing_operations"."external_setup_cost"
-    IS 'For kind=external only: one-time per-job setup charge from the vendor; amortizes across batch.';
 
 COMMENT ON COLUMN "public"."saved_insights"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -5286,6 +6187,12 @@ COMMENT ON COLUMN "public"."shipments"."shipping_method"
 
 COMMENT ON COLUMN "public"."shipments"."job_id"
     IS 'The single job this packing slip belongs to. All shipment_line_items resolve to job_parts of this job (enforced in create_shipment_with_line_items). Source of the PS-{jobBase}-{n} number.';
+
+COMMENT ON COLUMN "public"."shipments"."bill_to_address"
+    IS 'Immutable snapshot of the bill-to address block at shipment/packing-slip issue time.';
+
+COMMENT ON COLUMN "public"."shipments"."ship_to_address"
+    IS 'Immutable snapshot of the ship-to address block at shipment issue time.';
 
 COMMENT ON COLUMN "public"."system_admins"."id"
     IS 'Primary key. UUID auto-generated.';

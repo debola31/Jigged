@@ -133,7 +133,7 @@ function getPageTitle(pathname: string): string {
   }
 
   // Map other route segments to display titles
-  const titleMap: Record<string, string> = {};
+  const titleMap: Record<string, string> = { activity: 'Activity' };
 
   // Check from the end backwards for known segments
   for (let i = segments.length - 1; i >= 0; i--) {

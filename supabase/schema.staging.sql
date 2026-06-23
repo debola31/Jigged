@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-23T13:00:20Z
+-- Generated: 2026-06-23T13:49:44Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -529,7 +529,7 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "company_id" uuid NOT NULL,
     "sequence" integer NOT NULL,
     "quantity" integer NOT NULL,
-    "markup_percent" numeric(5,2),
+    "markup_percent" numeric(10,6),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),

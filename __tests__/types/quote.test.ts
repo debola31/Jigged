@@ -86,9 +86,31 @@ describe('calculateMarkupFromUnitPrice', () => {
     expect(calculateMarkupFromUnitPrice(100, 100)).toBe(0);
   });
 
-  it('rounds to 2 decimal places', () => {
-    // $139.39 from $103.25 = ((139.39 - 103.25) / 103.25) * 100 = 35.0024...
-    expect(calculateMarkupFromUnitPrice(103.25, 139.39)).toBeCloseTo(35, 0);
+  it('rounds to 6 decimal places (matches numeric(10,6) markup column)', () => {
+    // $139.39 from $103.25 = ((139.39 - 103.25) / 103.25) * 100 = 35.002421...
+    expect(calculateMarkupFromUnitPrice(103.25, 139.39)).toBe(35.002421);
+  });
+});
+
+describe('unit-price ⇄ markup round-trip', () => {
+  // A unit price the user types must survive the back-solve-to-markup →
+  // store-as-numeric(10,6) → recompute-price path and land back on the exact
+  // cent. The old numeric(5,2) (2-dp markup) quantized achievable prices ~1.4¢
+  // apart near a typical base, so $140.00 on a $139.98 base snapped to $139.99.
+  // numeric(10,6) (6-dp markup) round-trips exactly for any base < $1,000,000.
+  const cases: Array<[base: number, typedPrice: number]> = [
+    [139.98, 140], // the reported bug: base just over the old $100 safe limit
+    [139.98, 140.01],
+    [103.25, 139.39],
+    [100.01, 137.77],
+    [1000.0, 1234.56],
+    [9999.99, 12500.0], // large base — still well under the $1M limit
+  ];
+
+  it.each(cases)('base $%s, typed price $%s round-trips to the cent', (base, typedPrice) => {
+    const markup = calculateMarkupFromUnitPrice(base, typedPrice);
+    expect(markup).not.toBeNull();
+    expect(calculateUnitPriceFromMarkup(base, markup as number)).toBe(typedPrice);
   });
 });
 

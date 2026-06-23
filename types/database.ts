@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.4"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -512,8 +507,6 @@ export type Database = {
           company_id: string
           created_at: string
           id: string
-          is_qr_anchor: boolean
-          is_stockable: boolean
           kind: string | null
           name: string
           parent_id: string | null
@@ -525,8 +518,6 @@ export type Database = {
           company_id: string
           created_at?: string
           id?: string
-          is_qr_anchor?: boolean
-          is_stockable?: boolean
           kind?: string | null
           name: string
           parent_id?: string | null
@@ -538,8 +529,6 @@ export type Database = {
           company_id?: string
           created_at?: string
           id?: string
-          is_qr_anchor?: boolean
-          is_stockable?: boolean
           kind?: string | null
           name?: string
           parent_id?: string | null
@@ -2241,7 +2230,6 @@ export type Database = {
         Row: {
           created_at: string | null
           cycle_minutes_per_unit: number | null
-          external_setup_cost: number | null
           external_unit_price: number | null
           id: string
           instructions: string | null
@@ -2256,7 +2244,6 @@ export type Database = {
         Insert: {
           created_at?: string | null
           cycle_minutes_per_unit?: number | null
-          external_setup_cost?: number | null
           external_unit_price?: number | null
           id?: string
           instructions?: string | null
@@ -2271,7 +2258,6 @@ export type Database = {
         Update: {
           created_at?: string | null
           cycle_minutes_per_unit?: number | null
-          external_setup_cost?: number | null
           external_unit_price?: number | null
           id?: string
           instructions?: string | null
@@ -3146,3 +3132,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

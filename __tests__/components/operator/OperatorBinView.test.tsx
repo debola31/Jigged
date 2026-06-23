@@ -36,8 +36,6 @@ const loc = (over: { id: string; name: string; code?: string | null; parent_id?:
   name: over.name,
   kind: 'bin',
   code: over.code ?? null,
-  is_stockable: true,
-  is_qr_anchor: false,
   sort_order: 0,
   created_at: '',
   updated_at: '',

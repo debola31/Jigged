@@ -46,6 +46,9 @@ const CUSTOMER_NAME = 'E2E Test Customer';
 const PART_MFG_NAME = 'E2E-MFG-001';
 const PART_RAW_NAME = 'E2E-RAW-001';
 const PART_SUB_NAME = 'E2E-SUB-001';
+// Made part measured in a non-count unit (inches), with a fractional pricing
+// tier — exercises fractional order quantities end-to-end (quote -> job).
+const PART_LENGTH_NAME = 'E2E-LENGTH-001';
 
 interface SetupEnv {
   url: string;
@@ -446,11 +449,25 @@ export default async function globalSetup(): Promise<void> {
     cost_per_unit: 12.0,
   });
 
+  const lengthPartId = await ensurePart(supabase, companyId, {
+    part_name: PART_LENGTH_NAME,
+    description: 'E2E made part sold by length (inches)',
+    source: 'made',
+    is_stocked: false,
+    primary_unit: 'inches',
+    quantity: 0,
+    cost_per_unit: null,
+  });
+
   await ensureRouting(supabase, companyId, mfgPartId, wcInternalId);
+  await ensureRouting(supabase, companyId, lengthPartId, wcInternalId);
   await ensureBomEdge(supabase, mfgPartId, subPartId);
   // Two pricing tiers so QuoteForm can resolve a tier on the seeded MFG part.
   await ensurePricingTier(supabase, companyId, mfgPartId, 1, 1, 50);
   await ensurePricingTier(supabase, companyId, mfgPartId, 2, 10, 40);
+  // Fractional minimum-quantity tier on the length part (0.5 in) — only valid
+  // once part_pricing_tiers.quantity is numeric. Seeds the fractional path.
+  await ensurePricingTier(supabase, companyId, lengthPartId, 1, 0.5, 30);
 
   // eslint-disable-next-line no-console
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);

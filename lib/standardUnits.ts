@@ -83,3 +83,28 @@ export const STANDARD_UNITS_BY_KEY: Record<string, StandardUnit> =
     acc[u.key] = u;
     return acc;
   }, {});
+
+/**
+ * Short display symbol for a unit key (e.g. `inches` -> `in`), used to label a
+ * quantity so a fractional value isn't ambiguous ("0.32 in" not "0.32"). Falls
+ * back to the raw value for custom/company units not in the standard set, and
+ * returns `null` for a null/empty unit so callers can drop the suffix entirely.
+ */
+export function unitShortLabel(unit: string | null | undefined): string | null {
+  if (!unit) return null;
+  return STANDARD_UNITS_BY_KEY[unit]?.short ?? unit;
+}
+
+/**
+ * Unit symbol to render alongside a quantity, or `null` when a suffix would be
+ * noise. Non-count units (length / weight / volume / area / time) and custom
+ * company units get labelled so a fractional value is unambiguous ("0.32 in",
+ * "0.5 barrel"); count units return `null` because a bare number is the
+ * convention there ("10 brackets", not "10 ea"). Keeps existing count-based
+ * quotes visually unchanged while disambiguating the fractional cases.
+ */
+export function quantityUnitSuffix(unit: string | null | undefined): string | null {
+  if (!unit) return null;
+  if (STANDARD_UNITS_BY_KEY[unit]?.category === 'count') return null;
+  return unitShortLabel(unit);
+}

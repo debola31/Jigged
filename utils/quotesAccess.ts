@@ -117,7 +117,7 @@ const QUOTE_LINE_ITEM_FIELDS = `
   id, quote_id, company_id, part_id, source_tier_id, sequence,
   quantity, unit_price, total_price, markup_percent, base_cost_per_unit,
   is_quote_override, pricing_basis_snapshot, basis_unknown, created_at,
-  parts(id, part_name, description)
+  parts(id, part_name, description, primary_unit)
 `;
 
 const QUOTE_LIST_SELECT = `

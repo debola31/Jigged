@@ -11,6 +11,7 @@ import type { QuoteWithRelations } from '@/types/quote';
 import type { AddressSnapshot } from '@/types/documentSnapshot';
 import type { Company } from '@/utils/companyAccess';
 import { isQuoteExpired, daysUntilExpiration, formatLeadTime } from '@/types/quote';
+import { quantityUnitSuffix } from '@/lib/standardUnits';
 
 const MARGIN = 40;
 
@@ -290,7 +291,12 @@ export async function generateQuotePdf(
   // render as ONE table; a part with 2+ quantities spans its name/description
   // across its quantity rows. Firm quotes (every part one quantity) add a grand
   // total; price-options quotes omit it (the customer picks a quantity).
-  const partGroups: { part_name: string; description: string; items: typeof lineItems }[] = [];
+  const partGroups: {
+    part_name: string;
+    description: string;
+    unit: string | null;
+    items: typeof lineItems;
+  }[] = [];
   const groupIndex = new Map<string, number>();
   for (const li of lineItems) {
     let gi = groupIndex.get(li.part_id);
@@ -300,6 +306,8 @@ export async function generateQuotePdf(
       partGroups.push({
         part_name: li.parts?.part_name ?? 'Part',
         description: li.parts?.description?.trim() ?? '',
+        // Labels a fractional quantity ("0.32 in"); null for count parts.
+        unit: quantityUnitSuffix(li.parts?.primary_unit),
         items: [],
       });
     }
@@ -316,7 +324,7 @@ export async function generateQuotePdf(
       const rows = [...group.items].sort((a, b) => a.quantity - b.quantity);
       rows.forEach((li, i) => {
         const qtyCells = [
-          String(li.quantity),
+          group.unit ? `${li.quantity} ${group.unit}` : String(li.quantity),
           formatCurrency(li.unit_price),
           formatCurrency(li.total_price ?? li.unit_price * li.quantity),
         ];

@@ -151,6 +151,7 @@ const baseQuote: QuoteWithRelations = {
         id: 'part-1',
         part_name: 'BRKT-001',
         description: 'Steel bracket, 3/16"',
+        primary_unit: 'each',
       },
     },
   ],
@@ -203,6 +204,29 @@ describe('generateQuotePdf', () => {
     expect(qty).toBe('10');
     expect(unitPrice).toContain('$70');
     expect(total).toContain('$700');
+  });
+
+  it('labels a fractional quantity with the part unit (e.g. "0.32 in") for non-count parts', async () => {
+    const lengthQuote: QuoteWithRelations = {
+      ...baseQuote,
+      line_items: [
+        {
+          ...baseQuote.line_items![0],
+          quantity: 0.32,
+          parts: {
+            ...baseQuote.line_items![0].parts!,
+            part_name: 'BAR-STOCK',
+            primary_unit: 'inches',
+          },
+        },
+      ],
+    };
+
+    await generateQuotePdf(lengthQuote, baseCompany);
+
+    const config = autoTableFn.mock.calls[0][1];
+    const [, , qty] = config.body[0];
+    expect(qty).toBe('0.32 in');
   });
 
   it('leaves the description cell blank when parts.description is null', async () => {

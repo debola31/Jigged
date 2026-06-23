@@ -438,6 +438,36 @@ describe('quotesAccess utilities', () => {
       expect(insertLineItemForPartMock.mock.calls[1][3]).toBe(10);
     });
 
+    it('forwards a fractional order_quantity unchanged (parts sold by length/weight)', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'quotes') {
+          return {
+            insert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { id: 'quote-new', company_id: 'company-1' },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return mockQueryBuilder;
+      });
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await expect(
+        createQuote('company-1', {
+          ...baseForm,
+          parts: [{ part_id: 'part-1', order_quantity: 0.32 }],
+        }),
+      ).resolves.toBeDefined();
+
+      // 0.32 reaches the line-item insert intact — no integer coercion.
+      expect(insertLineItemForPartMock.mock.calls[0][3]).toBe(0.32);
+    });
+
     it('rejects order_quantity <= 0', async () => {
       await expect(
         createQuote('company-1', { ...baseForm, parts: [{ part_id: 'part-1', order_quantity: 0 }] }),

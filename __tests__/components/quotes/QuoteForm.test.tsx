@@ -213,6 +213,26 @@ describe('QuoteForm', () => {
     });
   });
 
+  it('accepts a fractional order quantity (parts sold by length/weight) and forwards it', async () => {
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create quote/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    const qtyInput = screen.getByLabelText('Order quantity');
+    await user.clear(qtyInput);
+    await user.type(qtyInput, '0.32');
+    await user.click(screen.getByRole('button', { name: /create quote/i }));
+
+    await waitFor(() => {
+      expect(createQuote).toHaveBeenCalledTimes(1);
+    });
+    const [, payload] = createQuote.mock.calls[0];
+    expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 0.32 }]);
+  });
+
   it('calls updateQuote with the payload and navigates on success', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-existing" initialData={initialPopulated} />,

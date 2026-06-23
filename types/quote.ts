@@ -218,6 +218,10 @@ export interface QuoteLineItem {
     id: string;
     part_name: string;
     description: string | null;
+    // Part's unit of measure — labels a fractional quantity ("0.32 in") so it
+    // isn't ambiguous on the quote / PDF. Inherited from the part (single source
+    // of truth), not snapshotted onto the line.
+    primary_unit: string | null;
   } | null;
 }
 

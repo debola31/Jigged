@@ -19,6 +19,7 @@ import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import JobFeed from '@/components/operator/JobFeed';
+import PreviousRunCard from '@/components/operator/PreviousRunCard';
 import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -191,6 +192,16 @@ export default function OperatorJobTravelerPage() {
           per step on the operation pages. Bumped up top: operators use it a lot. */}
       <Box sx={{ mb: 3 }}>
         <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
+      </Box>
+
+      {/* Guidance: how this part went last time (collapsed; part-centric). */}
+      <Box sx={{ mb: 3 }}>
+        <PreviousRunCard
+          partId={traveler.part_id}
+          companyId={companyId}
+          excludeJobId={traveler.job_id}
+          title="Last time we ran this part"
+        />
       </Box>
 
       {/* Operations / steps — tap one to action it */}

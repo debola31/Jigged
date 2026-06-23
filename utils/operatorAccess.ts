@@ -33,6 +33,7 @@ import type {
   JobTravelerOperation,
   JobNote,
   JobNoteMedia,
+  PreviousRun,
 } from '@/types/operator';
 
 // Operator type from user_company_access. role and created_at are
@@ -295,6 +296,7 @@ export async function getOperatorJobs(
 interface PartHeaderForDetail {
   id: string;
   job_id: string;
+  part_id: string;
   quantity: number;
   production_status: string;
   job_number: string;
@@ -328,7 +330,7 @@ async function loadPartHeader(
   const { data: part, error } = await supabase
     .from('job_parts')
     .select(`
-      id, job_id, production_status, quantity,
+      id, job_id, part_id, production_status, quantity,
       parts(part_name, description),
       jobs!inner(id, job_number, customers(name))
     `)
@@ -341,6 +343,7 @@ async function loadPartHeader(
   type PartRow = {
     id: string;
     job_id: string;
+    part_id: string;
     production_status: string;
     quantity: number;
     parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
@@ -356,6 +359,7 @@ async function loadPartHeader(
   return {
     id: p.id,
     job_id: p.job_id,
+    part_id: p.part_id,
     quantity: p.quantity,
     production_status: p.production_status,
     job_number: jobJoin?.job_number ?? '',
@@ -398,6 +402,7 @@ async function assembleJobPartDetail(
   return {
     id: header.id,
     job_id: header.job_id,
+    part_id: header.part_id,
     job_number: header.job_number,
     customer_name: header.customer_name,
     part_name: header.part_name,
@@ -880,4 +885,86 @@ export async function addJobNote(
   }
 
   return mapJobNoteRow(data as unknown as JobNoteRow);
+}
+
+/**
+ * "Last time we ran this part" guidance: the most recent COMPLETED prior run of
+ * the same part (excluding the current job), with that run's feed (notes +
+ * photos) for the operator to reference — e.g. the setup photo from last time.
+ *
+ * Part-centric (keyed on part_id), never operator-comparative — no time metrics.
+ * When `jobOperationId` is given, the returned notes are filtered to the SAME
+ * step across runs (matched by routing_operation_id, falling back to
+ * operation_name), so the operation page can show "last time, this step".
+ * Returns null when there's no prior completed run.
+ */
+export async function getPreviousRunForPart(
+  partId: string,
+  companyId: string,
+  opts?: { excludeJobId?: string; jobOperationId?: string },
+): Promise<PreviousRun | null> {
+  const supabase = getSupabase();
+
+  // Completed prior runs of this part (job_parts carries part-level completion
+  // + company_id). Low volume per part, so pick the newest in JS.
+  const { data, error } = await supabase
+    .from('job_parts')
+    .select('job_id, completed_at, jobs!inner(id, job_number)')
+    .eq('part_id', partId)
+    .eq('company_id', companyId)
+    .eq('production_status', 'completed');
+
+  if (error || !data) return null;
+
+  type PriorRow = {
+    job_id: string;
+    completed_at: string | null;
+    jobs: { id: string; job_number: string } | { id: string; job_number: string }[] | null;
+  };
+  const rows = (data as unknown as PriorRow[]).filter(
+    (r) => r.job_id !== opts?.excludeJobId,
+  );
+  if (rows.length === 0) return null;
+
+  // Newest completed first (nulls last).
+  rows.sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
+  const prior = rows[0];
+  const priorJob = Array.isArray(prior.jobs) ? prior.jobs[0] : prior.jobs;
+  if (!priorJob) return null;
+
+  let notes = await getJobNotes(prior.job_id, companyId);
+
+  // Per-step filtering: match the same operation across runs.
+  if (opts?.jobOperationId) {
+    const { data: curOp } = await supabase
+      .from('job_operations')
+      .select('routing_operation_id, operation_name')
+      .eq('id', opts.jobOperationId)
+      .single();
+
+    const { data: priorOps } = await supabase
+      .from('job_operations')
+      .select('id, routing_operation_id, operation_name')
+      .eq('job_id', prior.job_id);
+
+    type OpRow = { id: string; routing_operation_id: string | null; operation_name: string };
+    const cur = curOp as { routing_operation_id: string | null; operation_name: string } | null;
+    const matchIds = new Set(
+      ((priorOps ?? []) as OpRow[])
+        .filter((op) =>
+          cur?.routing_operation_id && op.routing_operation_id
+            ? op.routing_operation_id === cur.routing_operation_id
+            : op.operation_name === cur?.operation_name,
+        )
+        .map((op) => op.id),
+    );
+    notes = notes.filter((n) => n.job_operation_id && matchIds.has(n.job_operation_id));
+  }
+
+  return {
+    jobId: priorJob.id,
+    jobNumber: priorJob.job_number,
+    completedAt: prior.completed_at,
+    notes,
+  };
 }

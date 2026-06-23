@@ -396,3 +396,67 @@ job_materials        -- Per-(job, part) materials snapshot (expected + actual co
 - Company context persists across page refreshes
 
 - JWT tokens managed by Supabase Auth with automatic refresh
+
+---
+
+### 15. Document Snapshot Standard
+
+**Problem it solves.** Documents like quotes, jobs, shipments/packing slips, and
+invoices are *point-in-time records*. Master data they reference (customer name,
+addresses, contacts, part names) can change or be deleted later. If a document reads
+that master data live by FK, editing or deleting the master silently rewrites
+history — and FKs that block deletion (`ON DELETE RESTRICT`) trap users who simply
+want to retire an old address. This is the industry-standard ERP/accounting approach
+(NetSuite freezes the address onto the transaction; an invoice is "a frozen official
+legal snapshot").
+
+**The standard.**
+
+> A transactional document must store an **immutable copy** of every master-data
+> field it renders that should reflect the document's *issue date*. Any retained
+> master FK is **nullable** (`ON DELETE SET NULL`) and used only for
+> navigation/relinking — never as the read source for the rendered document.
+
+**Decision rule for any new master→document reference:** *"If this master row is
+later edited or deleted, must this document still show the original value?"*
+Yes → snapshot. No → a live FK is correct (pickers, dashboards, "where-used",
+navigation should always reflect current state).
+
+**Mechanisms (both in use):**
+- **Field / JSON snapshot on the document row** — for rich data. Examples:
+  `quote_line_items.pricing_basis_snapshot`; the customer/address/contact block on
+  `quotes`/`jobs`/`shipments` (`customer_name`, `bill_to_address`, `ship_to_address`,
+  `contact_snapshot`).
+- **Denormalized label + `ON DELETE SET NULL`** — for simple ledger references.
+  Examples: `inventory_transactions.item_name` (deleted parts),
+  `inventory_transactions.location_name` (deleted locations).
+
+**Capture & freeze.** Snapshots are written by `BEFORE INSERT/UPDATE` triggers
+(`snapshot_document_party` on quotes/jobs, `snapshot_shipment_party` on shipments;
+cf. `snapshot_transaction_location_name`). A column is (re)snapshotted only when its
+FK changes to a **non-null** value — so clearing an FK to NULL (including the
+`ON DELETE SET NULL` fired by deleting the master) **preserves** the existing
+snapshot rather than wiping it. Editing the master row never touches the document
+tables, so the snapshot stays frozen.
+
+**On snapshot, enable deletion.** Flip the document's FK to `ON DELETE SET NULL` and
+**backfill every existing row** in the same migration (no "compute live if missing"
+read-path fallback — see the "No silent runtime fallbacks" principle in CLAUDE.md).
+
+#### Snapshot coverage (audit)
+
+| Document | Field | Status |
+|---|---|---|
+| Quote PDF / view | bill-to & ship-to address, customer name, contact | ✅ snapshot (`quotes.bill_to_address` / `ship_to_address` / `customer_name` / `contact_snapshot`) |
+| Quote line items | pricing basis, unit/total price, operation & material names | ✅ snapshot (pre-existing) |
+| Job | address block, customer name, contact | ✅ snapshot (`jobs.*`) |
+| Shipment / packing slip | bill-to & ship-to address, customer name | ✅ snapshot (`shipments.*`) |
+| Inventory ledger | part name (`item_name`), location (`location_name`) | ✅ snapshot (pre-existing) |
+| **Quote line items / packing slip** | **part name & description** | ⚠️ **gap — rendered live** (follow-up) |
+| **QuickBooks invoice push** | **customer name, part names, billing address** | ⚠️ **gap — rendered live at push** (follow-up) |
+
+**Follow-up gaps** (tracked, not yet implemented): snapshot part name/description onto
+`quote_line_items` and packing-slip lines; snapshot customer name / part names /
+billing address into the QuickBooks invoice push (`api/services/quickbooks.py`).
+These are the remaining live-FK reads of identity fields on customer-facing/financial
+documents; apply the standard above when closing them.

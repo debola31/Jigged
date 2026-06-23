@@ -203,19 +203,17 @@ export default function QuoteDetailPage() {
   }
   const isFirmQuote = partGroups.length > 0 && partGroups.every((g) => g.items.length === 1);
 
-  // Resolve the quote's frozen address/contact FKs against the customer's
-  // address book for display. These were captured at quote creation.
-  const customerAddresses = quote.customers?.addresses ?? [];
-  const customerContacts = quote.customers?.customer_contacts ?? [];
-  const shippingAddress = customerAddresses.find((a) => a.id === quote.shipping_address_id) ?? null;
-  const billingAddress = customerAddresses.find((a) => a.id === quote.billing_address_id) ?? null;
-  const quoteContact = customerContacts.find((c) => c.id === quote.contact_id) ?? null;
-  // Ship-to is its own column only when a distinct shipping address is set;
-  // otherwise the card is just Customer (name + billing) + Contact.
+  // Display the quote's frozen customer/address/contact snapshots (Document
+  // Snapshot Standard), not the live address book — so the view matches the PDF
+  // and survives the master address/contact being edited or deleted.
+  const shippingAddress = quote.ship_to_address;
+  const billingAddress = quote.bill_to_address;
+  const quoteContact = quote.contact_snapshot;
+  // Ship-to is its own column only when a distinct shipping address snapshot is
+  // set (compared by value, so it survives the master address being deleted).
   const showShippingColumn =
-    !!quote.shipping_address_id &&
-    quote.shipping_address_id !== quote.billing_address_id &&
-    shippingAddress !== null;
+    shippingAddress !== null &&
+    JSON.stringify(shippingAddress) !== JSON.stringify(billingAddress);
 
   if (editMode && isEditable) {
     const handleSaveSuccess = async () => {

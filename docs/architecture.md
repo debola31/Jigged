@@ -193,7 +193,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - parts - Part definitions (company-wide, no customer_id)
 
-- part_pricing_tiers - Quantity break-points with markup % per tier; markup is the source of truth, unit price is derived live against the routing
+- part_pricing_tiers - Quantity break-points with markup % per tier; markup is the source of truth, unit price is derived live as `base_cost × (1 + markup/100)` — base cost from the routing/BOM for made parts, from procurement tiers for bought parts
 
 - operation_types - Available operations
 

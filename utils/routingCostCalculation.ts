@@ -126,12 +126,13 @@ export async function calculateRoutingCost(
       const operationName = wc?.name || 'Unknown Operation';
 
       if (wc?.kind === 'external') {
+        // External (vendor) work bills once per part — a unit price only, no
+        // setup cost (setup is an internal-only concept).
         const unitPrice = op.external_unit_price !== null ? Number(op.external_unit_price) : null;
-        const setupCost = op.external_setup_cost !== null ? Number(op.external_setup_cost) : null;
-        if (unitPrice === null && setupCost === null) {
+        if (unitPrice === null) {
           warnings.push({
             type: 'missing_external_pricing',
-            message: `${operationName}: external op has no unit price or setup cost`,
+            message: `${operationName}: external op has no unit price`,
             node_id: op.id,
           });
           continue;
@@ -141,8 +142,8 @@ export async function calculateRoutingCost(
           run_time_minutes: 0,
           setup_time_minutes: 0,
           labor_rate: 0,
-          cost: Math.round((unitPrice ?? 0) * 100) / 100,
-          setup_cost: Math.round((setupCost ?? 0) * 100) / 100,
+          cost: Math.round(unitPrice * 100) / 100,
+          setup_cost: 0,
         });
         continue;
       }

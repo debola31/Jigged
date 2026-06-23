@@ -269,8 +269,9 @@ export default function WorkCenterForm({
             </Grid>
 
             {/* Kind-conditional fields: only one of these is valid at a time per the DB CHECK constraint.
-                External work centers price per routing operation (external_unit_price +
-                external_setup_cost), so labor_rate is hidden entirely — see hint below. */}
+                External work centers price per routing operation (external_unit_price —
+                external work bills once per part, no setup cost), so labor_rate is hidden
+                entirely — see hint below. */}
             {formData.kind === 'internal' && (
               <Grid size={{ xs: 12, sm: 6 }}>
                 <TextField
@@ -306,9 +307,9 @@ export default function WorkCenterForm({
                     External work centers price per routing operation
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Set <strong>external_unit_price</strong> and{' '}
-                    <strong>external_setup_cost</strong> on each routing operation
-                    that uses this work center, not on the work center itself.
+                    Set the <strong>vendor unit price</strong> on each routing
+                    operation that uses this work center, not on the work center
+                    itself. External work bills once per part — there is no setup cost.
                   </Typography>
                 </Alert>
               </Grid>

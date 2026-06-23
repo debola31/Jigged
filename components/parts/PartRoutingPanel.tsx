@@ -42,7 +42,6 @@ function rowFromOperation(op: RoutingOperationWithWorkCenter): OperationRowData 
     laborRateOverride: op.labor_rate_override,
     workCenterLaborRate: op.work_center?.labor_rate ?? null,
     externalUnitPrice: op.external_unit_price,
-    externalSetupCost: op.external_setup_cost,
     instructions: op.instructions,
   };
 }
@@ -114,7 +113,6 @@ export default function PartRoutingPanel({
               cycleMinutesPerUnit: o.cycleMinutesPerUnit,
               laborRateOverride: o.laborRateOverride,
               externalUnitPrice: o.externalUnitPrice,
-              externalSetupCost: o.externalSetupCost,
               instructions: o.instructions,
             })),
             originalOpIds,

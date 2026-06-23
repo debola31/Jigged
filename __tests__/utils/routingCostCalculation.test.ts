@@ -7,7 +7,7 @@ import type { BomLineWithChildPart } from '@/types/bom';
  *
  * Behaviors under test:
  *   - Internal ops: cost = (cycle + setup) × COALESCE(override, wc.labor_rate) / 60
- *   - External ops: cost = unit_price (per-unit) + setup_cost (one-time)
+ *   - External ops: cost = unit_price (per-unit); no setup cost (external work bills once)
  *   - BOM materials: per-unit cost = bom.quantity × getComputedPartCost(child_id, qty)
  *     (the SQL function compute_part_cost_at_qty handles tier cascade and
  *     unit conversion internally — the TS layer just multiplies)
@@ -89,7 +89,6 @@ interface OpOverrides {
   cycle_minutes_per_unit?: number | null;
   labor_rate_override?: number | null;
   external_unit_price?: number | null;
-  external_setup_cost?: number | null;
   work_center?: RoutingOperationWithWorkCenter['work_center'];
 }
 
@@ -103,7 +102,6 @@ function makeOp(overrides: OpOverrides = {}): RoutingOperationWithWorkCenter {
     cycle_minutes_per_unit: overrides.cycle_minutes_per_unit ?? null,
     labor_rate_override: overrides.labor_rate_override ?? null,
     external_unit_price: overrides.external_unit_price ?? null,
-    external_setup_cost: overrides.external_setup_cost ?? null,
     instructions: null,
     metadata: {},
     created_at: '2024-01-01T00:00:00Z',
@@ -310,10 +308,9 @@ describe('calculateRoutingCost', () => {
       vendor: { id: 'v-1', name: 'PerformCoat Finishing' },
     };
 
-    it('prices unit_price as per-unit and setup_cost as one-time', async () => {
+    it('prices external ops as per-unit unit_price with zero setup', async () => {
       const op = makeOp({
         external_unit_price: 4.5,
-        external_setup_cost: 75,
         work_center: externalWc,
       });
       mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
@@ -323,33 +320,19 @@ describe('calculateRoutingCost', () => {
       expect(result!.warnings).toEqual([]);
       expect(result!.labor_items).toHaveLength(1);
       expect(result!.labor_items[0].cost).toBe(4.5);
-      expect(result!.labor_items[0].setup_cost).toBe(75);
+      // External work bills once per part — there is no setup cost.
+      expect(result!.labor_items[0].setup_cost).toBe(0);
       // External ops never carry time — those fields stay zero
       expect(result!.labor_items[0].run_time_minutes).toBe(0);
       expect(result!.labor_items[0].setup_time_minutes).toBe(0);
       expect(result!.labor_items[0].labor_rate).toBe(0);
     });
 
-    it('treats unit_price-only as zero setup', async () => {
-      const op = makeOp({
-        external_unit_price: 10,
-        external_setup_cost: null,
-        work_center: externalWc,
-      });
-      mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
-
-      const result = await calculateRoutingCost('part-1');
-
-      expect(result!.labor_items[0].cost).toBe(10);
-      expect(result!.labor_items[0].setup_cost).toBe(0);
-    });
-
-    it('emits missing_external_pricing when both fields are null', async () => {
-      // Mirrors recalculate_part_cost's SQL guard: free outside ops are
-      // meaningless, so we refuse to price as $0.
+    it('emits missing_external_pricing when there is no unit price', async () => {
+      // Mirrors compute_part_cost_at_qty's SQL guard: an external op with no
+      // unit price is meaningless, so we refuse to price it as $0.
       const op = makeOp({
         external_unit_price: null,
-        external_setup_cost: null,
         work_center: externalWc,
       });
       mockGetRoutingForPart.mockResolvedValue(makeRouting([op]));
@@ -382,7 +365,6 @@ describe('calculateRoutingCost', () => {
       const externalOp = makeOp({
         id: 'op-ext',
         external_unit_price: 4.5,
-        external_setup_cost: 75,
         work_center: {
           id: 'wc-ext',
           name: 'PerformCoat',
@@ -399,8 +381,8 @@ describe('calculateRoutingCost', () => {
       expect(result!.labor_items).toHaveLength(2);
       // labor (per-unit run + per-unit external unit_price)
       expect(result!.total_labor_cost).toBeCloseTo(12 + 4.5, 2);
-      // setup (internal + external one-time)
-      expect(result!.total_setup_cost).toBeCloseTo(60 + 75, 2);
+      // setup (internal only — external work has no setup cost)
+      expect(result!.total_setup_cost).toBeCloseTo(60, 2);
     });
   });
 

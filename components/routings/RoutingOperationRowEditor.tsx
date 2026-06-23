@@ -32,10 +32,8 @@ export interface OperationEditorValue {
   cycleMinutesPerUnit: number | null;
   /** Internal: optional override for the work center's labor rate ($/hr). */
   laborRateOverride: number | null;
-  /** External: per-unit price ($). */
+  /** External: per-unit price ($). External work bills once per part — no setup. */
   externalUnitPrice: number | null;
-  /** External: flat per-batch setup cost ($). */
-  externalSetupCost: number | null;
   instructions: string | null;
 }
 
@@ -84,9 +82,6 @@ export default function RoutingOperationRowEditor({
   const [externalUnitPriceStr, setExternalUnitPriceStr] = useState(
     numToStr(initial?.externalUnitPrice),
   );
-  const [externalSetupCostStr, setExternalSetupCostStr] = useState(
-    numToStr(initial?.externalSetupCost),
-  );
   const [instructions, setInstructions] = useState(initial?.instructions ?? '');
   const [touched, setTouched] = useState(false);
 
@@ -96,7 +91,6 @@ export default function RoutingOperationRowEditor({
     setCycleStr(numToStr(initial?.cycleMinutesPerUnit));
     setLaborOverrideStr(initialLaborStr(initial));
     setExternalUnitPriceStr(numToStr(initial?.externalUnitPrice));
-    setExternalSetupCostStr(numToStr(initial?.externalSetupCost));
     setInstructions(initial?.instructions ?? '');
     setTouched(false);
   }, [initial]);
@@ -129,21 +123,14 @@ export default function RoutingOperationRowEditor({
     touched && cycleStr !== '' && (cycleParsed === null || cycleParsed < 0);
 
   const externalUnitPriceParsed = parseOptionalNumber(externalUnitPriceStr);
-  const externalSetupCostParsed = parseOptionalNumber(externalSetupCostStr);
   const extUnitPriceError =
     touched &&
     externalUnitPriceStr !== '' &&
     (externalUnitPriceParsed === null || externalUnitPriceParsed < 0);
-  const extSetupCostError =
-    touched &&
-    externalSetupCostStr !== '' &&
-    (externalSetupCostParsed === null || externalSetupCostParsed < 0);
 
   const internalHasAny =
     (setupParsed !== null && setupParsed > 0) || (cycleParsed !== null && cycleParsed > 0);
-  const externalHasAny =
-    (externalUnitPriceParsed !== null && externalUnitPriceParsed > 0) ||
-    (externalSetupCostParsed !== null && externalSetupCostParsed > 0);
+  const externalHasAny = externalUnitPriceParsed !== null && externalUnitPriceParsed > 0;
   const hasAnyValue = isExternal ? externalHasAny : internalHasAny;
   const atLeastOneError = touched && !hasAnyValue;
 
@@ -151,14 +138,13 @@ export default function RoutingOperationRowEditor({
     setTouched(true);
     if (!workCenter) return;
     if (isExternal) {
-      if (extUnitPriceError || extSetupCostError || !externalHasAny) return;
+      if (extUnitPriceError || !externalHasAny) return;
       onSave({
         workCenter,
         setupMinutes: null,
         cycleMinutesPerUnit: null,
         laborRateOverride: null,
         externalUnitPrice: externalUnitPriceParsed,
-        externalSetupCost: externalSetupCostParsed,
         instructions: instructions.trim() || null,
       });
     } else {
@@ -180,7 +166,6 @@ export default function RoutingOperationRowEditor({
         cycleMinutesPerUnit: cycleParsed,
         laborRateOverride,
         externalUnitPrice: null,
-        externalSetupCost: null,
         instructions: instructions.trim() || null,
       });
     }
@@ -258,6 +243,8 @@ export default function RoutingOperationRowEditor({
 
       {isExternal ? (
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          {/* External (vendor) work bills once per part — a unit price only,
+              no setup cost (setup is an internal-only concept). */}
           <TextField
             size="small"
             label="Vendor unit price ($)"
@@ -271,20 +258,6 @@ export default function RoutingOperationRowEditor({
             }}
             error={!!extUnitPriceError}
             helperText={extUnitPriceError ? 'Enter a non-negative number.' : ' '}
-            sx={{ flex: 1, minWidth: 180 }}
-          />
-          <TextField
-            size="small"
-            label="Vendor setup cost ($)"
-            type="text"
-            inputMode="decimal"
-            value={externalSetupCostStr}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalSetupCostStr(v);
-            }}
-            error={!!extSetupCostError}
-            helperText={extSetupCostError ? 'Enter a non-negative number.' : ' '}
             sx={{ flex: 1, minWidth: 180 }}
           />
         </Box>

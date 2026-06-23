@@ -85,7 +85,6 @@ export default function RoutingOperationsList({
         cycleMinutesPerUnit: value.cycleMinutesPerUnit,
         laborRateOverride: value.laborRateOverride,
         externalUnitPrice: value.externalUnitPrice,
-        externalSetupCost: value.externalSetupCost,
         instructions: value.instructions,
       };
       onChange([...rows, newRow]);
@@ -98,7 +97,6 @@ export default function RoutingOperationsList({
         cycleMinutesPerUnit: value.cycleMinutesPerUnit,
         laborRateOverride: value.laborRateOverride,
         externalUnitPrice: value.externalUnitPrice,
-        externalSetupCost: value.externalSetupCost,
         instructions: value.instructions,
       };
       onChange(copy);
@@ -124,7 +122,6 @@ export default function RoutingOperationsList({
         cycleMinutesPerUnit: editingRow.cycleMinutesPerUnit,
         laborRateOverride: editingRow.laborRateOverride,
         externalUnitPrice: editingRow.externalUnitPrice,
-        externalSetupCost: editingRow.externalSetupCost,
         instructions: editingRow.instructions,
       }
     : undefined;

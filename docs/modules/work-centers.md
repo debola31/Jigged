@@ -28,7 +28,7 @@ A **work center** is a unit of production capacity. It can be **internal** (a ma
 | `metadata` | jsonb (e.g. `{code: "WC-LATHE-01"}` used for the Station QR code on internal work centers) |
 | `created_at`, `updated_at` | |
 
-External work centers do **not** carry a labor_rate on the work-center row. Their cost is set per routing operation (`routing_operations.external_unit_price`, `routing_operations.external_setup_cost`) — pricing is per-operation, not per-vendor.
+External work centers do **not** carry a labor_rate on the work-center row. Their cost is a single **vendor unit price** set per routing operation (`routing_operations.external_unit_price`) — pricing is per-operation, not per-vendor. External (vendor) work **bills once per part, so there is no setup cost** — setup is an internal-only concept (the `external_setup_cost` column was dropped in June 2026).
 
 ---
 

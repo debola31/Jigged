@@ -41,10 +41,6 @@ export default function RoutingViewer({ routing }: RoutingViewerProps) {
                 const isExternal = op.work_center?.kind === 'external';
                 const secondaryText = isExternal
                   ? `Vendor ${op.work_center?.vendor?.name ?? 'unknown'} • ${
-                      op.external_setup_cost && op.external_setup_cost > 0
-                        ? `Setup $${op.external_setup_cost.toFixed(2)}`
-                        : 'No setup cost'
-                    } • ${
                       op.external_unit_price && op.external_unit_price > 0
                         ? `$${op.external_unit_price.toFixed(2)}/unit`
                         : 'No unit price'

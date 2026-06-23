@@ -784,6 +784,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     if (formData.lead_time_unit === '') {
       return 'Select a lead time unit.';
     }
+    // Payment terms are required on every quote (the custom "Other" field
+    // writes back into payment_terms, so this one check covers both paths).
+    if (formData.payment_terms.trim() === '') {
+      return 'Enter payment terms.';
+    }
     const seenParts = new Set<string>();
     for (const block of partBlocks) {
       if (!block.part) return 'Every part block must have a part selected.';
@@ -1557,7 +1562,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               {/* Presets + an explicit "Other (specify)…" that reveals a free
                   text field — discoverable custom entry without losing the
                   common presets. payment_terms stays a single string column. */}
-              <FormControl size="small" fullWidth>
+              <FormControl size="small" fullWidth required>
                 <InputLabel id="payment-terms-label" shrink>
                   Payment terms
                 </InputLabel>

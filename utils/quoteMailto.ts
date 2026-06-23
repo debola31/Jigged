@@ -1,25 +1,52 @@
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 
-/**
- * Build a `mailto:` URL that opens the user's own mail client pre-filled with
- * the quote recipient, subject, and body. Replaces the previous Resend-backed
- * server send: the email now leaves from the salesperson's mailbox, so replies
- * and a sent-copy come for free. The quote PDF can't ride along (mailto carries
- * no attachments) — the user attaches it from the PDF preview if needed.
- *
- * Subject/body are percent-encoded (encodeURIComponent → spaces as %20, which
- * mail clients render correctly; URLSearchParams' '+' encoding would show
- * literal pluses). The recipient is a single address and is left unencoded.
- */
-export function buildQuoteMailto(quote: QuoteWithRelations, company: Company): string {
-  const to = pickPrimaryContact(quote)?.email ?? '';
-  const subject = defaultSubject(quote.quote_number, company.name);
-  const body = defaultBody(quote, company, quote.created_by_member?.name ?? '');
-  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+export interface QuoteMailtoOptions {
+  /** Recipient addresses. Defaults to the customer's primary contact email. */
+  to?: string[];
+  /** CC addresses. Omitted when empty. */
+  cc?: string[];
+  /** Override the default subject (e.g. the user edited it in the dialog). */
+  subject?: string;
+  /** Override the default body. */
+  body?: string;
 }
 
-function defaultSubject(quoteNumber: string | null, companyName: string): string {
+/**
+ * Build a `mailto:` URL that opens the user's own mail client pre-filled with
+ * the quote recipients, subject, and body. The email leaves from the
+ * salesperson's mailbox, so replies and a sent-copy come for free. The quote
+ * PDF can't ride along (mailto carries no attachments) — the QuoteEmailDialog
+ * downloads the PDF alongside opening this URL and reminds the user to attach it.
+ *
+ * Subject/body/cc are percent-encoded (encodeURIComponent → spaces as %20,
+ * which mail clients render correctly; URLSearchParams' '+' encoding would show
+ * literal pluses). The `to` recipients are comma-joined and left unencoded
+ * (the mailto spec's address-list form).
+ */
+export function buildQuoteMailto(
+  quote: QuoteWithRelations,
+  company: Company,
+  opts: QuoteMailtoOptions = {},
+): string {
+  const toList =
+    opts.to && opts.to.length > 0
+      ? opts.to
+      : ([pickPrimaryContact(quote)?.email].filter(Boolean) as string[]);
+  const subject = opts.subject ?? defaultSubject(quote.quote_number, company.name);
+  const body = opts.body ?? defaultBody(quote, company, quote.created_by_member?.name ?? '');
+
+  const query: string[] = [];
+  if (opts.cc && opts.cc.length > 0) {
+    query.push(`cc=${encodeURIComponent(opts.cc.join(','))}`);
+  }
+  query.push(`subject=${encodeURIComponent(subject)}`);
+  query.push(`body=${encodeURIComponent(body)}`);
+
+  return `mailto:${toList.join(',')}?${query.join('&')}`;
+}
+
+export function defaultSubject(quoteNumber: string | null, companyName: string): string {
   const num = quoteNumber ?? 'Quote';
   return `Quote ${num} from ${companyName}`;
 }
@@ -37,12 +64,12 @@ function formatDate(iso: string | null | undefined): string {
  * Pick the customer's primary contact from the joined customer_contacts list.
  * Mirrors the helper in utils/quotePdf.ts — same primary-row resolution rule.
  */
-function pickPrimaryContact(quote: QuoteWithRelations) {
+export function pickPrimaryContact(quote: QuoteWithRelations) {
   const contacts = quote.customers?.customer_contacts ?? [];
   return contacts.find((c) => c.is_primary) ?? null;
 }
 
-function defaultBody(quote: QuoteWithRelations, company: Company, senderName: string): string {
+export function defaultBody(quote: QuoteWithRelations, company: Company, senderName: string): string {
   const primary = pickPrimaryContact(quote);
   const contactName = primary?.name || quote.customers?.name || 'there';
   const quoteNumber = quote.quote_number ?? 'attached';

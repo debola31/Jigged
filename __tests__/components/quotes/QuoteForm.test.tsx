@@ -90,7 +90,9 @@ const initialPopulated: QuoteFormData = {
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
   lead_time_value: '14',
   lead_time_unit: 'business_days',
-  payment_terms: '',
+  // Payment terms are required to submit a quote, so the "populated/complete"
+  // fixture carries one.
+  payment_terms: 'Net 30',
   expiration_date: '',
 };
 
@@ -167,6 +169,20 @@ describe('QuoteForm', () => {
     );
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+  });
+
+  it('requires payment terms — submit stays disabled until they are set', async () => {
+    // Everything valid except payment terms (blank) → submit blocked.
+    render(
+      <QuoteForm
+        mode="edit"
+        quoteId="q-1"
+        initialData={{ ...initialPopulated, payment_terms: '' }}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
     });
   });
 

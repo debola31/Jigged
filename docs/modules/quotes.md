@@ -228,27 +228,34 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Quote number (large)
 - Status pill (Active / Expired)
-- Created date, created by, expires-in, lead time (formatted with its unit, e.g. "6 weeks"), payment terms (when set)
+- Created date, expires-in, lead time (formatted with its unit, e.g. "6 weeks"), payment terms (always present — **payment terms are required** on every quote). The creator is no longer shown here — a **"Prepared by {name}"** line sits below the line items (mirroring the PDF, now that acceptance is by PO rather than signature).
 
 **Content cards:**
 
 - **Converted-to-Jobs banner** — only when `converted_at` is set. Lists every linked job by number with click-through links.
-- **Customer card** — name + click-through to the customer record.
+- **Customer card** — three columns in the order **Customer** (name + billing address) · **Ship to** (only when the shipping address differs from billing) · **Customer contact**. When shipping == billing the card is just two columns (Customer + Contact). Customer name click-throughs to the customer record.
 - **Line items** — one table for the whole quote (Part, Description, Order qty, Unit price, Total). A part with several quantities shows its name + description **once**, spanning its quantity rows, with one line per quantity.
   - **Firm quote** (every part has one quantity): a **grand total** row at the bottom.
   - **Price-options quote** (any part has 2+ quantities): **no grand total** (the customer picks a quantity).
   - A custom-price line shows a "custom" chip next to its unit price.
 - The old standalone **"Pricing tiers (reference)"** section was removed — the quantity rows are the price-break display now.
 
-**Actions (based on status):**
+**Actions — one row only:** a single **primary "Convert to Job"** button plus an
+**overflow (`⋮`) menu** holding the rest (Edit, View PDF, Email, Delete). This
+keeps the page to one line of actions and uses labelled menu items rather than a
+row of bare icons — better for the shop-floor tablet / older-user audience
+([NN/G](https://www.nngroup.com/articles/icon-usability/) on icon ambiguity).
+`Back to Quotes` stays top-left. Availability by status:
 
-| Current State | Available Actions |
-|---|---|
-| Active, not converted | Edit, Convert to Job, Delete |
-| Active, converted | Delete only (line items are frozen) |
-| Expired | Convert with warning, Delete |
+| Current State | Primary | Overflow menu |
+|---|---|---|
+| Active, not converted | Convert to Job | Edit, View PDF, Email, Delete |
+| Active, converted | — (no primary) | View PDF, Email, Delete (line items are frozen) |
+| Expired | Convert with warning | Edit, View PDF, Email, Delete |
 
-**Print PDF** lives in the top-right page toolbar and is available in every status. See [Printing Quotes](#printing-quotes) below.
+**View PDF** and **Email** live in the overflow menu (Email opens the
+[Email dialog](#emailing-a-quote)); both are available in every status. See
+[Printing Quotes](#printing-quotes) below.
 
 ### 4. Convert to Job Modal
 
@@ -616,17 +623,17 @@ Every editable behavior above has at least one `edit → save → reload → ass
 
 ## Printing Quotes
 
-Quote detail pages include a **Print PDF** button that generates a customer-facing PDF locally in the browser (no server round-trip).
+Quote detail pages expose **View PDF** (in the actions overflow menu) that generates a customer-facing PDF locally in the browser (no server round-trip).
 
 **What the PDF contains:**
 
 - Company logo (if uploaded in Settings → Company Branding) and company name in the header
-- Large "QUOTE" heading with the quote number, date, and validity / lead-time meta
-- **Created By · Customer Contact · Shipping Address** — three columns on one row (names, email, phone, address — the contact's role is not shown) pulled from the quote's snapshotted FKs; missing fields are skipped cleanly
+- Large "QUOTE" heading with the quote number, date, validity / lead-time / payment-terms meta
+- **Customer · Ship to (only if different from billing) · Customer contact** — columns on one row (customer name + billing address, the shipping address when it differs, and the contact's name/email/phone) pulled from the quote's snapshotted FKs; missing fields and the ship-to column (when shipping == billing) are skipped cleanly
 - **Line items** — one table (Part, Description, Order qty, Unit price, Total), ordered by `sequence`. A part with several quantities spans its name + description across its quantity rows.
   - **Firm quote** (every part one quantity): a bottom-line **grand total**.
   - **Price-options quote** (any part 2+ quantities): **no grand total** (the customer hasn't yet picked a quantity, so a single bottom-line price would mislead).
-- Acceptance / signature block + page footer
+- **Acceptance block** — instructs the customer to *reply with a purchase order referencing the quote*; there is **no signature/date/PO# ruled line** (acceptance is by PO). A small **"Prepared by {name} · {email}"** line sits just below it, followed by the page footer.
 
 **Intentionally excluded** (kept off the customer's view):
 
@@ -635,6 +642,24 @@ Quote detail pages include a **Print PDF** button that generates a customer-faci
 - Markup percentage and base cost
 
 **Filename:** `Quote-{quote_number}.pdf`
+
+## Emailing a Quote
+
+The overflow menu's **Email** action opens the **Quote Email dialog**
+(`components/quotes/QuoteEmailDialog.tsx`) rather than jumping straight to a bare
+`mailto:`. The dialog:
+
+- Seeds **To** with the customer's primary contact and lets the user add multiple
+  **To** and **Cc** addresses (chip inputs, basic email validation + de-dupe).
+- Shows the **example subject and message** (editable) so the user sees exactly
+  what will be sent.
+- On **Confirm**, does both: **downloads the quote PDF** (`Quote-{number}.pdf`) and
+  opens the user's default mail client via `buildQuoteMailto(quote, company, { to, cc, subject, body })`.
+- Reminds the user — `mailto:` can't carry an attachment — to **attach the
+  downloaded PDF** before sending.
+
+The email leaves from the salesperson's own mailbox, so replies and a sent-copy
+come for free; there is no server send.
 
 **Branding:** Upload your logo at `/dashboard/{companyId}/settings` (admin-only, Company Branding card). PNG, JPG, or WebP up to 2 MB. SVGs are accepted for storage but currently fall back to a text-only header in the PDF — use a raster format for logos that should appear. If no logo is uploaded, the PDF renders with the company name only.
 

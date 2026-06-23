@@ -100,31 +100,39 @@ function findContactById(
 }
 
 /**
+ * The address-only lines (line1, line2, city/state/zip, non-US country) for a
+ * customer address — no customer name, no attention_to. Used directly for the
+ * SHIP TO column (the customer name already heads the CUSTOMER column) and as
+ * the address half of the Customer block.
+ */
+function buildAddressOnlyLines(address: QuoteCustomerAddress | null): string[] {
+  if (!address) return [];
+  const lines: string[] = [];
+  const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
+  const cityStateZipFull = [cityStateZip, address.postal_code].filter(Boolean).join(' ').trim();
+  if (address.address_line1) lines.push(address.address_line1);
+  if (address.address_line2) lines.push(address.address_line2);
+  if (cityStateZipFull) lines.push(cityStateZipFull);
+  if (address.country && address.country.toUpperCase() !== 'USA') {
+    lines.push(address.country);
+  }
+  return lines;
+}
+
+/**
  * Build the printed address lines for the Customer block (customer name +
  * billing address). The address's attention_to is intentionally NOT
- * surfaced here — the Customer Contact has its own section below the
- * metadata block. No contact lines or contact info either.
+ * surfaced here — the Customer Contact has its own column. No contact lines
+ * or contact info either.
  */
 function buildBillingAddressLines(
   customer: QuoteCustomer | null | undefined,
   address: QuoteCustomerAddress | null,
 ): string[] {
   if (!customer) return ['(No customer)'];
-
   const lines: string[] = [];
   if (customer.name) lines.push(customer.name);
-
-  if (address) {
-    const cityStateZip = [address.city, address.state].filter(Boolean).join(', ');
-    const cityStateZipFull = [cityStateZip, address.postal_code].filter(Boolean).join(' ').trim();
-    if (address.address_line1) lines.push(address.address_line1);
-    if (address.address_line2) lines.push(address.address_line2);
-    if (cityStateZipFull) lines.push(cityStateZipFull);
-    if (address.country && address.country.toUpperCase() !== 'USA') {
-      lines.push(address.country);
-    }
-  }
-
+  lines.push(...buildAddressOnlyLines(address));
   return lines;
 }
 
@@ -234,30 +242,31 @@ export async function generateQuotePdf(
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
 
-  // ---------- CREATED BY · CUSTOMER CONTACT · CUSTOMER (3 columns) ----------
-  const usableWidth = pageWidth - MARGIN * 2;
-  const col1X = MARGIN;
-  const col2X = MARGIN + usableWidth * 0.33;
-  const col3X = MARGIN + usableWidth * 0.66;
-
-  const createdByName = quote.created_by_member?.name ?? null;
-  const createdByEmail = quote.created_by_member?.email ?? null;
-
-  // Resolve the billing address + customer contact from the quote's FKs.
-  // These are set at quote creation (legacy quotes were backfilled in
-  // migrations 20260520 + 20260522) so the printed quote always renders
-  // what the customer originally saw, even if the customer's defaults
-  // change later. The shipping address is captured on the quote for the
-  // future fulfillment flow but is NOT rendered on the quote document.
+  // ---------- CUSTOMER · SHIP TO (if different) · CUSTOMER CONTACT ----------
+  // Order: Customer (name + billing address) | Ship to (only when the shipping
+  // address differs from billing) | Customer contact. When shipping == billing
+  // we show just two columns. These FKs are set at quote creation (legacy
+  // quotes were backfilled in migrations 20260520 + 20260522) so the printed
+  // quote always renders what the customer originally saw. "Prepared by" is no
+  // longer a column here — it moved to the acceptance block below now that a
+  // quote is accepted by returning a PO rather than a signature.
   const billingAddress = findAddressById(quote.customers?.addresses, quote.billing_address_id);
+  const shippingAddress = findAddressById(quote.customers?.addresses, quote.shipping_address_id);
   const contact = findContactById(quote.customers?.customer_contacts, quote.contact_id);
   const billingLines = buildBillingAddressLines(quote.customers ?? null, billingAddress);
 
-  // Build each column's body lines as { text, bold }. The lead line of each
-  // column (creator/contact name, customer name) is bold; the rest plain.
-  const createdByLines: Array<{ text: string; bold: boolean }> = [];
-  if (createdByName) createdByLines.push({ text: createdByName, bold: true });
-  if (createdByEmail) createdByLines.push({ text: createdByEmail, bold: false });
+  // Shipping is its own column only when a distinct shipping address is set.
+  const shippingDiffers =
+    !!quote.shipping_address_id &&
+    quote.shipping_address_id !== quote.billing_address_id &&
+    shippingAddress !== null;
+
+  const customerBody: Array<{ text: string; bold: boolean }> = billingLines.map(
+    (line: string, i: number) => ({ text: line, bold: i === 0 }),
+  );
+  const shippingBody: Array<{ text: string; bold: boolean }> = buildAddressOnlyLines(
+    shippingAddress,
+  ).map((line: string, i: number) => ({ text: line, bold: i === 0 }));
 
   const contactLines: Array<{ text: string; bold: boolean }> = [];
   if (contact) {
@@ -266,31 +275,34 @@ export async function generateQuotePdf(
     if (contact.phone) contactLines.push({ text: contact.phone, bold: false });
   }
 
-  const billingBody: Array<{ text: string; bold: boolean }> = billingLines.map(
-    (line: string, i: number) => ({ text: line, bold: i === 0 }),
-  );
-
+  // Ordered columns: Customer, [Ship to if different], Contact. X positions are
+  // derived from the count so the two-column case stays evenly balanced.
   const infoColumns: Array<{
-    x: number;
-    label: string | null;
+    label: string;
     lines: Array<{ text: string; bold: boolean }>;
-  }> = [
-    { x: col1X, label: createdByLines.length > 0 ? 'CREATED BY' : null, lines: createdByLines },
-    { x: col2X, label: contactLines.length > 0 ? 'CUSTOMER CONTACT' : null, lines: contactLines },
-    { x: col3X, label: 'CUSTOMER', lines: billingBody },
-  ];
+  }> = [{ label: 'CUSTOMER', lines: customerBody }];
+  if (shippingDiffers && shippingBody.length > 0) {
+    infoColumns.push({ label: 'SHIP TO', lines: shippingBody });
+  }
+  if (contactLines.length > 0) {
+    infoColumns.push({ label: 'CUSTOMER CONTACT', lines: contactLines });
+  }
+
+  const usableWidth = pageWidth - MARGIN * 2;
+  const colWidth = usableWidth / infoColumns.length;
+  const columnsWithX = infoColumns.map((col, i) => ({ ...col, x: MARGIN + i * colWidth }));
 
   // Column labels on one row.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(120);
-  for (const col of infoColumns) {
-    if (col.label) doc.text(col.label, col.x, cursorY);
+  for (const col of columnsWithX) {
+    doc.text(col.label, col.x, cursorY);
   }
 
   // Column bodies; advance the cursor past the tallest column.
   let maxInfoLines = 0;
-  for (const col of infoColumns) {
+  for (const col of columnsWithX) {
     col.lines.forEach((ln, i) => {
       doc.setFont('helvetica', ln.bold ? 'bold' : 'normal');
       doc.setFontSize(11);
@@ -405,7 +417,8 @@ export async function generateQuotePdf(
   }
 
   // ---------- Acceptance block (compact) ----------
-  const acceptanceHeight = 70;
+  // Acceptance is by returning a purchase order — no wet signature/date lines.
+  const acceptanceHeight = 56;
   const footerReserve = 50;
 
   if (cursorY + acceptanceHeight > pageHeight - MARGIN - footerReserve) {
@@ -424,26 +437,26 @@ export async function generateQuotePdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(60);
-  const acceptCopy = 'To accept, sign below or reply with a PO referencing this quote.';
+  const acceptCopy =
+    `To accept, reply to this quote with a purchase order referencing quote ${quote.quote_number ?? ''}.`.trim();
   const wrappedCopy = doc.splitTextToSize(acceptCopy, pageWidth - MARGIN * 2);
   doc.text(wrappedCopy, MARGIN, cursorY);
-  cursorY += wrappedCopy.length * 12 + 14;
+  cursorY += wrappedCopy.length * 12 + 12;
 
-  doc.setDrawColor(160);
-  doc.setLineWidth(0.5);
-  const sigLineY = cursorY + 8;
-  doc.line(MARGIN, sigLineY, MARGIN + 240, sigLineY);
-  doc.line(MARGIN + 270, sigLineY, MARGIN + 430, sigLineY);
-  doc.line(MARGIN + 460, sigLineY, pageWidth - MARGIN, sigLineY);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('Signature', MARGIN, sigLineY + 11);
-  doc.text('Date', MARGIN + 270, sigLineY + 11);
-  doc.text('PO #', MARGIN + 460, sigLineY + 11);
+  // Prepared by — relocated from the old top "CREATED BY" column.
+  const preparedName = quote.created_by_member?.name ?? null;
+  const preparedEmail = quote.created_by_member?.email ?? null;
+  if (preparedName || preparedEmail) {
+    const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text(`Prepared by ${preparedText}`, MARGIN, cursorY);
+    cursorY += 12;
+  }
 
   // ---------- Footer (every page) ----------
-  // Created-by info now lives in the body (left of BILL TO), so the footer is
+  // "Prepared by" now lives in the acceptance block, so the footer is
   // generated-on/page-of only.
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {

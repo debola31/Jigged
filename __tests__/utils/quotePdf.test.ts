@@ -358,7 +358,7 @@ describe('generateQuotePdf', () => {
     expect(rendered.some((t) => t.includes('Receiving Dept'))).toBe(false);
   });
 
-  it('renders the static ACCEPTANCE block (signature, PO#)', async () => {
+  it('renders the ACCEPTANCE block with reply-with-a-PO copy and NO signature/date lines', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
@@ -367,12 +367,20 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered).toContain('ACCEPTANCE');
-    expect(rendered).toContain('Signature');
-    expect(rendered).toContain('PO #');
-    expect(rendered).toContain('Date');
+    // Acceptance is now by returning a PO — the wet-signature ruled lines are gone.
+    expect(rendered).not.toContain('Signature');
+    expect(rendered).not.toContain('PO #');
+    expect(rendered).not.toContain('Date');
+    // The acceptance sentence is wrapped via splitTextToSize; assert its input.
+    const splitInputs = docInstance.splitTextToSize.mock.calls.map((c: unknown[]) => c[0]);
+    expect(
+      splitInputs.some(
+        (t: unknown) => typeof t === 'string' && t.includes('purchase order referencing quote'),
+      ),
+    ).toBe(true);
   });
 
-  it('renders a CREATED BY block (left of the CUSTOMER block) when creator is known', async () => {
+  it('renders a "Prepared by" line (not a CREATED BY column) when the creator is known', async () => {
     const quoteWithCreator: QuoteWithRelations = {
       ...baseQuote,
       created_by: 'user-1',
@@ -386,12 +394,12 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    expect(rendered).toContain('CREATED BY');
-    expect(rendered).toContain('Sam T');
-    expect(rendered).toContain('sam@example.com');
+    // "Created by" is no longer a top column — it's a "Prepared by" footer line.
+    expect(rendered).not.toContain('CREATED BY');
+    expect(rendered).toContain('Prepared by Sam T · sam@example.com');
   });
 
-  it('omits the CREATED BY label when there is no creator on the quote', async () => {
+  it('omits the "Prepared by" line when there is no creator on the quote', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
@@ -400,8 +408,52 @@ describe('generateQuotePdf', () => {
       .filter((t: unknown): t is string => typeof t === 'string');
 
     expect(rendered).not.toContain('CREATED BY');
+    expect(rendered.some((t) => t.startsWith('Prepared by'))).toBe(false);
     // The CUSTOMER block is still rendered.
     expect(rendered).toContain('CUSTOMER');
+  });
+
+  it('renders a SHIP TO column only when the shipping address differs from billing', async () => {
+    // Base quote: billing and shipping point at the same address → no SHIP TO.
+    await generateQuotePdf(baseQuote, baseCompany);
+    let docInstance = jsPDFCtor.mock.results[0].value;
+    let rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+    expect(rendered).not.toContain('SHIP TO');
+
+    vi.clearAllMocks();
+
+    // Distinct shipping address → SHIP TO column with the shipping address lines.
+    const twoAddr: QuoteWithRelations = {
+      ...baseQuote,
+      shipping_address_id: 'addr-2',
+      customers: {
+        ...baseQuote.customers!,
+        addresses: [
+          baseQuote.customers!.addresses![0],
+          {
+            id: 'addr-2',
+            address_line1: '99 Dock Road',
+            address_line2: null,
+            city: 'Toledo',
+            state: 'OH',
+            postal_code: '43601',
+            country: 'USA',
+            default_billing: false,
+            default_shipping: true,
+            attention_to: null,
+          },
+        ],
+      },
+    };
+    await generateQuotePdf(twoAddr, baseCompany);
+    docInstance = jsPDFCtor.mock.results[0].value;
+    rendered = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+    expect(rendered).toContain('SHIP TO');
+    expect(rendered).toContain('99 Dock Road');
   });
 
   it('renders ONE table with the part spanning its quantity rows (no grand total) for an options quote', async () => {

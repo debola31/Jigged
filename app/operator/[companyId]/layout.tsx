@@ -17,9 +17,11 @@ import ListItemText from '@mui/material/ListItemText';
 import LogoutIcon from '@mui/icons-material/Logout';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
+import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
@@ -45,7 +47,7 @@ export default function OperatorLayout({
   const companyId = params.companyId as string;
 
   const [userRole, setUserRole] = useState<string>('operator');
-  const [navValue, setNavValue] = useState(0);
+  const [navValue, setNavValue] = useState<string>('jobs');
   const [isLoading, setIsLoading] = useState(true);
 
   const supabase = getSupabase();
@@ -102,11 +104,9 @@ export default function OperatorLayout({
 
   // Update nav value based on current path
   useEffect(() => {
-    if (pathname?.includes('/profile')) {
-      setNavValue(1);
-    } else {
-      setNavValue(0);
-    }
+    if (pathname?.includes('/profile')) setNavValue('profile');
+    else if (pathname?.includes('/inventory')) setNavValue('inventory');
+    else setNavValue('jobs');
   }, [pathname]);
 
   const handleLogout = async () => {
@@ -117,16 +117,11 @@ export default function OperatorLayout({
     router.push(`/operator/${companyId}/login`);
   };
 
-  const handleNavChange = (_event: React.SyntheticEvent, newValue: number) => {
+  const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
     setNavValue(newValue);
-    switch (newValue) {
-      case 0:
-        router.push(`/operator/${companyId}/jobs`);
-        break;
-      case 1:
-        router.push(`/operator/${companyId}/profile`);
-        break;
-    }
+    if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
+    else if (newValue === 'profile') router.push(`/operator/${companyId}/profile`);
+    else router.push(`/operator/${companyId}/jobs`);
   };
 
   // Don't show header/nav on login page
@@ -192,13 +187,20 @@ function OperatorShell({
 }: {
   userRole: string;
   companyId: string;
-  navValue: number;
-  onNavChange: (event: React.SyntheticEvent, newValue: number) => void;
+  navValue: string;
+  onNavChange: (event: React.SyntheticEvent, newValue: string) => void;
   onLogout: () => void;
   children: React.ReactNode;
 }) {
   const { stationId, stationName, stations, setStation } = useStationContext();
+  const { features } = useCompanyFeatures();
+  const pathname = usePathname();
   const router = useRouter();
+  const showInventory = Boolean(features.inventory_locations);
+  // The warehouse is station-independent, so keep the nav (and a way out) on
+  // inventory routes even before a station is picked.
+  const isInventoryRoute = pathname?.includes('/inventory') ?? false;
+  const navVisible = Boolean(stationId) || isInventoryRoute;
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   const handleStationMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -332,7 +334,7 @@ function OperatorShell({
         sx={{
           flex: 1,
           mt: '48px', // Single-row AppBar height
-          mb: stationId ? '56px' : 0, // BottomNavigation height (hidden during station selection)
+          mb: navVisible ? '56px' : 0, // BottomNavigation height
           overflow: 'auto',
           p: 2,
         }}
@@ -340,8 +342,8 @@ function OperatorShell({
         {children}
       </Box>
 
-      {/* Bottom Navigation — hidden during station selection */}
-      {stationId && (
+      {/* Bottom Navigation — hidden only on the bare station-selection screen */}
+      {navVisible && (
         <Paper
           sx={{
             position: 'fixed',
@@ -369,11 +371,21 @@ function OperatorShell({
           >
             <BottomNavigationAction
               label="Jobs"
+              value="jobs"
               icon={<WorkIcon />}
               sx={{ minHeight: 56 }}
             />
+            {showInventory && (
+              <BottomNavigationAction
+                label="Inventory"
+                value="inventory"
+                icon={<WarehouseOutlinedIcon />}
+                sx={{ minHeight: 56 }}
+              />
+            )}
             <BottomNavigationAction
               label="Profile"
+              value="profile"
               icon={<PersonIcon />}
               sx={{ minHeight: 56 }}
             />

@@ -82,7 +82,7 @@ export default function OperatorBinViewPage() {
 
   const goBack = () => {
     if (parent) router.push(`/operator/${companyId}/inventory/locations/${parent.id}`);
-    else router.push(`/operator/${companyId}/jobs`);
+    else router.push(`/operator/${companyId}/inventory`);
   };
 
   const modalUnit = modal?.part.primary_unit || 'ea';
@@ -102,7 +102,7 @@ export default function OperatorBinViewPage() {
   if (error || !node) {
     return (
       <Box>
-        <IconButton onClick={() => router.push(`/operator/${companyId}/jobs`)} aria-label="Back" sx={{ mb: 2 }}>
+        <IconButton onClick={() => router.push(`/operator/${companyId}/inventory`)} aria-label="Back" sx={{ mb: 2 }}>
           <ArrowBackIcon />
         </IconButton>
         <Alert severity="error">{error ?? 'Location not found.'}</Alert>

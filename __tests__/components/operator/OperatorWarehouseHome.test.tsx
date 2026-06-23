@@ -25,8 +25,6 @@ const loc = (over: { id: string; name: string; parent_id?: string | null; code?:
   name: over.name,
   kind: 'cabinet',
   code: over.code ?? null,
-  is_stockable: true,
-  is_qr_anchor: false,
   sort_order: 0,
   created_at: '',
   updated_at: '',

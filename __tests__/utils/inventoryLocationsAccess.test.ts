@@ -64,8 +64,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   name: over.id,
   kind: null,
   code: null,
-  is_stockable: true,
-  is_qr_anchor: false,
   sort_order: 0,
   created_at: '',
   updated_at: '',

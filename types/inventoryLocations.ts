@@ -13,8 +13,6 @@ export interface InventoryLocation {
   name: string;
   kind: string | null;
   code: string | null;
-  is_stockable: boolean;
-  is_qr_anchor: boolean;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -31,16 +29,11 @@ export interface CreateLocationInput {
   name: string;
   kind?: string | null;
   code?: string | null;
-  is_stockable?: boolean;
-  is_qr_anchor?: boolean;
   sort_order?: number;
 }
 
 export type UpdateLocationInput = Partial<
-  Pick<
-    InventoryLocation,
-    'name' | 'kind' | 'code' | 'is_stockable' | 'is_qr_anchor' | 'sort_order'
-  >
+  Pick<InventoryLocation, 'name' | 'kind' | 'code' | 'sort_order'>
 >;
 
 /**

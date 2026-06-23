@@ -29,7 +29,7 @@ import type {
 } from '@/types/inventoryLocations';
 
 const LOCATION_COLUMNS =
-  'id, company_id, parent_id, name, kind, code, is_stockable, is_qr_anchor, sort_order, created_at, updated_at';
+  'id, company_id, parent_id, name, kind, code, sort_order, created_at, updated_at';
 
 // ===========================================================================
 // Tree CRUD
@@ -121,8 +121,6 @@ export async function createLocation(
       name: input.name.trim(),
       kind: input.kind ?? null,
       code: input.code ?? null,
-      is_stockable: input.is_stockable ?? true,
-      is_qr_anchor: input.is_qr_anchor ?? false,
       sort_order: input.sort_order ?? 0,
     })
     .select(LOCATION_COLUMNS)

@@ -2,7 +2,7 @@
 
 ## Overview
 
-A **markup rate** is a named pattern of quantity break-points + markup percentages that can be applied to a part to materialize its pricing tiers. Markup rates are company-scoped, snapshot-applied (deleting the rate keeps the tiers it produced), and one rate per company can be marked as the default for new parts.
+A **markup rate** is a named pattern of quantity break-points + markup percentages that can be applied to a part to materialize its pricing tiers. The resulting tiers resolve to a sell price for **both made and bought parts** — markup is applied to the routing/BOM cost for made parts and to the procurement-tier cost for bought parts. Markup rates are company-scoped, snapshot-applied (deleting the rate keeps the tiers it produced), and one rate per company can be marked as the default for new parts.
 
 **Priority:** Built; in production.
 

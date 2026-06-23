@@ -231,7 +231,7 @@ A part's cost flows in three layers:
    ```
 3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items).
 
-Parts without a routing show "No cost data" in the cost breakdown card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a routing exists).
+**Bought parts** have no routing, so their base cost comes from the part's **procurement tiers** (the Cost card) via `compute_part_cost_at_qty` instead of `calculateRoutingCost`. The shared resolver `getTiersWithComputedPrices` falls back to that procurement cost when a part has no routing/BOM, so a bought part's pricing tiers still resolve a sell price = `procurement_cost(qty) × (1 + markup/100)`. A made part with no routing yet shows "No cost data" in the cost breakdown card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a routing exists).
 
 ---
 

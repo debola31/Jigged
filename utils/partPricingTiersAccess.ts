@@ -9,6 +9,7 @@ import {
   calculateRoutingCost,
   calculateTierPricing,
 } from '@/utils/routingCostCalculation';
+import { getComputedPartCost } from '@/utils/partsAccess';
 
 /**
  * Get all pricing tiers for a part (raw DB shape), ordered by sequence.
@@ -31,9 +32,11 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
 
 /**
  * Single source of truth for tier pricing: load the tier rows (markup % is
- * the user-controlled source of truth), compute the current base cost from
- * the part's live routing + BOM, then derive `unit_price = base × (1 +
- * markup/100)` per tier qty.
+ * the user-controlled source of truth), compute the current base cost — from
+ * the part's live routing + BOM for made parts, or from its procurement tiers
+ * (`compute_part_cost_at_qty`) for bought parts that have no routing — then
+ * derive `unit_price = base × (1 + markup/100)` per tier qty. Both part kinds
+ * price through this one resolver so no read path can drift.
  *
  * Use this anywhere a user sees a tier price (quote form chip, PDF, the
  * resolved tier picked for a quote line item). The Part detail page already
@@ -54,10 +57,25 @@ export async function getTiersWithComputedPrices(
   ]);
 
   if (!breakdown) {
-    // No routing/BOM (e.g. bought parts) — unit_price cannot be computed
-    // from a parent routing. Surface as null so the consumer's "no usable
-    // tier" check fires; bought parts hit a different pricing flow.
-    return tiers.map((t) => ({ ...t, unit_price: null }));
+    // No routing/BOM (e.g. bought parts): the base cost comes from the part's
+    // procurement tiers via `compute_part_cost_at_qty`, not a parent routing.
+    // Sell price is still the same cost-plus model — base × (1 + markup/100) —
+    // so bought parts price in every read path that uses this resolver (quote
+    // form preview, quote PDF, quote line items). Matches `calculateTierPricing`
+    // semantics exactly: a null markup yields a null price ("no price yet"), and
+    // a tier whose base cost can't resolve (no procurement tier covers its qty)
+    // keeps unit_price = null so the "no usable tier" check still fires.
+    return Promise.all(
+      tiers.map(async (t) => {
+        const rawBase = await getComputedPartCost(partId, t.quantity).catch(() => null);
+        if (rawBase === null || t.markup_percent == null || Number.isNaN(t.markup_percent)) {
+          return { ...t, unit_price: null };
+        }
+        const baseCostPerUnit = Math.round(rawBase * 100) / 100;
+        const unitPrice = Math.round(baseCostPerUnit * (1 + t.markup_percent / 100) * 100) / 100;
+        return { ...t, unit_price: unitPrice };
+      }),
+    );
   }
 
   return tiers.map((t) => {

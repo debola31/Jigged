@@ -397,7 +397,7 @@ base_cost_per_unit (at tier qty Q) = run_per_unit + material_per_unit + (total_s
 unit_price                         = base_cost_per_unit × (1 + markup_percent / 100)
 ```
 
-Markup % is the source of truth on a part tier. Typing a unit price in the part Pricing card back-calculates and stores the markup; routing changes still propagate to every tier's unit price.
+Markup % is the source of truth on a part tier. Typing a unit price in the part Pricing card back-calculates and stores the markup; routing changes still propagate to every tier's unit price. For **bought parts** (no routing) the `base_cost_per_unit` comes from the part's procurement tiers via `compute_part_cost_at_qty` rather than the routing rollup above — so bought parts resolve a tier price (`cost × (1 + markup/100)`) and no longer require a manual per-line override.
 
 **On the quote (createQuote):**
 

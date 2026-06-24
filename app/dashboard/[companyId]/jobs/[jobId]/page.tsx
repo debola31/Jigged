@@ -17,6 +17,8 @@ import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -26,18 +28,21 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import EditIcon from '@mui/icons-material/Edit';
+import LockIcon from '@mui/icons-material/Lock';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, cancelJob, reopenJob } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, EditJobPartQuantityModal } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -46,6 +51,11 @@ import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
+
+const fmtUsd = (v: number | null): string =>
+  v === null
+    ? '—'
+    : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -68,6 +78,8 @@ export default function JobDetailPage() {
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
+  const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
+  const [qtySuccess, setQtySuccess] = useState<string | null>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -184,6 +196,38 @@ export default function JobDetailPage() {
     setPendingPreviewShipmentId(result.shipmentId);
     setHistoryRefreshKey((k) => k + 1);
     // Re-pull job + per-part summary so status block + parts row reflect the new shipment.
+    await fetchJob();
+  };
+
+  const handleQtyConfirmed = async (result: UpdateJobPartQuantityResult) => {
+    const edited = editQtyPart;
+    setEditQtyPart(null);
+    // Audit trail: log the change to the job feed. Best-effort — a note failure
+    // must never undo the (already-committed) quantity edit. authorId is the
+    // user_company_access id (RLS requirement), resolved via getCurrentOperator.
+    try {
+      const me = await getCurrentOperator(companyId);
+      if (me) {
+        const partName = edited?.parts?.part_name ?? 'part';
+        const priceNote = result.priceReresolved
+          ? ` (unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)})`
+          : '';
+        await addJobNote(
+          jobId,
+          companyId,
+          me.id,
+          `Order quantity changed ${result.oldQuantity} → ${result.newQuantity} for ${partName}${priceNote}`,
+          { jobPartId: result.jobPart.id, noteType: 'event' },
+        );
+      }
+    } catch (err) {
+      console.warn('Job detail: failed to log quantity-change note', err);
+    }
+    setQtySuccess(
+      `Order qty updated ${result.oldQuantity} → ${result.newQuantity}` +
+        (result.priceReresolved ? ` · unit price ${fmtUsd(result.newUnitPrice)}` : ''),
+    );
+    // Re-pull so the parts row, status block, and fulfillment chip reflect the edit.
     await fetchJob();
   };
 
@@ -411,6 +455,28 @@ export default function JobDetailPage() {
                               label={`Order qty ${part.quantity}`}
                               variant="outlined"
                             />
+                            {qbInvoiceLink ? (
+                              <Tooltip
+                                title={`Invoiced in QuickBooks${
+                                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
+                                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
+                              >
+                                <LockIcon fontSize="small" color="disabled" />
+                              </Tooltip>
+                            ) : (
+                              job.production_status !== 'cancelled' &&
+                              part.production_status !== 'cancelled' && (
+                                <Tooltip title="Edit order quantity">
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => setEditQtyPart(part)}
+                                    aria-label="Edit order quantity"
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )
+                            )}
                             {shipmentsEnabled && summary && summary.qty_shipped > 0 && (
                               <Typography variant="body2" color="text.secondary">
                                 {summary.qty_shipped} of {summary.qty_ordered} shipped
@@ -540,11 +606,29 @@ export default function JobDetailPage() {
         }}
       />
 
+      <EditJobPartQuantityModal
+        open={editQtyPart !== null}
+        jobPart={editQtyPart}
+        qtyShipped={
+          editQtyPart ? summariesByPart.get(editQtyPart.id)?.qty_shipped ?? 0 : 0
+        }
+        onClose={() => setEditQtyPart(null)}
+        onConfirmed={handleQtyConfirmed}
+      />
+
       <Snackbar
         open={!!pushSuccess}
         autoHideDuration={5000}
         onClose={() => setPushSuccess(null)}
         message={pushSuccess ?? ''}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      />
+
+      <Snackbar
+        open={!!qtySuccess}
+        autoHideDuration={5000}
+        onClose={() => setQtySuccess(null)}
+        message={qtySuccess ?? ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
     </Box>

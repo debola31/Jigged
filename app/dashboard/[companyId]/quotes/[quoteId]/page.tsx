@@ -32,6 +32,7 @@ import ListItemText from '@mui/material/ListItemText';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
+import { getJobQuantitiesForQuote } from '@/utils/jobsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
@@ -70,6 +71,12 @@ export default function QuoteDetailPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  // Current job_part quantities keyed by source quote line — populated only for
+  // converted quotes so each line can reflect "now N on the job" when a job
+  // quantity was edited after conversion. The quote keeps its quoted figures.
+  const [jobQtyByLine, setJobQtyByLine] = useState<
+    Map<string, { quantity: number; job_id: string; job_number: string }>
+  >(new Map());
   const fetchQuote = useCallback(async () => {
     try {
       setLoading(true);
@@ -86,6 +93,33 @@ export default function QuoteDetailPage() {
   useEffect(() => {
     fetchQuote();
   }, [fetchQuote]);
+
+  // Reflect current job quantities on a converted quote (read-only). A quantity
+  // edited on the job after conversion shows here as "now N on the job"; the
+  // quoted figure itself never changes.
+  useEffect(() => {
+    if (!quote?.converted_at) {
+      setJobQtyByLine(new Map());
+      return;
+    }
+    let cancelled = false;
+    getJobQuantitiesForQuote(quoteId)
+      .then((rows) => {
+        if (cancelled) return;
+        setJobQtyByLine(
+          new Map(
+            rows.map((r) => [
+              r.source_quote_line_item_id,
+              { quantity: r.quantity, job_id: r.job_id, job_number: r.job_number },
+            ]),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quote?.converted_at, quoteId]);
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -414,6 +448,15 @@ export default function QuoteDetailPage() {
             </span>
           ))}{' '}
           on {formatDate(quote.converted_at)}
+          {lineItems.some((li) => {
+            const j = jobQtyByLine.get(li.id);
+            return j && j.quantity !== li.quantity;
+          }) && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              Some order quantities changed on the job after conversion — the quoted
+              figures below are unchanged; current job quantities are noted inline.
+            </Typography>
+          )}
         </Alert>
       )}
 
@@ -541,7 +584,30 @@ export default function QuoteDetailPage() {
                             {i === 0 && (
                               <td rowSpan={rows.length}>{group.description ?? ''}</td>
                             )}
-                            <td className="num">{li.quantity}</td>
+                            <td className="num">
+                              {li.quantity}
+                              {(() => {
+                                const jobQ = jobQtyByLine.get(li.id);
+                                if (!jobQ || jobQ.quantity === li.quantity) return null;
+                                return (
+                                  <Tooltip
+                                    title={`Order quantity was changed to ${jobQ.quantity} on Job ${jobQ.job_number} after this quote was converted. The quote keeps the originally quoted figure.`}
+                                  >
+                                    <Box
+                                      component="span"
+                                      sx={{
+                                        display: 'block',
+                                        fontSize: '0.7rem',
+                                        fontWeight: 600,
+                                        color: 'warning.main',
+                                      }}
+                                    >
+                                      now {jobQ.quantity} on job
+                                    </Box>
+                                  </Tooltip>
+                                );
+                              })()}
+                            </td>
                             <td className="num">
                               {formatCurrency(li.unit_price)}
                               {li.is_quote_override && (

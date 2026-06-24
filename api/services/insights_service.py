@@ -119,6 +119,35 @@ def _get_period_boundaries(period_type: str, num_periods: int) -> list[dict]:
 # ============================================================
 
 
+def _job_part_revenue(jp: dict) -> float:
+    """Revenue for one job_part: its agreed line total (job_parts.total_price),
+    falling back to unit_price * quantity.
+
+    The job_part — NOT the source quote line — is the post-conversion source of
+    truth for price/quantity (see job_parts.unit_price/total_price, added by
+    migration 20260621162024). Reading it here means realized revenue reflects
+    any quantity edited after the job was created, and it avoids over-counting a
+    price-options quote's unchosen lines (the conversion picks one line per part,
+    but the quote still holds the others).
+    """
+    tp = jp.get("total_price")
+    if tp is not None:
+        return float(tp)
+    up = jp.get("unit_price")
+    qty = jp.get("quantity")
+    if up is not None and qty is not None:
+        return float(up) * float(qty)
+    return 0.0
+
+
+def _sum_job_parts_revenue(job_parts) -> float:
+    """Sum _job_part_revenue across a job's job_parts (tolerates the PostgREST
+    single-object-vs-list embedding shape)."""
+    if not isinstance(job_parts, list):
+        job_parts = [job_parts] if job_parts else []
+    return sum(_job_part_revenue(jp) for jp in job_parts if isinstance(jp, dict))
+
+
 def get_revenue_by_period(
     company_id: str,
     period_type: str = "weekly",
@@ -132,18 +161,18 @@ def get_revenue_by_period(
     start_date = periods[0]["start"]
     end_date = periods[-1]["end"]
 
-    # Quotes no longer carry total_price; sum each quote's line items via the
-    # quote_line_items join. One job → one quote → many line items.
+    # Realized revenue is the job's own job_parts line totals — the agreed
+    # price/quantity that gets invoiced — NOT the source quote lines. Reading
+    # job_parts keeps revenue correct after a post-conversion quantity edit and
+    # avoids over-counting price-options quotes (see _job_part_revenue).
     # shipped_at is gone from the jobs table — the last ship date now comes
-    # from public.job_last_ship_date(jobs.id), which PR 4 fills in from
-    # non-voided shipments. PR 3 ships a NULL-returning stub, so this query
-    # returns no rows until shipments exist. Reanchored on
+    # from public.job_last_ship_date(jobs.id). Anchored on
     # fulfillment_status = 'fully_shipped' to scope to delivered orders.
     response = (
         supabase.table("jobs")
         .select(
             "id, last_ship_date:job_last_ship_date, "
-            "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
+            "job_parts(total_price, unit_price, quantity)"
         )
         .eq("company_id", company_id)
         .eq("fulfillment_status", "fully_shipped")
@@ -153,13 +182,7 @@ def get_revenue_by_period(
     jobs = response.data or []
 
     def _job_revenue(job: dict) -> float:
-        quote = job.get("quotes")
-        if isinstance(quote, list):
-            quote = quote[0] if quote else None
-        if not isinstance(quote, dict):
-            return 0.0
-        line_items = quote.get("quote_line_items") or []
-        return sum(float(li.get("total_price", 0) or 0) for li in line_items)
+        return _sum_job_parts_revenue(job.get("job_parts"))
 
     # Bucket jobs into periods using the computed last_ship_date helper.
     result = []
@@ -354,15 +377,15 @@ def get_customer_revenue_breakdown(
     start_date = periods[0]["start"]
     end_date = periods[-1]["end"]
 
-    # Quotes no longer carry total_price; sum each quote's line items.
-    # shipped_at replaced with the job_last_ship_date helper (NULL stub
-    # in PR 3, populated by PR 4).
+    # Realized revenue is the job's own job_parts line totals (see
+    # _job_part_revenue) — not the source quote lines — so it stays correct
+    # after a post-conversion quantity edit.
     response = (
         supabase.table("jobs")
         .select(
             "id, customer_id, last_ship_date:job_last_ship_date, "
             "customers!left(name), "
-            "quotes!jobs_quote_id_fkey(quote_line_items(total_price))"
+            "job_parts(total_price, unit_price, quantity)"
         )
         .eq("company_id", company_id)
         .eq("fulfillment_status", "fully_shipped")
@@ -378,11 +401,7 @@ def get_customer_revenue_breakdown(
         if isinstance(job.get("customers"), dict):
             customer_name = job["customers"].get("name", "Unknown")
 
-        quote = job.get("quotes")
-        if isinstance(quote, list):
-            quote = quote[0] if quote else None
-        line_items = (quote or {}).get("quote_line_items") or []
-        price = sum(float(li.get("total_price", 0) or 0) for li in line_items)
+        price = _sum_job_parts_revenue(job.get("job_parts"))
 
         customer_id = job.get("customer_id", "unknown")
         if customer_id not in customer_revenue:
@@ -418,9 +437,9 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
     Get part profitability analysis on the unified parts schema.
 
     Walks shipped jobs → job_parts → parts and aggregates per part:
-      - revenue: SUM(quote_line_items.total_price) from each job_part's
-        source_quote_line_item (jobs no longer carry a single price; the
-        quote line item is the per-part revenue source).
+      - revenue: SUM(job_parts.total_price) per part — the agreed line total on
+        the job_part, which is the post-conversion source of truth and reflects
+        any quantity edited after the job was created.
       - labor_cost: SUM over each job_operation belonging to that job_part:
           * For internal work centers (work_centers.kind = 'internal'):
               labor_rate = COALESCE(routing_operations.labor_rate_override,
@@ -445,9 +464,8 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
         supabase.table("jobs")
         .select(
             "id, "
-            "job_parts(id, part_id, quantity, source_quote_line_item_id, "
+            "job_parts(id, part_id, quantity, total_price, unit_price, "
             "parts!job_parts_part_id_fkey(part_name, description), "
-            "quote_line_items!job_parts_source_quote_line_item_id_fkey(total_price), "
             "job_operations(estimated_setup_minutes, estimated_run_minutes_per_unit, "
             "work_centers!left(kind, labor_rate), "
             "routing_operations!left(labor_rate_override, external_unit_price, "
@@ -486,15 +504,10 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
                     "job_part_count": 0,
                 }
 
-            # Revenue: from the quote_line_item this job_part was created from.
-            # If unlinked (manual job_part with no quote origin), revenue is 0.
-            qli = jp.get("quote_line_items")
-            if isinstance(qli, list) and qli:
-                qli = qli[0]
-            if isinstance(qli, dict):
-                part_data[part_id]["total_revenue"] += float(
-                    qli.get("total_price", 0) or 0
-                )
+            # Revenue: the job_part's agreed line total (post-conversion source
+            # of truth; reflects quantity edits). Unlinked/manual job_parts with
+            # no price contribute 0. See _job_part_revenue.
+            part_data[part_id]["total_revenue"] += _job_part_revenue(jp)
 
             # Labor cost: per-operation rollup using the cost contract.
             operations = jp.get("job_operations") or []

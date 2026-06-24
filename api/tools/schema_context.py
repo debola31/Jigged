@@ -196,7 +196,9 @@ SCHEMA_CONTEXT = """
 - part_id: UUID (FK -> parts.id)
 - source_quote_line_item_id: UUID (FK -> quote_line_items.id, nullable)
 - sequence: INTEGER (unique per job)
-- quantity: INTEGER (>0)
+- quantity: NUMERIC (>0) -- editable after job creation; fractional allowed
+- unit_price: NUMERIC(12,4) -- agreed price per unit (the per-part revenue source)
+- total_price: NUMERIC(12,4) -- agreed line total (quantity * unit_price); USE THIS for job revenue
 - production_status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'cancelled'
 - fulfillment_status: TEXT -- one of: 'unshipped', 'partially_shipped', 'fully_shipped'
 - status_changed_at: TIMESTAMPTZ
@@ -319,9 +321,11 @@ SCHEMA_CONTEXT = """
 - A "shipped" job means fulfillment_status = 'fully_shipped'. The last ship
   date comes from public.job_last_ship_date(job_id), which sums non-voided
   shipments. There is no jobs.shipped_at column anymore.
-- Revenue per quote = SUM(quote_line_items.total_price) WHERE quote_id = ?.
-- Revenue per shipped job = SUM through job_parts → quote_line_items
-  (each job_part links to the quote_line_item it was created from).
+- Revenue per OPEN quote (pipeline / not yet converted) = SUM(quote_line_items.total_price) WHERE quote_id = ?.
+- Revenue per job (realized) = SUM(job_parts.total_price) for that job's parts.
+  Use job_parts, NOT the source quote line — job_parts.quantity/unit_price are
+  the post-conversion source of truth (a quantity edited after conversion shows
+  here), and a price-options quote keeps unchosen lines that would over-count.
 - Use DATE_TRUNC('week', timestamp) for weekly grouping, DATE_TRUNC('month', ...) for monthly.
 - All TIMESTAMPTZ columns are UTC.
 - Cost contract for internal routing/job operations:
@@ -343,15 +347,14 @@ WHERE company_id = $1
   AND started_at >= DATE_TRUNC('week', NOW()) - INTERVAL '1 week'
   AND started_at <  DATE_TRUNC('week', NOW());
 
--- Revenue by month (last 6 months) — sum quote_line_items via job_parts.
--- Uses the public.job_last_ship_date(jobs.id) helper instead of the dropped
--- shipped_at column.
+-- Revenue by month (last 6 months) — sum job_parts.total_price (the agreed
+-- per-part line total, post-conversion source of truth). Uses the
+-- public.job_last_ship_date(jobs.id) helper instead of the dropped shipped_at.
 SELECT DATE_TRUNC('month', public.job_last_ship_date(j.id)::timestamptz) AS month,
-       SUM(qli.total_price)              AS revenue,
-       COUNT(DISTINCT j.id)              AS job_count
+       SUM(jp.total_price)              AS revenue,
+       COUNT(DISTINCT j.id)             AS job_count
 FROM jobs j
-JOIN job_parts jp        ON jp.job_id = j.id
-JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
+JOIN job_parts jp ON jp.job_id = j.id
 WHERE j.company_id = $1
   AND j.fulfillment_status = 'fully_shipped'
   AND public.job_last_ship_date(j.id) >= (CURRENT_DATE - INTERVAL '6 months')
@@ -360,12 +363,11 @@ ORDER BY month;
 
 -- Top 5 customers by revenue
 SELECT c.name,
-       SUM(qli.total_price) AS revenue,
+       SUM(jp.total_price) AS revenue,
        COUNT(DISTINCT j.id) AS job_count
 FROM jobs j
-JOIN customers c          ON c.id = j.customer_id
-JOIN job_parts jp         ON jp.job_id = j.id
-JOIN quote_line_items qli ON qli.id = jp.source_quote_line_item_id
+JOIN customers c  ON c.id = j.customer_id
+JOIN job_parts jp ON jp.job_id = j.id
 WHERE j.company_id = $1 AND j.fulfillment_status = 'fully_shipped'
 GROUP BY c.name
 ORDER BY revenue DESC

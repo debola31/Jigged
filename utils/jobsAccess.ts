@@ -19,6 +19,7 @@ type JobPartInsert = Database['public']['Tables']['job_parts']['Insert'];
 type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
 import type {
   Job,
+  JobPart,
   JobWithRelations,
   JobFilters,
   ProductionStatus,
@@ -28,6 +29,10 @@ import type {
   CurrentOperationInfo,
 } from '@/types/job';
 import { isJobDone } from '@/types/job';
+import type { PricingBasisSnapshot } from '@/types/quote';
+import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
+import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -522,6 +527,257 @@ export async function createJobFromPurchaseOrder(
   }
 
   return { job_id: job.id, job_number: job.job_number };
+}
+
+// ============== Job Part Quantity Editing ==============
+
+/** Result of editing a job_part's order quantity. */
+export interface UpdateJobPartQuantityResult {
+  jobPart: JobPart;
+  oldQuantity: number;
+  newQuantity: number;
+  oldUnitPrice: number | null;
+  newUnitPrice: number | null;
+  oldTotalPrice: number | null;
+  newTotalPrice: number | null;
+  /** True when the tier price was re-resolved and actually changed unit_price. */
+  priceReresolved: boolean;
+}
+
+/**
+ * Pricing basis for a job_part's quantity edit, read from its source quote
+ * line. Null for PO-sourced jobs (no quote line) — those always keep the
+ * agreed unit_price. Override / basis_unknown lines also keep their price.
+ */
+export interface JobPartPricingBasis {
+  isOverride: boolean;
+  basisUnknown: boolean;
+  snapshot: PricingBasisSnapshot | null;
+}
+
+// job_parts.total_price is numeric(12,4); round the recompute to 4dp to match
+// the convert/PO write paths (calculateTotalPrice rounds to 2dp — too coarse
+// here, it would make an edited line inconsistent with its siblings).
+const roundTotal4dp = (n: number): number => Math.round(n * 10000) / 10000;
+
+/**
+ * Resolve the kept vs. tier-crossing unit price for a job_part at a new
+ * quantity. Pure, so the edit modal previews it and the writer applies it
+ * identically. `keepUnitPrice` is always the agreed price; `tierUnitPrice` is
+ * the snapshot-resolved price, present only when the line is tier-priced
+ * (not an override / basis_unknown / PO-sourced) — otherwise null.
+ */
+export function resolveJobPartUnitPrice(
+  currentUnitPrice: number | null,
+  basis: JobPartPricingBasis | null,
+  newQuantity: number,
+): { keepUnitPrice: number | null; tierUnitPrice: number | null } {
+  const keepUnitPrice = currentUnitPrice;
+  if (!basis || basis.isOverride || basis.basisUnknown || !basis.snapshot) {
+    return { keepUnitPrice, tierUnitPrice: null };
+  }
+  const resolved = resolveTierFromSnapshot(basis.snapshot, newQuantity);
+  return { keepUnitPrice, tierUnitPrice: resolved ? resolved.unit_price : null };
+}
+
+/**
+ * Fetch the frozen pricing basis for a job_part's edit modal, read through
+ * `source_quote_line_item_id`. Returns null for PO-sourced jobs (no quote
+ * line) so the modal knows there's no tier curve to offer.
+ */
+export async function getJobPartPricingBasis(
+  jobPartId: string,
+): Promise<JobPartPricingBasis | null> {
+  const supabase = getSupabase();
+  const { data: jp, error } = await supabase
+    .from('job_parts')
+    .select('source_quote_line_item_id')
+    .eq('id', jobPartId)
+    .single();
+  if (error || !jp?.source_quote_line_item_id) return null;
+
+  const { data: line } = await supabase
+    .from('quote_line_items')
+    .select('is_quote_override, basis_unknown, pricing_basis_snapshot')
+    .eq('id', jp.source_quote_line_item_id)
+    .maybeSingle();
+  if (!line) return null;
+  return {
+    isOverride: line.is_quote_override,
+    basisUnknown: line.basis_unknown,
+    snapshot:
+      (line.pricing_basis_snapshot as unknown as PricingBasisSnapshot | null) ?? null,
+  };
+}
+
+/**
+ * Edit the order quantity on a job_part after the job was created. Today
+ * job_parts.quantity is immutable; this is the post-conversion edit path
+ * (customers commonly change quantity up or down after a quote converts).
+ *
+ * Pricing mirrors the quote-side `updateLineItemQuantity`: it DEFAULTS to
+ * keeping the agreed unit_price (passing a volume break is the shop's call,
+ * not automatic) and only re-resolves the tier price from the source line's
+ * FROZEN snapshot when `opts.useNewTierPrice` is set. PO-sourced / override /
+ * basis_unknown lines always keep their price. total_price recomputes at 4dp.
+ *
+ * Guardrails (all enforced before the write):
+ *  - newQuantity must be finite and > 0 (decimals allowed — fractional units).
+ *  - cannot reduce below already-shipped qty for the part.
+ *  - blocked while a QuickBooks invoice exists for the job (Phase 1 — invoiced
+ *    jobs get the void-and-reissue / memo flow in a later phase).
+ *
+ * fulfillment_status is NOT written here — the AFTER UPDATE OF quantity DB
+ * trigger (trigger_recompute_jp_fulfillment_on_qty) recomputes it from the
+ * single-source compute_job_part_fulfillment_status function and rolls it up
+ * to the job. The returned row may therefore carry a stale fulfillment_status;
+ * callers refetch the job for canonical state.
+ */
+export async function updateJobPartQuantity(
+  jobPartId: string,
+  newQuantity: number,
+  opts?: { useNewTierPrice?: boolean },
+): Promise<UpdateJobPartQuantityResult> {
+  const supabase = getSupabase();
+
+  if (!Number.isFinite(newQuantity) || newQuantity <= 0) {
+    throw new Error('Order quantity must be a number greater than zero.');
+  }
+
+  // 1. Load the job_part.
+  const { data: jpRow, error: jpErr } = await supabase
+    .from('job_parts')
+    .select(
+      'id, job_id, company_id, quantity, unit_price, total_price, source_quote_line_item_id, production_status',
+    )
+    .eq('id', jobPartId)
+    .single();
+  if (jpErr || !jpRow) {
+    console.error('Error loading job_part for quantity edit:', jpErr);
+    throw jpErr || new Error('Could not load the job part.');
+  }
+  const part = jpRow as unknown as {
+    id: string;
+    job_id: string;
+    company_id: string;
+    quantity: number;
+    unit_price: number | null;
+    total_price: number | null;
+    source_quote_line_item_id: string | null;
+    production_status: ProductionStatus;
+  };
+
+  if (part.production_status === 'cancelled') {
+    throw new Error('This part is cancelled — its quantity can no longer be edited.');
+  }
+
+  // 2. Invoice gate (Phase 1): block when a QuickBooks invoice already exists.
+  const invoiceLink = await getQuickBooksInvoiceLinkForJob(part.company_id, part.job_id);
+  if (invoiceLink) {
+    throw new Error(
+      `This job is already invoiced in QuickBooks${
+        invoiceLink.docNumber ? ` (${invoiceLink.docNumber})` : ''
+      }. Revise or void that invoice in QuickBooks before changing the quantity.`,
+    );
+  }
+
+  // 3. Shipped-floor guard: can't drop below what already shipped.
+  const summaries = await getJobPartShipmentSummaries(part.job_id);
+  const qtyShipped = summaries.find((s) => s.job_part_id === jobPartId)?.qty_shipped ?? 0;
+  if (newQuantity < qtyShipped) {
+    throw new Error(
+      `Cannot set quantity to ${newQuantity} — ${qtyShipped} have already shipped on this part. ` +
+        'Void a packing slip first to ship fewer.',
+    );
+  }
+
+  // 4. Re-resolve price (keep agreed by default; cross a tier only on opt-in).
+  const basis = await getJobPartPricingBasis(jobPartId);
+  const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(
+    part.unit_price,
+    basis,
+    newQuantity,
+  );
+  const newUnitPrice =
+    opts?.useNewTierPrice && tierUnitPrice !== null ? tierUnitPrice : keepUnitPrice;
+  const priceReresolved = newUnitPrice !== part.unit_price;
+  const newTotalPrice = newUnitPrice !== null ? roundTotal4dp(newUnitPrice * newQuantity) : null;
+
+  // 5. Single write. fulfillment_status handled by the DB trigger.
+  const updatePayload: JobPartUpdate = {
+    quantity: newQuantity,
+    unit_price: newUnitPrice,
+    total_price: newTotalPrice,
+    updated_at: new Date().toISOString(),
+  };
+  const { data: updated, error: updErr } = await supabase
+    .from('job_parts')
+    .update(updatePayload)
+    .eq('id', jobPartId)
+    .select('*')
+    .single();
+  if (updErr || !updated) {
+    console.error('Error updating job_part quantity:', updErr);
+    throw new Error(
+      friendlyErrorMessage(updErr, { entity: 'job', fallback: 'Failed to update the quantity.' }),
+    );
+  }
+
+  return {
+    jobPart: updated as unknown as JobPart,
+    oldQuantity: part.quantity,
+    newQuantity,
+    oldUnitPrice: part.unit_price,
+    newUnitPrice,
+    oldTotalPrice: part.total_price,
+    newTotalPrice,
+    priceReresolved,
+  };
+}
+
+/**
+ * Current job_part quantities for a (converted) quote, keyed by the source
+ * quote line. Lets the read-only quote page reflect "current order qty N
+ * (quoted M)" when a job quantity was edited after conversion — without making
+ * the quote itself writable. Returns [] for unconverted quotes / PO-sourced
+ * parts (no source line).
+ */
+export interface QuoteLineJobQuantity {
+  source_quote_line_item_id: string;
+  job_id: string;
+  job_number: string;
+  quantity: number;
+}
+
+export async function getJobQuantitiesForQuote(
+  quoteId: string,
+): Promise<QuoteLineJobQuantity[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('job_parts')
+    .select('source_quote_line_item_id, quantity, jobs!inner(id, job_number, quote_id)')
+    .eq('jobs.quote_id', quoteId)
+    .not('source_quote_line_item_id', 'is', null);
+  if (error) {
+    console.error('Error loading job quantities for quote:', error);
+    return [];
+  }
+  type Row = {
+    source_quote_line_item_id: string | null;
+    quantity: number;
+    jobs: { id: string; job_number: string; quote_id: string | null } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  return rows
+    .filter((r): r is Row & { source_quote_line_item_id: string; jobs: NonNullable<Row['jobs']> } =>
+      Boolean(r.source_quote_line_item_id && r.jobs),
+    )
+    .map((r) => ({
+      source_quote_line_item_id: r.source_quote_line_item_id,
+      job_id: r.jobs.id,
+      job_number: r.jobs.job_number,
+      quantity: r.quantity,
+    }));
 }
 
 // ============== Job Materials ==============

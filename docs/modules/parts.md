@@ -229,7 +229,7 @@ A workspace tab (`?tab=files`, always visible) for engineering file attachments.
 
 ## Cost Determination Logic
 
-A part's cost flows in three layers:
+A part's cost flows in four layers:
 
 1. **Routing cost** — derived live by `calculateRoutingCost(partId)`. Returns per-op run + setup costs and per-material line costs, plus warnings.
 2. **Tier cost** — `calculateTierPricing(breakdown, quantity, markup)` adds setup amortization at the tier's quantity:
@@ -238,6 +238,7 @@ A part's cost flows in three layers:
    unit_price        = base_cost_per_unit × (1 + markup / 100)
    ```
 3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items).
+4. **Job part** — created at quote→job conversion by copying the quote line's `(quantity, unit_price, total_price)`. Unlike the quote line, `job_parts.quantity` is **editable** post-conversion (with fulfillment guardrails) and `total_price` is re-derived as `quantity × unit_price` at edit time. Invoicing and revenue read the `job_part`, not the quote snapshot — so the job part is the post-conversion source of truth. See [Jobs Module — Editing order quantity](jobs.md).
 
 **Bought parts** have no routing, so their base cost comes from the part's **procurement tiers** (the Cost card) via `compute_part_cost_at_qty` instead of `calculateRoutingCost`. The shared resolver `getTiersWithComputedPrices` falls back to that procurement cost when a part has no routing/BOM, so a bought part's pricing tiers still resolve a sell price = `procurement_cost(qty) × (1 + markup/100)`. A made part with no routing yet shows "No cost data" in the cost breakdown card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a routing exists).
 

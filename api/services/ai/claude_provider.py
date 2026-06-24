@@ -9,6 +9,7 @@ from typing import Optional
 import anthropic
 
 from .base_provider import AIProvider, MappingSuggestion
+from .model_config import DEFAULT_ANTHROPIC_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +57,14 @@ class ClaudeProvider(AIProvider):
 
         Args:
             api_key: Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var.
-            model: Model to use. Defaults to claude-sonnet-4-20250514.
+            model: Model to use. Defaults to DEFAULT_ANTHROPIC_MODEL (model_config.py).
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("ANTHROPIC_API_KEY is required")
 
         self.client = anthropic.Anthropic(api_key=self.api_key)
-        self.model = model or "claude-sonnet-4-20250514"
+        self.model = model or DEFAULT_ANTHROPIC_MODEL
 
     @property
     def provider_name(self) -> str:

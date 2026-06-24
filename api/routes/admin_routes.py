@@ -88,6 +88,25 @@ def generate_slug(company_name: str) -> str:
 
 
 # ============================================================================
+# AI MODEL HEALTH
+# ============================================================================
+
+@router.get("/ai/model-health")
+async def ai_model_health(request: Request):
+    """Report whether the pinned Anthropic model is still active.
+
+    Uses the free Models API metadata endpoint (no billed inference) so an admin
+    can verify the live model on demand and get advance warning before a model
+    retirement breaks chat/chart (as claude-sonnet-4-20250514 did). Requires
+    system admin access.
+    """
+    await verify_system_admin(request)
+
+    from services.ai.model_config import check_model_health
+    return check_model_health()
+
+
+# ============================================================================
 # LIST COMPANIES
 # ============================================================================
 

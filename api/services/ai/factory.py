@@ -9,6 +9,7 @@ from .base_provider import AIProvider
 from .claude_provider import ClaudeProvider
 from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
+from .model_config import DEFAULT_ANTHROPIC_MODEL
 
 
 def create_provider(provider_name: str, model: Optional[str] = None) -> AIProvider:
@@ -55,10 +56,13 @@ async def get_provider(
         Configured AIProvider instance
     """
     try:
-        # Query ai_config table for this company and feature
+        # Query ai_config table for the configured provider. The model is NOT
+        # read from here — model selection is centralized in model_config.py
+        # (DEFAULT_ANTHROPIC_MODEL) so a single source of truth governs which
+        # Claude model is used and a retired id can't linger in a stale row.
         response = (
             supabase.table("ai_config")
-            .select("provider, model, settings")
+            .select("provider, settings")
             .eq("company_id", company_id)
             .eq("feature", feature)
             .maybe_single()
@@ -67,8 +71,7 @@ async def get_provider(
 
         if response.data:
             provider_name = response.data.get("provider", "anthropic")
-            model = response.data.get("model")
-            return create_provider(provider_name, model)
+            return create_provider(provider_name)
 
     except Exception:
         # If DB lookup fails, fall back to default
@@ -91,7 +94,7 @@ def get_available_providers() -> list[dict]:
         "name": "anthropic",
         "display_name": "Claude (Anthropic)",
         "available": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": DEFAULT_ANTHROPIC_MODEL,
     })
 
     # Check OpenAI

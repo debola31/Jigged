@@ -98,10 +98,10 @@ export default function QuoteDetailPage() {
   // edited on the job after conversion shows here as "now N on the job"; the
   // quoted figure itself never changes.
   useEffect(() => {
-    if (!quote?.converted_at) {
-      setJobQtyByLine(new Map());
-      return;
-    }
+    // Only converted quotes have jobs to reflect. No need to clear stale data
+    // for a non-converted quote: the map is keyed by line-item id (unique per
+    // quote), so a different quote's lines never match a leftover entry.
+    if (!quote?.converted_at) return;
     let cancelled = false;
     getJobQuantitiesForQuote(quoteId)
       .then((rows) => {

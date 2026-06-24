@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -17,7 +17,8 @@ import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Tooltip from '@mui/material/Tooltip';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
@@ -80,6 +81,10 @@ export default function JobDetailPage() {
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
   const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
   const [qtySuccess, setQtySuccess] = useState<string | null>(null);
+  // Anchors for the top-bar Edit-Quantity / Print-Traveler part pickers
+  // (only shown when a job has more than one part).
+  const [qtyMenuAnchor, setQtyMenuAnchor] = useState<null | HTMLElement>(null);
+  const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -185,6 +190,25 @@ export default function JobDetailPage() {
     parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
+  const editableParts = parts.filter((p) => p.production_status !== 'cancelled');
+
+  // Edit Quantity / Print Traveler are per-part actions surfaced in the top
+  // action bar for discoverability. With one part they act directly; with
+  // several they open a small picker menu.
+  const handleEditQtyClick = (e: ReactMouseEvent<HTMLElement>) => {
+    if (editableParts.length === 1) {
+      setEditQtyPart(editableParts[0]);
+    } else {
+      setQtyMenuAnchor(e.currentTarget);
+    }
+  };
+  const handleTravelerClick = (e: ReactMouseEvent<HTMLElement>) => {
+    if (parts.length === 1) {
+      setTravelerPart({ id: parts[0].id, name: parts[0].parts?.part_name ?? null });
+    } else {
+      setTravelerMenuAnchor(e.currentTarget);
+    }
+  };
 
   const handleCreated = async (result: {
     shipmentId: string;
@@ -263,6 +287,41 @@ export default function JobDetailPage() {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          {parts.length > 0 &&
+            (qbInvoiceLink ? (
+              <Tooltip
+                title={`Invoiced in QuickBooks${
+                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
+                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
+              >
+                <span>
+                  <Button variant="outlined" startIcon={<LockIcon />} disabled>
+                    Edit Quantity
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              editableParts.length > 0 && (
+                <Button
+                  variant="outlined"
+                  startIcon={<EditIcon />}
+                  onClick={handleEditQtyClick}
+                  disabled={actionLoading}
+                >
+                  Edit Quantity
+                </Button>
+              )
+            ))}
+          {parts.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<PrintIcon />}
+              onClick={handleTravelerClick}
+              disabled={actionLoading}
+            >
+              Print Traveler
+            </Button>
+          )}
           {canShip && (
             <Button
               variant="outlined"
@@ -455,28 +514,6 @@ export default function JobDetailPage() {
                               label={`Order qty ${part.quantity}`}
                               variant="outlined"
                             />
-                            {qbInvoiceLink ? (
-                              <Tooltip
-                                title={`Invoiced in QuickBooks${
-                                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
-                                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
-                              >
-                                <LockIcon fontSize="small" color="disabled" />
-                              </Tooltip>
-                            ) : (
-                              job.production_status !== 'cancelled' &&
-                              part.production_status !== 'cancelled' && (
-                                <Tooltip title="Edit order quantity">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => setEditQtyPart(part)}
-                                    aria-label="Edit order quantity"
-                                  >
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              )
-                            )}
                             {shipmentsEnabled && summary && summary.qty_shipped > 0 && (
                               <Typography variant="body2" color="text.secondary">
                                 {summary.qty_shipped} of {summary.qty_ordered} shipped
@@ -497,16 +534,6 @@ export default function JobDetailPage() {
                                 size="small"
                               />
                             )}
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<PrintIcon />}
-                              onClick={() =>
-                                setTravelerPart({ id: part.id, name: part.parts?.part_name ?? null })
-                              }
-                            >
-                              Print Traveler
-                            </Button>
                           </Box>
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
@@ -607,6 +634,7 @@ export default function JobDetailPage() {
       />
 
       <EditJobPartQuantityModal
+        key={editQtyPart?.id ?? 'none'}
         open={editQtyPart !== null}
         jobPart={editQtyPart}
         qtyShipped={
@@ -615,6 +643,42 @@ export default function JobDetailPage() {
         onClose={() => setEditQtyPart(null)}
         onConfirmed={handleQtyConfirmed}
       />
+
+      <Menu
+        anchorEl={qtyMenuAnchor}
+        open={!!qtyMenuAnchor}
+        onClose={() => setQtyMenuAnchor(null)}
+      >
+        {editableParts.map((p) => (
+          <MenuItem
+            key={p.id}
+            onClick={() => {
+              setQtyMenuAnchor(null);
+              setEditQtyPart(p);
+            }}
+          >
+            {p.parts?.part_name ?? 'Part'} · qty {p.quantity}
+          </MenuItem>
+        ))}
+      </Menu>
+
+      <Menu
+        anchorEl={travelerMenuAnchor}
+        open={!!travelerMenuAnchor}
+        onClose={() => setTravelerMenuAnchor(null)}
+      >
+        {parts.map((p) => (
+          <MenuItem
+            key={p.id}
+            onClick={() => {
+              setTravelerMenuAnchor(null);
+              setTravelerPart({ id: p.id, name: p.parts?.part_name ?? null });
+            }}
+          >
+            {p.parts?.part_name ?? 'Part'}
+          </MenuItem>
+        ))}
+      </Menu>
 
       <Snackbar
         open={!!pushSuccess}

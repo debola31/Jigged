@@ -8,7 +8,6 @@ import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
-import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
@@ -53,19 +52,20 @@ export default function EditJobPartQuantityModal({
   onClose,
   onConfirmed,
 }: EditJobPartQuantityModalProps) {
-  const [qtyStr, setQtyStr] = useState('');
+  // Form state is initialised from props on mount; the parent passes
+  // key={jobPart.id} so a different part remounts this with fresh state — no
+  // reset-in-effect needed (which keeps the effect below free of synchronous
+  // setState).
+  const [qtyStr, setQtyStr] = useState(jobPart ? String(jobPart.quantity) : '');
   const [basis, setBasis] = useState<JobPartPricingBasis | null>(null);
   const [useNewTierPrice, setUseNewTierPrice] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset + load the frozen pricing basis (the tier curve) when (re)opened.
+  // Load the frozen pricing basis (the tier curve). setState happens only in
+  // the async callback, never synchronously in the effect body.
   useEffect(() => {
-    if (!open || !jobPart) return;
-    setQtyStr(String(jobPart.quantity));
-    setUseNewTierPrice(false);
-    setError(null);
-    setBasis(null);
+    if (!jobPart) return;
     let cancelled = false;
     getJobPartPricingBasis(jobPart.id)
       .then((b) => {
@@ -77,7 +77,7 @@ export default function EditJobPartQuantityModal({
     return () => {
       cancelled = true;
     };
-  }, [open, jobPart?.id, jobPart?.quantity]);
+  }, [jobPart]);
 
   if (!jobPart) return null;
 
@@ -238,19 +238,6 @@ export default function EditJobPartQuantityModal({
               <Typography fontWeight={600}>{fmtUsd(newTotal)}</Typography>
             </Box>
           </Box>
-        )}
-
-        {validInput && !unchanged && (
-          <Alert severity="info" sx={{ mt: 2 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              After saving, double-check:
-            </Typography>
-            <Stack component="ul" sx={{ m: 0, pl: 2.5 }} spacing={0.25}>
-              <li>Lead time / due date if the order got bigger.</li>
-              <li>Material already purchased for the old quantity.</li>
-              <li>Work already in progress at the old quantity.</li>
-            </Stack>
-          </Alert>
         )}
 
         {error && (

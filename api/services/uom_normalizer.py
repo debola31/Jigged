@@ -23,6 +23,8 @@ from typing import Optional
 
 import anthropic
 
+from services.ai.model_config import DEFAULT_ANTHROPIC_MODEL
+
 logger = logging.getLogger(__name__)
 
 
@@ -149,7 +151,7 @@ def infer_uom_with_ai(
         return {item["key"]: None for item in items}
 
     client = anthropic.Anthropic(api_key=api_key)
-    model_name = model or "claude-sonnet-4-20250514"
+    model_name = model or DEFAULT_ANTHROPIC_MODEL
 
     prompt = _AI_PROMPT_TEMPLATE.format(
         canonical_units=json.dumps(sorted(CANONICAL_UNITS)),

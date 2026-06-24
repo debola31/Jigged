@@ -157,6 +157,8 @@ These live in `insights_service.py` as chat fallbacks. They are registered in `M
 
 All functions implicitly receive `company_id` from the authenticated request context.
 
+**Revenue source of truth:** the realized-revenue functions (`get_revenue_by_period`, `get_customer_revenue_breakdown`, `get_part_profitability`) sum **`job_parts.total_price`** (the agreed per-part line total on the job), *not* the source `quote_line_items.total_price`. The job part is the post-conversion source of truth, so revenue reflects any order quantity edited after conversion — and it avoids over-counting a price-options quote's unchosen lines. `get_revenue_forecast` is the exception: it sums `quote_line_items.total_price` because it values the **open** (un-converted) quote pipeline, where no job exists yet. The same rule is encoded in the NL→SQL guidance in `api/tools/schema_context.py`.
+
 At-risk jobs and low-inventory alerts are **not** in this list — they are computed client-side in [utils/alertsAccess.ts](../../utils/alertsAccess.ts) and consumed by the header `AlertBadge` popover. They use Supabase RLS directly (no service-role, no AI).
 
 ---

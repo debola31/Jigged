@@ -7,6 +7,7 @@ export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";
 export { default as JobPartMaterialsCard } from "./JobPartMaterialsCard";
 export { default as CompleteOperationModal } from "./CompleteOperationModal";
+export { default as EditJobPartQuantityModal } from "./EditJobPartQuantityModal";
 export { default as ViewRoutingModal } from "./ViewRoutingModal";
 export { default as JobTravelerPreviewDialog } from "./JobTravelerPreviewDialog";
 export { default as JobBillingShippingCard } from "./JobBillingShippingCard";

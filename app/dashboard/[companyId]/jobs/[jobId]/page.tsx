@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -17,6 +17,9 @@ import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
+import Tooltip from '@mui/material/Tooltip';
 import Link from 'next/link';
 import MuiLink from '@mui/material/Link';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -26,18 +29,21 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import EditIcon from '@mui/icons-material/Edit';
+import LockIcon from '@mui/icons-material/Lock';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, cancelJob, reopenJob } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, EditJobPartQuantityModal } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -46,6 +52,11 @@ import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
+
+const fmtUsd = (v: number | null): string =>
+  v === null
+    ? '—'
+    : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -68,6 +79,12 @@ export default function JobDetailPage() {
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
+  const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
+  const [qtySuccess, setQtySuccess] = useState<string | null>(null);
+  // Anchors for the top-bar Edit-Quantity / Print-Traveler part pickers
+  // (only shown when a job has more than one part).
+  const [qtyMenuAnchor, setQtyMenuAnchor] = useState<null | HTMLElement>(null);
+  const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
@@ -173,6 +190,25 @@ export default function JobDetailPage() {
     parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
+  const editableParts = parts.filter((p) => p.production_status !== 'cancelled');
+
+  // Edit Quantity / Print Traveler are per-part actions surfaced in the top
+  // action bar for discoverability. With one part they act directly; with
+  // several they open a small picker menu.
+  const handleEditQtyClick = (e: ReactMouseEvent<HTMLElement>) => {
+    if (editableParts.length === 1) {
+      setEditQtyPart(editableParts[0]);
+    } else {
+      setQtyMenuAnchor(e.currentTarget);
+    }
+  };
+  const handleTravelerClick = (e: ReactMouseEvent<HTMLElement>) => {
+    if (parts.length === 1) {
+      setTravelerPart({ id: parts[0].id, name: parts[0].parts?.part_name ?? null });
+    } else {
+      setTravelerMenuAnchor(e.currentTarget);
+    }
+  };
 
   const handleCreated = async (result: {
     shipmentId: string;
@@ -184,6 +220,38 @@ export default function JobDetailPage() {
     setPendingPreviewShipmentId(result.shipmentId);
     setHistoryRefreshKey((k) => k + 1);
     // Re-pull job + per-part summary so status block + parts row reflect the new shipment.
+    await fetchJob();
+  };
+
+  const handleQtyConfirmed = async (result: UpdateJobPartQuantityResult) => {
+    const edited = editQtyPart;
+    setEditQtyPart(null);
+    // Audit trail: log the change to the job feed. Best-effort — a note failure
+    // must never undo the (already-committed) quantity edit. authorId is the
+    // user_company_access id (RLS requirement), resolved via getCurrentOperator.
+    try {
+      const me = await getCurrentOperator(companyId);
+      if (me) {
+        const partName = edited?.parts?.part_name ?? 'part';
+        const priceNote = result.priceReresolved
+          ? ` (unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)})`
+          : '';
+        await addJobNote(
+          jobId,
+          companyId,
+          me.id,
+          `Order quantity changed ${result.oldQuantity} → ${result.newQuantity} for ${partName}${priceNote}`,
+          { jobPartId: result.jobPart.id, noteType: 'event' },
+        );
+      }
+    } catch (err) {
+      console.warn('Job detail: failed to log quantity-change note', err);
+    }
+    setQtySuccess(
+      `Order qty updated ${result.oldQuantity} → ${result.newQuantity}` +
+        (result.priceReresolved ? ` · unit price ${fmtUsd(result.newUnitPrice)}` : ''),
+    );
+    // Re-pull so the parts row, status block, and fulfillment chip reflect the edit.
     await fetchJob();
   };
 
@@ -219,6 +287,41 @@ export default function JobDetailPage() {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          {parts.length > 0 &&
+            (qbInvoiceLink ? (
+              <Tooltip
+                title={`Invoiced in QuickBooks${
+                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
+                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
+              >
+                <span>
+                  <Button variant="outlined" startIcon={<LockIcon />} disabled>
+                    Edit Quantity
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              editableParts.length > 0 && (
+                <Button
+                  variant="outlined"
+                  startIcon={<EditIcon />}
+                  onClick={handleEditQtyClick}
+                  disabled={actionLoading}
+                >
+                  Edit Quantity
+                </Button>
+              )
+            ))}
+          {parts.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<PrintIcon />}
+              onClick={handleTravelerClick}
+              disabled={actionLoading}
+            >
+              Print Traveler
+            </Button>
+          )}
           {canShip && (
             <Button
               variant="outlined"
@@ -431,16 +534,6 @@ export default function JobDetailPage() {
                                 size="small"
                               />
                             )}
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<PrintIcon />}
-                              onClick={() =>
-                                setTravelerPart({ id: part.id, name: part.parts?.part_name ?? null })
-                              }
-                            >
-                              Print Traveler
-                            </Button>
                           </Box>
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
@@ -540,11 +633,66 @@ export default function JobDetailPage() {
         }}
       />
 
+      <EditJobPartQuantityModal
+        key={editQtyPart?.id ?? 'none'}
+        open={editQtyPart !== null}
+        jobPart={editQtyPart}
+        qtyShipped={
+          editQtyPart ? summariesByPart.get(editQtyPart.id)?.qty_shipped ?? 0 : 0
+        }
+        onClose={() => setEditQtyPart(null)}
+        onConfirmed={handleQtyConfirmed}
+      />
+
+      <Menu
+        anchorEl={qtyMenuAnchor}
+        open={!!qtyMenuAnchor}
+        onClose={() => setQtyMenuAnchor(null)}
+      >
+        {editableParts.map((p) => (
+          <MenuItem
+            key={p.id}
+            onClick={() => {
+              setQtyMenuAnchor(null);
+              setEditQtyPart(p);
+            }}
+          >
+            {p.parts?.part_name ?? 'Part'} · qty {p.quantity}
+          </MenuItem>
+        ))}
+      </Menu>
+
+      <Menu
+        anchorEl={travelerMenuAnchor}
+        open={!!travelerMenuAnchor}
+        onClose={() => setTravelerMenuAnchor(null)}
+      >
+        {parts.map((p) => (
+          <MenuItem
+            key={p.id}
+            onClick={() => {
+              setTravelerMenuAnchor(null);
+              setTravelerPart({ id: p.id, name: p.parts?.part_name ?? null });
+            }}
+          >
+            {p.parts?.part_name ?? 'Part'}
+          </MenuItem>
+        ))}
+      </Menu>
+
       <Snackbar
         open={!!pushSuccess}
         autoHideDuration={5000}
         onClose={() => setPushSuccess(null)}
         message={pushSuccess ?? ''}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      />
+
+      <Snackbar
+        open={!!qtySuccess}
+        autoHideDuration={5000}
+        onClose={() => setQtySuccess(null)}
+        message={qtySuccess ?? ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
     </Box>

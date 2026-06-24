@@ -24,6 +24,15 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => mockSupabase,
 }));
 
+// updateJobPartQuantity orchestrates two cross-module readers — stub them so the
+// test drives only the job_parts / quote_line_items queries it owns.
+vi.mock('@/utils/shipmentsAccess', () => ({
+  getJobPartShipmentSummaries: vi.fn(),
+}));
+vi.mock('@/utils/quickbooksAccess', () => ({
+  getQuickBooksInvoiceLinkForJob: vi.fn(),
+}));
+
 import {
   deleteJob,
   bulkCancelJobs,
@@ -34,7 +43,10 @@ import {
   reopenJob,
   searchJobsByIdentifier,
   updateJobAddressContact,
+  updateJobPartQuantity,
 } from '@/utils/jobsAccess';
+import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
 
 describe('jobsAccess', () => {
   beforeEach(() => {
@@ -372,6 +384,176 @@ describe('jobsAccess', () => {
 
       // Returns the job row the aggregation trigger flipped off 'cancelled'.
       expect(job).toEqual({ id: 'job-1', production_status: 'in_progress' });
+    });
+  });
+
+  describe('updateJobPartQuantity', () => {
+    // Frozen 3-tier snapshot: qty 1 → $130, qty 10 → $100, qty 50 → $90.
+    const snapshot = {
+      tiers: [
+        { id: 't1', quantity: 1, unit_price: 130, markup_percent: null },
+        { id: 't2', quantity: 10, unit_price: 100, markup_percent: null },
+        { id: 't3', quantity: 50, unit_price: 90, markup_percent: null },
+      ],
+      resolved_tier_id: 't2',
+      resolved_quantity: 10,
+      captured_at: '2026-06-01T00:00:00Z',
+    };
+
+    const baseJobPart = {
+      id: 'jp1',
+      job_id: 'job1',
+      company_id: 'co1',
+      quantity: 10,
+      unit_price: 100,
+      total_price: 1000,
+      source_quote_line_item_id: 'qli1',
+      production_status: 'in_progress',
+    };
+
+    // from() impl serving the job_part fetch, the pricing-basis quote_line_items
+    // fetch, and capturing the job_parts update patch.
+    function installFrom(opts: {
+      jobPart?: Record<string, unknown> | null;
+      quoteLine?: Record<string, unknown> | null;
+      updates: Array<Record<string, unknown>>;
+    }) {
+      const jobPart = opts.jobPart === undefined ? baseJobPart : opts.jobPart;
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'job_parts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: jobPart, error: null }),
+              }),
+            }),
+            update: vi.fn().mockImplementation((patch: Record<string, unknown>) => ({
+              eq: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockImplementation(() => {
+                    opts.updates.push(patch);
+                    return Promise.resolve({ data: { ...jobPart, ...patch }, error: null });
+                  }),
+                }),
+              }),
+            })),
+          };
+        }
+        if (table === 'quote_line_items') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: opts.quoteLine ?? null, error: null }),
+              }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+    }
+
+    const tieredLine = { is_quote_override: false, basis_unknown: false, pricing_basis_snapshot: snapshot };
+
+    beforeEach(() => {
+      vi.mocked(getJobPartShipmentSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_shipped: 0, qty_remaining: 10, last_ship_date: null },
+      ]);
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+    });
+
+    it('keeps the agreed unit price by default and recomputes the total; never writes fulfillment_status', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      const result = await updateJobPartQuantity('jp1', 15);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].quantity).toBe(15);
+      expect(updates[0].unit_price).toBe(100);
+      expect(updates[0].total_price).toBe(1500);
+      expect(result.priceReresolved).toBe(false);
+      // fulfillment_status is recomputed by the DB trigger, never written here.
+      expect(updates[0]).not.toHaveProperty('fulfillment_status');
+    });
+
+    it('applies the quantity-break price when the caller opts in and the tier crosses', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      const result = await updateJobPartQuantity('jp1', 50, { useNewTierPrice: true });
+      expect(updates[0].unit_price).toBe(90);
+      expect(updates[0].total_price).toBe(4500);
+      expect(result.priceReresolved).toBe(true);
+    });
+
+    it('keeps the agreed price across a tier when the caller does NOT opt in', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      const result = await updateJobPartQuantity('jp1', 50);
+      expect(updates[0].unit_price).toBe(100);
+      expect(updates[0].total_price).toBe(5000);
+      expect(result.priceReresolved).toBe(false);
+    });
+
+    it('never re-resolves an override line (price pinned even with opt-in)', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: { ...tieredLine, is_quote_override: true }, updates });
+      await updateJobPartQuantity('jp1', 50, { useNewTierPrice: true });
+      expect(updates[0].unit_price).toBe(100);
+      expect(updates[0].total_price).toBe(5000);
+    });
+
+    it('keeps the price for a PO-sourced job_part (no source quote line)', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, source_quote_line_item_id: null }, updates });
+      await updateJobPartQuantity('jp1', 25, { useNewTierPrice: true });
+      expect(updates[0].unit_price).toBe(100);
+      expect(updates[0].total_price).toBe(2500);
+    });
+
+    it('accepts a fractional quantity', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, source_quote_line_item_id: null }, updates });
+      await updateJobPartQuantity('jp1', 12.5);
+      expect(updates[0].quantity).toBe(12.5);
+      expect(updates[0].total_price).toBe(1250);
+    });
+
+    it('rounds the line total to 4 decimal places (matching numeric(12,4))', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, source_quote_line_item_id: null, unit_price: 1.3333 }, updates });
+      await updateJobPartQuantity('jp1', 3);
+      expect(updates[0].total_price).toBe(3.9999);
+    });
+
+    it('blocks reducing below the already-shipped quantity', async () => {
+      vi.mocked(getJobPartShipmentSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_shipped: 10, qty_remaining: 0, last_ship_date: '2026-06-10' },
+      ]);
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      await expect(updateJobPartQuantity('jp1', 5)).rejects.toThrow(/already shipped/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('blocks editing once the job is invoiced in QuickBooks', async () => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
+        invoiceId: 'i1',
+        docNumber: 'INV-42',
+        url: 'https://qbo/INV-42',
+      });
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      await expect(updateJobPartQuantity('jp1', 15)).rejects.toThrow(/invoiced in QuickBooks/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('rejects a non-positive quantity before any read', async () => {
+      await expect(updateJobPartQuantity('jp1', 0)).rejects.toThrow(/greater than zero/i);
+    });
+
+    it('refuses to edit a cancelled part', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
+      await expect(updateJobPartQuantity('jp1', 15)).rejects.toThrow(/cancelled/i);
+      expect(updates).toHaveLength(0);
     });
   });
 });

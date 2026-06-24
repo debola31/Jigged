@@ -60,11 +60,12 @@ Jobs carry two independent status columns:
 - **`production_status`**: `not_started | in_progress | completed | cancelled` — what the shop is doing.
 - **`fulfillment_status`**: `unshipped | partially_shipped | fully_shipped` — what the customer has received. **Derived**, never written directly.
 
-Three trigger chains keep `fulfillment_status` consistent:
+Four trigger chains keep `fulfillment_status` consistent:
 
 1. `recompute_job_part_fulfillment_from_line` — AFTER INS/UPD/DEL on `shipment_line_items`, recomputes `job_parts.fulfillment_status`.
 2. `recompute_job_part_fulfillment_from_void` — AFTER UPD `voided_at` on `shipments`, cascades void to dependent line items.
-3. `sync_job_fulfillment_status_from_parts` — AFTER INS/UPD `fulfillment_status` / DEL on `job_parts`, recomputes `jobs.fulfillment_status`.
+3. `recompute_job_part_fulfillment_from_qty` — AFTER UPD OF `quantity` on `job_parts` (the editable-order-quantity feature), recomputes that part's `fulfillment_status` from `compute_job_part_fulfillment_status`. Needed because editing the ordered quantity changes the shipped-vs-ordered comparison but fires none of the shipment-keyed triggers; e.g. a part `fully_shipped` at qty 10 flips to `partially_shipped` when raised to 15.
+4. `sync_job_fulfillment_status_from_parts` — AFTER INS/UPD `fulfillment_status` / DEL on `job_parts`, recomputes `jobs.fulfillment_status`.
 
 The derivation functions are:
 
@@ -72,6 +73,8 @@ The derivation functions are:
 - `compute_job_fulfillment_status(uuid)` STABLE → aggregates child statuses (does **not** exclude cancelled parts per PRD §7.1).
 
 A job auto-closes (fulfillment_status → `fully_shipped`) when `SUM(shipped) ≥ SUM(ordered)` for all non-cancelled job_parts.
+
+`qty_remaining` (from `getJobPartShipmentSummaries`) is derived live as `job_parts.quantity − SUM(non-voided shipped)`, so it always reflects the **current** ordered quantity — including a post-conversion edit. Conversely, `updateJobPartQuantity` refuses to lower a part's quantity below what has already shipped.
 
 ---
 

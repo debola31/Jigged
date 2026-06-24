@@ -850,13 +850,21 @@ export async function getJobNotes(
  * note — callers must guarantee body-or-media (a fully empty note is useless);
  * the returned note's `media` is empty until media is attached via
  * addJobNoteMedia.
+ *
+ * `opts.noteType` defaults to 'user' (a human-authored note). Pass 'event' for
+ * auto-logged feed entries (e.g. the order-quantity-change audit trail) so the
+ * feed can style them differently from typed notes.
  */
 export async function addJobNote(
   jobId: string,
   companyId: string,
   authorId: string,
   body: string | null,
-  opts?: { jobPartId?: string | null; jobOperationId?: string | null },
+  opts?: {
+    jobPartId?: string | null;
+    jobOperationId?: string | null;
+    noteType?: 'user' | 'event';
+  },
 ): Promise<JobNote> {
   const supabase = getSupabase();
 
@@ -869,6 +877,7 @@ export async function addJobNote(
       job_id: jobId,
       author_id: authorId,
       body: trimmed,
+      note_type: opts?.noteType ?? 'user',
       job_part_id: opts?.jobPartId ?? null,
       job_operation_id: opts?.jobOperationId ?? null,
     })

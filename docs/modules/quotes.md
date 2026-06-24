@@ -50,6 +50,8 @@ A single quote can include:
 
 **Conversion flag:** `converted_at` is set when the quote is converted. Conversion creates **one job** (Q-NNNN → J-NNNN) with one work cell (`job_part`) per selected (part, quantity); each `job_part` records `source_quote_line_item_id` for the line it came from. For a price-options quote the salesperson picks the accepted quantity per part in the convert dialog (firm quotes convert all their lines as-is). Loading a converted quote shows the linked job in the "Jobs" banner; the quote itself stays intact as the record of every option that was offered.
 
+**Post-conversion quantities:** the quote's line-item quantities are **frozen** once converted (the quote is read-only), but the *job's* `job_parts.quantity` is **editable** — customers often change quantity after the fact. The job is the post-conversion source of truth. The read-only quote reflects the live job quantity inline ("now N on job", with the originally quoted figure kept) so the divergence is visible without making the quote writable. See [Jobs Module — Editing order quantity](jobs.md).
+
 The pending-approval / approved / rejected states were removed in April 2026. For small shops the salesperson and the approver are the same person; the state machine added friction without adding value.
 
 ---
@@ -483,7 +485,7 @@ If the salesperson quotes this part at quantities 1, 2, and 4, three `quote_line
 7. Set `quote.converted_at` (status unchanged); the quote keeps all its line items as the record of every option offered.
 8. Return `{ quote, job: { id, job_number, parts: [{ id, part_id, quantity, source_quote_line_item_id }, …] } }`.
 
-A quote with three distinct parts becomes one job with three work cells; each cell's quantity is the quantity of the line the user picked for that part.
+A quote with three distinct parts becomes one job with three work cells; each cell's quantity is the quantity of the line the user picked for that part. `quantity = line.quantity` is the value **at conversion**; the job's `job_parts.quantity` is editable afterward (the quote line stays frozen) — see [Jobs Module — Editing order quantity](jobs.md).
 
 ---
 

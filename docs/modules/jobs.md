@@ -84,7 +84,8 @@ Overdue surfaces as:
 | part_id | UUID (FK) | Yes | Link to the master part record |
 | source_quote_line_item_id | UUID (FK) | No | The quote line that spawned this part |
 | sequence | Integer | Yes | Display order within the job |
-| quantity | Integer | Yes | Order qty (copied from the quote line) |
+| quantity | Numeric | Yes | Order qty — copied from the quote line at creation, then **editable** (see "Editing order quantity" below). Fractional allowed. |
+| unit_price / total_price | Numeric(12,4) | No | Agreed price per unit and line total — the single source of price for invoicing and revenue. Re-derived on a quantity edit. |
 | status | Text | Yes | Per-part status — same enum as `jobs.status`, but owned at this level. Updates here trigger an aggregate refresh on `jobs.status` |
 | current_operation_sequence | Integer | No | Cursor pointing at the next operation to start |
 | started_at / completed_at / shipped_at | Timestamps | No | Per-part lifecycle timestamps |
@@ -92,6 +93,14 @@ Overdue surfaces as:
 `job_operations` and `job_materials` carry a `job_part_id` FK so each row belongs to exactly one part of one job. The `(job_part_id, sequence)` unique constraint replaces the old `(job_id, sequence)` so each part has its own independent operations sequence.
 
 **Due date & conversion:** When a quote is converted via `convertQuoteToJob`, the caller can pass `leadTimeDays` to override the quote's value. If a lead time is present, `jobs.due_date = CURRENT_DATE + lead_time_days`. The job's due date is shared by every part — split-shipping deadlines are a future enhancement.
+
+**Editing order quantity:** Customers commonly change quantity (up or down) after a quote converts, so `job_parts.quantity` is editable from the Job detail page (edit icon next to the "Order qty" chip) via `updateJobPartQuantity(jobPartId, newQty, opts?)`. The job — not the now-read-only quote — is the post-conversion source of truth. Behaviour:
+
+- **Pricing:** defaults to keeping the agreed `unit_price`; if the new qty crosses a price break in the source quote line's frozen tier snapshot, the modal offers the re-resolved price (the user opts in). `total_price` is recomputed at 4 dp. PO-sourced / override / `basis_unknown` lines always keep their price.
+- **Guardrails:** quantity must be `> 0` (decimals allowed); cannot drop below already-shipped qty; **blocked while a QuickBooks invoice exists** for the job (the invoiced-job revision flow is a later phase — the control shows a lock icon). Cancelled parts are not editable.
+- **Fulfillment:** the `trigger_recompute_jp_fulfillment_on_qty` DB trigger recomputes `fulfillment_status` from `compute_job_part_fulfillment_status` after the edit (a part can flip `fully_shipped → partially_shipped` when qty increases). The access layer never writes `fulfillment_status` itself.
+- **Audit:** the change is logged to the job feed as an `event`-type `job_note` (old → new qty, and any unit-price change).
+- The originating quote stays read-only but reflects the live job quantity ("now N on job"); see the Quotes module.
 
 ---
 

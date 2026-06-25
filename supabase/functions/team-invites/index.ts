@@ -17,6 +17,18 @@ import { getOriginUrl } from '../_shared/origin.ts';
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
 /**
+ * Canonical, request-independent base URL for links and images embedded in
+ * outbound emails. Deliberately NOT derived from the request origin
+ * (getOriginUrl) — an admin sending an invite from a Vercel preview must not
+ * mint an email that points at an ephemeral preview URL. Set the SITE_URL
+ * secret per environment (the staging URL on staging); defaults to the
+ * production apex.
+ */
+function getPublicBaseUrl(): string {
+  return Deno.env.get('SITE_URL') ?? 'https://jigged.app';
+}
+
+/**
  * Verify the caller is an admin of the specified company.
  * Uses an anon client with the user's JWT to extract user identity,
  * then uses the service role client for admin queries.
@@ -53,16 +65,17 @@ async function verifyAdmin(
 }
 
 /**
- * Generate an invitation link for a user via Supabase Auth.
+ * Generate a one-time invitation token for a user via Supabase Auth.
  * Tries 'invite' type first (for new users), falls back to 'magiclink' (for existing users).
- * Returns the action_link URL that the user should click.
+ * Returns the hashed token + its type, used to build a first-party
+ * /auth/confirm link instead of the raw supabase.co action_link.
  */
 async function generateInviteLink(
   supabase: ReturnType<typeof getServiceRoleClient>,
   email: string,
   redirectTo: string,
   metadata: Record<string, string>,
-): Promise<string> {
+): Promise<{ hashedToken: string; type: 'invite' | 'magiclink' }> {
   // Try invite link first (creates user if they don't exist)
   const { data: inviteData, error: inviteError } = await supabase.auth.admin.generateLink({
     type: 'invite',
@@ -73,8 +86,8 @@ async function generateInviteLink(
     },
   });
 
-  if (!inviteError && inviteData?.properties?.action_link) {
-    return inviteData.properties.action_link;
+  if (!inviteError && inviteData?.properties?.hashed_token) {
+    return { hashedToken: inviteData.properties.hashed_token, type: 'invite' };
   }
 
   console.warn('generateLink(invite) failed, trying magiclink:', inviteError?.message);
@@ -88,12 +101,12 @@ async function generateInviteLink(
     },
   });
 
-  if (magicError || !magicData?.properties?.action_link) {
+  if (magicError || !magicData?.properties?.hashed_token) {
     console.error('generateLink(magiclink) also failed:', magicError);
     throw new Error('Failed to generate invitation link');
   }
 
-  return magicData.properties.action_link;
+  return { hashedToken: magicData.properties.hashed_token, type: 'magiclink' };
 }
 
 /**
@@ -122,12 +135,7 @@ function buildInviteEmailHtml(companyName: string, actionLink: string): string {
     <tr><td align="center">
       <table width="480" cellpadding="0" cellspacing="0" bgcolor="#1a1f4a" style="background-color:#1a1f4a; border:1px solid #2d3260; border-radius:8px; padding:40px;">
         <tr><td align="center" style="padding-bottom:24px;">
-          <svg viewBox="0 0 64 64" width="48" height="48" xmlns="http://www.w3.org/2000/svg">
-            <rect width="64" height="64" rx="12" fill="#151520"/>
-            <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A"/>
-            <rect x="30" y="10" width="10" height="32" fill="#4682B4"/>
-            <path d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54" fill="#2BBCB3"/>
-          </svg>
+          <img src="${getPublicBaseUrl()}/jigged-logo.png" width="48" height="48" alt="Jigged">
         </td></tr>
         <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
           You've been invited to Jigged
@@ -161,6 +169,10 @@ async function sendInviteEmail(
 ): Promise<void> {
   const html = buildInviteEmailHtml(companyName, actionLink);
 
+  // From address is a single env-configurable value (Task 4). Domain stays
+  // jigged.app; hello@ is a live Google Workspace alias so replies reach a real inbox.
+  const from = Deno.env.get('INVITE_FROM_EMAIL') ?? 'Jigged <hello@jigged.app>';
+
   const res = await fetch(RESEND_API_URL, {
     method: 'POST',
     headers: {
@@ -168,7 +180,7 @@ async function sendInviteEmail(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      from: 'Jigged <noreply@jigged.app>',
+      from,
       to: [to],
       subject: `You've been invited to ${companyName || 'Jigged'}`,
       html,
@@ -295,16 +307,22 @@ Deno.serve(async (req) => {
         return errorResponse('Failed to create invitation', 500);
       }
 
-      // Generate invitation link and send email via Resend
+      // Generate the one-time token and send a first-party email via Resend.
+      // redirectTo is now vestigial (Supabase no longer does the redirect — our
+      // /auth/confirm route does), but we keep it so generateLink's allow-list
+      // validation and the auth-callback metadata fallback are unaffected.
       const siteUrl = getOriginUrl(req);
       const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
 
       try {
-        const actionLink = await generateInviteLink(supabase, email.toLowerCase(), redirectTo, {
+        const { hashedToken, type } = await generateInviteLink(supabase, email.toLowerCase(), redirectTo, {
           invitation_id: invitation.id,
           company_name: companyName,
           invited_role: role,
         });
+
+        const next = `/accept-invite/${invitation.id}`;
+        const actionLink = `${getPublicBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
 
         await sendInviteEmail(resendApiKey, email.toLowerCase(), companyName, actionLink);
       } catch (emailErr) {
@@ -460,16 +478,19 @@ Deno.serve(async (req) => {
         .update({ expires_at: newExpiresAt.toISOString() })
         .eq('id', invitationId);
 
-      // Generate link and resend via Resend
+      // Generate the one-time token and resend a first-party email via Resend.
       const siteUrl = getOriginUrl(req);
       const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
 
       try {
-        const actionLink = await generateInviteLink(supabase, invitation.email, redirectTo, {
+        const { hashedToken, type } = await generateInviteLink(supabase, invitation.email, redirectTo, {
           invitation_id: invitation.id,
           company_name: companyName,
           invited_role: invitation.role,
         });
+
+        const next = `/accept-invite/${invitation.id}`;
+        const actionLink = `${getPublicBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
 
         await sendInviteEmail(resendApiKey, invitation.email, companyName, actionLink);
       } catch (emailErr) {

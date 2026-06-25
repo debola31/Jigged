@@ -6,25 +6,24 @@ import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
-import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined';
 
 import type { Part } from '@/types/part';
 import type {
   InventoryLocation,
   PartLocationBalanceWithLocation,
 } from '@/types/inventoryLocations';
-import { getBalancesForPart, getLocations, disableLocationTracking } from '@/utils/inventoryLocationsAccess';
+import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import PartLocationActionModal, {
   type LocationAction,
   type LocationOption,
+  type LocationBalanceOption,
 } from './PartLocationActionModal';
 
 function pathLabel(id: string, byId: Map<string, InventoryLocation>): string {
@@ -59,7 +58,6 @@ export default function PartLocationInventory({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<LocationAction | null>(null);
-  const [disabling, setDisabling] = useState(false);
 
   const primaryUnit = part.primary_unit ?? '';
 
@@ -91,22 +89,19 @@ export default function PartLocationInventory({
     [locations, byId],
   );
 
+  // Move sources: only the locations where this part actually has stock.
+  const sourceBalances = useMemo<LocationBalanceOption[]>(
+    () =>
+      balances
+        .map((b) => ({ id: b.location_id, label: b.path.join(' › ') || b.location_name, quantity: b.quantity }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [balances],
+  );
+
   const unitOptions = useMemo(
     () => Array.from(new Set([primaryUnit, ...getStandardUnitsForUnit(primaryUnit)])).filter(Boolean),
     [primaryUnit],
   );
-
-  const handleDisable = async () => {
-    setDisabling(true);
-    try {
-      await disableLocationTracking(partId);
-      await onStockChanged();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to disable tracking.');
-    } finally {
-      setDisabling(false);
-    }
-  };
 
   const onActionDone = async () => {
     await reload();
@@ -115,14 +110,6 @@ export default function PartLocationInventory({
 
   return (
     <Box sx={{ textAlign: 'left' }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-        <Chip icon={<LocationOnOutlinedIcon />} label="Location-tracked" color="info" size="small" />
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" color="inherit" onClick={handleDisable} disabled={disabling}>
-          Disable tracking
-        </Button>
-      </Stack>
-
       <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <Button variant="contained" color="success" startIcon={<AddIcon />} onClick={() => setAction('add')}>
           Add
@@ -176,6 +163,7 @@ export default function PartLocationInventory({
           primaryUnit={primaryUnit}
           unitOptions={unitOptions}
           locations={locationOptions}
+          sourceBalances={sourceBalances}
           onClose={() => setAction(null)}
           onDone={onActionDone}
         />

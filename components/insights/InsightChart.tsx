@@ -28,6 +28,15 @@ function formatLabel(value: string): string {
   return value.length > 12 ? value.slice(0, 12) + '...' : value;
 }
 
+/** Abbreviate large numbers for axis ticks: 7749 -> "7.7K", 1.2e6 -> "1.2M". */
+function formatCompact(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (abs >= 1_000_000) return (value / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (abs >= 1_000) return (value / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(value);
+}
+
 /**
  * Wrapper component that renders MUI X Charts based on chart_config.
  * Supports: area, pie, bar, bar_horizontal, sparkline chart types.
@@ -54,6 +63,20 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
     );
   }
 
+  // Fail loud if the model's x_key/y_key aren't present on the rows. The server
+  // validator should already have dropped such configs, but never silently
+  // render blank labels / zero bars (the original "empty chart" bug).
+  const hasKeys = data.every((d) => x_key in d && y_key in d);
+  if (!hasKeys) {
+    return (
+      <Box sx={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="body2" color="text.secondary">
+          No chartable data
+        </Typography>
+      </Box>
+    );
+  }
+
   const chartColors = [
     theme.palette.primary.main,
     theme.palette.secondary.main,
@@ -63,9 +86,16 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
     theme.palette.info.main,
   ];
 
+  // Sort nominal bars by value (descending) for readability; preserve the
+  // original order for time series (area) and pie.
+  const sortForBars = chart_type === 'bar' || chart_type === 'bar_horizontal';
+  const rows = sortForBars
+    ? [...data].sort((a, b) => Number(b[y_key] ?? 0) - Number(a[y_key] ?? 0))
+    : data;
+
   // Extract x-axis labels and y-axis values
-  const xLabels = data.map((d) => formatLabel(String(d[x_key] ?? '')));
-  const yValues = data.map((d) => Number(d[y_key] ?? 0));
+  const xLabels = rows.map((d) => formatLabel(String(d[x_key] ?? '')));
+  const yValues = rows.map((d) => Number(d[y_key] ?? 0));
 
   if (chart_type === 'area') {
     return (
@@ -82,6 +112,8 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
           yAxis={[
             {
               label: y_label,
+              min: 0,
+              valueFormatter: (value: number) => formatCompact(value),
               tickLabelStyle: { fill: theme.palette.text.secondary, fontSize: 11 },
             },
           ]}
@@ -157,6 +189,8 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
           yAxis={[
             {
               label: y_label,
+              min: 0,
+              valueFormatter: (value: number) => formatCompact(value),
               tickLabelStyle: { fill: theme.palette.text.secondary, fontSize: 11 },
             },
           ]}
@@ -192,6 +226,8 @@ export default function InsightChart({ chartConfig, height = 250 }: InsightChart
           xAxis={[
             {
               label: y_label,
+              min: 0,
+              valueFormatter: (value: number) => formatCompact(value),
               tickLabelStyle: { fill: theme.palette.text.secondary, fontSize: 11 },
             },
           ]}

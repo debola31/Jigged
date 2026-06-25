@@ -15,6 +15,7 @@
  * in the team-invites Edge Function. The old POST /team endpoint has been removed.
  */ import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
 import { getOriginUrl } from '../_shared/origin.ts';
+import { getEmailBaseUrl, getEmailFrom } from '../_shared/email.ts';
 import { writeAuthAudit } from '../_shared/auth-audit.ts';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
@@ -64,12 +65,7 @@ function buildRecoveryEmailHtml(companyName: string, actionLink: string): string
     <tr><td align="center">
       <table width="480" cellpadding="0" cellspacing="0" bgcolor="#1a1f4a" style="background-color:#1a1f4a; border:1px solid #2d3260; border-radius:8px; padding:40px;">
         <tr><td align="center" style="padding-bottom:24px;">
-          <svg viewBox="0 0 64 64" width="48" height="48" xmlns="http://www.w3.org/2000/svg">
-            <rect width="64" height="64" rx="12" fill="#151520"/>
-            <rect x="14" y="10" width="30" height="10" rx="2" fill="#D4872A"/>
-            <rect x="30" y="10" width="10" height="32" fill="#4682B4"/>
-            <path d="M40 42 L40 54 L26 54 Q14 54 14 42 L24 42 Q30 42 30 48 L30 54" fill="#2BBCB3"/>
-          </svg>
+          <img src="${getEmailBaseUrl()}/jigged-logo.png" width="48" height="48" alt="Jigged">
         </td></tr>
         <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
           Reset your Jigged password
@@ -114,7 +110,7 @@ async function sendRecoveryEmail(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      from: 'Jigged <noreply@jigged.app>',
+      from: getEmailFrom(),
       to: [to],
       subject: 'Reset your Jigged password',
       html,
@@ -389,13 +385,10 @@ Deno.serve(async (req)=>{
       }
 
       const siteUrl = getOriginUrl(req);
-      // Land directly on /reset-password. Recovery sessions are
-      // delivered either as a `?code=...` (PKCE) or in the URL hash
-      // (implicit). The server-side /auth/callback route only handles
-      // the query-param form — sending users through it for recovery
-      // breaks the hash flow (the hash is preserved through the
-      // redirect but the destination doesn't know what to do with it).
-      // The /reset-password page handles both shapes directly.
+      // redirectTo is now vestigial: we no longer embed Supabase's raw
+      // action_link (a supabase.co URL). Instead we mint the token below and
+      // build a first-party /auth/confirm link. Kept only because generateLink
+      // validates redirectTo against the auth redirect allow-list.
       const redirectTo = `${siteUrl}/reset-password`;
 
       const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
@@ -404,7 +397,7 @@ Deno.serve(async (req)=>{
         options: { redirectTo },
       });
 
-      if (linkErr || !linkData?.properties?.action_link) {
+      if (linkErr || !linkData?.properties?.hashed_token) {
         console.error('admin_password_recovery: generateLink failed', linkErr);
         await writeAuthAudit(supabase, {
           actor_user_id: actor.id,
@@ -412,10 +405,16 @@ Deno.serve(async (req)=>{
           company_id: target.company_id,
           event_type: RECOVERY_EVENT,
           outcome: 'failed',
-          error_detail: `generate_link: ${linkErr?.message || 'no_action_link'}`,
+          error_detail: `generate_link: ${linkErr?.message || 'no_hashed_token'}`,
         });
         return recoveryGenericResponse();
       }
+
+      // First-party recovery link: /auth/confirm verifies the token_hash
+      // server-side (type=recovery), sets the session cookie, and forwards to
+      // /reset-password, which shows the set-new-password form. Keeps the
+      // visible link on jigged.app instead of supabase.co.
+      const recoveryLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(linkData.properties.hashed_token)}&type=recovery&next=${encodeURIComponent('/reset-password')}`;
 
       // 6. Look up company name for the email body. companies.name is
       //    NOT NULL in the schema (defense-in-depth fallback only).
@@ -430,7 +429,7 @@ Deno.serve(async (req)=>{
 
       // 7. Send via Resend.
       try {
-        await sendRecoveryEmail(resendApiKey, email, companyName, linkData.properties.action_link);
+        await sendRecoveryEmail(resendApiKey, email, companyName, recoveryLink);
       } catch (emailErr) {
         console.error('admin_password_recovery: Resend failed', emailErr);
         await writeAuthAudit(supabase, {

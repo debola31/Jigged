@@ -13,20 +13,9 @@
 
 import { getServiceRoleClient, getAnonClient, handleCors, jsonResponse, errorResponse } from '../_shared/supabase.ts';
 import { getOriginUrl } from '../_shared/origin.ts';
+import { getEmailBaseUrl, getEmailFrom } from '../_shared/email.ts';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
-
-/**
- * Canonical, request-independent base URL for links and images embedded in
- * outbound emails. Deliberately NOT derived from the request origin
- * (getOriginUrl) — an admin sending an invite from a Vercel preview must not
- * mint an email that points at an ephemeral preview URL. Set the SITE_URL
- * secret per environment (the staging URL on staging); defaults to the
- * production apex.
- */
-function getPublicBaseUrl(): string {
-  return Deno.env.get('SITE_URL') ?? 'https://jigged.app';
-}
 
 /**
  * Verify the caller is an admin of the specified company.
@@ -135,7 +124,7 @@ function buildInviteEmailHtml(companyName: string, actionLink: string): string {
     <tr><td align="center">
       <table width="480" cellpadding="0" cellspacing="0" bgcolor="#1a1f4a" style="background-color:#1a1f4a; border:1px solid #2d3260; border-radius:8px; padding:40px;">
         <tr><td align="center" style="padding-bottom:24px;">
-          <img src="${getPublicBaseUrl()}/jigged-logo.png" width="48" height="48" alt="Jigged">
+          <img src="${getEmailBaseUrl()}/jigged-logo.png" width="48" height="48" alt="Jigged">
         </td></tr>
         <tr><td align="center" style="color:#ffffff; font-size:20px; font-weight:600; padding-bottom:16px;">
           You've been invited to Jigged
@@ -169,9 +158,7 @@ async function sendInviteEmail(
 ): Promise<void> {
   const html = buildInviteEmailHtml(companyName, actionLink);
 
-  // From address is a single env-configurable value (Task 4). Domain stays
-  // jigged.app; hello@ is a live Google Workspace alias so replies reach a real inbox.
-  const from = Deno.env.get('INVITE_FROM_EMAIL') ?? 'Jigged <hello@jigged.app>';
+  const from = getEmailFrom();
 
   const res = await fetch(RESEND_API_URL, {
     method: 'POST',
@@ -322,7 +309,7 @@ Deno.serve(async (req) => {
         });
 
         const next = `/accept-invite/${invitation.id}`;
-        const actionLink = `${getPublicBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
+        const actionLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
 
         await sendInviteEmail(resendApiKey, email.toLowerCase(), companyName, actionLink);
       } catch (emailErr) {
@@ -490,7 +477,7 @@ Deno.serve(async (req) => {
         });
 
         const next = `/accept-invite/${invitation.id}`;
-        const actionLink = `${getPublicBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
+        const actionLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
 
         await sendInviteEmail(resendApiKey, invitation.email, companyName, actionLink);
       } catch (emailErr) {

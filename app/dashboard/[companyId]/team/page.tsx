@@ -336,24 +336,35 @@ export default function TeamPage() {
     }
   }, [companyId]);
 
-  // Revoke an invitation
-  const handleRevokeInvitation = async (invitationId: string) => {
+  // Low-level: revoke a single invitation via the team-invites Edge Function.
+  // Returns true on success. No UI side effects — callers own messaging/refresh,
+  // so this is reusable by both the per-row Revoke button and bulk delete.
+  const revokeInvitationRequest = async (
+    invitationId: string,
+    accessToken: string
+  ): Promise<boolean> => {
     try {
-      const supabase = getSupabase();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
       const response = await fetch(`${getInvitesUrl()}/${invitationId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
+        headers: { 'Authorization': `Bearer ${accessToken}` },
       });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
 
-      if (!response.ok) throw new Error('Failed to revoke invitation');
+  // Revoke an invitation
+  const handleRevokeInvitation = async (invitationId: string) => {
+    const supabase = getSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
 
+    const ok = await revokeInvitationRequest(invitationId, session.access_token);
+    if (ok) {
       setSnackbar({ open: true, message: 'Invitation revoked', severity: 'success' });
       loadInvitations();
-    } catch (err) {
-      console.error('Error revoking invitation:', err);
+    } else {
       setSnackbar({ open: true, message: 'Failed to revoke invitation', severity: 'error' });
     }
   };
@@ -420,53 +431,93 @@ export default function TeamPage() {
     return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
   }, [loading, currentData.length]);
 
-  // Delete item(s) - all roles now use user_company_access
+  // Delete selected row(s). A row is either an active member (a
+  // user_company_access row) or a pending invitation (id prefixed `inv-`,
+  // backed by the invitations table). These live in different places and must
+  // be removed differently — members via Supabase, invitations via the
+  // team-invites Edge Function — so we split the selection and route each kind.
   const handleDelete = async () => {
     setDeleting(true);
     try {
       const supabase = getSupabase();
       const itemName = activeTab === 0 ? 'admin' : activeTab === 1 ? 'user' : 'operator';
 
-      if (deleteDialog.type === 'single' && deleteDialog.id) {
-        const { error } = await supabase
-          .from('user_company_access')
-          .delete()
-          .eq('id', deleteDialog.id);
+      // Unify single + bulk into one target list.
+      const targetIds =
+        deleteDialog.type === 'single'
+          ? deleteDialog.id
+            ? [deleteDialog.id]
+            : []
+          : selectedIds;
 
-        if (error) throw error;
+      const inviteIds = targetIds
+        .filter((id) => id.startsWith('inv-'))
+        .map((id) => id.slice('inv-'.length));
+      const memberIds = targetIds.filter((id) => !id.startsWith('inv-'));
 
-        setSnackbar({
-          open: true,
-          message: `${itemName.charAt(0).toUpperCase() + itemName.slice(1)} deleted`,
-          severity: 'success',
-        });
-      } else if (deleteDialog.type === 'bulk') {
-        // Only delete actual members, not pending invitations
-        const memberIds = selectedIds.filter(id => !id.startsWith('inv-'));
-        if (memberIds.length === 0) {
-          setDeleteDialog({ open: false, type: 'single' });
-          return;
-        }
-        const { error } = await supabase
+      if (targetIds.length === 0) {
+        setDeleteDialog({ open: false, type: 'single' });
+        return;
+      }
+
+      let removedMembers = 0;
+      let revokedInvites = 0;
+      let failedInvites = 0;
+
+      // Remove active members. count: 'exact' verifies the DB actually deleted
+      // the rows rather than silently matching zero (e.g. RLS), so the toast
+      // reflects reality instead of assuming success.
+      if (memberIds.length > 0) {
+        const { error, count } = await supabase
           .from('user_company_access')
-          .delete()
+          .delete({ count: 'exact' })
           .in('id', memberIds);
 
         if (error) throw error;
-
-        setSnackbar({
-          open: true,
-          message: `${selectedIds.length} ${itemName}${selectedIds.length > 1 ? 's' : ''} deleted`,
-          severity: 'success',
-        });
-        setSelectedIds([]);
-        if (gridRef.current?.api) {
-          gridRef.current.api.deselectAll();
-        }
+        removedMembers = count ?? 0;
       }
 
+      // Revoke pending invitations via the team-invites Edge Function.
+      if (inviteIds.length > 0) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('Not authenticated');
+
+        const results = await Promise.all(
+          inviteIds.map((invId) => revokeInvitationRequest(invId, session.access_token))
+        );
+        revokedInvites = results.filter(Boolean).length;
+        failedInvites = results.length - revokedInvites;
+      }
+
+      const totalRemoved = removedMembers + revokedInvites;
+
+      if (failedInvites > 0) {
+        // Partial or total failure on the invitation side — surface it.
+        setSnackbar({
+          open: true,
+          message:
+            totalRemoved > 0
+              ? `Removed ${totalRemoved}, but ${failedInvites} invitation${failedInvites > 1 ? 's' : ''} could not be revoked`
+              : 'Failed to delete',
+          severity: 'error',
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: `${totalRemoved} ${itemName}${totalRemoved > 1 ? 's' : ''} removed`,
+          severity: 'success',
+        });
+      }
+
+      setSelectedIds([]);
+      if (gridRef.current?.api) {
+        gridRef.current.api.deselectAll();
+      }
       setDeleteDialog({ open: false, type: 'single' });
-      // Reload the appropriate data
+
+      // Refresh data: invitations state feeds the role grids, so reload it
+      // whenever invites were touched, then reload the active member list.
+      if (inviteIds.length > 0) loadInvitations();
       if (activeTab === 0) loadAdmins();
       else if (activeTab === 1) loadUsers();
       else loadOperators();

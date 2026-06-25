@@ -13,6 +13,7 @@ via direct Supabase queries with RLS policies. Per-company alerts
 import json
 import logging
 import os
+import re
 import time
 
 import sentry_sdk
@@ -122,8 +123,9 @@ async def chat(company_id: str, request: ChatRequest):
         raw_content = result["content"]
         chart_config = _extract_chart_config(raw_content)
 
-        # Strip code blocks from the answer text so users don't see raw JSON
-        clean_answer = _strip_code_blocks(raw_content)
+        # Strip code blocks (raw JSON) and flatten any markdown tables so the
+        # plain-text UI never shows raw `|---|` column formatting.
+        clean_answer = _flatten_markdown_tables(_strip_code_blocks(raw_content))
 
         # Log to ai_chat_queries
         try:
@@ -204,6 +206,39 @@ def _strip_code_blocks(content: str) -> str:
     # Keep only even-indexed parts (outside code fences)
     clean_parts = [parts[i] for i in range(len(parts)) if i % 2 == 0]
     return "\n".join(clean_parts).strip()
+
+
+# Markdown table separator row, e.g. |---|---| or | :--- | ---: |
+_MD_TABLE_SEPARATOR = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
+
+
+def _flatten_markdown_tables(content: str) -> str:
+    """Collapse any markdown tables in the text into plain readable lines.
+
+    The chat answer renders as plain text in the UI, so a raw markdown table
+    shows up as literal `| col | col |` / `|---|---|` ("fake column
+    demarcations"). This drops separator rows and rewrites table rows as
+    `cell — cell`, leaving non-table lines untouched. Defensive backstop — the
+    system prompt also instructs the model not to emit tables.
+    """
+    if "|" not in content:
+        return content
+
+    out: list[str] = []
+    for line in content.split("\n"):
+        stripped = line.strip()
+        # Drop separator rows like |---|---|
+        if "-" in stripped and _MD_TABLE_SEPARATOR.match(stripped):
+            continue
+        # Flatten table rows (start or end with a pipe) into "a — b — c"
+        if stripped.startswith("|") or stripped.endswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            cells = [c for c in cells if c]
+            if cells:
+                out.append(" — ".join(cells))
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 @router.get("/{company_id}/chat/history", response_model=ChatHistoryResponse)

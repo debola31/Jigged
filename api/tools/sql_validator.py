@@ -10,7 +10,7 @@ Validates that queries are safe to execute:
 
 import re
 
-from .schema_context import ALLOWED_TABLES
+from .schema_context import ALLOWED_TABLES, SENSITIVE_TABLES
 
 # Statements that are NOT allowed
 _FORBIDDEN_STATEMENT_TYPES = re.compile(
@@ -29,11 +29,47 @@ _FORBIDDEN_PATTERNS = re.compile(
 # SELECT INTO is a mutation (creates a table)
 _SELECT_INTO = re.compile(r"\bSELECT\b.*\bINTO\b", re.IGNORECASE | re.DOTALL)
 
-# Extract table names from FROM and JOIN clauses
-_TABLE_REFERENCE = re.compile(
-    r"(?:\bFROM\b|\bJOIN\b)\s+\"?(\w+)\"?",
+# Capture the table list immediately after FROM / JOIN: one or more
+# comma-separated table references, each optionally schema-qualified and/or
+# double-quoted (e.g. `jobs`, `public.customers`, `"work_centers"`,
+# `FROM jobs, parts`). Comma-joins that interleave aliases ("FROM a x, b y")
+# aren't fully parsed here — the SENSITIVE_TABLES denylist is the guaranteed
+# backstop for restricted tables regardless of query shape.
+_TABLE_LIST_AFTER_FROM_JOIN = re.compile(
+    r'(?:\bFROM\b|\bJOIN\b)\s+'
+    r'("?\w+"?(?:\."?\w+"?)?'
+    r'(?:\s*,\s*"?\w+"?(?:\."?\w+"?)?)*)',
     re.IGNORECASE,
 )
+
+# Guaranteed-catch denylist: reject if any sensitive/auth table name appears
+# anywhere in the query as a whole word, however it's referenced.
+_SENSITIVE_TABLE_PATTERN = re.compile(
+    r"\b(" + "|".join(re.escape(t) for t in sorted(SENSITIVE_TABLES)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_table_token(token: str) -> str:
+    """Strip quotes and any schema prefix -> bare lowercase table name.
+
+    `"public"."user_company_access"` -> `user_company_access`.
+    """
+    token = token.replace('"', "").strip()
+    if "." in token:
+        token = token.rsplit(".", 1)[-1]
+    return token.lower()
+
+
+def _extract_table_names(cleaned: str) -> set[str]:
+    """Extract referenced table names from FROM/JOIN clauses (allowlist check)."""
+    tables: set[str] = set()
+    for m in _TABLE_LIST_AFTER_FROM_JOIN.finditer(cleaned):
+        for part in m.group(1).split(","):
+            name = _normalize_table_token(part)
+            if name:
+                tables.add(name)
+    return tables
 
 
 def validate_query(sql: str) -> tuple[bool, str]:
@@ -84,12 +120,17 @@ def validate_query(sql: str) -> tuple[bool, str]:
     if "$1" not in cleaned:
         return False, "Query must include $1 placeholder for company_id filtering."
 
-    # 7. Extract and validate table references
-    tables_found = set()
-    for m in _TABLE_REFERENCE.finditer(cleaned):
-        table_name = m.group(1).lower()
-        tables_found.add(table_name)
+    # 7. Guaranteed-catch denylist: sensitive/auth tables are never allowed,
+    # even if the table extraction below misses an unusual reference form.
+    deny = _SENSITIVE_TABLE_PATTERN.search(cleaned)
+    if deny:
+        return False, (
+            f"Query references restricted table(s): {deny.group(1).lower()}. "
+            f"Only business tables are allowed."
+        )
 
+    # 8. Extract and validate table references against the allowlist.
+    tables_found = _extract_table_names(cleaned)
     disallowed = tables_found - ALLOWED_TABLES
     if disallowed:
         return False, (
@@ -97,7 +138,7 @@ def validate_query(sql: str) -> tuple[bool, str]:
             f"Only business tables are allowed."
         )
 
-    # 8. Check subquery depth (max 3 levels)
+    # 9. Check subquery depth (max 3 levels)
     depth = 0
     max_depth = 0
     for ch in cleaned:

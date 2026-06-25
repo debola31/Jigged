@@ -117,17 +117,22 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 | Single statement | No `;` chaining |
 | SELECT/WITH only | Must start with `SELECT` or `WITH` (for CTEs) |
 | Forbidden keywords | `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `INTO`, `pg_sleep`, `pg_catalog`, `information_schema` |
-| Table allowlist | Only 17 business tables (see below) |
+| Table allowlist | Only business tables in `ALLOWED_TABLES` (`schema_context.py`). Table references are extracted reliably, including comma-joins (`FROM a, b`) and schema-qualified names (`public.tbl`) |
+| Sensitive-table denylist | Auth/system tables in `SENSITIVE_TABLES` are rejected if referenced anywhere in the query — a guaranteed catch regardless of join syntax. DB Row-Level Security is the final backstop |
 | Company scoping | Must contain `$1` at least once |
 | Nesting limit | Max 3 levels of subquery nesting |
 
-### Allowed Tables (16 business tables)
+### Allowed Tables
 
-`companies`, `customers`, `quotes`, `parts`, `routings`, `routing_nodes`, `routing_edges`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `operation_types`, `operator_sessions`, `inventory_items`, `inventory_unit_conversions`, `inventory_transactions`
+`companies`, `customers`, `vendors`, `parts`, `part_pricing_tiers`, `parts_bom`, `parts_unit_conversions`, `markup_rates`, `quotes`, `quote_line_items`, `quote_materials`, `quote_operations`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`, `routings`, `routing_operations`, `inventory_transactions`
+
+> Source of truth: the `ALLOWED_TABLES` frozenset in `api/tools/schema_context.py`. Keep this list and `SCHEMA_CONTEXT` in sync with the code.
 
 ### Excluded Tables (auth/system/AI)
 
-`user_company_access`, `user_preferences`, `system_admins`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`
+Enforced by the `SENSITIVE_TABLES` denylist in `api/tools/schema_context.py` — rejected if referenced anywhere in a query:
+
+`user_company_access`, `user_preferences`, `system_admins`, `auth_audit_log`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`, `quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`
 
 ### Adding a New Table to AI Scope
 
@@ -472,9 +477,7 @@ The `AI_READONLY_DATABASE_URL` should point to a read-only Postgres role (see Da
 
 The text-to-SQL chat feature requires a read-only database role to execute AI-generated queries safely.
 
-**Migration:** `supabase/migrations/20260305000001_create_ai_readonly_role.sql`
-
-Before running the migration, replace `CHANGE_ME_secure_password` with a real password. Then set the environment variable:
+**Migration:** the `jigged_ai_readonly` role and its per-table `GRANT SELECT` / `ai_readonly_select` RLS policies live in the baseline migration (`supabase/migrations/20260527151536_baseline.sql`). Set the environment variable to point at that role:
 ```
 AI_READONLY_DATABASE_URL=postgresql://jigged_ai_readonly:your_password@db.xxx.supabase.co:5432/postgres
 ```
@@ -489,7 +492,7 @@ The chat system prompt includes:
 2. **Database schema** — All 17 tables with column names, types, enum values, foreign key relationships, and important notes (imported from `schema_context.py`)
 3. **SQL guidelines** — Use `$1` for company_id, join patterns for tables without company_id
 4. **Example queries** — 4 common patterns for reference
-5. **Response guidelines** — Keep summaries concise, include chart_config when appropriate, highlight actionable insights
+5. **Response guidelines** — Keep summaries concise, include chart_config when appropriate, plain prose only (no markdown tables — they render as raw text in the UI), highlight actionable insights
 
 ```
 You are a business analyst for a small precision manufacturing shop.
@@ -507,6 +510,8 @@ Guidelines:
 - Compare to previous periods when relevant.
 - Flag risks prominently (at-risk jobs, low inventory, revenue decline).
 - Use plain language. Avoid jargon. These are machinists, not MBAs.
+- Write plain prose. Never use markdown tables or pipe/--- columns; for multiple values use chart_config plus a one-line summary or a short inline list.
+- Only query tables in the schema above; never reference user/auth/access tables.
 ```
 
 ---

@@ -431,3 +431,24 @@ ALLOWED_TABLES = frozenset({
     "routing_operations",
     "inventory_transactions",
 })
+
+# Denylist of sensitive auth/system tables the AI must NEVER query. The
+# ALLOWED_TABLES allowlist above is the primary boundary; this is a
+# guaranteed-catch backstop: the validator rejects any query in which one of
+# these names appears as a whole word — comma-join, CTE, subquery, or alias —
+# regardless of how table extraction parses it. Database Row-Level Security is
+# the final backstop. Keep this in sync with the "Excluded Tables" section of
+# docs/modules/ai-insights.md.
+SENSITIVE_TABLES = frozenset({
+    "user_company_access",
+    "user_preferences",
+    "system_admins",
+    "auth_audit_log",
+    "ai_chat_queries",
+    "ai_config",
+    "saved_insights",
+    "demo_data_templates",
+    "quickbooks_connections",
+    "quickbooks_customer_map",
+    "quickbooks_invoice_links",
+})

@@ -221,3 +221,77 @@ class TestEdgeCases:
             "WHERE company_id = $1"
         )
         assert valid
+
+
+class TestSensitiveTableDenylist:
+    """Sensitive auth/system tables are rejected however they're referenced."""
+
+    @pytest.mark.parametrize("table", [
+        "user_company_access", "system_admins", "ai_config",
+        "ai_chat_queries", "user_preferences", "auth_audit_log",
+    ])
+    def test_sensitive_table_in_from_rejected(self, table):
+        valid, msg = validate_query(
+            f"SELECT * FROM {table} WHERE company_id = $1"
+        )
+        assert not valid
+        assert "restricted" in msg.lower()
+
+    def test_sensitive_table_in_comma_join_rejected(self):
+        # Comma-join: the old regex only saw the first table; the denylist
+        # guarantees the restricted table is still caught.
+        valid, msg = validate_query(
+            "SELECT * FROM jobs, user_company_access WHERE jobs.company_id = $1"
+        )
+        assert not valid
+        assert "user_company_access" in msg.lower()
+
+    def test_sensitive_table_in_subquery_rejected(self):
+        valid, msg = validate_query(
+            "SELECT * FROM jobs WHERE company_id = $1 "
+            "AND id IN (SELECT id FROM ai_config)"
+        )
+        assert not valid
+        assert "restricted" in msg.lower()
+
+    def test_schema_qualified_sensitive_table_rejected(self):
+        valid, msg = validate_query(
+            "SELECT * FROM public.user_company_access WHERE company_id = $1"
+        )
+        assert not valid
+        assert "restricted" in msg.lower()
+
+
+class TestTableExtractionHardening:
+    """Regression tests for comma-joins and schema-qualified table names."""
+
+    def test_comma_join_disallowed_table_rejected(self):
+        # 'auth_users' is not on the sensitive denylist, but must still fail the
+        # allowlist even in a comma-join (the old regex saw only the first table).
+        valid, msg = validate_query(
+            "SELECT * FROM jobs, auth_users WHERE jobs.company_id = $1"
+        )
+        assert not valid
+        assert "restricted" in msg.lower()
+
+    def test_comma_join_allowed_tables_accepted(self):
+        valid, _ = validate_query(
+            "SELECT j.id, c.name FROM jobs, customers "
+            "WHERE jobs.customer_id = customers.id AND jobs.company_id = $1"
+        )
+        assert valid
+
+    def test_schema_qualified_allowed_table_accepted(self):
+        # 'public.customers' must normalize to 'customers' (the old regex
+        # captured 'public' and wrongly rejected this).
+        valid, _ = validate_query(
+            "SELECT id FROM public.customers WHERE company_id = $1"
+        )
+        assert valid
+
+    def test_schema_qualified_disallowed_table_rejected(self):
+        valid, msg = validate_query(
+            "SELECT * FROM public.auth_users WHERE company_id = $1"
+        )
+        assert not valid
+        assert "restricted" in msg.lower()

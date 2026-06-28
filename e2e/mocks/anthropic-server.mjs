@@ -84,10 +84,9 @@ function buildResponse() {
 
 const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url.endsWith('/v1/messages')) {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk;
-    });
+    // Drain the request stream so the 'end' event fires; the mock returns a
+    // canned response and does not inspect the request body.
+    req.on('data', () => {});
     req.on('end', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(buildResponse()));
@@ -107,7 +106,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
   console.log(`[anthropic-mock] listening on http://localhost:${PORT}`);
 });
 

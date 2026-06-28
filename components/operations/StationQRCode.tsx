@@ -51,7 +51,6 @@ export default function StationQRCode({
     });
 
     const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
 
     // QR code size in PDF (80mm square)
     const qrSize = 80;

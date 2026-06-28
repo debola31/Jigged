@@ -353,7 +353,6 @@ function main(): void {
   const repoRoot = resolve(__dirname, '..');
   const result = scanProject(repoRoot);
 
-  // eslint-disable-next-line no-console
   console.log(
     `[schema-embed-check] ${result.schemaTables} tables, ${result.filesScanned} files scanned`,
   );
@@ -363,23 +362,18 @@ function main(): void {
   const warnings = result.violations.filter((v) => v.reason === 'unresolved-interpolation');
 
   for (const w of warnings) {
-    // eslint-disable-next-line no-console
     console.warn('[warn] ' + formatViolation(w, repoRoot));
   }
 
   if (errors.length === 0) {
-    // eslint-disable-next-line no-console
     console.log('[schema-embed-check] OK — no schema/embed drift detected.');
     return;
   }
 
-  // eslint-disable-next-line no-console
   console.error(`\n[schema-embed-check] ${errors.length} violation(s):\n`);
   for (const v of errors) {
-    // eslint-disable-next-line no-console
     console.error(formatViolation(v, repoRoot));
   }
-  // eslint-disable-next-line no-console
   console.error(
     '\nIf the schema was regenerated, refresh ' +
       'supabase/schema.prod.sql via scripts/export_schema.py.\n',

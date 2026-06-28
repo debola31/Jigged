@@ -172,7 +172,7 @@ export default function AcceptInvitePage() {
     setCompanyName(inv.company_name || '');
     setInvitation(inv);
     setState('name-prompt');
-  }, [invitationId]);
+  }, [invitationId, router]);
 
   useEffect(() => {
     checkSessionAndLoadInvitation();

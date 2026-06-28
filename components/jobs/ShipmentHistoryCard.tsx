@@ -21,7 +21,6 @@ import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import BlockIcon from '@mui/icons-material/Block';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PrintIcon from '@mui/icons-material/Print';
 
 import { getShipmentsForJob, voidShipment } from '@/utils/shipmentsAccess';

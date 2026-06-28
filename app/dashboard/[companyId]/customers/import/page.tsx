@@ -637,7 +637,7 @@ export default function ImportCustomersPage() {
               return 'Duplicate';
           }
         }}
-        getErrorMessage={(error) => {
+        getErrorMessage={(_error) => {
           return `Missing: Company Name`;
         }}
       />

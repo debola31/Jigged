@@ -101,8 +101,10 @@ export default function AcceptPurchaseOrderModal({
   const [lines, setLines] = useState<PoLineDraft[]>([emptyLine()]);
   const [attachment, setAttachment] = useState<File | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
+  // Reset the form + load customers each time the modal opens (house
+  // convention: onEnter, not a reset useEffect, which would trip
+  // set-state-in-effect).
+  const handleEnter = () => {
     setError(null);
     setAttachmentWarning(null);
     setCreatedJobId(null);
@@ -114,13 +116,17 @@ export default function AcceptPurchaseOrderModal({
     getCustomersForSelect(companyId)
       .then(setCustomers)
       .catch((err) => console.error('Error loading customers:', err));
+  };
+
+  // Cancel any pending expected-price lookups when the modal closes/unmounts.
+  // Cleanup-only (no setState), so it doesn't trip set-state-in-effect.
+  useEffect(() => {
     const timers = priceTimers.current;
     return () => {
-      // Cancel any pending expected-price lookups on close/unmount.
       timers.forEach((t) => clearTimeout(t));
       timers.clear();
     };
-  }, [open, companyId]);
+  }, [open]);
 
   const customerOptions: SelectOption[] = useMemo(
     () => customers.map((c) => ({ id: c.id, label: c.name })),
@@ -276,7 +282,13 @@ export default function AcceptPurchaseOrderModal({
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>Accept Purchase Order</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1 }}>

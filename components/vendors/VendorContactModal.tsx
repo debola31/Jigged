@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -68,15 +68,15 @@ export default function VendorContactModal({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Re-seed the form whenever the modal opens (or the editing target changes).
-  useEffect(() => {
-    if (!open) return;
+  // Re-seed the form each time the modal opens (house convention: onEnter,
+  // not a reset useEffect, which would trip set-state-in-effect).
+  const handleEnter = () => {
     setFormData(
       existing ? vendorContactToFormData(existing) : EMPTY_VENDOR_CONTACT_FORM,
     );
     setError(null);
     setFieldErrors({});
-  }, [open, existing]);
+  };
 
   const isEdit = !!existing;
 
@@ -134,7 +134,13 @@ export default function VendorContactModal({
   };
 
   return (
-    <Dialog open={open} onClose={loading ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={loading ? undefined : onClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>{isEdit ? 'Edit Contact' : 'Add Contact'}</DialogTitle>
       <DialogContent>
         {error && (

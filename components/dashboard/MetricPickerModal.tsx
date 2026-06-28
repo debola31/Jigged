@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -32,10 +32,6 @@ export default function MetricPickerModal({
   onSave,
 }: MetricPickerModalProps) {
   const [selected, setSelected] = useState<MetricKey[]>(currentKeys);
-
-  useEffect(() => {
-    if (open) setSelected(currentKeys);
-  }, [open, currentKeys]);
 
   const handleToggle = (key: MetricKey) => {
     if (selected.includes(key)) {
@@ -69,7 +65,15 @@ export default function MetricPickerModal({
   const unselectedMetrics = PICKABLE_METRICS.filter((m) => !selected.includes(m.key));
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="xs"
+      fullWidth
+      // Re-seed the selection from the current pins each time the modal opens
+      // (house convention: onEnter, not a reset useEffect).
+      TransitionProps={{ onEnter: () => setSelected(currentKeys) }}
+    >
       <DialogTitle>
         Choose Metrics
         <Typography variant="body2" color="text.secondary">

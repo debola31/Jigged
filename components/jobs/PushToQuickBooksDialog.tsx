@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -79,10 +79,6 @@ export default function PushToQuickBooksDialog({
     }
   }, [companyId, jobId]);
 
-  useEffect(() => {
-    if (open) runPreflight();
-  }, [open, runPreflight]);
-
   const handlePush = async () => {
     setPushing(true);
     setError(null);
@@ -121,7 +117,15 @@ export default function PushToQuickBooksDialog({
     customer && (customer.status === 'exact_match' || customer.status === 'candidates' || customer.status === 'unmatched');
 
   return (
-    <Dialog open={open} onClose={pushing ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={pushing ? undefined : onClose}
+      maxWidth="sm"
+      fullWidth
+      // Run the preflight check each time the dialog opens (house convention:
+      // onEnter, not a useEffect, which would trip set-state-in-effect).
+      TransitionProps={{ onEnter: runPreflight }}
+    >
       <DialogTitle>Create QuickBooks invoice for {jobNumber}</DialogTitle>
       <DialogContent dividers>
         {loading ? (

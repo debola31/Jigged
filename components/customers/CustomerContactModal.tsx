@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -61,14 +61,15 @@ export default function CustomerContactModal({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (!open) return;
+  // Re-seed the form each time the modal opens (house convention: onEnter,
+  // not a reset useEffect, which would trip set-state-in-effect).
+  const handleEnter = () => {
     setFormData(
       existing ? customerContactToFormData(existing) : EMPTY_CUSTOMER_CONTACT_FORM,
     );
     setError(null);
     setFieldErrors({});
-  }, [open, existing]);
+  };
 
   const isEdit = !!existing;
 
@@ -126,7 +127,13 @@ export default function CustomerContactModal({
   };
 
   return (
-    <Dialog open={open} onClose={loading ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={loading ? undefined : onClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>{isEdit ? 'Edit Contact' : 'Add Contact'}</DialogTitle>
       <DialogContent>
         {error && (

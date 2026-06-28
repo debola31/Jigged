@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -31,15 +31,10 @@ export default function CustomerFormModal({
 }: CustomerFormModalProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  // Key to force re-render of form when modal opens
+  // Key to force a fresh CustomerForm each time the modal opens. Bumped in
+  // onEnter (house convention) rather than a reset useEffect, which would trip
+  // set-state-in-effect.
   const [formKey, setFormKey] = useState(0);
-
-  // Reset form when modal opens
-  useEffect(() => {
-    if (open) {
-      setFormKey((prev) => prev + 1);
-    }
-  }, [open]);
 
   const handleSuccess = (customer: Customer) => {
     onCreated(customer);
@@ -59,6 +54,7 @@ export default function CustomerFormModal({
           maxHeight: '90vh',
         },
       }}
+      TransitionProps={{ onEnter: () => setFormKey((prev) => prev + 1) }}
     >
       <DialogTitle
         sx={{

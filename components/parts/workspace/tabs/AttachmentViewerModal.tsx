@@ -49,16 +49,17 @@ export default function AttachmentViewerModal({
   attachment,
   onClose,
 }: AttachmentViewerModalProps) {
+  // Initial state IS the fresh-open state: the parent passes key={attachment.id}
+  // so a different attachment remounts this with loading=true / url=null /
+  // error=null — no synchronous reset-in-effect needed (which would trip
+  // set-state-in-effect). All setState below happens inside the async callback.
   const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !attachment) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setUrl(null);
     getPartAttachmentUrl(attachment.storage_path)
       .then((u) => {
         if (!cancelled) setUrl(u);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -31,13 +31,6 @@ export default function CompleteOperationModal({
 }: CompleteOperationModalProps) {
   const [notes, setNotes] = useState('');
 
-  // Reset form when modal opens with a new operation
-  useEffect(() => {
-    if (open && operation) {
-      setNotes('');
-    }
-  }, [open, operation?.id]);
-
   const handleConfirm = () => {
     const data: { notes?: string } = {};
 
@@ -51,7 +44,15 @@ export default function CompleteOperationModal({
   if (!operation) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      // Reset the notes field each time the modal opens (house convention:
+      // onEnter, not a reset useEffect, which would trip set-state-in-effect).
+      TransitionProps={{ onEnter: () => setNotes('') }}
+    >
       <DialogTitle>Complete Operation</DialogTitle>
       <DialogContent>
         <Box sx={{ mb: 3 }}>

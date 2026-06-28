@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -115,8 +115,9 @@ export default function ConvertToJobModal({
   const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
   const allPartsChosen = partGroups.every((g) => !!selectedByPart[g.part_id]);
 
-  useEffect(() => {
-    if (!open) return;
+  // Reset the form each time the modal opens (house convention: onEnter,
+  // not a reset useEffect, which would trip set-state-in-effect).
+  const handleEnter = () => {
     setDueDateInput(defaultDueDateISO(quote.lead_time_days));
     setCustomerPoInput('');
     setAttachment(null);
@@ -128,7 +129,7 @@ export default function ConvertToJobModal({
       if (g.items.length === 1) initial[g.part_id] = g.items[0].id;
     }
     setSelectedByPart(initial);
-  }, [open, quote.lead_time_days, partGroups]);
+  };
 
   const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
   const poValid = customerPoInput.trim() !== '';
@@ -179,7 +180,13 @@ export default function ConvertToJobModal({
   const expired = isQuoteExpired(quote);
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle>Convert to Job</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1 }}>

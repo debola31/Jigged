@@ -41,7 +41,6 @@ interface CustomerAddressFormProps {
 
 function addressToFormData(addr: CustomerAddress): CustomerAddressFormData {
   return {
-    id: addr.id,
     address_line1: addr.address_line1 ?? '',
     address_line2: addr.address_line2 ?? '',
     city: addr.city ?? '',

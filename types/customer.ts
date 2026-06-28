@@ -41,12 +41,11 @@ export interface CustomerAddress {
 }
 
 /**
- * Address fields the form/modal edits. Excludes server-managed identity and
- * timestamps so create and update can use the same shape.
+ * Address fields the form/modal edits. Excludes server-managed identity (the
+ * row id — passed separately to updateCustomerAddress) and timestamps so
+ * create and update can use the same shape.
  */
 export interface CustomerAddressFormData {
-  /** Present for existing addresses, absent for newly-added rows. */
-  id?: string;
   address_line1: string;
   address_line2: string;
   city: string;

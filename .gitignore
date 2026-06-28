@@ -4,6 +4,9 @@
 /node_modules
 /.pnp
 .pnp.*
+
+# npm lockfile — this project uses pnpm; pnpm-lock.yaml is the source of truth.
+package-lock.json
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -69,15 +72,6 @@ supabase/.temp/
 
 # pytest-cov artifact
 api/.coverage
-
-
-# Stryker mutation-testing artifacts (regenerated per run)
-/reports/mutation/
-.stryker-tmp/
-
-# mutmut mutation-testing cache (regenerated per run)
-api/.mutmut-cache
-api/mutants/
 
 # Claude Code: local settings + git worktrees (kept out of version control).
 # settings.json is re-included so shared, team-level Claude config can still be committed.

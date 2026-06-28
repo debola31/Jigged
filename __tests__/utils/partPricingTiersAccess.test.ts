@@ -100,6 +100,29 @@ describe('getTiersWithComputedPrices — bought parts (no routing/BOM)', () => {
 
     expect(tiers[0].unit_price).toBeNull();
   });
+
+  it('leaves unit_price null when markup is NaN (guards a corrupt rate)', async () => {
+    mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: Number.NaN })];
+    mockCalcRoutingCost.mockResolvedValue(null);
+    mockComputedPartCost.mockResolvedValue(25);
+
+    const tiers = await getTiersWithComputedPrices('part-1');
+
+    expect(tiers[0].unit_price).toBeNull();
+  });
+
+  it('rounds the base cost before applying markup (two-step rounding)', async () => {
+    mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: 100 })];
+    mockCalcRoutingCost.mockResolvedValue(null);
+    mockComputedPartCost.mockResolvedValue(1.114);
+
+    const tiers = await getTiersWithComputedPrices('part-1');
+
+    // base rounds 1.114 -> 1.11 first; 1.11 × 2 = 2.22.
+    // (Without the intermediate round, 1.114 × 2 = 2.228 -> 2.23 — so this
+    // case proves the base is rounded before markup is applied.)
+    expect(tiers[0].unit_price).toBe(2.22);
+  });
 });
 
 describe('getTiersWithComputedPrices — made parts (routing/BOM) unchanged', () => {

@@ -12,6 +12,7 @@ via direct Supabase queries with RLS policies. Per-company alerts
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -118,14 +119,22 @@ async def chat(company_id: str, request: ChatRequest):
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Try to extract chart_config from the response
-        # The AI may include it as a JSON block in its response
+        # Extract the chart_config the model proposed, then let deterministic
+        # code decide whether it's worth charting (validate + downgrade to text
+        # for degenerate/invalid data) and pick the chart type from the data
+        # shape. The prose answer is always kept; a dropped chart is never a
+        # blank card.
         raw_content = result["content"]
-        chart_config = _extract_chart_config(raw_content)
+        chart_config = _select_chart_type(
+            _validate_chart_config(_extract_chart_config(raw_content)),
+            request.question,
+        )
 
-        # Strip code blocks (raw JSON) and flatten any markdown tables so the
-        # plain-text UI never shows raw `|---|` column formatting.
-        clean_answer = _flatten_markdown_tables(_strip_code_blocks(raw_content))
+        # Clean the answer for the plain-text UI: drop fenced JSON, flatten any
+        # markdown tables, and neutralize inline markdown (**bold**, etc.).
+        clean_answer = _strip_inline_markdown(
+            _flatten_markdown_tables(_strip_code_blocks(raw_content))
+        )
 
         # Log to ai_chat_queries
         try:
@@ -239,6 +248,167 @@ def _flatten_markdown_tables(content: str) -> str:
             continue
         out.append(line)
     return "\n".join(out).strip()
+
+
+# Inline markdown patterns to neutralize in the plain-text answer. We only touch
+# clearly-paired/anchored markup so shop data like a part number "PART_101" or an
+# expression "a * b" survives untouched. Underscore emphasis is intentionally NOT
+# handled (snake_case identifiers are common in shop data).
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")              # [label](url) -> label
+_MD_BOLD = re.compile(r"\*\*(\S(?:.*?\S)?)\*\*")            # **bold** -> bold
+_MD_ITALIC = re.compile(r"(?<![\w*])\*(\S(?:.*?\S)?)\*(?![\w*])")  # *italic* -> italic
+_MD_CODE = re.compile(r"`([^`]+)`")                         # `code` -> code
+_MD_HEADING = re.compile(r"(?m)^\s{0,3}#{1,6}\s+")          # leading ### -> remove
+
+
+def _strip_inline_markdown(content: str) -> str:
+    """Neutralize inline markdown so the plain-text UI shows clean prose.
+
+    Unwraps **bold**, *italic*, `code`, [label](url) -> label, and drops leading
+    `#` headings. Only paired/anchored asterisk/backtick patterns are touched, so
+    "PART_101" or a literal "a * b" is left intact. Defensive backstop to the
+    system prompt (which forbids markdown); runs after table flattening.
+    """
+    content = _MD_LINK.sub(r"\1", content)
+    content = _MD_BOLD.sub(r"\1", content)
+    content = _MD_ITALIC.sub(r"\1", content)
+    content = _MD_CODE.sub(r"\1", content)
+    content = _MD_HEADING.sub("", content)
+    return content.strip()
+
+
+# ---- chart_config validation + deterministic chart-type selection -----------
+
+_ALLOWED_CHART_TYPES = frozenset({"area", "pie", "bar", "bar_horizontal", "sparkline"})
+# A chart needs enough points to beat a one-line sentence; below this we downgrade
+# to the prose answer (single fact / 1-2 values -> text).
+_MIN_CHART_POINTS = 3
+# For an exactly-2-point chart, keep it only when the two values are a genuine
+# comparison — the smaller is at least this fraction of the larger. A dominant
+# top-1 (e.g. 7749 vs 36 -> 0.5%) is a single-fact answer, not a comparison.
+_COMPARABLE_RATIO = 0.05
+
+
+def _coerce_number(value) -> float | None:
+    """Best-effort parse of a numeric value; handles '1,234.5' / '$1234'."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    if isinstance(value, str):
+        try:
+            return float(value.replace(",", "").replace("$", "").strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _comparable(values: list[float]) -> bool:
+    """True when two values are close enough in magnitude to be a real comparison."""
+    a, b = abs(values[0]), abs(values[1])
+    hi = max(a, b)
+    if hi == 0:
+        return False
+    return (min(a, b) / hi) >= _COMPARABLE_RATIO
+
+
+def _validate_chart_config(config: dict | None) -> dict | None:
+    """Return the chart_config only if it will render an intelligible chart.
+
+    Otherwise return None so the chat answers in prose. The prose answer is
+    always kept — a dropped chart is an explicit downgrade, never a blank card
+    (honors the repo's "no silent fallbacks" rule). Validated against the
+    config's own embedded data:
+      - chart_type is supported; data is a non-empty list of objects
+      - every row contains x_key AND y_key; y parses as a finite number
+      - non-degenerate: >=2 distinct categories, not all-equal/all-zero, and
+        enough points (>=3, or exactly 2 only when the values are comparable)
+    """
+    if not isinstance(config, dict):
+        return None
+
+    chart_type = config.get("chart_type")
+    x_key = config.get("x_key")
+    y_key = config.get("y_key")
+    data = config.get("data")
+
+    if chart_type not in _ALLOWED_CHART_TYPES:
+        return None
+    if not isinstance(data, list) or not data:
+        return None
+    if not isinstance(x_key, str) or not isinstance(y_key, str):
+        return None
+
+    categories: list[str] = []
+    y_values: list[float] = []
+    for row in data:
+        if not isinstance(row, dict) or x_key not in row or y_key not in row:
+            return None  # key mismatch — the empty-render class
+        y = _coerce_number(row.get(y_key))
+        if y is None:
+            return None  # non-numeric y
+        categories.append(str(row.get(x_key)))
+        y_values.append(y)
+
+    if len(set(categories)) < 2:
+        return None  # single category — nothing to compare
+    if len(set(y_values)) == 1:
+        return None  # all-equal (covers all-zero) — flat, uninformative
+    if len(y_values) < _MIN_CHART_POINTS:
+        # 1 point -> text; 2 points only if a genuine comparison.
+        if len(y_values) != 2 or not _comparable(y_values):
+            return None
+
+    return config
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}")  # ISO-ish date detection for temporal x
+_CHART_TYPE_KEYWORDS = (
+    ("horizontal", "bar_horizontal"),
+    ("donut", "pie"),
+    ("doughnut", "pie"),
+    ("pie", "pie"),
+    ("column", "bar"),
+    ("bar", "bar"),
+    ("line", "area"),
+    ("area", "area"),
+    ("trend", "area"),
+)
+
+
+def _select_chart_type(config: dict | None, question: str = "") -> dict | None:
+    """Pick chart_type deterministically from the data shape, overriding the
+    model's choice — unless the user explicitly named a type in the question.
+
+    temporal x + numeric y          -> area
+    nominal x (few categories)      -> bar (bar_horizontal when labels are long
+                                       or there are many categories)
+    model-chosen pie with few slices -> kept as pie (part-of-whole)
+    """
+    if config is None:
+        return None
+
+    q = (question or "").lower()
+    for kw, ctype in _CHART_TYPE_KEYWORDS:
+        # Word-boundary match so "pipeline" doesn't trigger "line", etc.
+        if re.search(rf"\b{kw}\b", q):
+            return {**config, "chart_type": ctype}
+
+    data = config.get("data") or []
+    x_key = config.get("x_key")
+    cats = [str(r.get(x_key, "")) for r in data if isinstance(r, dict)]
+    n = len(cats)
+    is_temporal = bool(cats) and all(_DATE_RE.match(c) for c in cats)
+
+    if is_temporal:
+        chosen = "area"
+    elif config.get("chart_type") == "pie" and n <= 6:
+        chosen = "pie"  # plausible part-of-whole
+    else:
+        longest = max((len(c) for c in cats), default=0)
+        chosen = "bar_horizontal" if (longest > 14 or n > 8) else "bar"
+
+    return {**config, "chart_type": chosen}
 
 
 @router.get("/{company_id}/chat/history", response_model=ChatHistoryResponse)

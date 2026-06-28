@@ -7,7 +7,11 @@ is the backstop that converts those to readable plain text.
 
 import pytest
 
-from routes.insights_routes import _flatten_markdown_tables, _strip_code_blocks
+from routes.insights_routes import (
+    _flatten_markdown_tables,
+    _strip_code_blocks,
+    _strip_inline_markdown,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -65,3 +69,27 @@ class TestStripCodeBlocks:
         out = _strip_code_blocks(text)
         assert "chart_type" not in out
         assert "Revenue up." in out
+
+
+class TestStripInlineMarkdown:
+    def test_bold_unwrapped(self):
+        # The exact reported defect.
+        assert _strip_inline_markdown("**Customer 101** is your top customer") == (
+            "Customer 101 is your top customer"
+        )
+
+    def test_italic_and_code_and_heading_and_link(self):
+        assert _strip_inline_markdown("an *italic* word") == "an italic word"
+        assert _strip_inline_markdown("the `job_id` field") == "the job_id field"
+        assert _strip_inline_markdown("# Heading\nbody") == "Heading\nbody"
+        assert _strip_inline_markdown("see [the docs](https://x.io/y)") == "see the docs"
+
+    def test_plain_prose_untouched(self):
+        text = "Revenue is up 12% vs last week."
+        assert _strip_inline_markdown(text) == text
+
+    def test_part_numbers_and_multiplication_preserved(self):
+        # Underscores in identifiers and a literal "a * b" must NOT be mangled.
+        assert _strip_inline_markdown("Part PART_101 ships today") == "Part PART_101 ships today"
+        assert _strip_inline_markdown("cost is a * b per unit") == "cost is a * b per unit"
+        assert _strip_inline_markdown("col revenue_total is high") == "col revenue_total is high"

@@ -34,9 +34,13 @@ def _build_chat_system_prompt() -> str:
         "formatting — they render as raw text in the UI. For multiple values, rely on the "
         "chart_config plus a one-line summary, or a short inline list "
         "(e.g. 'Customer A: $50k, B: $35k, C: $28k').\n"
-        "- ALWAYS include a chart_config JSON block when the data has multiple values, trends, comparisons, or distributions.\n"
-        "- Use area for trends over time, bar for comparisons, bar_horizontal for ranked lists, pie for distributions.\n"
-        "- Only omit charts for yes/no answers or single-number lookups.\n"
+        "- Default to a one-line prose answer. Only add a chart_config when there are at least "
+        "3 data points AND a chart genuinely helps: a trend over time, a comparison across several "
+        "categories, or a part-of-whole breakdown. For a single fact, a ranked top-N where one "
+        "value dominates, or only 1-2 values, answer in prose only — no chart.\n"
+        "- When you do chart: area for trends over time, bar for comparisons across categories, "
+        "bar_horizontal for ranked lists with long labels, pie for part-of-whole. Never use bold "
+        "(**) or any markdown formatting in the answer.\n"
         "- Answer with facts and numbers only. Do not add advice, opinions, or recommendations unless the user asks.\n"
         "- Include comparisons to previous periods when the data supports it (e.g., 'up 12% vs last week').\n"
         "- Flag risks prominently (at-risk jobs, low inventory, revenue decline).\n"
@@ -46,12 +50,14 @@ def _build_chat_system_prompt() -> str:
         "chart_config format (include as a ```json code block when applicable):\n"
         "{\n"
         '  "chart_type": "area" | "pie" | "bar" | "bar_horizontal" | "sparkline",\n'
-        '  "data": [{"x_key_value": ..., "y_key_value": ...}, ...],\n'
-        '  "x_key": "field_name",\n'
-        '  "y_key": "field_name",\n'
+        '  "data": [{"customer": "Acme", "revenue": 7749.24}, {"customer": "Globex", "revenue": 5210}],\n'
+        '  "x_key": "customer",\n'
+        '  "y_key": "revenue",\n'
         '  "x_label": "Axis Label",\n'
         '  "y_label": "Axis Label"\n'
-        "}"
+        "}\n\n"
+        "Every key inside the data row objects MUST be exactly the x_key and y_key strings "
+        "(here 'customer' and 'revenue'). Emit valid JSON only — no comments or trailing commas."
     )
 
 

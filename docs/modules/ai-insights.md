@@ -84,13 +84,45 @@ The dashboard page is user-driven: the ask bar is the only way to generate insig
        |
        v
 6. AI interprets results -> returns:
-   - Natural language summary
-   - Optional chart_config (chart type + formatted data)
+   - Natural language summary (inline markdown + tables stripped for the plain-text UI)
+   - Optional *proposed* chart_config (chart type + formatted data)
        |
        v
-7. Frontend renders text + optional MUI X Chart
-   - Save button only shown when chart_config exists
+7. Backend decides the modality deterministically (constrained renderer):
+   - validate chart_config against its data; downgrade to text when invalid or
+     degenerate (missing keys, non-numeric y, 1-2 dominant values, single category)
+   - pick the chart type from the data shape (temporal -> area, nominal -> bar)
+       |
+       v
+8. Frontend renders text + optional MUI X Chart
+   - InsightChart fails loud ("No chartable data") instead of blank bars
+   - Save button only shown when a chart survived validation
 ```
+
+### Chart decisioning & validation
+
+Text-first, **constrained-renderer** pattern (industry norm: ThoughtSpot, Power BI
+Copilot, Tableau "Show Me", Amazon QuickSight Q): the model *proposes* a chart, but
+deterministic code decides whether and how to render it.
+
+- **Modality (prompt):** default to a one-line prose answer; ask for a `chart_config`
+  only when there are >=3 data points and a chart genuinely helps (trend over time,
+  comparison across categories, part-of-whole). Single facts, dominant top-N, and
+  1-2 values stay text.
+- **Validation + downgrade** (`_validate_chart_config`, `api/routes/insights_routes.py`):
+  drops the chart (keeping the prose answer) when `chart_type` is unsupported, data is
+  empty, the declared `x_key`/`y_key` aren't on every row, `y` isn't numeric, or the
+  result is degenerate (<2 distinct categories, all-equal/all-zero, a single point, or
+  a 2-point chart where one value dominates). A dropped chart is an explicit downgrade —
+  never a blank card.
+- **Deterministic chart type** (`_select_chart_type`): the rendered type is derived from
+  the data shape (temporal x -> `area`; nominal x -> `bar`, or `bar_horizontal` for
+  long/many labels; a model-chosen `pie` is kept only for a few slices). An explicit type
+  named in the question ("as a pie") wins.
+- **Renderer guards** (`components/insights/InsightChart.tsx`): missing `x_key`/`y_key`
+  shows an explicit "No chartable data" state (never blank labels / zero bars); bar/area
+  use a zero baseline; axis ticks are abbreviated (`7749` -> `7.7K`); nominal bars are
+  value-sorted.
 
 ### Hybrid Tool Architecture
 
@@ -492,7 +524,7 @@ The chat system prompt includes:
 2. **Database schema** — All 17 tables with column names, types, enum values, foreign key relationships, and important notes (imported from `schema_context.py`)
 3. **SQL guidelines** — Use `$1` for company_id, join patterns for tables without company_id
 4. **Example queries** — 4 common patterns for reference
-5. **Response guidelines** — Keep summaries concise, include chart_config when appropriate, plain prose only (no markdown tables — they render as raw text in the UI), highlight actionable insights
+5. **Response guidelines** — Text-first: a one-line prose answer by default, with a chart_config only when there are >=3 points and a chart helps. Plain prose only — no markdown tables, bold, or other markdown (the UI renders plain text). Highlight actionable insights
 
 ```
 You are a business analyst for a small precision manufacturing shop.
@@ -505,12 +537,12 @@ Guidelines:
 - Always use execute_sql to get real data. Never make up numbers.
 - Use $1 as a placeholder for company_id in all queries.
 - Keep summaries to 1-3 sentences. Shop owners are busy.
-- When data supports it, include a chart_config JSON block.
+- Default to a one-line prose answer; include a chart_config only when there are >=3 data points and a chart helps (trend, comparison, part-of-whole). Single facts and 1-2 values stay text.
 - Highlight actionable insights: what should the owner DO about this data?
 - Compare to previous periods when relevant.
 - Flag risks prominently (at-risk jobs, low inventory, revenue decline).
 - Use plain language. Avoid jargon. These are machinists, not MBAs.
-- Write plain prose. Never use markdown tables or pipe/--- columns; for multiple values use chart_config plus a one-line summary or a short inline list.
+- Write plain prose. Never use markdown tables, bold (**), or any markdown; for multiple values use chart_config plus a one-line summary or a short inline list.
 - Only query tables in the schema above; never reference user/auth/access tables.
 ```
 

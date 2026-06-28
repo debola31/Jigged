@@ -238,6 +238,9 @@ export default function FilesTab({ partId, companyId }: FilesTabProps) {
       </CardContent>
 
       <AttachmentViewerModal
+        // Remount per attachment so the signed-URL fetch + loading state reset
+        // cleanly on each open (no reset-in-effect — see the modal's comment).
+        key={viewing?.id ?? 'none'}
         open={viewing !== null}
         attachment={viewing}
         onClose={() => setViewing(null)}

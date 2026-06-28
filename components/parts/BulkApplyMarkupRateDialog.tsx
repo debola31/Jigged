@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -50,30 +50,23 @@ export default function BulkApplyMarkupRateDialog({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
+  // Load rates + auto-select the default each time the dialog opens (house
+  // convention: onEnter, not a useEffect, which would trip set-state-in-effect).
+  const handleEnter = async () => {
     setLoadingRates(true);
     setError(null);
     setSelectedRateId(null);
-    getAllMarkupRates(companyId)
-      .then((data) => {
-        if (cancelled) return;
-        setRates(data);
-        const defaultRate = data.find((r) => r.is_default);
-        setSelectedRateId(defaultRate?.id ?? data[0]?.id ?? null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load markup rates');
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingRates(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, companyId]);
+    try {
+      const data = await getAllMarkupRates(companyId);
+      setRates(data);
+      const defaultRate = data.find((r) => r.is_default);
+      setSelectedRateId(defaultRate?.id ?? data[0]?.id ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load markup rates');
+    } finally {
+      setLoadingRates(false);
+    }
+  };
 
   const handleConfirm = async () => {
     if (!selectedRateId) return;
@@ -109,7 +102,13 @@ export default function BulkApplyMarkupRateDialog({
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle sx={{ pb: 1 }}>
         Set markup rate
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>

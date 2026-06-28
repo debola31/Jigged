@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -64,9 +64,9 @@ export default function QuoteEmailDialog({ open, onClose, quote, company }: Quot
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Seed the fields each time the dialog opens.
-  useEffect(() => {
-    if (!open) return;
+  // Seed the fields each time the dialog opens (house convention: onEnter,
+  // not a reset useEffect, which would trip set-state-in-effect).
+  const handleEnter = () => {
     const primaryEmail = pickPrimaryContact(quote)?.email ?? '';
     setToList(primaryEmail ? [primaryEmail] : []);
     setCcList([]);
@@ -74,7 +74,7 @@ export default function QuoteEmailDialog({ open, onClose, quote, company }: Quot
     setBody(defaultBody(quote, company, quote.created_by_member?.name ?? ''));
     setError(null);
     setSending(false);
-  }, [open, quote, company]);
+  };
 
   const handleConfirm = async () => {
     setError(null);
@@ -106,7 +106,13 @@ export default function QuoteEmailDialog({ open, onClose, quote, company }: Quot
   };
 
   return (
-    <Dialog open={open} onClose={sending ? undefined : onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={sending ? undefined : onClose}
+      maxWidth="sm"
+      fullWidth
+      TransitionProps={{ onEnter: handleEnter }}
+    >
       <DialogTitle sx={{ pr: 6 }}>
         Email {quote.quote_number ?? 'Quote'}
         <IconButton

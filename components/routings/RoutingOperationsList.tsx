@@ -1,7 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Box, Typography, Button, Alert, CircularProgress } from '@mui/material';
+import {
+  Box,
+  Typography,
+  Button,
+  Alert,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+} from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import BuildIcon from '@mui/icons-material/Build';
 import RoutingOperationRow, { type OperationRowData } from './RoutingOperationRow';
@@ -42,6 +52,12 @@ export default function RoutingOperationsList({
     | { mode: 'add' }
     | { mode: 'edit'; rowIndex: number }
   >({ mode: 'closed' });
+  // Index of the operation pending delete-confirmation. Deleting a row
+  // auto-saves immediately (the parent persists on `onChange`) with no undo,
+  // so we gate it behind a lightweight confirm — consistent with the BOM
+  // material delete, and the only safety net for an otherwise silent,
+  // unrecoverable removal. See docs/interaction-standards.md §1.
+  const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null);
 
   useEffect(() => {
     getWorkCentersForRouting(companyId)
@@ -67,9 +83,11 @@ export default function RoutingOperationsList({
     onChange(copy);
   }, [rows, onChange]);
 
-  const handleDelete = useCallback((index: number) => {
-    onChange(rows.filter((_, i) => i !== index));
-  }, [rows, onChange]);
+  const confirmDelete = useCallback(() => {
+    if (pendingDeleteIndex === null) return;
+    onChange(rows.filter((_, i) => i !== pendingDeleteIndex));
+    setPendingDeleteIndex(null);
+  }, [pendingDeleteIndex, rows, onChange]);
 
   const handleEditorSave = (value: OperationEditorValue) => {
     if (!value.workCenter) return;
@@ -138,6 +156,11 @@ export default function RoutingOperationsList({
     setupMinutesTotal += r.setupMinutes ?? 0;
     cycleMinutesTotal += r.cycleMinutesPerUnit ?? 0;
   }
+
+  // Placeholder rows have no chosen work center yet, so fall back to a
+  // generic noun in the confirm copy.
+  const pendingRow = pendingDeleteIndex !== null ? rows[pendingDeleteIndex] : null;
+  const pendingName = pendingRow?.workCenterId ? pendingRow.workCenterName : null;
 
   return (
     <Box>
@@ -210,7 +233,7 @@ export default function RoutingOperationsList({
                 onMoveUp={() => handleMoveUp(idx)}
                 onMoveDown={() => handleMoveDown(idx)}
                 onEdit={() => setEditorState({ mode: 'edit', rowIndex: idx })}
-                onDelete={() => handleDelete(idx)}
+                onDelete={() => setPendingDeleteIndex(idx)}
                 disabled={disabled || editorOpen}
               />
             )
@@ -225,6 +248,29 @@ export default function RoutingOperationsList({
           )}
         </>
       )}
+
+      <Dialog open={pendingDeleteIndex !== null} onClose={() => setPendingDeleteIndex(null)}>
+        <DialogTitle>Remove operation?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Remove{' '}
+            {pendingName ? (
+              <>
+                <strong>{pendingName}</strong> from this routing
+              </>
+            ) : (
+              'this operation'
+            )}
+            ? This cannot be undone, but you can re-add the operation later.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingDeleteIndex(null)}>Cancel</Button>
+          <Button onClick={confirmDelete} color="error" variant="contained">
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

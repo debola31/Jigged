@@ -13,6 +13,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated test artifact (istanbul coverage report ships its own stale
+    // eslint-disable directives). Gitignored; not present in CI at lint time,
+    // but keeps local `pnpm lint` clean after a coverage run so the
+    // --max-warnings 0 cap stays honest.
+    "coverage/**",
   ]),
   {
     // ESLint 9 flat config: rules from a plugin need the plugin registered

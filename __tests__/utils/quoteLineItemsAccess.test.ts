@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
-import type { QuoteLineItem } from '@/types/quote';
 
 // Chainable Supabase mock. The builder returns itself for every chain
 // method and exposes `.data` / `.error` so `await chain.single()` resolves

@@ -200,9 +200,7 @@ describe('companyAccess utilities', () => {
     });
 
     it('returns dashboard for single company user', async () => {
-      let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
         if (table === 'user_company_access') {
           return {
             ...mockQueryBuilder,
@@ -239,9 +237,7 @@ describe('companyAccess utilities', () => {
     });
 
     it('returns dashboard for multi-company user with valid last company', async () => {
-      let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
         if (table === 'user_company_access') {
           return {
             ...mockQueryBuilder,
@@ -289,9 +285,7 @@ describe('companyAccess utilities', () => {
     });
 
     it('returns /select-company for multi-company user with no last company', async () => {
-      let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
         if (table === 'user_company_access') {
           return {
             ...mockQueryBuilder,
@@ -339,9 +333,7 @@ describe('companyAccess utilities', () => {
     });
 
     it('returns /select-company when last company is no longer accessible', async () => {
-      let callCount = 0;
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        callCount++;
         if (table === 'user_company_access') {
           return {
             ...mockQueryBuilder,

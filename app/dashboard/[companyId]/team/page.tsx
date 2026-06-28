@@ -129,7 +129,7 @@ export default function TeamPage() {
 
   // Invitations state
   const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [invitationsLoading, setInvitationsLoading] = useState(false);
+  const [_invitationsLoading, setInvitationsLoading] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -339,7 +339,7 @@ export default function TeamPage() {
   // Low-level: revoke a single invitation via the team-invites Edge Function.
   // Returns true on success. No UI side effects — callers own messaging/refresh,
   // so this is reusable by both the per-row Revoke button and bulk delete.
-  const revokeInvitationRequest = async (
+  const revokeInvitationRequest = useCallback(async (
     invitationId: string,
     accessToken: string
   ): Promise<boolean> => {
@@ -352,10 +352,10 @@ export default function TeamPage() {
     } catch {
       return false;
     }
-  };
+  }, []);
 
   // Revoke an invitation
-  const handleRevokeInvitation = async (invitationId: string) => {
+  const handleRevokeInvitation = useCallback(async (invitationId: string) => {
     const supabase = getSupabase();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -367,10 +367,10 @@ export default function TeamPage() {
     } else {
       setSnackbar({ open: true, message: 'Failed to revoke invitation', severity: 'error' });
     }
-  };
+  }, [revokeInvitationRequest, loadInvitations]);
 
   // Resend an invitation
-  const handleResendInvitation = async (invitationId: string) => {
+  const handleResendInvitation = useCallback(async (invitationId: string) => {
     try {
       const supabase = getSupabase();
       const { data: { session } } = await supabase.auth.getSession();
@@ -390,7 +390,7 @@ export default function TeamPage() {
       console.error('Error resending invitation:', err);
       setSnackbar({ open: true, message: 'Failed to resend invitation', severity: 'error' });
     }
-  };
+  }, [loadInvitations]);
 
   // Load invitations on mount
   useEffect(() => {
@@ -616,7 +616,7 @@ export default function TeamPage() {
         </Tooltip>
       </Box>
     );
-  }, []);
+  }, [handleResendInvitation, handleRevokeInvitation]);
 
   // AG Grid column definitions for Operators
   const operatorColumnDefs: ColDef<TeamRow>[] = useMemo(

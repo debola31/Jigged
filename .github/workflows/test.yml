@@ -32,9 +32,9 @@ jobs:
         run: pnpm exec tsc --noEmit -p tsconfig.json
 
       - name: Lint
-        # `pnpm lint` runs `eslint --max-warnings 109` per package.json.
-        # 109 is the current baseline; warnings can only decrease from here.
-        # See 3e PR description for the rule downgrade rationale.
+        # `pnpm lint` runs `eslint --max-warnings <N>` per package.json (the
+        # source of truth for the cap). The cap ratchets monotonically down
+        # toward 0 as warnings are paid off (issue #442); never raise it.
         run: pnpm lint
 
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)

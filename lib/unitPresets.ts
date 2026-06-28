@@ -90,7 +90,7 @@ export const ALL_UNITS: string[] = Object.values(UNIT_CATEGORIES)
  * Common units grouped by category for organized dropdowns
  */
 export const UNITS_BY_CATEGORY = Object.entries(UNIT_CATEGORIES).map(
-  ([key, category]) => ({
+  ([_key, category]) => ({
     category: category.name,
     units: category.units
   })
@@ -315,7 +315,7 @@ export function getUnitDisplayName(unit: string): string {
 /**
  * Format unit for display with optional plural handling
  */
-export function formatUnit(unit: string, quantity: number): string {
+export function formatUnit(unit: string, _quantity: number): string {
   // For now, just return the unit as-is
   // Could be extended for proper pluralization
   return unit;

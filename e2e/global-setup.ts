@@ -400,7 +400,6 @@ export default async function globalSetup(): Promise<void> {
   const env = readEnvOrExit();
   const supabase = makeAdminClient(env);
 
-  // eslint-disable-next-line no-console
   console.log('[e2e/global-setup] Seeding ephemeral local Supabase…');
 
   const user = await ensureAuthUser(supabase);
@@ -469,6 +468,5 @@ export default async function globalSetup(): Promise<void> {
   // once part_pricing_tiers.quantity is numeric. Seeds the fractional path.
   await ensurePricingTier(supabase, companyId, lengthPartId, 1, 0.5, 30);
 
-  // eslint-disable-next-line no-console
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
 }

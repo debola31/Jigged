@@ -48,9 +48,9 @@ import {
 import {
   lineShipConsequence,
   projectSlip,
-  PROJECTED_STATUS_LABEL,
   type ShipConsequence,
 } from '@/components/shipments/shipmentMath';
+import { FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
 /** UI-only carrier selection. 'other' reveals a free-text field whose value
  *  is what actually gets stored in shipments.carrier. */
@@ -717,7 +717,7 @@ export default function ShipmentForm({
             unit{slipProjection.unitsNow === 1 ? '' : 's'} across{' '}
             {slipProjection.linesShipping} line{slipProjection.linesShipping === 1 ? '' : 's'}.
             {' '}After it,{slipJobNumber ? ` Job ${slipJobNumber}` : ' this job'} will be{' '}
-            <strong>{PROJECTED_STATUS_LABEL[slipProjection.projectedStatus]}</strong>{' '}
+            <strong>{FULFILLMENT_STATUS_CONFIG[slipProjection.projectedStatus].label}</strong>{' '}
             ({slipProjection.partsComplete} of {slipProjection.partsTotal} part
             {slipProjection.partsTotal === 1 ? '' : 's'} complete).
           </Typography>

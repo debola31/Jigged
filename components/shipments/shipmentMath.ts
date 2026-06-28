@@ -73,9 +73,3 @@ export function projectSlip(
         : 'unshipped';
   return { unitsNow, linesShipping, partsComplete, partsTotal, projectedStatus };
 }
-
-export const PROJECTED_STATUS_LABEL: Record<SlipProjection['projectedStatus'], string> = {
-  fully_shipped: 'Fully Shipped',
-  partially_shipped: 'Partially Shipped',
-  unshipped: 'Unshipped',
-};

@@ -42,25 +42,49 @@ to the consequence.
 Uniform confirmation dialogs cause **confirmation fatigue** — users reflex-click
 "Confirm," which strips the *one* dialog that matters of its power
 ([NN/g — Confirmation Dialogs](https://www.nngroup.com/articles/confirmation-dialog/)).
-Scale by impact + reversibility ([Apple — Alerts](https://developer.apple.com/design/human-interface-guidelines/alerts), [Carbon — Remove pattern](https://carbondesignsystem.com/community/patterns/remove-pattern/), [M3 — Snackbar](https://m3.material.io/components/snackbar/guidelines)):
+But fatigue bites at *high delete frequency*; our nested part-editors are edited
+occasionally, so a small confirm is cheap insurance here, not a fatigue source.
+Scale by impact + reversibility — with one audience floor (below) that overrides
+the generic "low-stakes ⇒ no dialog" advice.
 
 | Target | Stakes | Treatment |
 |---|---|---|
 | **High-impact / hard to reverse** — e.g. delete a whole **Part** (cascades to routing; blocked by references) | High | **Confirmation dialog**, danger style, consequences stated, Delete kept away from Cancel ([NN/g — proximity](https://www.nngroup.com/articles/proximity-consequential-options/)). |
-| **Low-impact / trivially reversible** — BOM material row, pricing tier, routing operation row | Low | **Inline delete + Undo snackbar. No dialog.** |
+| **Immediately-persisted row delete** — BOM material row, routing operation row (auto-saved on change) | Low–med | **Lightweight confirmation dialog** — same shape as the Part delete, less copy. This is the safety-net *floor*; see the audience note for why NOT an Undo snackbar. |
+| **Staged (explicit-Save) edit** — pricing-tier removal | Low | **No dialog.** Removal is in-memory until the user clicks Save; the dirty-state indicator + the option to walk away unsaved *is* the safety net. |
 
-> ⚠️ "Inline, no dialog" is only safe **with Undo**. A no-dialog delete without
-> Undo is a silent unrecoverable delete — worse than a dialog. Build the Undo
-> alongside removing the dialog.
+> **Audience floor — why not "inline delete + Undo snackbar":** our users are
+> 50–60, often on tablets on a shop floor with divided attention. Auto-dismissing
+> snackbars are a documented accessibility/usability liability for exactly this
+> profile: WCAG 2.2.1 (Level A) treats a short auto-dismiss window as a timing
+> limit when the toast is the *only* recovery path ([W3C](https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html));
+> Material Design 3 itself says web auto-dismiss snackbars are "inaccessible for
+> people with low vision or who require additional time" ([M3 — Snackbar](https://m3.material.io/components/snackbar/guidelines));
+> GitHub Primer lists toasts as "not recommended for use" ([Primer](https://primer.style/accessibility/patterns/accessible-notifications-and-messages/));
+> and a 2023 systematic review of 40 older-adult studies recommends *increasing*
+> on-screen feedback time ([JMIR 2023](https://mhealth.jmir.org/2023/1/e43186)).
+> NN/g frames Undo as a *complement* to a dialog, not a replacement. So a
+> destructive, immediately-persisted row delete keeps its dialog; only replace a
+> dialog when recovery is **durable** — a soft-delete + "recently deleted /
+> restore" affordance (the pattern already used for customers, `softDeleteCustomer`)
+> — never a timed toast.
 
-### Current state vs this standard (gaps to close)
+### Current state vs this standard
 - ✅ Part delete: red icon + confirmation dialog.
-- ✅ Row deletes (BOM/tier/operation): red icons at rest.
-- ✅ Shared `DeleteIconButton` + a CI source-scan test enforce red-at-rest; the
-  grey note-delete and grey unit-conversion delete are fixed.
-- ⬜ Row deletes still lack **Undo**; the BOM row delete still shows a
-  confirmation dialog (over-confirmed). Target end state: drop the BOM-row
-  dialog and add an **Undo snackbar** to BOM/tier/operation deletes.
+- ✅ Row deletes (BOM / tier / operation): red icons at rest.
+- ✅ Shared `DeleteIconButton` + a CI source-scan test enforce red-at-rest.
+- ✅ BOM material delete: confirmation dialog (correct — keep it).
+- ✅ Routing-operation delete: now gated by a confirmation dialog. It auto-saves
+  on change, so without this it was a silent, unrecoverable delete — the one real
+  gap, now closed.
+- ✅ Pricing-tier removal: staged behind explicit Save; recoverable by not saving,
+  and it does **not** alter existing quotes (line items snapshot `unit_price`; the
+  `source_tier_id` FK is `ON DELETE SET NULL`), so it is not the financial hazard
+  it appears to be.
+- 🔄 **Superseded:** the earlier target of "drop the BOM dialog + add Undo
+  snackbars to BOM/tier/operation" is reversed after UX research (the audience
+  floor above). We keep dialogs on destructive row deletes; ephemeral Undo is not
+  our pattern. Issues #394 / #396 were closed with this rationale.
 
 ---
 
@@ -83,8 +107,20 @@ and always show status ([GitHub Primer — Saving](https://primer.style/product/
 ### Current state
 - ✅ `SaveStatus` adopted in identity, routing, BOM, procurement, transaction
   notes. Pricing is explicit-Save.
-- ⬜ Follow-up: a navigation guard for in-flight/unsaved edits; an Undo for
-  pricing saves (financial change).
+- ❌ **Undo-after-save for pricing — not pursued.** GitLab Pajamas advises against
+  auto-saving financial data ([Pajamas](https://design.gitlab.com/usability/saving-and-feedback)),
+  so explicit Save stays. With an explicit Save button **plus** a visible dirty
+  indicator already in place, a separate post-save Undo is redundant — the
+  deliberate action *is* the safeguard, and a tier is trivially re-edited and
+  re-saved (and doesn't touch existing quotes; see §1).
+- 🔻 **Navigation guard — low priority, narrow if at all.** The honest dirty-state
+  indicator is the real protection. A `beforeunload` guard is a weak backstop:
+  browsers show only a generic, non-customizable message (it can't name the
+  unsaved tier) and it is unreliable on mobile/tablet — our primary device — and
+  may not fire at all ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
+  If added at all, use a conditional in-app (Next.js) route guard attached **only
+  while genuinely dirty** and removed once saved (MDN), to avoid the false-positive
+  that trains users to ignore it (the Figma "already-saved-but-warned" pitfall).
 
 ---
 

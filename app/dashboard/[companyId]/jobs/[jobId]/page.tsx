@@ -570,6 +570,7 @@ export default function JobDetailPage() {
               jobId={jobId}
               refreshKey={historyRefreshKey}
               initialPreviewShipmentId={pendingPreviewShipmentId}
+              onShipmentVoided={fetchJob}
             />
           </Grid>
         )}

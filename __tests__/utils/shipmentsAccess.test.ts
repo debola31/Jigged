@@ -42,8 +42,12 @@ function buildQueryStub(initial?: { data?: unknown; error?: unknown }) {
   };
 }
 
-const { mockSupabase, queueBuilders } = vi.hoisted(() => {
+const { mockSupabase, queueBuilders, mockAuthGetUser } = vi.hoisted(() => {
   let queue: ReturnType<typeof Object>[] = [];
+  const authGetUser = vi.fn().mockResolvedValue({
+    data: { user: { id: 'user-1' } },
+    error: null,
+  });
   const supabase = {
     from: vi.fn().mockImplementation(() => {
       const next = queue.shift();
@@ -53,9 +57,11 @@ const { mockSupabase, queueBuilders } = vi.hoisted(() => {
       }
       return next;
     }),
+    auth: { getUser: authGetUser },
   };
   return {
     mockSupabase: supabase,
+    mockAuthGetUser: authGetUser,
     queueBuilders: (builders: ReturnType<typeof Object>[]) => {
       queue = builders;
     },
@@ -70,7 +76,7 @@ vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
 }));
 
-import { getOpenJobPartsForCustomer } from '@/utils/shipmentsAccess';
+import { getOpenJobPartsForCustomer, voidShipment } from '@/utils/shipmentsAccess';
 import type { OpenJobPartRow } from '@/types/shipment';
 
 describe('getOpenJobPartsForCustomer', () => {
@@ -355,5 +361,54 @@ describe('getOpenJobPartsForCustomer', () => {
     const rows = await getOpenJobPartsForCustomer('co-1', 'cust-1');
     expect(rows[0].qty_shipped).toBe(3);
     expect(rows[0].qty_remaining).toBe(7);
+  });
+});
+
+describe('voidShipment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // clearAllMocks resets call history but not the implementation; re-assert
+    // the signed-in default so a prior test's *Once override can't leak.
+    mockAuthGetUser.mockResolvedValue({
+      data: { user: { id: 'user-1' } },
+      error: null,
+    });
+  });
+
+  it('stamps voided_at/voided_by on the row, guarded against re-void', async () => {
+    const updateBuilder = buildQueryStub({ data: null, error: null });
+    queueBuilders([updateBuilder]);
+
+    await voidShipment('ship-1');
+
+    // voided_by is the current auth user; voided_at is an ISO timestamp.
+    expect(updateBuilder.update).toHaveBeenCalledTimes(1);
+    const patch = updateBuilder.update.mock.calls[0][0] as {
+      voided_at: string;
+      voided_by: string;
+    };
+    expect(patch.voided_by).toBe('user-1');
+    expect(typeof patch.voided_at).toBe('string');
+    expect(Number.isNaN(Date.parse(patch.voided_at))).toBe(false);
+    expect(updateBuilder.eq).toHaveBeenCalledWith('id', 'ship-1');
+    // Idempotency guard: only void rows not already voided.
+    expect(updateBuilder.is).toHaveBeenCalledWith('voided_at', null);
+  });
+
+  it('throws when no user is signed in (never writes)', async () => {
+    mockAuthGetUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+    // No builder queued — if it tried to UPDATE, .from() would throw a
+    // different error. We assert the auth-guard message specifically.
+    await expect(voidShipment('ship-1')).rejects.toThrow(/signed in/i);
+  });
+
+  it('surfaces the database error message', async () => {
+    const updateBuilder = buildQueryStub({
+      data: null,
+      error: { message: 'permission denied' },
+    });
+    queueBuilders([updateBuilder]);
+
+    await expect(voidShipment('ship-1')).rejects.toThrow(/permission denied/);
   });
 });

@@ -1,11 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Table from '@mui/material/Table';
@@ -15,10 +20,11 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import BlockIcon from '@mui/icons-material/Block';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PrintIcon from '@mui/icons-material/Print';
 
-import { getShipmentsForJob } from '@/utils/shipmentsAccess';
+import { getShipmentsForJob, voidShipment } from '@/utils/shipmentsAccess';
 import type { ShipmentWithRelations } from '@/types/shipment';
 import { SHIPPING_METHOD_LABELS } from '@/types/shipment';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
@@ -33,17 +39,27 @@ interface ShipmentHistoryCardProps {
    * RPC returns from create_shipment_with_line_items).
    */
   initialPreviewShipmentId?: string | null;
+  /**
+   * Optional: fired after a shipment is voided so the parent can re-pull
+   * the job + per-part fulfillment summaries (the void cascade changes
+   * job_parts.fulfillment_status). The card reloads its own list.
+   */
+  onShipmentVoided?: () => void;
 }
 
 export default function ShipmentHistoryCard({
   jobId,
   refreshKey = 0,
   initialPreviewShipmentId = null,
+  onShipmentVoided,
 }: ShipmentHistoryCardProps) {
   const [shipments, setShipments] = useState<ShipmentWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(initialPreviewShipmentId);
+  const [voidTarget, setVoidTarget] = useState<ShipmentWithRelations | null>(null);
+  const [voiding, setVoiding] = useState(false);
+  const [voidError, setVoidError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,6 +112,25 @@ export default function ShipmentHistoryCard({
       0,
     );
   };
+
+  const handleVoidConfirm = useCallback(async () => {
+    if (!voidTarget) return;
+    setVoiding(true);
+    setVoidError(null);
+    try {
+      await voidShipment(voidTarget.id);
+      setVoidTarget(null);
+      await load();
+      // Parent re-pulls job + per-part summaries: the void cascade just
+      // changed job_parts.fulfillment_status (and possibly the job's).
+      onShipmentVoided?.();
+    } catch (err) {
+      console.error('Failed to void shipment:', err);
+      setVoidError(err instanceof Error ? err.message : 'Failed to void shipment.');
+    } finally {
+      setVoiding(false);
+    }
+  }, [voidTarget, load, onShipmentVoided]);
 
   return (
     <Card elevation={2}>
@@ -156,6 +191,20 @@ export default function ShipmentHistoryCard({
                         <PrintIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
+                    {!s.voided_at && (
+                      <Tooltip title="Void packing slip">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => {
+                            setVoidError(null);
+                            setVoidTarget(s);
+                          }}
+                        >
+                          <BlockIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -169,6 +218,38 @@ export default function ShipmentHistoryCard({
         shipmentId={previewId}
         onClose={() => setPreviewId(null)}
       />
+
+      <Dialog
+        open={Boolean(voidTarget)}
+        onClose={() => {
+          if (!voiding) setVoidTarget(null);
+        }}
+      >
+        <DialogTitle>Void {voidTarget?.packing_slip_number}?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: voidError ? 2 : 0 }}>
+            This reverses the shipped quantities on{' '}
+            <strong>{voidTarget?.packing_slip_number}</strong> and reopens the affected
+            lines for re-shipment. The packing-slip number stays on record as voided —
+            it is not reused.
+          </Typography>
+          {voidError && <Alert severity="error">{voidError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVoidTarget(null)} disabled={voiding}>
+            Keep Slip
+          </Button>
+          <Button
+            onClick={handleVoidConfirm}
+            color="error"
+            variant="contained"
+            disabled={voiding}
+            startIcon={voiding ? <CircularProgress size={16} color="inherit" /> : <BlockIcon />}
+          >
+            {voiding ? 'Voiding…' : 'Void Slip'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Card>
   );
 }

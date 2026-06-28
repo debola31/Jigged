@@ -9,7 +9,8 @@
  *   5. inserts the shipment + line items (triggers cascade fulfillment),
  *   6. writes an audit row if the job transitioned forward into fully_shipped.
  *
- * Reads use plain PostgREST joins. Voids are scaffolded but throw — Phase 3.
+ * Reads use plain PostgREST joins. voidShipment stamps voided_at/voided_by
+ * and lets the trigger family reverse the fulfillment cascade.
  */
 
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
@@ -583,10 +584,37 @@ export async function getJobLastShipDate(jobId: string): Promise<Date | null> {
 }
 
 /**
- * Phase 3 placeholder. Schema and trigger B support voiding, but the
- * UI surface is out-of-scope for Phase 1. Throwing here keeps the API
- * surface stable for Phase 3 wiring.
+ * Void a shipment. Stamps voided_at/voided_by on the row; the
+ * trigger_recompute_jp_fulfillment_on_void trigger reverses the
+ * fulfillment cascade (job_parts → job recompute from the remaining
+ * non-voided line items). No migration or RPC needed: the "Users can
+ * update shipments" RLS policy permits the in-company UPDATE, and the
+ * reverse transition is recorded on voided_at/voided_by by design (no
+ * separate audit row — see job_fulfillment_audit comment).
+ *
+ * Idempotent: the `.is('voided_at', null)` guard makes re-voiding a
+ * no-op rather than re-stamping a new timestamp. Quantities are never
+ * deleted, so the packing-slip number stays on record as VOIDED.
  */
-export async function voidShipment(_shipmentId: string): Promise<void> {
-  throw new Error('voidShipment is not implemented in Phase 1.');
+export async function voidShipment(shipmentId: string): Promise<void> {
+  const supabase = getSupabase();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    throw new Error('You must be signed in to void a shipment.');
+  }
+
+  const { error } = await supabase
+    .from('shipments')
+    .update({ voided_at: new Date().toISOString(), voided_by: user.id })
+    .eq('id', shipmentId)
+    .is('voided_at', null);
+
+  if (error) {
+    console.error('voidShipment failed:', error);
+    throw new Error(`Failed to void shipment: ${error.message}`);
+  }
 }

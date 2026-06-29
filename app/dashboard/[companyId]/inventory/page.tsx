@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -128,12 +128,14 @@ export default function InventoryPage() {
   );
   const rows = inventoryData ?? EMPTY_INVENTORY;
 
-  useEffect(() => {
+  // Clear selection when the search query or status filter changes — the rows
+  // on screen change, so any ids selected before may no longer be visible.
+  // Called from each control's onChange (not an effect) to avoid
+  // set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) {
-      gridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced, statusFilter]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   // Apply the status filter client-side so the grid (and the gridHeight /
   // empty-state checks below) all see the same row set. Status is derived
@@ -340,7 +342,10 @@ export default function InventoryPage() {
         <TextField
           placeholder="Search inventory..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           size="small"
           sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{
@@ -360,7 +365,10 @@ export default function InventoryPage() {
             labelId="inventory-status-label"
             value={statusFilter}
             label="Status"
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value as StatusFilter);
+              clearSelection();
+            }}
           >
             <MenuItem value="all">All</MenuItem>
             <MenuItem value="in_stock">In stock</MenuItem>

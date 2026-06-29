@@ -208,13 +208,13 @@ export default function JobsPage() {
   );
   const jobs = jobsData ?? EMPTY_JOBS;
 
-  // Clear selection when filters change
-  useEffect(() => {
+  // Clear selection when search or any filter changes — the rows on screen
+  // change, so any ids selected before may no longer be visible. Called from
+  // each control's onChange (not an effect) to avoid set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) {
-      gridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced, productionFilter, fulfillmentFilter, customerFilter, overdueOnly]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   const gridHeight = useMemo(() => {
     if (loading || jobs.length === 0) return 600;
@@ -487,7 +487,10 @@ export default function JobsPage() {
           inputRef={searchInputRef}
           placeholder="Job #, PO, customer, part, packing slip…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           onKeyDown={handleSearchKeyDown}
           size="small"
           sx={{ width: { xs: '100%', sm: 320 } }}
@@ -506,9 +509,10 @@ export default function JobsPage() {
           <SearchableSelect
             options={productionStatusOptions}
             value={productionFilterValue}
-            onChange={(value) =>
-              setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined)
-            }
+            onChange={(value) => {
+              setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined);
+              clearSelection();
+            }}
             label="Production Status"
             allowNone
             noneLabel="Any"
@@ -520,9 +524,10 @@ export default function JobsPage() {
           <SearchableSelect
             options={fulfillmentStatusOptions}
             value={fulfillmentFilterValue}
-            onChange={(value) =>
-              setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined)
-            }
+            onChange={(value) => {
+              setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined);
+              clearSelection();
+            }}
             label="Fulfillment Status"
             allowNone
             noneLabel="Any"
@@ -534,7 +539,10 @@ export default function JobsPage() {
           <SearchableSelect
             options={customerOptions}
             value={customerFilter}
-            onChange={setCustomerFilter}
+            onChange={(value) => {
+              setCustomerFilter(value);
+              clearSelection();
+            }}
             label="Customer"
             allowNone
             noneLabel="All Customers"
@@ -546,7 +554,10 @@ export default function JobsPage() {
           control={
             <Checkbox
               checked={overdueOnly}
-              onChange={(e) => setOverdueOnly(e.target.checked)}
+              onChange={(e) => {
+                setOverdueOnly(e.target.checked);
+                clearSelection();
+              }}
               size="small"
               sx={{
                 // Theme primary is Steel Blue (#4682B4), which blends into

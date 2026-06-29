@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -103,12 +103,13 @@ export default function VendorsPage() {
   );
   const rows = vendorsData ?? EMPTY_VENDORS;
 
-  useEffect(() => {
+  // Clear selection when the search query changes — the rows on screen change,
+  // so any ids selected before may no longer be visible. Called from the
+  // control's onChange (not an effect) to avoid set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) {
-      gridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   const gridHeight = useMemo(() => {
     if (loading || rows.length === 0) return 600;
@@ -255,7 +256,10 @@ export default function VendorsPage() {
         <TextField
           placeholder="Search vendors..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           size="small"
           sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{

@@ -148,12 +148,13 @@ export default function MarkupRatesListPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Clear selection when search changes — the rows on screen change, so any
-  // ids selected before may not be visible anymore.
-  useEffect(() => {
+  // Clear selection when the search query changes — the rows on screen change,
+  // so any ids selected before may not be visible anymore. Called from the
+  // search input's onChange (not an effect) to avoid set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) gridRef.current.api.deselectAll();
-  }, [searchDebounced]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   // The default rate is pinned to the top of the grid (immune to sort + search)
   // and tagged via the `is_default` flag, not by a magic name.
@@ -339,7 +340,10 @@ export default function MarkupRatesListPage() {
         <TextField
           placeholder="Search rates..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           size="small"
           sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{

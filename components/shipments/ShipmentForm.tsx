@@ -143,10 +143,11 @@ export default function ShipmentForm({
   const isCustomerMode = source.kind === 'customer';
 
   // ---------- Initial load ----------
+  // `loading` starts true (useState init), so the effect needs no synchronous
+  // setLoading(true) here (which would trip react-hooks/set-state-in-effect);
+  // every setState below runs inside the async IIFE, guarded by `cancelled`.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
     (async () => {
       try {
@@ -160,6 +161,10 @@ export default function ShipmentForm({
           )
           .eq('id', companyId)
           .single();
+        // Clear any prior error only after the first await boundary so no
+        // setState runs synchronously in the effect body. `loading` is true
+        // throughout the load, so the error Alert isn't rendered meanwhile.
+        if (!cancelled) setError(null);
         if (companyErr || !companyRow) {
           throw new Error(companyErr?.message ?? 'Company not found.');
         }

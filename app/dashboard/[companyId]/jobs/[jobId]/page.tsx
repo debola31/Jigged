@@ -108,6 +108,11 @@ export default function JobDetailPage() {
   }, [jobId, companyId]);
 
   useEffect(() => {
+    // Data-fetch-on-mount false positive: fetchJob's setState all runs after
+    // its await, not synchronously in this effect body (the documented class
+    // the eslint.config.mjs note describes). Large page with many refetch
+    // callers — kept as-is rather than restructured to the .then() shape.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchJob();
     (async () => {
       try {

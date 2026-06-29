@@ -175,6 +175,11 @@ export default function AcceptInvitePage() {
   }, [invitationId, router]);
 
   useEffect(() => {
+    // False positive: checkSessionAndLoadInvitation is an async auth
+    // orchestration (token exchange → session → invitation fetch) and every
+    // setState inside it runs AFTER an await, never synchronously in this
+    // effect body — so it can't cause the cascading-render the rule guards.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkSessionAndLoadInvitation();
   }, [checkSessionAndLoadInvitation]);
 

@@ -143,6 +143,10 @@ export default function PartProcurementPricingPanel({
   }, [partId, companyId]);
 
   useEffect(() => {
+    // Data-fetch-on-mount false positive: initialLoad's setState all runs
+    // post-await (documented class in eslint.config.mjs). It seeds the EDITABLE
+    // tier rows, so useLoad (immutable data) doesn't fit — kept as-is.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     initialLoad();
   }, [initialLoad]);
 

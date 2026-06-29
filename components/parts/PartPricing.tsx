@@ -215,6 +215,10 @@ export default function PartPricing({
   }, [partId, isBought]);
 
   useEffect(() => {
+    // Data-fetch-on-mount false positive: loadAll's setState all runs post-await
+    // (documented class in eslint.config.mjs). loadAll seeds the EDITABLE tier
+    // rows, so useLoad (immutable data) doesn't fit — kept as-is.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
   }, [loadAll, refreshKey]);
 

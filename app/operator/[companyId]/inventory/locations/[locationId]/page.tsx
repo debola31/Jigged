@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
@@ -24,7 +25,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import { resolveScan } from '@/utils/inventoryLocationsAccess';
 import { getCurrentOperator } from '@/utils/operatorAccess';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
-import type { ResolvedScan, LocationContent } from '@/types/inventoryLocations';
+import type { LocationContent } from '@/types/inventoryLocations';
 import OperatorLocationActionModal, {
   type OperatorLocationAction,
 } from '@/components/operator/OperatorLocationActionModal';
@@ -38,9 +39,7 @@ export default function OperatorBinViewPage() {
   const companyId = params.companyId as string;
   const locationId = params.locationId as string;
 
-  const [scan, setScan] = useState<ResolvedScan | null>(null);
   const [operatorId, setOperatorId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [modal, setModal] = useState<{ action: OperatorLocationAction; part: LocationContent } | null>(
@@ -48,21 +47,15 @@ export default function OperatorBinViewPage() {
   );
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setScan(await resolveScan(locationId));
-    } catch (e) {
+  const {
+    data: scan,
+    loading,
+    reload,
+  } = useLoad(() => resolveScan(locationId), [locationId], {
+    onError: (e) => {
       setError(e instanceof Error ? e.message : 'Could not open this location.');
-    } finally {
-      setLoading(false);
-    }
-  }, [locationId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+    },
+  });
 
   // Operator id stamps the ledger; best-effort, never blocks the view.
   useEffect(() => {

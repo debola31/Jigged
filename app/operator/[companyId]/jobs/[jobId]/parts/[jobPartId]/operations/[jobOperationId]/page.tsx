@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -25,7 +26,6 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
 import PreviousRunCard from '@/components/operator/PreviousRunCard';
-import type { OperatorJobDetail } from '@/types/operator';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
@@ -56,9 +56,7 @@ export default function OperatorOperationActionPage() {
 
   const { stationId, stationName, setStation } = useStationContext();
 
-  const [job, setJob] = useState<OperatorJobDetail | null>(null);
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,22 +68,19 @@ export default function OperatorOperationActionPage() {
     loadOperator();
   }, [companyId]);
 
-  const loadJob = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getOperatorOperationDetail(jobOperationId, companyId);
-      setJob(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load operation');
-    } finally {
-      setLoading(false);
-    }
-  }, [jobOperationId, companyId]);
-
-  useEffect(() => {
-    loadJob();
-  }, [loadJob]);
+  const {
+    data: job,
+    loading,
+    reload: loadJob,
+  } = useLoad(
+    () => getOperatorOperationDetail(jobOperationId, companyId),
+    [jobOperationId, companyId],
+    {
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load operation');
+      },
+    },
+  );
 
   // Completion is a direct, single-tap action — no confirmation. We stay on the
   // page and re-load into the completed state so a mistaken completion can be

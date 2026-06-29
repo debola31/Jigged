@@ -2,6 +2,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
@@ -63,7 +64,6 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const [pinnedKeys, setPinnedKeys] = useState<MetricKey[]>([]);
   const [values, setValues] = useState<Partial<Record<MetricKey, MetricValue>>>({});
   const [globalPeriod, setGlobalPeriod] = useState<MetricTimePeriod>('this_week');
-  const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [page, setPage] = useState(0);
 
@@ -97,10 +97,14 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
     return periods;
   }, []);
 
-  const loadMetrics = useCallback(async () => {
-    if (!companyId) return;
-    try {
-      setLoading(true);
+  // pinnedKeys / globalPeriod / values are also mutated by the picker and the
+  // period toggle, so they stay as independent state. useLoad owns only the
+  // mount fetch + loading flag; every setState below runs inside the async
+  // callback (never synchronously in an effect), so this stays clear of
+  // set-state-in-effect.
+  const { loading } = useLoad(
+    async () => {
+      if (!companyId) return;
       const [keys, storedPeriods] = await Promise.all([
         getPinnedMetricKeys(),
         getMetricTimePeriods(),
@@ -112,17 +116,15 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       const allMetricKeys = AVAILABLE_METRICS.map((m) => m.key);
       const vals = await getPinnedMetricValues(companyId, allMetricKeys, buildTimePeriods(period));
       setValues(vals);
-    } catch (err) {
-      console.error('Error loading pinned metrics:', err);
-      Sentry.captureException(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, buildTimePeriods]);
-
-  useEffect(() => {
-    loadMetrics();
-  }, [loadMetrics]);
+    },
+    [companyId, buildTimePeriods],
+    {
+      onError: (err) => {
+        console.error('Error loading pinned metrics:', err);
+        Sentry.captureException(err);
+      },
+    },
+  );
 
   const handleSave = async (keys: MetricKey[]) => {
     setPinnedKeys(keys);

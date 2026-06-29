@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
@@ -108,6 +109,10 @@ interface ChildCostTier {
   costPerUnit: number | null;
 }
 
+// Stable empty fallback so the tier-ladder effect + render don't churn while
+// the first load runs.
+const EMPTY_ROWS: BomLineWithChildPart[] = [];
+
 export default function PartBomPanel({
   partId,
   companyId,
@@ -116,8 +121,6 @@ export default function PartBomPanel({
   description,
   onChanged,
 }: PartBomPanelProps) {
-  const [rows, setRows] = useState<BomLineWithChildPart[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Per-row tier ladder (one entry per qty break point on the child).
   // Loaded after rows arrive. Each entry's costPerUnit comes from
@@ -139,23 +142,17 @@ export default function PartBomPanel({
   const [pendingDelete, setPendingDelete] = useState<BomLineWithChildPart | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchRows = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await getBomForPart(partId);
-      setRows(data);
-      setError(null);
-    } catch (err) {
+  const {
+    data: rowsData,
+    loading,
+    reload: fetchRows,
+  } = useLoad(() => getBomForPart(partId), [partId], {
+    onError: (err) => {
       console.error('Failed to load BOM:', err);
       setError(err instanceof Error ? err.message : 'Failed to load BOM.');
-    } finally {
-      setLoading(false);
-    }
-  }, [partId]);
-
-  useEffect(() => {
-    fetchRows();
-  }, [fetchRows]);
+    },
+  });
+  const rows = rowsData ?? EMPTY_ROWS;
 
   // Load each BOM row's tier ladder — the qty break points defined on the
   // child + the cost at each (via compute_part_cost_at_qty). These are the

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -48,6 +49,10 @@ interface DraftConversion {
 
 const emptyDraft: DraftConversion = { from_unit: '', to_primary_factor: '' };
 
+// Stable empty fallback so the derived list doesn't churn while the first
+// load runs.
+const EMPTY_CONVERSIONS: PartUnitConversion[] = [];
+
 /**
  * Inline editor for part unit conversions. Lives in the Inventory panel of
  * the part detail page (chunk 14 moved unit-conversion editing out of the
@@ -66,8 +71,6 @@ export default function PartUnitConversionsEditor({
   primaryUnit,
   onChanged,
 }: PartUnitConversionsEditorProps) {
-  const [conversions, setConversions] = useState<PartUnitConversion[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,28 +90,36 @@ export default function PartUnitConversionsEditor({
     onChangedRef.current = onChanged;
   }, [onChanged]);
 
-  const reload = useCallback(
-    async (notifyParent = false) => {
-      setLoading(true);
-      try {
-        const data = await getPartUnitConversions(partId);
-        setConversions(data);
-        setError(null);
-        if (notifyParent && onChangedRef.current) onChangedRef.current(data);
-      } catch (err) {
+  // When a persist/delete triggers a reload, the next successful load notifies
+  // the parent with the fresh conversions (the old `reload(true)` path). The
+  // initial mount load and partId-change loads leave it unset, so they don't
+  // notify — matching the previous `notifyParent` default of false.
+  const notifyParentRef = useRef(false);
+
+  const {
+    data: conversionsData,
+    loading,
+    reload,
+  } = useLoad(
+    async () => {
+      const data = await getPartUnitConversions(partId);
+      setError(null);
+      if (notifyParentRef.current) {
+        notifyParentRef.current = false;
+        onChangedRef.current?.(data);
+      }
+      return data;
+    },
+    [partId],
+    {
+      onError: (err) => {
         setError(
           err instanceof Error ? err.message : 'Failed to load unit conversions',
         );
-      } finally {
-        setLoading(false);
-      }
+      },
     },
-    [partId],
   );
-
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const conversions = conversionsData ?? EMPTY_CONVERSIONS;
 
   const openAdd = () => {
     setDraft(emptyDraft);
@@ -170,7 +181,8 @@ export default function PartUnitConversionsEditor({
     setSaving(true);
     try {
       await replacePartUnitConversions(partId, next);
-      await reload(true);
+      notifyParentRef.current = true;
+      await reload();
       setDraftOpen(false);
       setDraft(emptyDraft);
       setEditingId(undefined);
@@ -220,7 +232,8 @@ export default function PartUnitConversionsEditor({
     setError(null);
     try {
       await replacePartUnitConversions(partId, next);
-      await reload(true);
+      notifyParentRef.current = true;
+      await reload();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to delete conversion',

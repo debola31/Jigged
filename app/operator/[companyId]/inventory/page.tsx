@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
@@ -18,6 +19,9 @@ import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import { getLocations } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
+// Stable empty fallback so the roots memo doesn't churn while the first load runs.
+const EMPTY_LOCATIONS: InventoryLocation[] = [];
+
 /**
  * Operator "warehouse home" — the root of the Inventory tab. Lists the
  * top-level storage locations to browse (drill down into the bin view), so the
@@ -29,25 +33,18 @@ export default function OperatorWarehouseHomePage() {
   const router = useRouter();
   const companyId = params.companyId as string;
 
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setLocations(await getLocations(companyId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const { data: locationsData, loading } = useLoad(
+    () => getLocations(companyId),
+    [companyId],
+    {
+      onError: (e) => {
+        setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
+      },
+    },
+  );
+  const locations = locationsData ?? EMPTY_LOCATIONS;
 
   // Top-level locations are the warehouse roots to browse from.
   const roots = useMemo(() => locations.filter((l) => l.parent_id === null), [locations]);

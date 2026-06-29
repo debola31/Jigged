@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -49,7 +50,6 @@ import {
 } from '@/utils/vendorContactsAccess';
 import { roleDisplayLabel } from '@/types/vendorContact';
 import type { VendorContact } from '@/types/vendorContact';
-import type { Vendor } from '@/types/vendor';
 import { VendorContactModal } from '@/components/vendors';
 
 interface LinkedPart {
@@ -64,17 +64,18 @@ interface LinkedWorkCenter {
   kind: 'internal' | 'external';
 }
 
+// Stable empty fallbacks so the derived lists keep a constant identity while
+// the first load is in flight (and on a vendor with no linked records).
+const EMPTY_CONTACTS: VendorContact[] = [];
+const EMPTY_PARTS: LinkedPart[] = [];
+const EMPTY_WORK_CENTERS: LinkedWorkCenter[] = [];
+
 export default function VendorDetailPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
   const vendorId = params.vendorId as string;
 
-  const [vendor, setVendor] = useState<Vendor | null>(null);
-  const [contacts, setContacts] = useState<VendorContact[]>([]);
-  const [linkedParts, setLinkedParts] = useState<LinkedPart[]>([]);
-  const [linkedWorkCenters, setLinkedWorkCenters] = useState<LinkedWorkCenter[]>([]);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -90,42 +91,40 @@ export default function VendorDetailPage() {
   // wording can include the contact's name without needing extra state.
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
 
-  const fetchAll = useCallback(async () => {
-    try {
-      setLoading(true);
+  // Load the vendor, then (only if it exists) its linked parts, work centers,
+  // and contacts in parallel. useLoad keeps every setState inside the async
+  // callback, so the load effect can't trip set-state-in-effect.
+  const {
+    data,
+    loading,
+    reload: fetchAll,
+  } = useLoad(
+    async () => {
       const v = await getVendor(vendorId);
-      setVendor(v);
-      if (v) {
-        const [parts, wcs, contactList] = await Promise.all([
-          getPartsByPreferredVendor(vendorId),
-          getWorkCentersByVendor(vendorId),
-          getContactsForVendor(vendorId),
-        ]);
-        setLinkedParts(parts);
-        setLinkedWorkCenters(wcs);
-        setContacts(contactList);
+      if (!v) {
+        return { vendor: null, parts: EMPTY_PARTS, wcs: EMPTY_WORK_CENTERS, contacts: EMPTY_CONTACTS };
       }
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load vendor');
-    } finally {
-      setLoading(false);
-    }
-  }, [vendorId]);
+      const [parts, wcs, contacts] = await Promise.all([
+        getPartsByPreferredVendor(vendorId),
+        getWorkCentersByVendor(vendorId),
+        getContactsForVendor(vendorId),
+      ]);
+      return { vendor: v, parts, wcs, contacts };
+    },
+    [vendorId],
+    {
+      onError: (err) =>
+        setError(err instanceof Error ? err.message : 'Failed to load vendor'),
+    },
+  );
+  const vendor = data?.vendor ?? null;
+  const contacts = data?.contacts ?? EMPTY_CONTACTS;
+  const linkedParts = data?.parts ?? EMPTY_PARTS;
+  const linkedWorkCenters = data?.wcs ?? EMPTY_WORK_CENTERS;
 
-  // Lighter refresh after a contact mutation — no need to reload parts/wcs.
-  const refreshContacts = useCallback(async () => {
-    try {
-      const contactList = await getContactsForVendor(vendorId);
-      setContacts(contactList);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh contacts');
-    }
-  }, [vendorId]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  // Contact mutations re-run the full loader (reload). Cheap at vendor scale and
+  // keeps a single read path rather than a separate contacts-only fetch.
+  const refreshContacts = fetchAll;
 
   const handleDelete = async () => {
     setActionLoading(true);

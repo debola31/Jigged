@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -44,7 +45,7 @@ import {
   daysUntilExpiration,
   formatLeadTime,
 } from '@/types/quote';
-import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
+import type { QuoteLineItem } from '@/types/quote';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import QuoteForm from '@/components/quotes/QuoteForm';
 import ConvertToJobModal from '@/components/quotes/ConvertToJobModal';
@@ -57,8 +58,6 @@ export default function QuoteDetailPage() {
   const companyId = params.companyId as string;
   const quoteId = params.quoteId as string;
 
-  const [quote, setQuote] = useState<QuoteWithRelations | null>(null);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -77,22 +76,17 @@ export default function QuoteDetailPage() {
   const [jobQtyByLine, setJobQtyByLine] = useState<
     Map<string, { quantity: number; job_id: string; job_number: string }>
   >(new Map());
-  const fetchQuote = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await getQuoteWithRelations(quoteId, companyId);
-      setQuote(data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load quote');
-    } finally {
-      setLoading(false);
-    }
-  }, [quoteId, companyId]);
-
-  useEffect(() => {
-    fetchQuote();
-  }, [fetchQuote]);
+  // useLoad keeps every setState inside the async callback, so the load effect
+  // can't trip set-state-in-effect. `fetchQuote` (its reload) is reused after an
+  // inline edit save below.
+  const {
+    data: quote,
+    loading,
+    reload: fetchQuote,
+  } = useLoad(() => getQuoteWithRelations(quoteId, companyId), [quoteId, companyId], {
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : 'Failed to load quote'),
+  });
 
   // Reflect current job quantities on a converted quote (read-only). A quantity
   // edited on the job after conversion shows here as "now N on the job"; the

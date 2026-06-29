@@ -1,34 +1,24 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getUserCompanies, UserCompanyAccess } from '@/utils/companyAccess';
+import { useLoad } from '@/hooks/useLoad';
+
+const EMPTY_COMPANIES: UserCompanyAccess[] = [];
 
 export function useCompanies() {
   const { user } = useAuth();
-  const [companies, setCompanies] = useState<UserCompanyAccess[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
-    async function fetchCompanies() {
-      try {
-        const data = await getUserCompanies(user!.id);
-        setCompanies(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchCompanies();
-  }, [user]);
-
-  return { companies, loading, error };
+  // The no-user guard lives inside the loader (returning []) rather than a
+  // synchronous setState in the effect body — keeps set-state-in-effect quiet.
+  // When signed-out, `loading` is briefly true before resolving to []; that
+  // state is a redirect-to-login transient, so the flash isn't user-visible.
+  const { data, loading, error } = useLoad(
+    async () => (user ? getUserCompanies(user.id) : EMPTY_COMPANIES),
+    [user],
+  );
+  return {
+    companies: data ?? EMPTY_COMPANIES,
+    loading,
+    error: (error as Error | null) ?? null,
+  };
 }

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
@@ -50,6 +51,10 @@ interface CompanyListItem {
   features: Record<string, boolean>;
 }
 
+// Stable empty fallback so the filtered-companies memo doesn't recompute on
+// every render while the first load is in flight.
+const EMPTY_COMPANIES: CompanyListItem[] = [];
+
 const getAdminApiUrl = () => {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
   if (baseUrl.endsWith('/api')) {
@@ -72,8 +77,6 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
 export default function AdminCompaniesPage() {
   const router = useRouter();
-  const [companies, setCompanies] = useState<CompanyListItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -108,29 +111,29 @@ export default function AdminCompaniesPage() {
   const [featuresSaving, setFeaturesSaving] = useState(false);
   const [featuresError, setFeaturesError] = useState('');
 
-  const fetchCompanies = useCallback(async () => {
-    try {
+  const {
+    data: companiesData,
+    loading,
+    reload: fetchCompanies,
+  } = useLoad<CompanyListItem[]>(
+    async () => {
       const headers = await getAuthHeaders();
       const response = await fetch(getAdminApiUrl(), { headers });
-
       if (!response.ok) {
         const error = await response.json().catch(() => ({ detail: 'Failed to fetch companies' }));
         throw new Error(error.detail || 'Failed to fetch companies');
       }
-
-      const data = await response.json();
-      setCompanies(data);
-    } catch (err) {
-      console.error('Error fetching companies:', err);
-      setSnackbar({ open: true, message: 'Failed to load companies', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCompanies();
-  }, [fetchCompanies]);
+      return response.json();
+    },
+    [],
+    {
+      onError: (err) => {
+        console.error('Error fetching companies:', err);
+        setSnackbar({ open: true, message: 'Failed to load companies', severity: 'error' });
+      },
+    },
+  );
+  const companies = companiesData ?? EMPTY_COMPANIES;
 
   // Filtered companies based on search
   const filteredCompanies = useMemo(() => {
@@ -249,7 +252,6 @@ export default function AdminCompaniesPage() {
         const error = await response.json().catch(() => ({ detail: 'Failed to update features' }));
         throw new Error(error.detail || 'Failed to update features');
       }
-      const data = await response.json();
       setSnackbar({
         open: true,
         message: `Updated features for "${featuresCompany.name}"`,
@@ -258,15 +260,8 @@ export default function AdminCompaniesPage() {
       setFeaturesOpen(false);
       setFeaturesCompany(null);
       setFeaturesDraft({});
-      // Optimistic merge into the row + full refresh so other admins'
-      // changes show up too.
-      setCompanies((prev) =>
-        prev.map((c) =>
-          c.id === featuresCompany.id
-            ? { ...c, features: data.features ?? featuresDraft }
-            : c,
-        ),
-      );
+      // Refetch the canonical list so this change — and any other admins'
+      // concurrent changes — show up.
       fetchCompanies();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update features';

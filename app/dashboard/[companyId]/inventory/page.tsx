@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -54,6 +55,10 @@ import type { Part } from '@/types/part';
 type InventoryRow = Part;
 type StatusFilter = 'all' | StockStatus;
 
+// Stable empty fallback so the filtered-rows memo doesn't recompute on every
+// render while the first load is in flight.
+const EMPTY_INVENTORY: InventoryRow[] = [];
+
 /**
  * Inventory list page. Companion to the Parts list page.
  *
@@ -72,8 +77,6 @@ export default function InventoryPage() {
   const companyId = params.companyId as string;
   const { features } = useCompanyFeatures();
 
-  const [rows, setRows] = useState<InventoryRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   // Status is computed from quantity + reorder_point at render time, so the
@@ -105,31 +108,25 @@ export default function InventoryPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchInventory = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getStockedParts(
-        companyId,
-        searchDebounced,
-        sortModel.field,
-        sortModel.sort,
-      );
-      setRows(data);
-    } catch (error) {
-      console.error('Error fetching inventory:', error);
-      setSnackbar({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to load inventory',
-        severity: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, sortModel]);
-
-  useEffect(() => {
-    fetchInventory();
-  }, [fetchInventory]);
+  const {
+    data: inventoryData,
+    loading,
+    reload: fetchInventory,
+  } = useLoad(
+    () => getStockedParts(companyId, searchDebounced, sortModel.field, sortModel.sort),
+    [companyId, searchDebounced, sortModel],
+    {
+      onError: (error) => {
+        console.error('Error fetching inventory:', error);
+        setSnackbar({
+          open: true,
+          message: error instanceof Error ? error.message : 'Failed to load inventory',
+          severity: 'error',
+        });
+      },
+    },
+  );
+  const rows = inventoryData ?? EMPTY_INVENTORY;
 
   useEffect(() => {
     setSelectedIds([]);

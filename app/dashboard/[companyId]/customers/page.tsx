@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -42,13 +43,15 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import type { CustomerWithRelations } from '@/types/customer';
 type Customer = CustomerWithRelations;
 
+// Stable empty fallback so derived data doesn't churn the memo identity while
+// the first load is in flight.
+const EMPTY_CUSTOMERS: Customer[] = [];
+
 export default function CustomersPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
@@ -86,27 +89,20 @@ export default function CustomersPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getAllCustomers(
-        companyId,
-        'all',
-        searchDebounced,
-        sortModel.field,
-        sortModel.sort
-      );
-      setCustomers(data);
-    } catch (error) {
-      console.error('Error fetching customers:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, sortModel]);
-
-  useEffect(() => {
-    fetchCustomers();
-  }, [fetchCustomers]);
+  const {
+    data: customersData,
+    loading,
+    reload: fetchCustomers,
+  } = useLoad(
+    () => getAllCustomers(companyId, 'all', searchDebounced, sortModel.field, sortModel.sort),
+    [companyId, searchDebounced, sortModel],
+    {
+      onError: (error) => {
+        console.error('Error fetching customers:', error);
+      },
+    },
+  );
+  const customers = customersData ?? EMPTY_CUSTOMERS;
 
   // Clear selection when search changes
   useEffect(() => {

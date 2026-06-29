@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -52,6 +53,10 @@ interface WorkCenterRow extends WorkCenter {
   vendor_name: string | null;
 }
 
+// Stable empty fallback so derived data doesn't churn the memo identity while
+// the first load is in flight.
+const EMPTY_WORK_CENTERS: WorkCenterRow[] = [];
+
 const formatRate = (val: number | null): string =>
   val === null || val === undefined
     ? ''
@@ -71,8 +76,6 @@ export default function WorkCentersPage() {
   const companyId = params.companyId as string;
   const { setTitle } = usePageTitle();
 
-  const [rows, setRows] = useState<WorkCenterRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [activeKind, setActiveKind] = useState<WorkCenterKind>('internal');
@@ -101,35 +104,35 @@ export default function WorkCentersPage() {
     return () => setTitle(null);
   }, [activeKind, setTitle]);
 
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
-    try {
+  const {
+    data: workCentersData,
+    loading,
+    reload: fetchRows,
+  } = useLoad<WorkCenterRow[]>(
+    async () => {
       const [workCenters, vendors] = await Promise.all([
         getWorkCentersByKind(companyId, activeKind, searchDebounced),
         getAllVendors(companyId),
       ]);
       const vendorById = new Map<string, Vendor>(vendors.map((v) => [v.id, v]));
-      setRows(
-        workCenters.map((wc) => ({
-          ...wc,
-          vendor_name: wc.vendor_id ? vendorById.get(wc.vendor_id)?.name ?? null : null,
-        })),
-      );
-    } catch (err) {
-      console.error('Error fetching work centers:', err);
-      setSnackbar({
-        open: true,
-        message: err instanceof Error ? err.message : 'Failed to load work centers',
-        severity: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, activeKind]);
-
-  useEffect(() => {
-    fetchRows();
-  }, [fetchRows]);
+      return workCenters.map((wc) => ({
+        ...wc,
+        vendor_name: wc.vendor_id ? vendorById.get(wc.vendor_id)?.name ?? null : null,
+      }));
+    },
+    [companyId, searchDebounced, activeKind],
+    {
+      onError: (err) => {
+        console.error('Error fetching work centers:', err);
+        setSnackbar({
+          open: true,
+          message: err instanceof Error ? err.message : 'Failed to load work centers',
+          severity: 'error',
+        });
+      },
+    },
+  );
+  const rows = workCentersData ?? EMPTY_WORK_CENTERS;
 
   useEffect(() => {
     setSelectedIds([]);

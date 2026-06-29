@@ -79,9 +79,12 @@ export default function PartAutocomplete({
   useEffect(() => {
     if (!open) return;
     let active = true;
-    setLoading(true);
     const delay = inputValue.trim() ? 300 : 0;
+    // setLoading lives inside the debounce callback (not synchronously in the
+    // effect body) so it doesn't trip set-state-in-effect; the spinner shows
+    // for the actual fetch rather than during the debounce wait.
     const timer = setTimeout(async () => {
+      setLoading(true);
       try {
         const data = await searchPartsForSelect(companyId, inputValue, kind, 50);
         if (!active) return;

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
@@ -9,7 +10,7 @@ import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import { getQuoteCostBreakdown } from '@/utils/quotesAccess';
-import type { QuoteCostBreakdown, QuoteLineItem } from '@/types/quote';
+import type { QuoteLineItem } from '@/types/quote';
 import QuoteCostBreakdownView from './QuoteCostBreakdownView';
 
 interface QuoteCostBreakdownProps {
@@ -21,30 +22,17 @@ export default function QuoteCostBreakdownCard({
   quoteId,
   companyId,
 }: QuoteCostBreakdownProps) {
-  const [breakdown, setBreakdown] = useState<QuoteCostBreakdown | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    getQuoteCostBreakdown(quoteId, companyId)
-      .then((data) => {
-        if (!cancelled) setBreakdown(data);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load cost breakdown');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [quoteId, companyId]);
+  const { data: breakdown, loading } = useLoad(
+    () => getQuoteCostBreakdown(quoteId, companyId),
+    [quoteId, companyId],
+    {
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load cost breakdown');
+      },
+    },
+  );
 
   const lineItemsByPart = new Map<string, QuoteLineItem[]>();
   if (breakdown) {

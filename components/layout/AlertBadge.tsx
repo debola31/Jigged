@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -29,6 +30,9 @@ interface AlertBadgeProps {
   companyId: string;
 }
 
+const EMPTY_JOBS: AtRiskJob[] = [];
+const EMPTY_INVENTORY: InventoryAlert[] = [];
+
 function severityColor(severity: string): 'error' | 'warning' | 'default' {
   if (severity === 'critical' || severity === 'high') return 'error';
   if (severity === 'medium') return 'warning';
@@ -38,28 +42,21 @@ function severityColor(severity: string): 'error' | 'warning' | 'default' {
 export default function AlertBadge({ companyId }: AlertBadgeProps) {
   const router = useRouter();
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
-  const [atRiskJobs, setAtRiskJobs] = useState<AtRiskJob[]>([]);
-  const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlert[]>([]);
   const [jobsOpen, setJobsOpen] = useState(true);
   const [inventoryOpen, setInventoryOpen] = useState(true);
 
-  const fetchAlerts = useCallback(async () => {
-    if (!companyId) return;
-    try {
-      const [jobs, inventory] = await Promise.all([
-        getAtRiskJobs(companyId),
-        getLowStockPartsAlerts(companyId),
-      ]);
-      setAtRiskJobs(jobs);
-      setInventoryAlerts(inventory);
-    } catch {
-      // Silently fail — alerts are non-critical
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    fetchAlerts();
-  }, [fetchAlerts]);
+  // Both reads are plain Supabase metric queries (no AI). Alerts are
+  // non-critical, so a load failure is swallowed (captured into the unused
+  // `error`); useLoad keeps setState out of the effect body.
+  const { data } = useLoad(
+    async (): Promise<[AtRiskJob[], InventoryAlert[]]> => {
+      if (!companyId) return [EMPTY_JOBS, EMPTY_INVENTORY];
+      return Promise.all([getAtRiskJobs(companyId), getLowStockPartsAlerts(companyId)]);
+    },
+    [companyId],
+  );
+  const atRiskJobs = data?.[0] ?? EMPTY_JOBS;
+  const inventoryAlerts = data?.[1] ?? EMPTY_INVENTORY;
 
   const totalCount = atRiskJobs.length + inventoryAlerts.length;
   const open = Boolean(anchorEl);

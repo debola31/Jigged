@@ -63,13 +63,15 @@ export default function PartRoutingPanel({
   // Serialize persists so two rapid changes don't race.
   const queueRef = useRef<Promise<void>>(Promise.resolve());
 
+  // `loading` starts true (useState init), so this effect needs no synchronous
+  // setLoading(true)/setError(null) (which would trip set-state-in-effect);
+  // every setState below runs inside the promise callbacks, guarded by `cancelled`.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     getRoutingForPart(partId)
       .then((data) => {
         if (cancelled) return;
+        setError(null);
         if (data) {
           setRoutingId(data.id);
           setOps(data.operations.map(rowFromOperation));

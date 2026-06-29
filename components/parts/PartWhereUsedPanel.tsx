@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
@@ -27,6 +28,9 @@ interface PartWhereUsedPanelProps {
   currentChain?: string[];
 }
 
+// Stable empty fallback so the paginate memo doesn't churn while the first load runs.
+const EMPTY_PARENTS: BomLineWithParentPart[] = [];
+
 const formatQuantity = (n: number): string =>
   n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -45,33 +49,17 @@ export default function PartWhereUsedPanel({
   companyId,
   currentChain = [],
 }: PartWhereUsedPanelProps) {
-  const [rows, setRows] = useState<BomLineWithParentPart[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    getBomParents(partId)
-      .then((data) => {
-        if (cancelled) return;
-        setRows(data);
-        setError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error('Failed to load BOM parents:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load where-used list.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [partId]);
+  const { data: rowsData, loading } = useLoad(() => getBomParents(partId), [partId], {
+    onError: (err) => {
+      console.error('Failed to load BOM parents:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load where-used list.');
+    },
+  });
+  const rows = rowsData ?? EMPTY_PARENTS;
 
   const visibleRows = useMemo(() => {
     const start = page * rowsPerPage;

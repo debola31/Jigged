@@ -60,7 +60,9 @@ export default function VendorAutocomplete({
   sx,
 }: VendorAutocompleteProps) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true so the load effect needs no synchronous setLoading(true) (which
+  // would trip set-state-in-effect); all setState happens in the async callback.
+  const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
   // Resolve effective value. Prefer the explicit Vendor; fall back to id
@@ -71,7 +73,6 @@ export default function VendorAutocomplete({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     getAllVendors(companyId)
       .then((rows) => {
         if (!cancelled) setVendors(rows);

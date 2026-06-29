@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -106,14 +107,15 @@ function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | 
   return parts.length > 0 ? (parts as FulfillmentStatus[]) : undefined;
 }
 
+// Stable empty fallback so derived data doesn't churn while the first load runs.
+const EMPTY_JOBS: JobWithRelations[] = [];
+
 export default function JobsPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
-  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [productionFilter, setProductionFilter] = useState<
@@ -168,13 +170,15 @@ export default function JobsPage() {
     fetchCustomers();
   }, [companyId]);
 
-  // Fetch jobs
-  const fetchJobs = useCallback(async () => {
-    setLoading(true);
-    try {
-      // FR-19: hide done jobs by default — unless the user has explicitly
-      // filtered Fulfillment to include "Fully Shipped", in which case
-      // they've asked to see those rows.
+  // Fetch jobs. FR-19: hide done jobs by default — unless the user has
+  // explicitly filtered Fulfillment to include "Fully Shipped", in which case
+  // they've asked to see those rows.
+  const {
+    data: jobsData,
+    loading,
+    reload: fetchJobs,
+  } = useLoad(
+    () => {
       const fulfillmentIncludesShipped =
         Array.isArray(fulfillmentFilter) && fulfillmentFilter.includes('fully_shipped');
       const filters: JobFilters = {
@@ -185,26 +189,24 @@ export default function JobsPage() {
         overdue: overdueOnly || undefined,
         excludeDone: !fulfillmentIncludesShipped,
       };
-      const data = await getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
-      setJobs(data);
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    companyId,
-    productionFilter,
-    fulfillmentFilter,
-    customerFilter,
-    searchDebounced,
-    sortModel,
-    overdueOnly,
-  ]);
-
-  useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs]);
+      return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
+    },
+    [
+      companyId,
+      productionFilter,
+      fulfillmentFilter,
+      customerFilter,
+      searchDebounced,
+      sortModel,
+      overdueOnly,
+    ],
+    {
+      onError: (error) => {
+        console.error('Error fetching jobs:', error);
+      },
+    },
+  );
+  const jobs = jobsData ?? EMPTY_JOBS;
 
   // Clear selection when filters change
   useEffect(() => {

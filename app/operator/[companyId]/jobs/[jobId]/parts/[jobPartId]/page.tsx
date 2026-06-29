@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -20,7 +21,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import JobFeed from '@/components/operator/JobFeed';
 import PreviousRunCard from '@/components/operator/PreviousRunCard';
-import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
+import type { JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 
@@ -59,30 +60,23 @@ export default function OperatorJobTravelerPage() {
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
 
-  const [traveler, setTraveler] = useState<JobTraveler | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data: traveler, loading } = useLoad(
+    async () => {
       const data = await getJobPartTraveler(jobPartId, companyId);
-      if (!data) {
-        setError('Job not found.');
-        return;
-      }
-      setTraveler(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load job');
-    } finally {
-      setLoading(false);
-    }
-  }, [jobPartId, companyId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+      // A missing traveler is surfaced as a "Job not found." error (routed
+      // through onError below) rather than a silent null.
+      if (!data) throw new Error('Job not found.');
+      return data;
+    },
+    [jobPartId, companyId],
+    {
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load job');
+      },
+    },
+  );
 
   const openStep = (op: JobTravelerOperation) => {
     router.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);

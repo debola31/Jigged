@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -49,6 +50,10 @@ function formatBytes(bytes: number | null): string {
 
 const fmtWhen = (s: string): string => new Date(s).toLocaleDateString();
 
+// Stable empty fallback so the derived list doesn't churn while the first
+// load runs.
+const EMPTY_ATTACHMENTS: PartAttachment[] = [];
+
 /**
  * Files tab — engineering attachments for a part (PDF drawings, STEP models,
  * DWG drawings). Office/admin surface (not the operator view). Listing and
@@ -57,7 +62,6 @@ const fmtWhen = (s: string): string => new Date(s).toLocaleDateString();
  * enforces the same rule — this just hides the affordance).
  */
 export default function FilesTab({ partId, companyId }: FilesTabProps) {
-  const [attachments, setAttachments] = useState<PartAttachment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [operatorId, setOperatorId] = useState<string | null>(null);
@@ -65,18 +69,17 @@ export default function FilesTab({ partId, companyId }: FilesTabProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { isAdmin } = useUserRole();
 
-  const refresh = useCallback(async () => {
-    try {
-      setAttachments(await listPartAttachments(partId));
-    } catch (err) {
+  const {
+    data: attachmentsData,
+    loading,
+    reload: refresh,
+  } = useLoad(() => listPartAttachments(partId), [partId], {
+    onError: (err) => {
       console.error('Error loading part attachments:', err);
       setError('Could not load files.');
-    }
-  }, [partId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+    },
+  });
+  const attachments = attachmentsData ?? EMPTY_ATTACHMENTS;
 
   useEffect(() => {
     let cancelled = false;
@@ -145,8 +148,6 @@ export default function FilesTab({ partId, companyId }: FilesTabProps) {
 
   const canDelete = (att: PartAttachment): boolean =>
     isAdmin || (!!operatorId && att.uploaded_by === operatorId);
-
-  const loading = attachments === null;
 
   return (
     <Card elevation={2}>

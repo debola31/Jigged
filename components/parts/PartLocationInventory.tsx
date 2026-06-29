@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
@@ -25,6 +26,10 @@ import PartLocationActionModal, {
   type LocationOption,
   type LocationBalanceOption,
 } from './PartLocationActionModal';
+
+// Stable empty fallbacks so derived memos don't churn while the first load runs.
+const EMPTY_BALANCES: PartLocationBalanceWithLocation[] = [];
+const EMPTY_LOCATIONS: InventoryLocation[] = [];
 
 function pathLabel(id: string, byId: Map<string, InventoryLocation>): string {
   const names: string[] = [];
@@ -53,31 +58,26 @@ export default function PartLocationInventory({
   companyId,
   onStockChanged,
 }: PartLocationInventoryProps) {
-  const [balances, setBalances] = useState<PartLocationBalanceWithLocation[]>([]);
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<LocationAction | null>(null);
 
   const primaryUnit = part.primary_unit ?? '';
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [b, locs] = await Promise.all([getBalancesForPart(partId), getLocations(companyId)]);
-      setBalances(b);
-      setLocations(locs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load location balances.');
-    } finally {
-      setLoading(false);
-    }
-  }, [partId, companyId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const {
+    data: inventoryData,
+    loading,
+    reload,
+  } = useLoad(
+    () => Promise.all([getBalancesForPart(partId), getLocations(companyId)]),
+    [partId, companyId],
+    {
+      onError: (e) => {
+        setError(e instanceof Error ? e.message : 'Failed to load location balances.');
+      },
+    },
+  );
+  const balances = inventoryData?.[0] ?? EMPTY_BALANCES;
+  const locations = inventoryData?.[1] ?? EMPTY_LOCATIONS;
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
 

@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     // but keeps local `pnpm lint` clean after a coverage run so the
     // --max-warnings 0 cap stays honest.
     "coverage/**",
+    // Local Claude Code state — notably .claude/worktrees/* holds checkouts of
+    // OTHER branches whose (older) source would otherwise be linted and inflate
+    // the warning count vs CI (which never has this dir). Gitignored.
+    ".claude/**",
   ]),
   {
     // ESLint 9 flat config: rules from a plugin need the plugin registered

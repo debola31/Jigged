@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -38,6 +39,8 @@ import UsageTab from './tabs/UsageTab';
 import HistoryTab from './tabs/HistoryTab';
 import FilesTab from './tabs/FilesTab';
 
+// Stable empty fallback so derived data doesn't churn while the first load runs.
+const EMPTY_CONVERSIONS: PartUnitConversion[] = [];
 
 /**
  * The part workspace: a maturity-adaptive record that leads with the
@@ -96,10 +99,6 @@ export default function PartWorkspace({
     };
   }, [currentChain]);
 
-  const [part, setPart] = useState<Part | null>(null);
-  const [unitConversions, setUnitConversions] = useState<PartUnitConversion[]>([]);
-
-  const [loading, setLoading] = useState(mode === 'existing');
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -110,6 +109,11 @@ export default function PartWorkspace({
   // Bumped after each stock transaction so the history table reloads.
   const [transactionsRefreshKey, setTransactionsRefreshKey] = useState(0);
 
+  // Inline conversion edits from the Inventory tab take precedence over the
+  // seed fetched on load (the editor owns the live list once it mounts). Reset
+  // to null on a fresh part (partId-change remounts this component anyway).
+  const [conversionsOverride, setConversionsOverride] = useState<PartUnitConversion[] | null>(null);
+
   const [txnModalOpen, setTxnModalOpen] = useState(false);
   const [txnModalType, setTxnModalType] = useState<InventoryTransactionType>('addition');
 
@@ -118,40 +122,39 @@ export default function PartWorkspace({
   // while loading. Recomputed when refreshKey bumps (routing/pricing changed).
   const [isPriceable, setIsPriceable] = useState<boolean | null>(null);
 
-  /**
-   * Fetch the part + its side-loads. `silent` skips the loading flag so a
-   * post-mutation refetch swaps data in place without spinnering the page.
-   */
-  const fetchPart = useCallback(
-    async (silent = false) => {
-      if (!partId) return;
-      try {
-        if (!silent) setLoading(true);
-        const data = await getPartWithRelations(partId);
-        setPart(data);
-        setError(null);
-
-        if (data) {
-          try {
-            const conversions = await getPartUnitConversions(partId);
-            setUnitConversions(conversions);
-          } catch (err) {
-            console.warn('Failed to load unit conversions:', err);
-            setUnitConversions([]);
-          }
+  // Fetch the part + its side-loads. The mount load (and a partId change)
+  // shows the spinner; a post-mutation refetch comes through a deps bump
+  // (refreshKey / transactionsRefreshKey) so useLoad swaps data in place
+  // without spinnering the page (stale-while-revalidate). Conversions are a
+  // non-fatal side-load — failure degrades to an empty list, not a page error.
+  const {
+    data: loadData,
+    loading: partLoading,
+  } = useLoad(
+    async () => {
+      if (!partId) return { part: null, conversions: [] as PartUnitConversion[] };
+      const part = await getPartWithRelations(partId);
+      let conversions: PartUnitConversion[] = [];
+      if (part) {
+        try {
+          conversions = await getPartUnitConversions(partId);
+        } catch (err) {
+          console.warn('Failed to load unit conversions:', err);
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load part');
-      } finally {
-        if (!silent) setLoading(false);
       }
+      return { part, conversions };
     },
-    [partId],
+    [partId, refreshKey, transactionsRefreshKey],
+    {
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load part');
+      },
+    },
   );
-
-  useEffect(() => {
-    fetchPart();
-  }, [fetchPart]);
+  const part = loadData?.part ?? null;
+  const unitConversions = conversionsOverride ?? loadData?.conversions ?? EMPTY_CONVERSIONS;
+  // Create mode never fetches (no partId); only existing mode shows the spinner.
+  const loading = mode === 'existing' && partLoading;
 
   useEffect(() => {
     if (!partId) return;
@@ -181,10 +184,11 @@ export default function PartWorkspace({
     return () => setTitle(null);
   }, [mode, part, setTitle]);
 
-  const refreshAfterMutation = useCallback(async () => {
-    await fetchPart(true);
+  // Bumping refreshKey re-runs the part fetch (a useLoad dep) in place plus the
+  // cost/priceability reload — replaces the old explicit silent fetchPart call.
+  const refreshAfterMutation = useCallback(() => {
     setRefreshKey((k) => k + 1);
-  }, [fetchPart]);
+  }, []);
 
   const handleDelete = async () => {
     if (!partId) return;
@@ -204,8 +208,9 @@ export default function PartWorkspace({
     setTxnModalOpen(true);
   }, []);
 
-  const handleTxnSuccess = async () => {
-    await fetchPart(true);
+  const handleTxnSuccess = () => {
+    // Bumping transactionsRefreshKey re-runs the part fetch (a useLoad dep) in
+    // place and reloads the transaction history table.
     setTransactionsRefreshKey((k) => k + 1);
   };
 
@@ -374,7 +379,7 @@ export default function PartWorkspace({
           companyId={companyId}
           transactionsRefreshKey={transactionsRefreshKey}
           openTxnModal={openTxnModal}
-          onConversionsChanged={setUnitConversions}
+          onConversionsChanged={setConversionsOverride}
           onStockChanged={handleTxnSuccess}
         />
       )}

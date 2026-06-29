@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
@@ -14,6 +15,9 @@ import {
 import type { SavedInsight } from '@/utils/insightsAccess';
 
 const MAX_SAVED = 5;
+
+// Stable empty fallback so derived data doesn't churn while the first load runs.
+const EMPTY_INSIGHTS: SavedInsight[] = [];
 
 interface InsightsSectionProps {
   companyId: string;
@@ -33,39 +37,39 @@ export default function InsightsSection({
   savedVersion = 0,
   onSavedCountChange,
 }: InsightsSectionProps) {
-  const [savedInsights, setSavedInsights] = useState<SavedInsight[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSavedInsights = useCallback(async () => {
-    if (!companyId) return;
-
-    try {
-      setLoading(true);
-      setError(null);
+  const {
+    data: savedData,
+    loading,
+    reload: fetchSavedInsights,
+  } = useLoad(
+    async () => {
+      // No company yet → nothing to fetch (and report a zero count so the
+      // parent's chat affordance stays in sync).
+      if (!companyId) {
+        onSavedCountChange?.(0);
+        return [] as SavedInsight[];
+      }
       const saved = await getSavedInsights(companyId);
-      setSavedInsights(saved);
       onSavedCountChange?.(saved.length);
-    } catch (err) {
-      console.error('Error fetching saved insights:', err);
-      setError('Failed to load saved charts.');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, onSavedCountChange]);
-
-  useEffect(() => {
-    fetchSavedInsights();
-  }, [fetchSavedInsights, savedVersion]);
+      return saved;
+    },
+    [companyId, savedVersion],
+    {
+      onError: (err) => {
+        console.error('Error fetching saved insights:', err);
+        setError('Failed to load saved charts.');
+      },
+    },
+  );
+  const savedInsights = savedData ?? EMPTY_INSIGHTS;
 
   const handleRemoveSaved = async (insightId: string) => {
     try {
       await deleteSavedInsight(companyId, insightId);
-      setSavedInsights((prev) => {
-        const next = prev.filter((s) => s.id !== insightId);
-        onSavedCountChange?.(next.length);
-        return next;
-      });
+      // Re-pull so the list + reported count come from one source of truth.
+      await fetchSavedInsights();
     } catch (err) {
       console.error('Error deleting saved insight:', err);
     }

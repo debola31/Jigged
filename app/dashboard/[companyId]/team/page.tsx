@@ -413,17 +413,17 @@ export default function TeamPage() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [activeTab, loadAdmins, loadUsers, loadOperators]);
 
-  // Clear selection when search or tab changes
-  useEffect(() => {
+  // Clear selection when search or tab changes — the rows on screen change, so
+  // any ids selected before may no longer be visible. Deselects all three
+  // per-tab grids (the refs are stable, so the empty dep list is correct);
+  // doing all of them keeps this independent of which tab is active. Called
+  // from each control's onChange (not an effect) to avoid set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (activeTab === 0 && adminsGridRef.current?.api) {
-      adminsGridRef.current.api.deselectAll();
-    } else if (activeTab === 1 && usersGridRef.current?.api) {
-      usersGridRef.current.api.deselectAll();
-    } else if (activeTab === 2 && operatorsGridRef.current?.api) {
-      operatorsGridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced, activeTab]);
+    adminsGridRef.current?.api?.deselectAll();
+    usersGridRef.current?.api?.deselectAll();
+    operatorsGridRef.current?.api?.deselectAll();
+  }, []);
 
   // Calculate grid height dynamically based on active tab data
   const currentData = activeTab === 0 ? admins : activeTab === 1 ? users : operators;
@@ -725,7 +725,13 @@ export default function TeamPage() {
     <Box>
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 0, mt: -2 }}>
-        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => {
+            setActiveTab(v);
+            clearSelection();
+          }}
+        >
           <Tab label="Admins" icon={<AdminPanelSettingsIcon />} iconPosition="start" />
           <Tab label="Users" icon={<PersonIcon />} iconPosition="start" />
           <Tab label="Operators" icon={<BadgeIcon />} iconPosition="start" />
@@ -748,7 +754,10 @@ export default function TeamPage() {
             placeholder="Search admins..."
             size="small"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              clearSelection();
+            }}
             sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
@@ -884,7 +893,10 @@ export default function TeamPage() {
             placeholder="Search users..."
             size="small"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              clearSelection();
+            }}
             sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {
@@ -1020,7 +1032,10 @@ export default function TeamPage() {
             placeholder="Search operators..."
             size="small"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              clearSelection();
+            }}
             sx={{ width: { xs: '100%', sm: 300 } }}
             slotProps={{
               input: {

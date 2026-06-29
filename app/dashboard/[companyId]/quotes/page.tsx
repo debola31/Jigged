@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Link from 'next/link';
@@ -151,13 +151,13 @@ export default function QuotesPage() {
   );
   const quotes = quotesData ?? EMPTY_QUOTES;
 
-  // Clear selection on filter change
-  useEffect(() => {
+  // Clear selection when search or any filter changes — the rows on screen
+  // change, so any ids selected before may no longer be visible. Called from
+  // each control's onChange (not an effect) to avoid set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) {
-      gridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced, statusFilter, customerFilter, createdByFilter]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   // Grid height calculation
   const gridHeight = useMemo(() => {
@@ -337,7 +337,10 @@ export default function QuotesPage() {
         <TextField
           placeholder="Search quotes..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           size="small"
           sx={{ width: { xs: '100%', sm: 250 } }}
           slotProps={{
@@ -358,7 +361,10 @@ export default function QuotesPage() {
               { id: 'expired', label: 'Expired' },
             ]}
             value={statusFilter === 'all' ? '' : statusFilter}
-            onChange={(value) => setStatusFilter((value || 'all') as QuoteStatus | 'all')}
+            onChange={(value) => {
+              setStatusFilter((value || 'all') as QuoteStatus | 'all');
+              clearSelection();
+            }}
             label="Status"
             allowNone
             noneLabel="All Statuses"
@@ -373,7 +379,10 @@ export default function QuotesPage() {
               label: c.name,
             }))}
             value={customerFilter}
-            onChange={setCustomerFilter}
+            onChange={(value) => {
+              setCustomerFilter(value);
+              clearSelection();
+            }}
             label="Customer"
             allowNone
             noneLabel="All Customers"
@@ -390,7 +399,10 @@ export default function QuotesPage() {
                 label: m.name || m.email || 'Unknown',
               }))}
             value={createdByFilter}
-            onChange={setCreatedByFilter}
+            onChange={(value) => {
+              setCreatedByFilter(value);
+              clearSelection();
+            }}
             label="Created By"
             allowNone
             noneLabel="All Users"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -144,12 +144,14 @@ export default function PartsPage() {
   // warning can't disagree.
   const priceableIds = partsData?.[1] ?? EMPTY_PRICEABLE;
 
-  useEffect(() => {
+  // Clear selection when the search query or source filter changes — the rows
+  // on screen change, so any ids selected before may no longer be visible.
+  // Called from each control's onChange (not an effect) to avoid
+  // set-state-in-effect.
+  const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    if (gridRef.current?.api) {
-      gridRef.current.api.deselectAll();
-    }
-  }, [searchDebounced, sourceFilter]);
+    gridRef.current?.api?.deselectAll();
+  }, []);
 
   // Apply source filter client-side and stamp each row with is_priceable
   // from the RPC set so the grid, gridHeight, and empty-state checks all
@@ -388,7 +390,10 @@ export default function PartsPage() {
         <TextField
           placeholder="Search parts..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            clearSelection();
+          }}
           size="small"
           sx={{ width: { xs: '100%', sm: 300 } }}
           slotProps={{
@@ -408,7 +413,10 @@ export default function PartsPage() {
             labelId="parts-source-label"
             value={sourceFilter}
             label="Source"
-            onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+            onChange={(e) => {
+              setSourceFilter(e.target.value as SourceFilter);
+              clearSelection();
+            }}
           >
             <MenuItem value="all">All</MenuItem>
             <MenuItem value="made">Made</MenuItem>

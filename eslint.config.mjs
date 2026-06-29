@@ -43,16 +43,18 @@ const eslintConfig = defineConfig([
           destructuredArrayIgnorePattern: "^_",
         },
       ],
-      // Downgraded from `error` to `warn`. The rule (new in
-      // eslint-plugin-react-hooks v6 / Next.js 16) statically flags every
-      // setState call reached from inside a useEffect — including the
-      // standard data-fetch-on-mount pattern where the setState only
-      // happens after an await. ~78 of these in the codebase, almost all
-      // false positives (the actual cascading-render anti-pattern is rare).
-      // Keep as a warning so new instances are still surfaced in review,
-      // but don't block CI on existing call sites. Refactor surfaces that
-      // genuinely loop (where the rule is right) in the same PR that
-      // touches the affected component.
+      // Kept at `warn` (not `error`). The rule (eslint-plugin-react-hooks v6+ /
+      // Next.js 16) flags EVERY setState reachable from a useEffect — including
+      // the idiomatic data-fetch-on-mount pattern where setState only runs
+      // after an await. Issue #442 drove the count from 109 down to a small
+      // honest budget via genuine refactors: the `useLoad` hook for data
+      // loaders, `onEnter`/key-remount for reset-on-open modals, and moving
+      // bulk-selection clears into the search/tab handlers. The residual is the
+      // rule's documented false-positive / legitimate-effect class — prop
+      // mirrors, guards, localStorage reads, timers, derived-from-loaded-data —
+      // deliberately LEFT as warnings under the ratcheting `--max-warnings` cap
+      // (package.json) rather than mass-suppressed with inline-disables. New
+      // instances still surface in review; the cap only ratchets down.
       "react-hooks/set-state-in-effect": "warn",
     },
   },

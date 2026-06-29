@@ -392,13 +392,17 @@ export default function TeamPage() {
     }
   }, [loadInvitations]);
 
-  // Load invitations on mount
+  // Load invitations on mount. Data-fetch-on-mount false positive: the loader's
+  // setState all runs post-await (the documented class in eslint.config.mjs);
+  // the tab loaders chain getSession→fetch, awkward to restructure cleanly.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadInvitations();
   }, [loadInvitations]);
 
-  // Load data based on active tab
+  // Load data based on active tab.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- data-fetch-on-mount: each loader's setState runs post-await */
     if (activeTab === 0) {
       loadAdmins();
     } else if (activeTab === 1) {
@@ -406,6 +410,7 @@ export default function TeamPage() {
     } else {
       loadOperators();
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [activeTab, loadAdmins, loadUsers, loadOperators]);
 
   // Clear selection when search or tab changes

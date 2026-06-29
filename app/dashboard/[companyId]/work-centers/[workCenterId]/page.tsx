@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -29,7 +30,6 @@ import MuiLink from '@mui/material/Link';
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
 import { getCompany } from '@/utils/companyAccess';
 import StationQRCode from '@/components/operations/StationQRCode';
-import type { WorkCenterWithRelations } from '@/types/workCenter';
 
 export default function WorkCenterDetailPage() {
   const params = useParams();
@@ -37,33 +37,27 @@ export default function WorkCenterDetailPage() {
   const companyId = params.companyId as string;
   const workCenterId = params.workCenterId as string;
 
-  const [workCenter, setWorkCenter] = useState<WorkCenterWithRelations | null>(null);
-  const [companyName, setCompanyName] = useState<string | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  const fetchWorkCenter = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [data, company] = await Promise.all([
+  // Load the work center plus its company name (for the station-QR caption) in
+  // parallel. useLoad keeps every setState inside the async callback, so the
+  // load effect can't trip set-state-in-effect.
+  const { data, loading } = useLoad(
+    () =>
+      Promise.all([
         getWorkCenterWithRelations(workCenterId),
         getCompany(companyId),
-      ]);
-      setWorkCenter(data);
-      setCompanyName(company?.name);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load work center');
-    } finally {
-      setLoading(false);
-    }
-  }, [workCenterId, companyId]);
-
-  useEffect(() => {
-    fetchWorkCenter();
-  }, [fetchWorkCenter]);
+      ]),
+    [workCenterId, companyId],
+    {
+      onError: (err) =>
+        setError(err instanceof Error ? err.message : 'Failed to load work center'),
+    },
+  );
+  const workCenter = data?.[0] ?? null;
+  const companyName = data?.[1]?.name;
 
   const handleDelete = async () => {
     setActionLoading(true);

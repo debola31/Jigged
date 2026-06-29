@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -58,18 +59,16 @@ type PartRow = Part & { is_priceable: boolean };
 type SourceFilter = 'all' | 'made' | 'bought';
 type CompletenessFilter = 'all' | 'complete' | 'incomplete';
 
+// Stable empty fallbacks so the filtered-rows memo doesn't recompute on every
+// render while the first load is in flight.
+const EMPTY_PARTS: Part[] = [];
+const EMPTY_PRICEABLE: Set<string> = new Set();
+
 export default function PartsPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [rows, setRows] = useState<Part[]>([]);
-  // Set of part ids the quote form would accept without warning (at least
-  // one tier with a non-null computed cost). Single source of truth driven
-  // by the get_priceable_part_ids RPC — matches QuoteForm.hasUsableTier so
-  // the Pricing column and the quote warning can't disagree.
-  const [priceableIds, setPriceableIds] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   // Source filter is applied client-side after the fetch — `source` is a
@@ -107,41 +106,43 @@ export default function PartsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchParts = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Pull every part the company owns (made + bought, stocked or not).
-      // The source filter narrows this client-side. Inventory page handles
-      // the stocked-only view; this page is the full catalog.
-      //
-      // Priceable-id set is fetched in parallel — independent query,
-      // unaffected by search/sort. Failure is non-fatal: an empty set
-      // degrades the Pricing column to "everything reads as no pricing"
-      // rather than blocking the whole page.
-      const [parts, priceable] = await Promise.all([
+  // Pull every part the company owns (made + bought, stocked or not). The
+  // source filter narrows this client-side; the inventory page handles the
+  // stocked-only view. The priceable-id set is fetched in parallel — an
+  // independent query, unaffected by search/sort; failure is non-fatal (an
+  // empty set degrades the Pricing column to "no pricing" rather than blocking
+  // the page). useLoad keeps every setState inside the async callback.
+  const {
+    data: partsData,
+    loading,
+    reload: fetchParts,
+  } = useLoad(
+    () =>
+      Promise.all([
         getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort),
         getPriceablePartIds(companyId).catch((err) => {
           console.error('Error fetching priceable part ids:', err);
           return new Set<string>();
         }),
-      ]);
-      setRows(parts);
-      setPriceableIds(priceable);
-    } catch (error) {
-      console.error('Error fetching parts:', error);
-      setSnackbar({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to load parts',
-        severity: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, sortModel]);
-
-  useEffect(() => {
-    fetchParts();
-  }, [fetchParts]);
+      ]),
+    [companyId, searchDebounced, sortModel],
+    {
+      onError: (error) => {
+        console.error('Error fetching parts:', error);
+        setSnackbar({
+          open: true,
+          message: error instanceof Error ? error.message : 'Failed to load parts',
+          severity: 'error',
+        });
+      },
+    },
+  );
+  const rows = partsData?.[0] ?? EMPTY_PARTS;
+  // Set of part ids the quote form accepts without warning (≥1 tier with a
+  // non-null computed cost) — single source of truth (get_priceable_part_ids
+  // RPC), matching QuoteForm.hasUsableTier so the Pricing column and the quote
+  // warning can't disagree.
+  const priceableIds = partsData?.[1] ?? EMPTY_PRICEABLE;
 
   useEffect(() => {
     setSelectedIds([]);

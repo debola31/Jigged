@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -59,14 +60,16 @@ function parseQuoteStatusParam(v: string | null): QuoteStatus | 'all' {
   return 'all';
 }
 
+// Stable empty fallback so derived data doesn't churn the memo identity while
+// the first load is in flight.
+const EMPTY_QUOTES: QuoteWithRelations[] = [];
+
 export default function QuotesPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
-  const [quotes, setQuotes] = useState<QuoteWithRelations[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>(() =>
@@ -126,27 +129,27 @@ export default function QuotesPage() {
     sweepExpiredQuotes(companyId).catch(console.error);
   }, [companyId]);
 
-  const fetchQuotes = useCallback(async () => {
-    setLoading(true);
-    try {
+  const {
+    data: quotesData,
+    loading,
+    reload: fetchQuotes,
+  } = useLoad(
+    () => {
       const filters: QuoteFilters = {};
       if (statusFilter !== 'all') filters.status = statusFilter;
       if (customerFilter) filters.customerId = customerFilter;
       if (createdByFilter) filters.createdBy = createdByFilter;
       if (searchDebounced) filters.search = searchDebounced;
-
-      const data = await getAllQuotes(companyId, filters, sortModel.field, sortModel.sort);
-      setQuotes(data);
-    } catch (error) {
-      console.error('Error fetching quotes:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, statusFilter, customerFilter, createdByFilter, sortModel]);
-
-  useEffect(() => {
-    fetchQuotes();
-  }, [fetchQuotes]);
+      return getAllQuotes(companyId, filters, sortModel.field, sortModel.sort);
+    },
+    [companyId, searchDebounced, statusFilter, customerFilter, createdByFilter, sortModel],
+    {
+      onError: (error) => {
+        console.error('Error fetching quotes:', error);
+      },
+    },
+  );
+  const quotes = quotesData ?? EMPTY_QUOTES;
 
   // Clear selection on filter change
   useEffect(() => {

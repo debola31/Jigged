@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -43,13 +44,15 @@ import {
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import type { VendorWithPrimaryContact } from '@/types/vendor';
 
+// Stable empty fallback so derived data doesn't churn the memo identity while
+// the first load is in flight.
+const EMPTY_VENDORS: VendorWithPrimaryContact[] = [];
+
 export default function VendorsPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [rows, setRows] = useState<VendorWithPrimaryContact[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
@@ -74,31 +77,31 @@ export default function VendorsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const fetchRows = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getAllVendorsWithPrimaryContact(
+  const {
+    data: vendorsData,
+    loading,
+    reload: fetchRows,
+  } = useLoad(
+    () =>
+      getAllVendorsWithPrimaryContact(
         companyId,
         searchDebounced,
         sortModel.field,
         sortModel.sort,
-      );
-      setRows(data);
-    } catch (err) {
-      console.error('Error fetching vendors:', err);
-      setSnackbar({
-        open: true,
-        message: err instanceof Error ? err.message : 'Failed to load vendors',
-        severity: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, searchDebounced, sortModel]);
-
-  useEffect(() => {
-    fetchRows();
-  }, [fetchRows]);
+      ),
+    [companyId, searchDebounced, sortModel],
+    {
+      onError: (err) => {
+        console.error('Error fetching vendors:', err);
+        setSnackbar({
+          open: true,
+          message: err instanceof Error ? err.message : 'Failed to load vendors',
+          severity: 'error',
+        });
+      },
+    },
+  );
+  const rows = vendorsData ?? EMPTY_VENDORS;
 
   useEffect(() => {
     setSelectedIds([]);

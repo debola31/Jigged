@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -42,7 +43,7 @@ import {
 } from '@/utils/customerAddressesAccess';
 import { roleDisplayLabel } from '@/types/customerContact';
 import type { CustomerContact } from '@/types/customerContact';
-import type { CustomerAddress, CustomerWithRelations } from '@/types/customer';
+import type { CustomerAddress } from '@/types/customer';
 import { CustomerContactModal, CustomerAddressForm } from '@/components/customers';
 
 function formatAddressLines(a: CustomerAddress): string {
@@ -60,16 +61,17 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+// Stable empty fallbacks so the derived lists keep a constant identity while
+// the first load is in flight.
+const EMPTY_CONTACTS: CustomerContact[] = [];
+const EMPTY_ADDRESSES: CustomerAddress[] = [];
+
 export default function CustomerDetailPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
   const customerId = params.customerId as string;
 
-  const [customer, setCustomer] = useState<CustomerWithRelations | null>(null);
-  const [contacts, setContacts] = useState<CustomerContact[]>([]);
-  const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -88,48 +90,39 @@ export default function CustomerDetailPage() {
   );
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null);
 
-  const fetchAll = useCallback(async () => {
-    try {
-      setLoading(true);
+  // Load the customer, then (only if it exists) its contacts and addresses in
+  // parallel. useLoad keeps every setState inside the async callback, so the
+  // load effect can't trip set-state-in-effect.
+  const {
+    data,
+    loading,
+    reload: fetchAll,
+  } = useLoad(
+    async () => {
       const c = await getCustomerWithRelations(customerId);
-      setCustomer(c);
-      if (c) {
-        const [contactList, addrList] = await Promise.all([
-          getContactsForCustomer(customerId),
-          getAddressesForCustomer(customerId),
-        ]);
-        setContacts(contactList);
-        setAddresses(addrList);
+      if (!c) {
+        return { customer: null, contacts: EMPTY_CONTACTS, addresses: EMPTY_ADDRESSES };
       }
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load customer');
-    } finally {
-      setLoading(false);
-    }
-  }, [customerId]);
+      const [contacts, addresses] = await Promise.all([
+        getContactsForCustomer(customerId),
+        getAddressesForCustomer(customerId),
+      ]);
+      return { customer: c, contacts, addresses };
+    },
+    [customerId],
+    {
+      onError: (err) =>
+        setError(err instanceof Error ? err.message : 'Failed to load customer'),
+    },
+  );
+  const customer = data?.customer ?? null;
+  const contacts = data?.contacts ?? EMPTY_CONTACTS;
+  const addresses = data?.addresses ?? EMPTY_ADDRESSES;
 
-  const refreshContacts = useCallback(async () => {
-    try {
-      const contactList = await getContactsForCustomer(customerId);
-      setContacts(contactList);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh contacts');
-    }
-  }, [customerId]);
-
-  const refreshAddresses = useCallback(async () => {
-    try {
-      const addrList = await getAddressesForCustomer(customerId);
-      setAddresses(addrList);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refresh addresses');
-    }
-  }, [customerId]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  // Contact/address mutations re-run the full loader (reload). Cheap at customer
+  // scale and keeps a single read path rather than separate per-list fetches.
+  const refreshContacts = fetchAll;
+  const refreshAddresses = fetchAll;
 
   const handleDelete = async () => {
     setActionLoading(true);

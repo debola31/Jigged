@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -45,6 +46,10 @@ import {
   getAllMarkupRates,
   bulkDeleteMarkupRates,
 } from '@/utils/markupRatesAccess';
+
+// Stable empty fallback so derived data doesn't churn the memo identity while
+// the first load is in flight.
+const EMPTY_RATES: MarkupRate[] = [];
 
 // Custom selection-column cell. Default row shows a "Default" chip in place
 // of the (non-existent) checkbox; other rows show a checkbox synced to AG
@@ -100,8 +105,6 @@ export default function MarkupRatesListPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
 
-  const [rates, setRates] = useState<MarkupRate[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -119,22 +122,25 @@ export default function MarkupRatesListPage() {
     severity: 'error' | 'success';
   }>({ open: false, message: '', severity: 'success' });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getAllMarkupRates(companyId);
-      setRates(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load markup rates');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const {
+    data: ratesData,
+    loading,
+    reload: load,
+  } = useLoad(
+    () => {
+      // Clear any prior load error at the start of each (re)load. Runs in the
+      // loader callback, not an effect, so it doesn't trip set-state-in-effect.
+      setError(null);
+      return getAllMarkupRates(companyId);
+    },
+    [companyId],
+    {
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load markup rates');
+      },
+    },
+  );
+  const rates = ratesData ?? EMPTY_RATES;
 
   // Debounce search to keep AG Grid filtering consistent with the parts list pattern.
   useEffect(() => {

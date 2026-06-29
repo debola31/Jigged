@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -65,14 +66,15 @@ function collectLabels(node: InventoryLocationNode, byId: Map<string, InventoryL
   return out;
 }
 
+// Stable empty fallback so the tree/labels memos don't churn while loading.
+const EMPTY_LOCATIONS: InventoryLocation[] = [];
+
 interface LocationsManagerProps {
   companyId: string;
   companyName?: string;
 }
 
 export default function LocationsManager({ companyId, companyName }: LocationsManagerProps) {
-  const [locations, setLocations] = useState<InventoryLocation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -102,25 +104,20 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     node: null,
   });
 
+  const {
+    data: locationsData,
+    loading,
+    reload,
+  } = useLoad(() => getLocations(companyId), [companyId], {
+    onError: (e) => {
+      setError(e instanceof Error ? e.message : 'Failed to load locations.');
+    },
+  });
+  const locations = locationsData ?? EMPTY_LOCATIONS;
+
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
   const tree = useMemo(() => buildLocationTree(locations), [locations]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setLocations(await getLocations(companyId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load locations.');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   const callbacks = {
     onAddChild: (node: InventoryLocationNode) =>

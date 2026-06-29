@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
@@ -24,6 +25,9 @@ import type { JobNote, JobNoteMedia } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 const THUMB = 76;
+
+// Stable empty fallback so the merge memo doesn't churn while the first load runs.
+const EMPTY_NOTES: JobNote[] = [];
 
 /**
  * Context the operation page passes so the composer auto-tags every capture to
@@ -71,9 +75,10 @@ interface PendingPhoto {
  * Listing is a plain Supabase read (no AI on mount).
  */
 export default function JobFeed({ jobId, companyId, readOnly, operationContext }: JobFeedProps) {
-  const [notes, setNotes] = useState<JobNote[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Notes posted optimistically (prepended before the next full load). Deduped
+  // out of the merged list once they show up in a fresh load by id.
+  const [pendingNotes, setPendingNotes] = useState<JobNote[]>([]);
 
   const [operatorId, setOperatorId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -90,21 +95,25 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
 
   const showComposer = !readOnly && !!operationContext;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setNotes(await getJobNotes(jobId, companyId));
-    } catch (err) {
+  const {
+    data: loadedNotesData,
+    loading,
+    reload: load,
+  } = useLoad(() => getJobNotes(jobId, companyId), [jobId, companyId], {
+    onError: (err) => {
       setError(err instanceof Error ? err.message : 'Could not load the feed.');
-    } finally {
-      setLoading(false);
-    }
-  }, [jobId, companyId]);
+    },
+  });
+  const loadedNotes = loadedNotesData ?? EMPTY_NOTES;
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Merge optimistic posts ahead of the loaded feed, dropping any that the
+  // latest load already includes (matched by id) so there are no duplicates.
+  const notes = useMemo(() => {
+    if (pendingNotes.length === 0) return loadedNotes;
+    const loadedIds = new Set(loadedNotes.map((n) => n.id));
+    const stillPending = pendingNotes.filter((n) => !loadedIds.has(n.id));
+    return [...stillPending, ...loadedNotes];
+  }, [loadedNotes, pendingNotes]);
 
   useEffect(() => {
     if (!showComposer) return;
@@ -202,7 +211,7 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
         );
       }
 
-      setNotes((prev) => [{ ...note, media }, ...prev]);
+      setPendingNotes((prev) => [{ ...note, media }, ...prev]);
       pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
       setPending([]);
       setNoteDraft('');

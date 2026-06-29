@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRef, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
@@ -30,6 +31,9 @@ import {
   validateAttachmentFile,
 } from '@/utils/jobAttachmentsAccess';
 import type { JobAttachment } from '@/types/job';
+
+// Stable empty fallback so derived data doesn't churn while the first load runs.
+const EMPTY_ATTACHMENTS: JobAttachment[] = [];
 
 interface JobAttachmentsCardProps {
   jobId: string;
@@ -62,8 +66,6 @@ function isViewable(att: JobAttachment): boolean {
  * immediate; download opens a fresh signed URL.
  */
 export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsCardProps) {
-  const [attachments, setAttachments] = useState<JobAttachment[]>([]);
-  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -72,20 +74,17 @@ export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsC
   const [viewUrl, setViewUrl] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      setAttachments(await listJobAttachments(jobId));
-    } catch (err) {
+  const {
+    data: attachmentsData,
+    loading,
+    reload: refresh,
+  } = useLoad(() => listJobAttachments(jobId), [jobId], {
+    onError: (err) => {
       console.error('Error loading attachments:', err);
       setError('Could not load attachments.');
-    } finally {
-      setLoading(false);
-    }
-  }, [jobId]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+    },
+  });
+  const attachments = attachmentsData ?? EMPTY_ATTACHMENTS;
 
   const handleSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;

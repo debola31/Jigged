@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useLoad } from '@/hooks/useLoad';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -28,6 +29,9 @@ import type { ShipmentWithRelations } from '@/types/shipment';
 import { SHIPPING_METHOD_LABELS } from '@/types/shipment';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 
+// Stable empty fallback so derived data doesn't churn while the first load runs.
+const EMPTY_SHIPMENTS: ShipmentWithRelations[] = [];
+
 interface ShipmentHistoryCardProps {
   jobId: string;
   /** Set to a new value (e.g., Date.now()) when a fresh shipment has been created so the card refetches. */
@@ -52,18 +56,18 @@ export default function ShipmentHistoryCard({
   initialPreviewShipmentId = null,
   onShipmentVoided,
 }: ShipmentHistoryCardProps) {
-  const [shipments, setShipments] = useState<ShipmentWithRelations[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(initialPreviewShipmentId);
   const [voidTarget, setVoidTarget] = useState<ShipmentWithRelations | null>(null);
   const [voiding, setVoiding] = useState(false);
   const [voidError, setVoidError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const {
+    data: shipmentsData,
+    loading,
+    reload: load,
+  } = useLoad(
+    async () => {
       const rows = await getShipmentsForJob(jobId);
       // The PostgREST inner-join produces one row per matching
       // shipment_line_item. Roll up to one row per shipment so the
@@ -80,24 +84,22 @@ export default function ShipmentHistoryCard({
           ];
         }
       }
-      const merged = Array.from(byId.values()).sort((a, b) => {
+      return Array.from(byId.values()).sort((a, b) => {
         const ad = a.ship_date;
         const bd = b.ship_date;
         if (ad !== bd) return ad < bd ? 1 : -1;
         return a.created_at < b.created_at ? 1 : -1;
       });
-      setShipments(merged);
-    } catch (err) {
-      console.error('Failed to load shipment history:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load shipments.');
-    } finally {
-      setLoading(false);
-    }
-  }, [jobId]);
-
-  useEffect(() => {
-    load();
-  }, [load, refreshKey]);
+    },
+    [jobId, refreshKey],
+    {
+      onError: (err) => {
+        console.error('Failed to load shipment history:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load shipments.');
+      },
+    },
+  );
+  const shipments = shipmentsData ?? EMPTY_SHIPMENTS;
 
   // When a parent passes an initial preview id (post-create flow),
   // open the dialog on first mount. Don't reopen on refresh.

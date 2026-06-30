@@ -402,27 +402,6 @@ export default function JobDetailPage() {
               Create Shipment
             </Button>
           )}
-          {canReopen && (
-            <Button
-              variant="outlined"
-              startIcon={<RestartAltIcon />}
-              onClick={handleReopen}
-              disabled={actionLoading}
-            >
-              Reopen
-            </Button>
-          )}
-          {canCancel && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<CancelIcon />}
-              onClick={() => setCancelDialogOpen(true)}
-              disabled={actionLoading}
-            >
-              Cancel
-            </Button>
-          )}
           {qbInvoiceLink ? (
             <Button
               variant="outlined"
@@ -444,8 +423,29 @@ export default function JobDetailPage() {
             </Button>
           )}
 
-          {/* Delete is always the rightmost action — last in the row, away from
-              the benign actions, so the destructive control is predictably placed. */}
+          {/* The negative cluster sits at the right, after the benign + invoice
+              actions: the lifecycle toggle (Reopen/Cancel) then Delete last. */}
+          {canReopen && (
+            <Button
+              variant="outlined"
+              startIcon={<RestartAltIcon />}
+              onClick={handleReopen}
+              disabled={actionLoading}
+            >
+              Reopen
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<CancelIcon />}
+              onClick={() => setCancelDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+          )}
           <Tooltip title="Delete job">
             <span>
               <IconButton

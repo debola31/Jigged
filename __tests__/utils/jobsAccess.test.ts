@@ -24,13 +24,17 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => mockSupabase,
 }));
 
-// updateJobPartQuantity orchestrates two cross-module readers — stub them so the
-// test drives only the job_parts / quote_line_items queries it owns.
+// updateJobPartQuantity / deleteJob orchestrate cross-module readers — stub them
+// so the test drives only the job_parts / jobs queries it owns.
 vi.mock('@/utils/shipmentsAccess', () => ({
   getJobPartShipmentSummaries: vi.fn(),
+  countShipmentsForJob: vi.fn(),
 }));
 vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksInvoiceLinkForJob: vi.fn(),
+}));
+vi.mock('@/utils/jobAttachmentsAccess', () => ({
+  deleteStoredFilesForJobs: vi.fn(),
 }));
 
 import {
@@ -45,8 +49,9 @@ import {
   updateJobAddressContact,
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
-import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
+import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 
 describe('jobsAccess', () => {
   beforeEach(() => {
@@ -65,16 +70,105 @@ describe('jobsAccess', () => {
   });
 
   describe('deleteJob', () => {
-    it('deletes by job id scoped to company_id', async () => {
-      mockQueryBuilder.error = null;
-      await deleteJob('j1', 'co-1');
-      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'j1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    // deleteJob now: (1) loads production_status, (2) counts shipments,
+    // (3) cleans storage, (4) deletes. Both the status load and the delete hit
+    // from('jobs'), so use a per-table mock that serves select+delete and
+    // captures the delete scoping.
+    function installJobsFrom(opts: {
+      jobRow?: { production_status: string } | null;
+      loadError?: { message: string } | null;
+      deleteError?: { message: string } | null;
+    }) {
+      const jobRow =
+        opts.jobRow === undefined ? { production_status: 'not_started' } : opts.jobRow;
+      const deleteEqArgs: Array<[string, unknown]> = [];
+      const deleteFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockImplementation((c1: string, v1: unknown) => {
+          deleteEqArgs.push([c1, v1]);
+          return {
+            eq: vi.fn().mockImplementation((c2: string, v2: unknown) => {
+              deleteEqArgs.push([c2, v2]);
+              return Promise.resolve({ error: opts.deleteError ?? null });
+            }),
+          };
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'jobs') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: vi
+                    .fn()
+                    .mockResolvedValue({ data: jobRow, error: opts.loadError ?? null }),
+                }),
+              }),
+            }),
+            delete: deleteFn,
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+      return { deleteFn, deleteEqArgs };
+    }
+
+    beforeEach(() => {
+      vi.mocked(countShipmentsForJob).mockResolvedValue(0);
+      vi.mocked(deleteStoredFilesForJobs).mockResolvedValue(undefined);
     });
 
-    it('throws when supabase returns an error', async () => {
-      mockQueryBuilder.error = { message: 'boom' };
+    it('deletes a not_started job scoped to company_id after the guards pass', async () => {
+      const { deleteFn, deleteEqArgs } = installJobsFrom({
+        jobRow: { production_status: 'not_started' },
+      });
+      await deleteJob('j1', 'co-1');
+      expect(deleteStoredFilesForJobs).toHaveBeenCalledWith(['j1']);
+      expect(deleteFn).toHaveBeenCalledTimes(1);
+      expect(deleteEqArgs).toContainEqual(['id', 'j1']);
+      expect(deleteEqArgs).toContainEqual(['company_id', 'co-1']);
+    });
+
+    it('deletes a cancelled job', async () => {
+      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'cancelled' } });
+      await deleteJob('j1', 'co-1');
+      expect(deleteFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an in_progress job and never deletes', async () => {
+      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'in_progress' } });
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(
+        /not yet started or cancelled/,
+      );
+      expect(deleteFn).not.toHaveBeenCalled();
+      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
+    });
+
+    it('rejects a completed job', async () => {
+      installJobsFrom({ jobRow: { production_status: 'completed' } });
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(
+        /not yet started or cancelled/,
+      );
+    });
+
+    it('rejects when the job has shipment records and never deletes', async () => {
+      vi.mocked(countShipmentsForJob).mockResolvedValue(2);
+      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'cancelled' } });
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/shipment records/);
+      expect(deleteFn).not.toHaveBeenCalled();
+      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
+    });
+
+    it('throws "Job not found" when the job row is missing', async () => {
+      installJobsFrom({ jobRow: null });
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/not found/i);
+    });
+
+    it('throws a friendly error when the delete query fails', async () => {
+      installJobsFrom({
+        jobRow: { production_status: 'not_started' },
+        deleteError: { message: 'boom' },
+      });
       await expect(deleteJob('j1', 'co-1')).rejects.toBeTruthy();
     });
   });

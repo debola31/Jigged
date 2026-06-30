@@ -31,9 +31,10 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import LockIcon from '@mui/icons-material/Lock';
+import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, cancelJob, reopenJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob, deleteJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
@@ -72,6 +73,7 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
@@ -163,6 +165,20 @@ export default function JobDetailPage() {
     }
   };
 
+  const handleDelete = async () => {
+    setActionLoading(true);
+    try {
+      await deleteJob(jobId, companyId);
+      // Navigate away on success — the job (and this page) no longer exist.
+      // Don't reset actionLoading here: the component unmounts on push.
+      router.push(`/dashboard/${companyId}/jobs`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete job');
+      setActionLoading(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleDateString();
@@ -188,6 +204,11 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
+  // Only not-yet-started or cancelled jobs may be deleted. The access layer is
+  // the source of truth (it also blocks jobs with shipment records); this gate
+  // just hides the button for in-flight jobs.
+  const canDelete =
+    job.production_status === 'not_started' || job.production_status === 'cancelled';
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
@@ -356,6 +377,17 @@ export default function JobDetailPage() {
               disabled={actionLoading}
             >
               Cancel
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={() => setDeleteDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Delete
             </Button>
           )}
 
@@ -601,6 +633,34 @@ export default function JobDetailPage() {
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <CancelIcon />}
           >
             {actionLoading ? 'Cancelling…' : 'Cancel Job'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={actionLoading ? undefined : () => setDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Delete Job?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete <strong>{job.job_number}</strong>? This permanently
+            removes the job and all of its parts, operations, notes, and attachments. This
+            cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={actionLoading}>
+            Keep Job
+          </Button>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={actionLoading}
+            startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
+          >
+            {actionLoading ? 'Deleting…' : 'Delete Job'}
           </Button>
         </DialogActions>
       </Dialog>

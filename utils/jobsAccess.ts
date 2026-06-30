@@ -31,7 +31,7 @@ import type {
 import { isJobDone } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
-import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
 
 /**
@@ -785,13 +785,58 @@ export async function getJobQuantitiesForQuote(
 // ============== Job Lifecycle ==============
 
 /**
- * Delete a job. Cascades remove job_parts, job_operations, job_materials, and
- * the job_attachments rows — but the attachment files in storage don't cascade,
- * so we clean those up first (best-effort) before deleting the job.
+ * Delete a job. Only jobs that are not yet started or cancelled may be deleted;
+ * an in-progress or completed job must be cancelled first. This guard lives here
+ * (not just in the UI) so a bypassed caller still can't remove an in-flight job.
+ *
+ * Cascades remove job_parts, job_operations, job_materials, job_notes,
+ * job_attachments (rows) and the quickbooks_invoice_links. Two things don't
+ * cascade and are handled explicitly:
+ *   - attachment files in storage — cleaned up (best-effort) before the delete.
+ *   - shipments — shipments_job_id_fkey has no ON DELETE, so a job with any
+ *     shipment row (a cancelled job that shipped, even if later voided) is
+ *     blocked rather than silently destroying fulfillment history.
  */
 export async function deleteJob(jobId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
+  // 1. Load status (scoped by company) — before any destructive step.
+  const { data: jobRow, error: loadErr } = await supabase
+    .from('jobs')
+    .select('production_status')
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+
+  if (loadErr) {
+    console.error('Error loading job for delete:', loadErr);
+    throw new Error(
+      friendlyErrorMessage(loadErr, { entity: 'job', fallback: 'Failed to load job.' }),
+    );
+  }
+  if (!jobRow) {
+    throw new Error('Job not found.');
+  }
+
+  // 2. Status guard: only not-started or cancelled jobs are deletable.
+  const status = jobRow.production_status as ProductionStatus;
+  if (status !== 'not_started' && status !== 'cancelled') {
+    throw new Error(
+      'Only jobs that are not yet started or cancelled can be deleted. ' +
+        'Cancel this job first if you want to remove it.',
+    );
+  }
+
+  // 3. Shipments guard: any referencing shipment (voided included) would trip
+  //    the FK. Block and surface the gap rather than destroying history.
+  if ((await countShipmentsForJob(jobId)) > 0) {
+    throw new Error(
+      "This job has shipment records and can't be deleted. " +
+        'Jobs with packing slips are kept for recordkeeping.',
+    );
+  }
+
+  // 4. Clean up storage (best-effort), then delete the job row.
   await deleteStoredFilesForJobs([jobId]);
 
   const { error } = await supabase

@@ -76,7 +76,11 @@ vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
 }));
 
-import { getOpenJobPartsForCustomer, voidShipment } from '@/utils/shipmentsAccess';
+import {
+  countShipmentsForJob,
+  getOpenJobPartsForCustomer,
+  voidShipment,
+} from '@/utils/shipmentsAccess';
 import type { OpenJobPartRow } from '@/types/shipment';
 
 describe('getOpenJobPartsForCustomer', () => {
@@ -410,5 +414,38 @@ describe('voidShipment', () => {
     queueBuilders([updateBuilder]);
 
     await expect(voidShipment('ship-1')).rejects.toThrow(/permission denied/);
+  });
+});
+
+describe('countShipmentsForJob', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('counts all shipment rows for a job via the direct job_id column', async () => {
+    const stub = buildQueryStub({ error: null });
+    (stub as unknown as { count: number }).count = 3;
+    queueBuilders([stub]);
+
+    const n = await countShipmentsForJob('job-1');
+
+    expect(n).toBe(3);
+    expect(mockSupabase.from).toHaveBeenCalledWith('shipments');
+    expect(stub.select).toHaveBeenCalledWith('id', { count: 'exact', head: true });
+    expect(stub.eq).toHaveBeenCalledWith('job_id', 'job-1');
+  });
+
+  it('returns 0 when the count is null', async () => {
+    const stub = buildQueryStub({ error: null });
+    queueBuilders([stub]);
+
+    await expect(countShipmentsForJob('job-1')).resolves.toBe(0);
+  });
+
+  it('throws when the count query errors', async () => {
+    const stub = buildQueryStub({ error: { message: 'boom' } });
+    queueBuilders([stub]);
+
+    await expect(countShipmentsForJob('job-1')).rejects.toThrow(/check shipments/i);
   });
 });

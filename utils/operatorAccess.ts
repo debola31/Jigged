@@ -26,10 +26,12 @@ import type { Database } from '@/types/database';
 type UserCompanyAccessUpdate = Database['public']['Tables']['user_company_access']['Update'];
 import type {
   OperatorJob,
+  OperatorPlantJob,
   OperatorJobDetail,
   Station,
   JobCompleteResponse,
   JobTraveler,
+  JobPartsOverview,
   JobTravelerOperation,
   JobNote,
   JobNoteMedia,
@@ -218,17 +220,61 @@ export async function getOperatorJobs(
   companyId: string,
   operationTypeId?: string,
 ): Promise<OperatorJob[]> {
-  const supabase = getSupabase();
-
   if (!operationTypeId) {
-    // No station selected — return an empty list. The UI prompts the operator
-    // to pick a station first; we don't show "all jobs" because the station
-    // is the primary navigation key.
+    // No station selected — the station-scoped list needs a station. The
+    // whole-plant view is getAllStationsOperatorJobs() instead.
     return [];
   }
 
   const readyRows = await getReadyOperationsForStation(companyId, operationTypeId);
+  return buildOperatorJobs(readyRows);
+}
+
+/**
+ * Whole-plant ("All Stations") job list: the work ready/in-progress across
+ * every station, so a roaming operator or lead can see all active jobs without
+ * picking one station. Reuses the SAME per-station readiness RPC, called once
+ * per station in parallel, then tags each row with its station and enriches
+ * once — a single source of truth for "ready" (no duplicated readiness logic).
+ * Rows are returned flat; the UI groups them by station.
+ */
+export async function getAllStationsOperatorJobs(
+  companyId: string,
+  stations: Station[],
+): Promise<OperatorPlantJob[]> {
+  const perStation = await Promise.all(
+    stations.map(async (station) => {
+      const rows = await getReadyOperationsForStation(companyId, station.id);
+      return rows.map((row) => ({ row, station }));
+    }),
+  );
+  const tagged = perStation.flat();
+  if (tagged.length === 0) return [];
+
+  // job_operation_id is unique per ready row, so we can re-attach each row's
+  // station after enrichment without depending on array order.
+  const stationByOp = new Map<string, Station>();
+  for (const t of tagged) stationByOp.set(t.row.job_operation_id, t.station);
+
+  const jobs = await buildOperatorJobs(tagged.map((t) => t.row));
+  return jobs.map((job) => {
+    const station = job.operation_id ? stationByOp.get(job.operation_id) : undefined;
+    return {
+      ...job,
+      work_center_id: station?.id ?? null,
+      work_center_name: station?.name ?? null,
+    };
+  });
+}
+
+/**
+ * Shared enrichment: turn ready rows (from one station or the whole plant) into
+ * OperatorJob rows by fetching per-part progress, customer, and part status.
+ * Preserves input order (a 1:1 map over readyRows).
+ */
+async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> {
   if (readyRows.length === 0) return [];
+  const supabase = getSupabase();
 
   const jobPartIds = readyRows.map((r) => r.job_part_id);
 
@@ -736,6 +782,12 @@ export async function getJobPartTraveler(
     };
   });
 
+  // How many parts the parent job has — drives the traveler's "all parts" link.
+  const { count: jobPartCount } = await supabase
+    .from('job_parts')
+    .select('id', { count: 'exact', head: true })
+    .eq('job_id', p.job_id);
+
   return {
     job_part_id: p.id,
     job_id: p.job_id,
@@ -749,7 +801,84 @@ export async function getJobPartTraveler(
     due_date: jobJoin?.due_date ?? null,
     customer_po_number: jobJoin?.customer_po_number ?? null,
     production_status: p.production_status,
+    job_part_count: jobPartCount ?? 1,
     operations,
+  };
+}
+
+/**
+ * Whole-job parts overview for the operator parts hub: the job header plus every
+ * child part with its progress. Used to navigate a multi-part job; single-part
+ * jobs skip the hub (the page redirects straight to the traveler).
+ */
+export async function getJobPartsOverview(
+  jobId: string,
+  companyId: string,
+): Promise<JobPartsOverview | null> {
+  const supabase = getSupabase();
+
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('id, job_number, due_date, customers(name)')
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .single();
+  if (error || !job) return null;
+
+  type JobRow = {
+    id: string;
+    job_number: string;
+    due_date: string | null;
+    customers: { name: string } | { name: string }[] | null;
+  };
+  const j = job as JobRow;
+  const customer = Array.isArray(j.customers) ? j.customers[0] : j.customers;
+
+  const { data: partRows } = await supabase
+    .from('job_parts')
+    .select('id, quantity, production_status, parts(part_name)')
+    .eq('job_id', jobId);
+  type PartRow = {
+    id: string;
+    quantity: number;
+    production_status: string;
+    parts: { part_name: string } | { part_name: string }[] | null;
+  };
+  const parts = (partRows ?? []) as PartRow[];
+
+  // Per-part progress (ops total + completed).
+  const jobPartIds = parts.map((p) => p.id);
+  const progressByPart = new Map<string, { total: number; done: number }>();
+  if (jobPartIds.length > 0) {
+    const { data: ops } = await supabase
+      .from('job_operations')
+      .select('job_part_id, status')
+      .in('job_part_id', jobPartIds);
+    for (const op of (ops ?? []) as { job_part_id: string; status: string }[]) {
+      const acc = progressByPart.get(op.job_part_id) ?? { total: 0, done: 0 };
+      acc.total += 1;
+      if (op.status === 'completed') acc.done += 1;
+      progressByPart.set(op.job_part_id, acc);
+    }
+  }
+
+  return {
+    job_id: j.id,
+    job_number: j.job_number,
+    customer_name: customer?.name ?? null,
+    due_date: j.due_date,
+    parts: parts.map((p) => {
+      const partJoin = Array.isArray(p.parts) ? p.parts[0] : p.parts;
+      const progress = progressByPart.get(p.id) ?? { total: 0, done: 0 };
+      return {
+        job_part_id: p.id,
+        part_name: partJoin?.part_name ?? null,
+        quantity: p.quantity,
+        production_status: p.production_status,
+        operations_total: progress.total,
+        operations_completed: progress.done,
+      };
+    }),
   };
 }
 

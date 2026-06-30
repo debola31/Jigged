@@ -121,13 +121,13 @@ Role restrictions are enforced at **two levels**:
 | FR-3b | Direct Job Creation from Purchase Order | When a customer sends a PO with no prior quote, the salesperson can create a job directly via **New Job from PO** on the jobs list: pick the customer, enter the PO #, add one or more **existing** parts (each with a quantity and the agreed unit price), optionally attach the PO PDF, and accept. No quote is involved (`quote_id` null; job number `J-NNNN` drawn from the shared per-company order counter — same sequence quotes use, so a direct job just takes the next number). v1 supports existing parts that already have a routing. | Must | Given a customer PO for existing parts, when the salesperson completes "Accept Purchase Order", then a job is created with the PO #, the agreed price on each part, cloned routing operations, and the optional PO PDF attached. |
 | FR-3a | Quote PDF Export | Salesperson can export any quote as a branded, customer-facing PDF that includes the shop's FROM block (company name/logo/address/contact), a Customer · Ship-to (only when it differs from billing) · Customer-contact row, part/quantity/unit price/total, validity (Valid Until), lead time, payment terms, and an acceptance block instructing the customer to **reply with a purchase order referencing the quote** (no signature/date line) plus a "Prepared by" line. Internal details (routing, cost breakdown, markup, internal status) are excluded. The **Email** action opens a dialog that downloads the PDF and drafts a To/Cc message in the user's mail client (reminding them to attach the PDF). Shop contact info is configured in Settings → Company Profile; logo in Settings → Company Branding. | Must | Given an active quote, when salesperson exports the PDF, then a `Quote-{number}.pdf` downloads with the shop FROM block, the customer/ship-to/contact row, Valid Until + Lead Time + Payment Terms, and a reply-with-a-PO acceptance block — with no signature line and no routing or markup visible. |
 | FR-4 | Quote Lifecycle | A quote is "Active" until its expiration date passes, at which point it flips to "Expired" (read-only but still convertible with a warning). A quote becomes a job via the Convert action, which copies lead time and computes the job due date. The pending-approval / approved / rejected states were removed in April 2026. | Must | Given an active quote with 14-day lead time, when the owner converts it, then a job is created with due_date = today + 14 and the quote links to that job via converted_to_job_id. |
-| FR-5 | Station QR Code Login | Operators scan a QR code at a station to log in. The QR code encodes the station ID. After scanning, operator enters their PIN or scans their personal QR badge to identify themselves. | Must | Given an operator at Station 3, when they scan station QR and enter PIN, then they are logged into Station 3 and can assign work orders. |
-| FR-6 | Work Order Assignment to Station | Logged-in operator can enter a work order number to begin working on it. System records start time, associates operator with the work order, and tracks time until operator logs out or assigns a different work order. | Must | Given an operator logged into Station 3, when they enter WO-1234, then time tracking begins and WO-1234 shows "In Progress at Station 3". |
+| FR-5 | Station QR Code Sign-In | Operators scan a posted **station QR placard** (one per work center) to select their station, then sign in with **email/password** on their own phone (the Supabase session persists, so sign-in is effectively one-time per device). An already-signed-in operator who scans a placard just has their station switched. No PIN or badge. | Must | Given an operator who scans the CNC Lathe #2 placard and signs in, then their station is set to CNC Lathe #2 and they land on that station's job list. |
+| FR-6 | Pick Work from the Station Queue | The operator's station job list shows every (job, part) with an operation ready or in progress at that station, sorted by due date. The operator taps a row to open the step and records work with a single **Mark Complete** — no work-order entry, no start/stop, no timer (see §4.3, Complete-Only). | Must | Given an operator at CNC Lathe #2 with ready work, when they open the job list, then they see the ready (job, part) rows and can Mark Complete in one tap. |
 | FR-7 | File Attachment Support | Work orders and **parts** support PDF and CAD (STEP/DWG) file attachments. Jobs accept PDF attachments; parts accept PDF/STEP/DWG on the part workspace Files tab. **Status (June 2026): admin/office-side delivered** — attachments + in-app PDF and STEP 3D viewing live in the admin-only part/job workspaces (STEP via `online-3d-viewer`, with occt-import-js fetched from the jsdelivr CDN at runtime). DWG is download-only (Contour standardizes on PDF upstream). **Not yet delivered:** operator-on-device viewing — the part workspace is not the operator shop-floor view, so surfacing attachment viewing in the operator view is a separate future step that closes this FR. | Must | Given a part with an attached PDF drawing, when an office user opens it from the part's Files tab, then it renders inline. *(Operator-on-device acceptance pending the operator-view step.)* |
 | FR-8 | Work Order Status Lifecycle | Work orders progress through defined statuses: Requested → Approved → In Progress → Quality Checked → Shipped → Delivered → Invoiced → Complete. Status changes are logged with timestamp and user. | Must | Given a work order in Quality Checked status, when QC approves, then status changes to ready for shipping with audit log entry. |
 | FR-9 | Invoice Generation | Bookkeeper can generate an invoice for any work order in Shipped or Delivered status. Invoice includes work order details, line items, customer info, and calculated totals. Invoices can be exported as PDF. | Must | Given a shipped work order, when bookkeeper clicks Generate Invoice, then an invoice is created with correct pricing and can be downloaded as PDF. |
 | FR-10 | Invoice Payment Tracking | Bookkeeper can mark invoices as Paid and record payment date, amount, and method. System shows aging report of outstanding invoices. | Must | Given an outstanding invoice, when bookkeeper marks as paid with $500, then invoice status updates and aging report reflects the change. |
-| FR-11 | Work Order Templates | Owner/Engineer can create templates that define station routing (series or parallel flows), estimated time per station, and materials consumed. Templates speed up work order creation for repeat jobs. | Should | Given a template for "Custom Reamer", when salesperson creates work order using template, then routing and material estimates auto-populate. |
+| FR-11 | Routing Templates | Owner/Engineer can define a part's routing as a **linear sequence** of operations (no parallel/DAG branching), with estimated setup/run time per operation and the materials consumed. Routings speed up job creation for repeat parts. | Should | Given a routing for "Custom Reamer", when a job is created for that part, then its operations and material estimates are cloned onto the job. |
 | FR-12 | Operator Performance Gamification | Operators see real-time performance metrics including jobs completed, average time per station, and streaks for consecutive on-time completions. Achievements unlock for milestones. | Should | Given an operator who completes 5 jobs on-time, when they view dashboard, then a "5-streak" badge is visible. |
 | FR-13 | Inventory Transaction History | All inventory changes (additions, depletions, adjustments) are logged with timestamp, user, work order (if applicable), and quantity. Users can filter and export transaction history. | Should | Given an inventory item, when user views history, then all transactions are listed chronologically with full details. |
 | FR-14 | Shipping Label Generation | Admin can generate shipping labels for completed work orders. Integration with USPS, UPS, and FedEx APIs. Focus on USPS flat rate boxes for initial release. | Should | Given a work order ready to ship, when admin clicks Generate Label, then a USPS label is created and tracking number is stored. |
@@ -135,7 +135,7 @@ Role restrictions are enforced at **two levels**:
 | FR-16 | Legacy Data Migration | System supports CSV upload for inventory items, customers, and work order history. Upload wizard validates data, flags errors, and allows user correction before import. | Should | Given a CSV export from Tangle, when owner uploads to migration wizard, then data is validated and imported with error report. |
 | FR-17 | Owner Dashboard with Insights | Dashboard displays key metrics: active work orders, revenue in progress, inventory alerts, operator compliance rate, and jobs at risk of delay. AI-powered insights highlight bottlenecks. | Should | Given current shop data, when owner views dashboard, then they see WIP value, 3 inventory alerts, and 2 at-risk jobs flagged by AI. |
 | FR-18 | Natural Language Business Queries | Owner can type questions like "What was revenue last month?" or "Which customer has the most open orders?" and receive AI-generated answers based on system data. | Could | Given the question "What's my average order value this quarter?", when owner submits, then AI returns calculated answer with source data. |
-| FR-19 | Quality Inspection Workflow | Quality Checker can view completed work orders, perform inspection, and mark as Pass or Fail. Failed jobs route back to production with notes. Passed jobs advance to Shipped queue. | Must | Given a work order awaiting QC, when checker marks Fail with notes "Tolerance out of spec", then work order routes back to operator with notes visible. |
+| FR-19 | Quality Inspection Workflow | *(Not yet built.)* A future Quality Checker role would inspect completed work and mark Pass/Fail, routing failures back with notes. Operator-side quality/scrap capture is in **discovery** — see [operator-paperless-flow.md](operator-paperless-flow.md) §5.4. | Could | Given a work order awaiting QC, when checker marks Fail with notes "Tolerance out of spec", then work order routes back to operator with notes visible. |
 | FR-20 | Customer Management | System maintains customer records with contact info, shipping addresses, and order history. New customers are created when first work order is entered. Admin can edit/delete customer records. | Should | Given a new work order for "Acme Corp", when submitted, then Acme Corp customer record is created if not exists with contact details. |
 
 ### 4.2 Flows and Scenarios
@@ -148,7 +148,7 @@ Flow 1: job Happy Path
 
 3. Salesperson/Owner converts quote directly into a job (job.due_date = today + lead_time)
 
-4. Operator scans operation type QR, enters job number (status: In Progress)
+4. Operator scans the station QR placard (or a job's per-operation QR), opens the step, and taps Mark Complete (part → In Progress)
 
 5. Operator completes work, logs output
 
@@ -196,19 +196,19 @@ Flow 1: job Happy Path
 
 7. Reorder alert clears
 
-**Flow 4: Operator Shift Start**
+**Flow 4: Operator Station Sign-In**
 
-1. Operator arrives at operation type (e.g., CNC Lathe #2)
+1. Operator arrives at a work center (e.g., CNC Lathe #2)
 
-2. Operator scans operation type QR code with personal phone
+2. Operator scans the posted station QR placard with their own phone
 
-3. System prompts for operator identification (PIN or badge scan)
+3. If not already signed in, they sign in with email/password (effectively one-time per device); an already-signed-in operator simply has their station switched
 
-4. Operator authenticated and logged into operation type
+4. Their station is set to CNC Lathe #2 and they land on that station's job list
 
-5. Operator views available jobs, selects one
+5. Operator picks a ready job and opens the step
 
-6. Time tracking begins for operator + job + operation type combination
+6. Operator records the work with a single Mark Complete — no start/stop, no timer (see §4.3)
 
 ---
 
@@ -456,110 +456,10 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
   1. Nice to have
 
 7. Should job templates support parallel operation type routing (e.g., two operations happen simultaneously) or only series?
-  1. Parallel is a must have
+  1. Resolved (2026): routings are a **linear sequence only** — no parallel/DAG branching. The earlier "parallel is a must have" was reversed in favor of shop-floor simplicity.
 
 8. What gamification elements are most motivating for operators? (Leaderboards? Badges? Cash bonuses tied to achievements?)
   1. Leaderboards, badges and customization. no cash bonuses as all value should be intrinsic to the app
 
 
 
-[PRD Critique](prd-critique.md)
-# Executive Summary
-
-  > ⚠️ Overall Assessment: NEEDS WORK - Significant gaps exist between documentation and implementation on main branch.
-
-## Key Strengths
-
-  - Clear problem statement addressing real pain points for small machine shops
-
-  - Well-defined user personas (Owner, Operator, Salesperson, Estimator)
-
-  - Comprehensive user stories in table format for each module
-
-  - Proper multi-tenancy architecture (company_id isolation)
-
-## Critical Gaps
-
-  1. Quotes module not on main branch - Fully developed on feature branch but not merged
-
-  2. Jobs module is placeholder only - DB schema exists but no UI/functionality
-
-  3. Dashboard is empty - Spec calls for KPI cards, due-this-week list, activity feed
-
-  4. Routings module missing entirely - Not even a placeholder page
-
-  ---
-
-# PRD Completeness Analysis
-
-  ✅ Present: Vision & Summary, Problem Statement, User Stories, Functional Requirements, Data Model, Dependencies
-
-  ⚠️ Partial: User Personas, Scope (In/Out), Timeline/Phases
-
-  ❌ Missing: Non-Functional Requirements, Success Metrics, Assumptions, Risks
-
-  ---
-
-# Module Gap Analysis
-
-## Customers Module ✅
-
-  FULL MATCH - All 9 user stories implemented. CRUD, CSV import with AI mapping, bulk operations, soft delete all working.
-
-## Parts Module ⚠️
-
-  MOSTLY ALIGNED - Missing: Filter by customer dropdown, Active/inactive status field and filter
-
-## Quotes Module ❌
-
-  CRITICAL: NOT ON MAIN BRANCH - Exists on feature/quotes-module branch with ~3,320 lines but not merged. Users cannot create quotes.
-
-## Jobs Module ❌
-
-  CRITICAL: PLACEHOLDER ONLY - Page shows 'jobs & Jobs - coming soon'. DB schema exists but no frontend. This is the CORE of manufacturing ERP.
-
-## Operations Module ✅
-
-  FULL MATCH - Resource groups and operation types with labor rates. Only gap: custom fields not implemented (low priority).
-
-## Dashboard Module ❌
-
-  CRITICAL: MINIMAL - Spec has detailed wireframe with 4 KPI cards, jobs due list, activity feed. Implementation is just 'Welcome to Jigged'.
-
-## Routings Module ❌
-
-  PLACEHOLDER ONLY - Page shows 'Production Routings - coming soon'. Schema exists but no UI.
-
-  ---
-
-# Recommendations
-
-## Critical (Must Fix)
-
-  1. Merge Quotes module to main - Sales pipeline is blocked without quoting
-
-  2. Implement Jobs module - Core of manufacturing ERP; without it, system is just a CRM
-
-  3. Build Dashboard KPIs - Owners need at-a-glance visibility
-
-## Important (Should Fix)
-
-  1. Add Routings module - Jobs without routings lack manufacturing process definition
-
-  2. Add Parts filtering - Customer filter and active/inactive status per spec
-
-  3. Document RLS policies - Security configuration should be in PRD
-
-## Minor (Nice to Have)
-
-  1. Add success metrics to PRD
-
-  2. Add non-functional requirements to PRD
-
-  3. Create risk register
-
-  ---
-
-  **Evaluated: **2026-01-02 by Claude Code (Opus 4.5)
-
-  **Branch: **main

@@ -11,7 +11,10 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   builder.error = null;
   return {
     mockQueryBuilder: builder,
-    mockSupabase: { from: vi.fn().mockImplementation(() => builder) },
+    mockSupabase: {
+      from: vi.fn().mockImplementation(() => builder),
+      rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
+    },
   };
 });
 
@@ -26,12 +29,33 @@ vi.mock('@/lib/supabaseErrors', () => ({
     opts?.fallback ?? 'error',
 }));
 
-import { getJobNotes, addJobNote } from '@/utils/operatorAccess';
+import { getJobNotes, addJobNote, getAllStationsOperatorJobs } from '@/utils/operatorAccess';
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockQueryBuilder.data = null;
   mockQueryBuilder.error = null;
+});
+
+describe('getAllStationsOperatorJobs', () => {
+  it('queries readiness once per station (parallel) and returns [] when nothing is ready', async () => {
+    // The hoisted rpc mock resolves to no ready ops for every station, so the
+    // function short-circuits before any enrichment queries.
+    const stations = [
+      { id: 'wc1', name: 'Lathe' },
+      { id: 'wc2', name: 'Mill' },
+      { id: 'wc3', name: 'Deburr' },
+    ];
+
+    const result = await getAllStationsOperatorJobs('c1', stations);
+
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(3);
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('get_ready_operations_for_station', {
+      p_company_id: 'c1',
+      p_work_center_id: 'wc2',
+    });
+    expect(result).toEqual([]);
+  });
 });
 
 describe('getJobNotes', () => {

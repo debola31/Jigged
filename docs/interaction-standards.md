@@ -146,11 +146,11 @@ When an action can't be performed in the current state, prefer (in order):
    than hiding or graying out. A *disabled* button isn't focusable, so keyboard /
    screen-reader users never learn it exists or why, and a hover tooltip hides the
    reason ([NN/g — Why Disabled Buttons Hurt UX](https://www.nngroup.com/videos/why-disabled-buttons-hurt-ux-and-how-to-fix-them/), [NN/g — Disabled Accessibility: the pragmatic approach](https://www.nngroup.com/articles/disabled-accessibility-the-pragmatic-approach/), [Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/)).
-   Example: Delete shows on any job where removal is a plausible intent (queued,
-   running, or cancelled); clicking explains the next step — *cancel this job
-   first* for a running one, or *kept for recordkeeping* when shipment history
-   blocks it — instead of hiding the button or running a confirm→error two-step.
-   (Completed jobs are terminal, so Delete is omitted there — rule 3.)
+   Example: Delete shows on **every** job, in any production status; clicking
+   explains the blocker when there is one — *kept for recordkeeping* when the job
+   has a shipment or a QuickBooks invoice — instead of hiding the button or
+   running a confirm→error two-step. Removal is gated by *records of value*, not
+   the status label (the discriminator shop ERPs use for hard-delete).
 2. **Disable only for a stable lock** whose disabled state is itself meaningful,
    paired with a *visible* reason (not hover-only); prefer `aria-disabled` so it
    stays focusable. Example: once invoiced in QuickBooks, "Edit line" is disabled

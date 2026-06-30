@@ -184,10 +184,10 @@ export default function JobDetailPage() {
     }
   };
 
-  // Explain-on-click instead of hiding/greying: tell the user the next step or
-  // the blocker immediately rather than opening a confirm dialog that only ends
-  // in an error. Shipment history is the hard blocker (checked first, any
-  // status); a running job needs cancelling first; otherwise confirm + delete.
+  // Explain-on-click instead of hiding/greying: deletion is gated by records of
+  // value (a shipment or an invoice), not production status. If either exists,
+  // say so immediately rather than opening a confirm dialog that only errors;
+  // otherwise confirm + delete (any status).
   const handleDeleteClick = () => {
     if (shipmentCount && shipmentCount > 0) {
       setError(
@@ -195,8 +195,10 @@ export default function JobDetailPage() {
       );
       return;
     }
-    if (job?.production_status === 'in_progress') {
-      setError('Cancel this job first, then you can delete it.');
+    if (qbInvoiceLink) {
+      setError(
+        "This job has been invoiced in QuickBooks, so it's kept for recordkeeping and can't be deleted.",
+      );
       return;
     }
     setDeleteDialogOpen(true);
@@ -241,17 +243,10 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
-  // Delete is offered wherever removing the job is a plausible intent — queued,
-  // running, or cancelled — so the option is discoverable rather than hidden
-  // until a precondition is met. The next step (cancel a running job first) or
-  // the blocker (shipment history) is explained on click. Completed jobs are
-  // terminal (finished work, can't be cancelled), so Delete is genuinely
-  // irrelevant there and omitted. The access layer only permits not-started /
-  // cancelled deletes as the backstop.
-  const canDelete =
-    job.production_status === 'not_started' ||
-    job.production_status === 'cancelled' ||
-    job.production_status === 'in_progress';
+  // Delete is shown on every job, in any production status — removal is gated by
+  // records of value (a shipment or an invoice), not the status label, and that
+  // gate is explained on click (see handleDeleteClick) rather than by hiding the
+  // button. The access layer enforces the same gate as the backstop.
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
@@ -428,20 +423,18 @@ export default function JobDetailPage() {
               Cancel
             </Button>
           )}
-          {canDelete && (
-            <Tooltip title="Delete job">
-              <span>
-                <IconButton
-                  color="error"
-                  onClick={handleDeleteClick}
-                  disabled={actionLoading}
-                  aria-label="Delete job"
-                >
-                  <DeleteIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-          )}
+          <Tooltip title="Delete job">
+            <span>
+              <IconButton
+                color="error"
+                onClick={handleDeleteClick}
+                disabled={actionLoading}
+                aria-label="Delete job"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
 
           {qbInvoiceLink ? (
             <Button

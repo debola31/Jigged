@@ -71,17 +71,17 @@ describe('jobsAccess', () => {
   });
 
   describe('deleteJob', () => {
-    // deleteJob now: (1) loads production_status, (2) counts shipments,
-    // (3) cleans storage, (4) deletes. Both the status load and the delete hit
-    // from('jobs'), so use a per-table mock that serves select+delete and
-    // captures the delete scoping.
+    // deleteJob gates on records of value (shipments + invoice), NOT production
+    // status: confirm existence, check countShipmentsForJob +
+    // getQuickBooksInvoiceLinkForJob, clean storage, then delete. The existence
+    // load and the delete both hit from('jobs'); the mock serves select+delete
+    // and captures the delete scoping.
     function installJobsFrom(opts: {
-      jobRow?: { production_status: string } | null;
+      jobRow?: { id: string } | null;
       loadError?: { message: string } | null;
       deleteError?: { message: string } | null;
     }) {
-      const jobRow =
-        opts.jobRow === undefined ? { production_status: 'not_started' } : opts.jobRow;
+      const jobRow = opts.jobRow === undefined ? { id: 'j1' } : opts.jobRow;
       const deleteEqArgs: Array<[string, unknown]> = [];
       const deleteFn = vi.fn().mockReturnValue({
         eq: vi.fn().mockImplementation((c1: string, v1: unknown) => {
@@ -116,13 +116,12 @@ describe('jobsAccess', () => {
 
     beforeEach(() => {
       vi.mocked(countShipmentsForJob).mockResolvedValue(0);
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
       vi.mocked(deleteStoredFilesForJobs).mockResolvedValue(undefined);
     });
 
-    it('deletes a not_started job scoped to company_id after the guards pass', async () => {
-      const { deleteFn, deleteEqArgs } = installJobsFrom({
-        jobRow: { production_status: 'not_started' },
-      });
+    it('deletes a job with no shipments or invoice, scoped to company_id (any status)', async () => {
+      const { deleteFn, deleteEqArgs } = installJobsFrom({});
       await deleteJob('j1', 'co-1');
       expect(deleteStoredFilesForJobs).toHaveBeenCalledWith(['j1']);
       expect(deleteFn).toHaveBeenCalledTimes(1);
@@ -130,32 +129,22 @@ describe('jobsAccess', () => {
       expect(deleteEqArgs).toContainEqual(['company_id', 'co-1']);
     });
 
-    it('deletes a cancelled job', async () => {
-      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'cancelled' } });
-      await deleteJob('j1', 'co-1');
-      expect(deleteFn).toHaveBeenCalledTimes(1);
-    });
-
-    it('rejects an in_progress job and never deletes', async () => {
-      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'in_progress' } });
-      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(
-        /not yet started or cancelled/,
-      );
+    it('rejects when the job has shipment records and never deletes', async () => {
+      vi.mocked(countShipmentsForJob).mockResolvedValue(2);
+      const { deleteFn } = installJobsFrom({});
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/shipment records/);
       expect(deleteFn).not.toHaveBeenCalled();
       expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
     });
 
-    it('rejects a completed job', async () => {
-      installJobsFrom({ jobRow: { production_status: 'completed' } });
-      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(
-        /not yet started or cancelled/,
-      );
-    });
-
-    it('rejects when the job has shipment records and never deletes', async () => {
-      vi.mocked(countShipmentsForJob).mockResolvedValue(2);
-      const { deleteFn } = installJobsFrom({ jobRow: { production_status: 'cancelled' } });
-      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/shipment records/);
+    it('rejects when the job has been invoiced and never deletes', async () => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
+        invoiceId: 'i1',
+        docNumber: '1001',
+        url: 'http://qb.example/invoice/1',
+      });
+      const { deleteFn } = installJobsFrom({});
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/invoiced in QuickBooks/i);
       expect(deleteFn).not.toHaveBeenCalled();
       expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
     });
@@ -166,10 +155,7 @@ describe('jobsAccess', () => {
     });
 
     it('throws a friendly error when the delete query fails', async () => {
-      installJobsFrom({
-        jobRow: { production_status: 'not_started' },
-        deleteError: { message: 'boom' },
-      });
+      installJobsFrom({ deleteError: { message: 'boom' } });
       await expect(deleteJob('j1', 'co-1')).rejects.toBeTruthy();
     });
   });

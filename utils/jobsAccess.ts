@@ -889,25 +889,29 @@ export async function getJobQuantitiesForQuote(
 // ============== Job Lifecycle ==============
 
 /**
- * Delete a job. Only jobs that are not yet started or cancelled may be deleted;
- * an in-progress or completed job must be cancelled first. This guard lives here
- * (not just in the UI) so a bypassed caller still can't remove an in-flight job.
+ * Delete a job. Deletion is gated by RECORDS OF VALUE, not production status: a
+ * job can be removed in any production state (queued, running, completed, or
+ * cancelled) as long as it has no shipment records and no QuickBooks invoice —
+ * deleting either would orphan a real record. The discriminator is history, not
+ * the status label (matches how shop ERPs gate hard-delete). This guard lives
+ * here, not just in the UI, so a bypassed caller still can't remove a
+ * shipped/invoiced job.
  *
  * Cascades remove job_parts, job_operations, job_materials, job_notes,
- * job_attachments (rows) and the quickbooks_invoice_links. Two things don't
- * cascade and are handled explicitly:
+ * job_attachments (rows) and the quickbooks_invoice_links; inventory_transactions
+ * keep their rows with job_id set null. Two things are handled explicitly:
  *   - attachment files in storage — cleaned up (best-effort) before the delete.
- *   - shipments — shipments_job_id_fkey has no ON DELETE, so a job with any
- *     shipment row (a cancelled job that shipped, even if later voided) is
- *     blocked rather than silently destroying fulfillment history.
+ *   - shipments — shipments_job_id_fkey has no ON DELETE, so any shipment row
+ *     (voided included) blocks deletion rather than tripping the FK / losing
+ *     fulfillment history.
  */
 export async function deleteJob(jobId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Load status (scoped by company) — before any destructive step.
+  // 1. Existence + tenant scope.
   const { data: jobRow, error: loadErr } = await supabase
     .from('jobs')
-    .select('production_status')
+    .select('id')
     .eq('id', jobId)
     .eq('company_id', companyId)
     .maybeSingle();
@@ -922,25 +926,21 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
     throw new Error('Job not found.');
   }
 
-  // 2. Status guard: only not-started or cancelled jobs are deletable.
-  const status = jobRow.production_status as ProductionStatus;
-  if (status !== 'not_started' && status !== 'cancelled') {
-    throw new Error(
-      'Only jobs that are not yet started or cancelled can be deleted. ' +
-        'Cancel this job first if you want to remove it.',
-    );
-  }
-
-  // 3. Shipments guard: any referencing shipment (voided included) would trip
-  //    the FK. Block and surface the gap rather than destroying history.
+  // 2. Records-of-value guards (status-agnostic). A shipment or a created invoice
+  //    means the job is kept for recordkeeping rather than hard-deleted.
   if ((await countShipmentsForJob(jobId)) > 0) {
     throw new Error(
-      "This job has shipment records and can't be deleted. " +
-        'Jobs with packing slips are kept for recordkeeping.',
+      "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
+    );
+  }
+  const invoiceLink = await getQuickBooksInvoiceLinkForJob(companyId, jobId);
+  if (invoiceLink) {
+    throw new Error(
+      "This job has been invoiced in QuickBooks, so it's kept for recordkeeping and can't be deleted.",
     );
   }
 
-  // 4. Clean up storage (best-effort), then delete the job row.
+  // 3. Clean up storage (best-effort), then delete the job row.
   await deleteStoredFilesForJobs([jobId]);
 
   const { error } = await supabase

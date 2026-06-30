@@ -184,14 +184,19 @@ export default function JobDetailPage() {
     }
   };
 
-  // Explain-on-click instead of hiding/greying the button: a job with shipment
-  // records is kept for recordkeeping and can't be deleted — say so immediately
-  // rather than opening a confirm dialog that would only end in an error.
+  // Explain-on-click instead of hiding/greying: tell the user the next step or
+  // the blocker immediately rather than opening a confirm dialog that only ends
+  // in an error. Shipment history is the hard blocker (checked first, any
+  // status); a running job needs cancelling first; otherwise confirm + delete.
   const handleDeleteClick = () => {
     if (shipmentCount && shipmentCount > 0) {
       setError(
         "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
       );
+      return;
+    }
+    if (job?.production_status === 'in_progress') {
+      setError('Cancel this job first, then you can delete it.');
       return;
     }
     setDeleteDialogOpen(true);
@@ -236,13 +241,17 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
-  // Delete is offered for any not-started or cancelled job — consistent with
-  // Reopen/Cancel being status-driven, so the option is always discoverable
-  // rather than appearing on some cancelled jobs but not others. Whether a
-  // specific job can actually be deleted (no shipment records) is explained on
-  // click; the access layer still guards as a backstop.
+  // Delete is offered wherever removing the job is a plausible intent — queued,
+  // running, or cancelled — so the option is discoverable rather than hidden
+  // until a precondition is met. The next step (cancel a running job first) or
+  // the blocker (shipment history) is explained on click. Completed jobs are
+  // terminal (finished work, can't be cancelled), so Delete is genuinely
+  // irrelevant there and omitted. The access layer only permits not-started /
+  // cancelled deletes as the backstop.
   const canDelete =
-    job.production_status === 'not_started' || job.production_status === 'cancelled';
+    job.production_status === 'not_started' ||
+    job.production_status === 'cancelled' ||
+    job.production_status === 'in_progress';
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&

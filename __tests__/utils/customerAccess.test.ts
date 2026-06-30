@@ -52,6 +52,7 @@ vi.mock('@/lib/supabase', () => ({
 import {
   getAllCustomers,
   getCustomer,
+  getCustomerWithRelations,
   checkCustomerNameExists,
   createCustomer,
   updateCustomer,
@@ -163,6 +164,50 @@ describe('customerAccess utilities', () => {
       // getCustomer now returns CustomerWithAddresses — the addresses
       // array is normalized to [] when the join returns nothing.
       expect(result).toEqual({ ...mockCustomer, addresses: [] });
+    });
+  });
+
+  describe('getCustomerWithRelations', () => {
+    const mockCustomer: Customer = {
+      id: 'customer-1',
+      company_id: 'company-1',
+      name: 'Customer One',
+      website: null,
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    it('returns the customer with quotes/jobs counts from the parallel queries', async () => {
+      mockQueryBuilder.data = mockCustomer;
+      mockQueryBuilder.count = 5;
+      mockQueryBuilder.error = null;
+
+      const result = await getCustomerWithRelations('customer-1');
+
+      // Customer fetch plus the two count queries are all issued.
+      expect(mockSupabase.from).toHaveBeenCalledWith('customers');
+      expect(mockSupabase.from).toHaveBeenCalledWith('quotes');
+      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
+      // Shared mock builder returns the same count for both, but the point is
+      // the counts flow through to the mapped result.
+      expect(result).not.toBeNull();
+      expect(result?.quotes_count).toBe(5);
+      expect(result?.jobs_count).toBe(5);
+      expect(result?.addresses).toEqual([]);
+    });
+
+    it('returns null and skips the count queries when the customer is missing', async () => {
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = null;
+
+      const result = await getCustomerWithRelations('missing');
+
+      expect(result).toBeNull();
+      // The early null-return must short-circuit before the counts — the
+      // parallelization must not eagerly fire quotes/jobs for a missing row.
+      expect(mockSupabase.from).toHaveBeenCalledWith('customers');
+      expect(mockSupabase.from).not.toHaveBeenCalledWith('quotes');
+      expect(mockSupabase.from).not.toHaveBeenCalledWith('jobs');
     });
   });
 

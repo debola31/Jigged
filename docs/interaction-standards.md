@@ -134,3 +134,27 @@ not a status column:
 - On the part page: a guidance banner **plus** per-row highlights at the source
   (operation missing a labor rate; BOM material with no cost) — show users
   *where* to fix it, not just that something's wrong ([NN/g — form errors](https://www.nngroup.com/articles/errors-forms-design-guidelines/), [GOV.UK — validation](https://design-system.service.gov.uk/patterns/validation/)).
+
+---
+
+## 4. Unavailable actions (block vs. allow-then-error)
+
+When an action can't be performed in the current state, prefer (in order):
+
+1. **Show only the action that works.** Don't surface a control whose only
+   outcome is an error. If a state has a different valid action, show that one
+   instead. Example: a job with shipment records can't be hard-deleted (the
+   shipments FK / recordkeeping), so the detail page simply doesn't offer Delete
+   for it — Delete appears only for not-started/cancelled jobs with no shipments.
+   The access layer still refuses as a backstop.
+2. **Enabled + explain on attempt** for dynamic/validation gates — keep the
+   control clickable and explain what's wrong when they try. Disabled buttons +
+   hover tooltips are the weak pattern: keyboard/screen-reader users never get
+   the reason and the "why" is hidden ([Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/), [NN/g — error messages](https://www.nngroup.com/articles/error-message-guidelines/)).
+3. **Disable only for a stable lock** whose disabled state is itself meaningful —
+   and always pair it with a *visible* reason, not hover-only. Example: once a job
+   is invoiced in QuickBooks, "Edit line" is disabled with a 🔒 icon **and** a
+   visible "View invoice" button signalling the lock; the tooltip is supplementary.
+
+Avoid: a confirm dialog that leads to an error ("are you sure?" → "can't do
+that"). That's two steps to a dead-end — resolve via rule 1 or 2 instead.

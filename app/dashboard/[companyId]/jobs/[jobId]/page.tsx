@@ -15,6 +15,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
+import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Menu from '@mui/material/Menu';
@@ -36,7 +37,7 @@ import Snackbar from '@mui/material/Snackbar';
 
 import { getJobWithRelations, cancelJob, reopenJob, deleteJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
-import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
@@ -81,6 +82,7 @@ export default function JobDetailPage() {
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
+  const [shipmentCount, setShipmentCount] = useState<number | null>(null);
   const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
   const [qtySuccess, setQtySuccess] = useState<string | null>(null);
   // Anchors for the top-bar Edit-Quantity / Print-Traveler part pickers
@@ -139,6 +141,23 @@ export default function JobDetailPage() {
       cancelled = true;
     };
   }, [companyId, jobId]);
+
+  // Deletability depends on having no shipment records (voided included — the FK
+  // blocks either way). Fetch the count so we only OFFER Delete when it can
+  // actually succeed, instead of letting the user confirm and then hit an error.
+  useEffect(() => {
+    let cancelled = false;
+    countShipmentsForJob(jobId)
+      .then((n) => {
+        if (!cancelled) setShipmentCount(n);
+      })
+      .catch(() => {
+        if (!cancelled) setShipmentCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
 
   const handleReopen = async () => {
     setActionLoading(true);
@@ -204,11 +223,13 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
-  // Only not-yet-started or cancelled jobs may be deleted. The access layer is
-  // the source of truth (it also blocks jobs with shipment records); this gate
-  // just hides the button for in-flight jobs.
+  // Only OFFER Delete when it can actually succeed: a not-started/cancelled job
+  // with no shipment records (show-the-action-that-works — we don't surface a
+  // Delete that would only error). The access layer still guards as a backstop.
+  // shipmentCount is null until loaded, so Delete stays hidden until we know.
   const canDelete =
-    job.production_status === 'not_started' || job.production_status === 'cancelled';
+    (job.production_status === 'not_started' || job.production_status === 'cancelled') &&
+    shipmentCount === 0;
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
@@ -386,15 +407,18 @@ export default function JobDetailPage() {
             </Button>
           )}
           {canDelete && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={() => setDeleteDialogOpen(true)}
-              disabled={actionLoading}
-            >
-              Delete
-            </Button>
+            <Tooltip title="Delete job">
+              <span>
+                <IconButton
+                  color="error"
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={actionLoading}
+                  aria-label="Delete job"
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
           )}
 
           {qbInvoiceLink ? (

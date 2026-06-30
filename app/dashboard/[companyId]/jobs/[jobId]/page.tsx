@@ -423,19 +423,6 @@ export default function JobDetailPage() {
               Cancel
             </Button>
           )}
-          <Tooltip title="Delete job">
-            <span>
-              <IconButton
-                color="error"
-                onClick={handleDeleteClick}
-                disabled={actionLoading}
-                aria-label="Delete job"
-              >
-                <DeleteIcon />
-              </IconButton>
-            </span>
-          </Tooltip>
-
           {qbInvoiceLink ? (
             <Button
               variant="outlined"
@@ -456,6 +443,21 @@ export default function JobDetailPage() {
               Create Invoice in QuickBooks
             </Button>
           )}
+
+          {/* Delete is always the rightmost action — last in the row, away from
+              the benign actions, so the destructive control is predictably placed. */}
+          <Tooltip title="Delete job">
+            <span>
+              <IconButton
+                color="error"
+                onClick={handleDeleteClick}
+                disabled={actionLoading}
+                aria-label="Delete job"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       </Box>
 

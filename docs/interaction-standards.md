@@ -29,6 +29,10 @@ to the consequence.
     editor: BOM materials, pricing tiers, routing operations, quote line items,
     part notes. Use the shared [`components/common/DeleteIconButton`](../components/common/DeleteIconButton.tsx),
     which bakes in the hollow icon + `color="error"` so it can't be hand-rolled grey.
+- **Position — delete sits last.** In a header/toolbar action row the delete
+  control is always the **rightmost** item, set apart from the benign actions, so
+  the destructive option is predictably located and not crowded next to common
+  ones ([NN/g — consequential options near benign ones](https://www.nngroup.com/articles/proximity-consequential-options/)).
 - Enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts):
   a delete icon set to `text.secondary` fails CI. (Glyph choice is a per-call-site
   judgment, not machine-enforced.)

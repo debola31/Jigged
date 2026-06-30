@@ -14,6 +14,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import IconButton from '@mui/material/IconButton';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import LayersIcon from '@mui/icons-material/Layers';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
@@ -107,15 +108,26 @@ export default function OperatorJobTravelerPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      {/* Back to the operator's station jobs list (not the parts hub, which
-          auto-redirects single-part jobs straight back to this traveler). */}
-      <IconButton
-        onClick={() => router.push(`/operator/${companyId}/jobs`)}
-        sx={{ mb: 2 }}
-        aria-label="Back to jobs"
-      >
-        <ArrowBackIcon />
-      </IconButton>
+      {/* Back to the station jobs list, plus an "all parts" jump for multi-part
+          jobs. Single-part jobs have job_part_count = 1, so the link is hidden
+          (their hub would just redirect back here). */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+        <IconButton
+          onClick={() => router.push(`/operator/${companyId}/jobs`)}
+          aria-label="Back to jobs"
+        >
+          <ArrowBackIcon />
+        </IconButton>
+        {traveler.job_part_count > 1 && (
+          <Button
+            size="small"
+            startIcon={<LayersIcon />}
+            onClick={() => router.push(`/operator/${companyId}/jobs/${jobId}`)}
+          >
+            All {traveler.job_part_count} parts
+          </Button>
+        )}
+      </Box>
 
       {/* Header — mirrors the printed traveler's job block */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>

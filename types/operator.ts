@@ -55,6 +55,16 @@ export interface OperatorJob {
 }
 
 /**
+ * A whole-plant ("All Stations") job row — an OperatorJob plus which station
+ * (work center) its ready operation runs at, so the list can group by station.
+ * Returned by getAllStationsOperatorJobs(); the per-station list uses OperatorJob.
+ */
+export interface OperatorPlantJob extends OperatorJob {
+  work_center_id: string | null;
+  work_center_name: string | null;
+}
+
+/**
  * Per-part operator detail view — the page where Start/Stop/Complete lives.
  */
 export interface OperatorJobDetail {
@@ -136,7 +146,32 @@ export interface JobTraveler {
   due_date: string | null;
   customer_po_number: string | null;
   production_status: string;
+  /** Number of parts on the parent job — drives the "all parts" hub link. */
+  job_part_count: number;
   operations: JobTravelerOperation[];
+}
+
+/**
+ * A whole-job parts overview for the operator parts hub — the job header plus
+ * each part with its progress, used to navigate a multi-part job.
+ */
+export interface JobPartsOverview {
+  job_id: string;
+  job_number: string;
+  customer_name: string | null;
+  due_date: string | null;
+  parts: JobPartSummary[];
+}
+
+/** One part row in the parts hub. */
+export interface JobPartSummary {
+  /** job_part_id — navigation key into the part traveler. */
+  job_part_id: string;
+  part_name: string | null;
+  quantity: number;
+  production_status: string;
+  operations_total: number;
+  operations_completed: number;
 }
 
 /**

@@ -16,6 +16,7 @@ import FormLabel from '@mui/material/FormLabel';
 import RadioGroup from '@mui/material/RadioGroup';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Radio from '@mui/material/Radio';
+import InputAdornment from '@mui/material/InputAdornment';
 import SaveIcon from '@mui/icons-material/Save';
 
 import type { JobPartWithRelations } from '@/types/job';
@@ -23,8 +24,10 @@ import {
   getJobPartPricingBasis,
   resolveJobPartUnitPrice,
   updateJobPartQuantity,
+  updateJobPartPrice,
   type JobPartPricingBasis,
   type UpdateJobPartQuantityResult,
+  type UpdateJobPartPriceResult,
 } from '@/utils/jobsAccess';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 
@@ -57,6 +60,9 @@ export default function EditJobPartQuantityModal({
   // reset-in-effect needed (which keeps the effect below free of synchronous
   // setState).
   const [qtyStr, setQtyStr] = useState(jobPart ? String(jobPart.quantity) : '');
+  const [priceStr, setPriceStr] = useState(
+    jobPart && jobPart.unit_price !== null ? String(jobPart.unit_price) : '',
+  );
   const [basis, setBasis] = useState<JobPartPricingBasis | null>(null);
   const [useNewTierPrice, setUseNewTierPrice] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -85,36 +91,82 @@ export default function EditJobPartQuantityModal({
   const parsed = parseFloat(qtyStr);
   const validInput = isValidQuantityInput(qtyStr) && qtyStr.trim() !== '' && parsed > 0;
   const belowShipped = validInput && parsed < qtyShipped;
-  const unchanged = validInput && parsed === currentQty;
+  const qtyChanged = validInput && parsed !== currentQty;
+
+  // Manual unit-price entry. Empty = "don't touch the price" (so a NULL-priced
+  // legacy line can still have its quantity edited). A non-empty value must be a
+  // finite number >= 0; a manual price supersedes the tier-break choice below.
+  const trimmedPrice = priceStr.trim();
+  const parsedPrice = parseFloat(trimmedPrice);
+  const priceProvided = trimmedPrice !== '';
+  const priceInvalid = priceProvided && (!Number.isFinite(parsedPrice) || parsedPrice < 0);
+  const priceChanged =
+    priceProvided &&
+    !priceInvalid &&
+    (jobPart.unit_price === null ||
+      Math.abs(parsedPrice - jobPart.unit_price) > PRICE_EPSILON);
 
   const { keepUnitPrice, tierUnitPrice } = validInput
     ? resolveJobPartUnitPrice(jobPart.unit_price, basis, parsed)
     : { keepUnitPrice: jobPart.unit_price, tierUnitPrice: null };
 
   // A tier crossing only matters when the snapshot price actually differs from
-  // the agreed price — same-price tiers don't warrant a choice.
+  // the agreed price — same-price tiers don't warrant a choice. A manual price
+  // entry overrides the tier choice entirely, so suppress it then.
   const crossesTier =
+    !priceChanged &&
     tierUnitPrice !== null &&
     keepUnitPrice !== null &&
     Math.abs(tierUnitPrice - keepUnitPrice) > PRICE_EPSILON;
 
-  const effectiveUnitPrice = useNewTierPrice && crossesTier ? tierUnitPrice : keepUnitPrice;
+  const effectiveUnitPrice = priceChanged
+    ? parsedPrice
+    : useNewTierPrice && crossesTier
+      ? tierUnitPrice
+      : keepUnitPrice;
   const newTotal =
     validInput && effectiveUnitPrice !== null ? round4(effectiveUnitPrice * parsed) : null;
 
-  const canSave = validInput && !belowShipped && !unchanged && !saving;
+  const canSave =
+    validInput && !belowShipped && !priceInvalid && (qtyChanged || priceChanged) && !saving;
 
   const handleConfirm = async () => {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
-      const result = await updateJobPartQuantity(jobPart.id, parsed, {
-        useNewTierPrice: useNewTierPrice && crossesTier,
-      });
+      // Apply quantity first, then the manual price. When both change, the price
+      // write reloads the (already-persisted) new quantity, so the final total =
+      // manual price × new quantity. Two writes (the JS client has no
+      // transaction); if the second fails the first stays — the user retries.
+      let qtyResult: UpdateJobPartQuantityResult | null = null;
+      if (qtyChanged) {
+        qtyResult = await updateJobPartQuantity(jobPart.id, parsed, {
+          useNewTierPrice: useNewTierPrice && crossesTier,
+        });
+      }
+      let priceResult: UpdateJobPartPriceResult | null = null;
+      if (priceChanged) {
+        priceResult = await updateJobPartPrice(jobPart.id, parsedPrice);
+      }
+
+      // Normalize both writes into the single onConfirmed shape. oldUnitPrice is
+      // the original (pre-edit) price; newUnitPrice is the final stored price.
+      const result: UpdateJobPartQuantityResult = {
+        jobPart: priceResult?.jobPart ?? qtyResult!.jobPart,
+        oldQuantity: qtyResult?.oldQuantity ?? currentQty,
+        newQuantity: qtyResult?.newQuantity ?? currentQty,
+        oldUnitPrice: qtyResult?.oldUnitPrice ?? priceResult?.oldUnitPrice ?? jobPart.unit_price,
+        newUnitPrice: priceResult?.newUnitPrice ?? qtyResult?.newUnitPrice ?? jobPart.unit_price,
+        oldTotalPrice:
+          qtyResult?.oldTotalPrice ?? priceResult?.oldTotalPrice ?? jobPart.total_price,
+        newTotalPrice:
+          priceResult?.newTotalPrice ?? qtyResult?.newTotalPrice ?? jobPart.total_price,
+        priceReresolved: qtyResult?.priceReresolved ?? false,
+      };
       await onConfirmed(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update the quantity.');
+      setError(e instanceof Error ? e.message : 'Failed to update the line.');
     } finally {
       setSaving(false);
     }
@@ -122,7 +174,7 @@ export default function EditJobPartQuantityModal({
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Edit Order Quantity</DialogTitle>
+      <DialogTitle>Edit line</DialogTitle>
       <DialogContent>
         <Box sx={{ mb: 2 }}>
           <Typography variant="body2" color="text.secondary">
@@ -183,6 +235,28 @@ export default function EditJobPartQuantityModal({
           }
         />
 
+        <TextField
+          label="Unit price"
+          value={priceStr}
+          onChange={(e) => {
+            const v = e.target.value;
+            // Permissive while typing (digits + one dot); validated on save.
+            if (/^\d*\.?\d*$/.test(v)) setPriceStr(v);
+          }}
+          inputMode="decimal"
+          fullWidth
+          size="small"
+          sx={{ mt: 2 }}
+          error={priceInvalid}
+          helperText={priceInvalid ? 'Enter a price of zero or more.' : ' '}
+          slotProps={{
+            htmlInput: { inputMode: 'decimal' },
+            input: {
+              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+            },
+          }}
+        />
+
         {crossesTier && (
           <FormControl sx={{ mt: 2 }}>
             <FormLabel sx={{ fontSize: '0.85rem' }}>
@@ -206,7 +280,7 @@ export default function EditJobPartQuantityModal({
           </FormControl>
         )}
 
-        {validInput && !unchanged && (
+        {validInput && (qtyChanged || priceChanged) && (
           <Box
             sx={{
               display: 'flex',
@@ -256,7 +330,7 @@ export default function EditJobPartQuantityModal({
           disabled={!canSave}
           startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
         >
-          {saving ? 'Saving…' : 'Save quantity'}
+          {saving ? 'Saving…' : 'Save'}
         </Button>
       </DialogActions>
     </Dialog>

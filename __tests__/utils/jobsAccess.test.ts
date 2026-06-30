@@ -47,6 +47,7 @@ import {
   reopenJob,
   searchJobsByIdentifier,
   updateJobAddressContact,
+  updateJobPartPrice,
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
@@ -647,6 +648,124 @@ describe('jobsAccess', () => {
       const updates: Array<Record<string, unknown>> = [];
       installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
       await expect(updateJobPartQuantity('jp1', 15)).rejects.toThrow(/cancelled/i);
+      expect(updates).toHaveLength(0);
+    });
+  });
+
+  describe('updateJobPartPrice', () => {
+    const baseJobPart = {
+      id: 'jp1',
+      job_id: 'job1',
+      company_id: 'co1',
+      quantity: 10,
+      unit_price: 100,
+      total_price: 1000,
+      production_status: 'in_progress',
+    };
+
+    // updateJobPartPrice writes job_parts via .update().eq('id').eq('company_id')
+    // .select('*').single() — two eq's, unlike the quantity path's single eq.
+    function installFrom(opts: {
+      jobPart?: Record<string, unknown> | null;
+      updates: Array<Record<string, unknown>>;
+    }) {
+      const jobPart = opts.jobPart === undefined ? baseJobPart : opts.jobPart;
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'job_parts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: jobPart, error: null }),
+              }),
+            }),
+            update: vi.fn().mockImplementation((patch: Record<string, unknown>) => ({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  select: vi.fn().mockReturnValue({
+                    single: vi.fn().mockImplementation(() => {
+                      opts.updates.push(patch);
+                      return Promise.resolve({ data: { ...jobPart, ...patch }, error: null });
+                    }),
+                  }),
+                }),
+              }),
+            })),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+    });
+
+    it('recomputes the total at the new price; never writes fulfillment_status', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      const result = await updateJobPartPrice('jp1', 125);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].unit_price).toBe(125);
+      expect(updates[0].total_price).toBe(1250);
+      expect(updates[0]).not.toHaveProperty('fulfillment_status');
+      expect(result.oldUnitPrice).toBe(100);
+      expect(result.newUnitPrice).toBe(125);
+      expect(result.oldTotalPrice).toBe(1000);
+      expect(result.newTotalPrice).toBe(1250);
+    });
+
+    it('rounds the recomputed total to 4dp', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, quantity: 3 }, updates });
+      await updateJobPartPrice('jp1', 1.3333);
+      expect(updates[0].total_price).toBe(3.9999);
+    });
+
+    it('allows a zero (no-charge) price', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      const result = await updateJobPartPrice('jp1', 0);
+      expect(updates[0].unit_price).toBe(0);
+      expect(updates[0].total_price).toBe(0);
+      expect(result.newTotalPrice).toBe(0);
+    });
+
+    it('sets a real price on a NULL-priced (legacy) line', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({
+        jobPart: { ...baseJobPart, unit_price: null, total_price: null, quantity: 4 },
+        updates,
+      });
+      const result = await updateJobPartPrice('jp1', 50);
+      expect(updates[0].unit_price).toBe(50);
+      expect(updates[0].total_price).toBe(200);
+      expect(result.oldUnitPrice).toBeNull();
+      expect(result.newUnitPrice).toBe(50);
+    });
+
+    it('rejects a negative price before any read', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      await expect(updateJobPartPrice('jp1', -5)).rejects.toThrow(/zero or more/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('rejects when the job is already invoiced', async () => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
+        invoiceId: 'i1',
+        docNumber: '1001',
+        url: 'http://qb.example/invoice/1',
+      });
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/invoiced in QuickBooks/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('refuses to edit a cancelled part', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
+      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/cancelled/i);
       expect(updates).toHaveLength(0);
     });
   });

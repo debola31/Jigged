@@ -249,34 +249,40 @@ export default function JobDetailPage() {
     await fetchJob();
   };
 
-  const handleQtyConfirmed = async (result: UpdateJobPartQuantityResult) => {
+  const handleLineConfirmed = async (result: UpdateJobPartQuantityResult) => {
     const edited = editQtyPart;
     setEditQtyPart(null);
+    const qtyChanged = result.oldQuantity !== result.newQuantity;
+    const priceChanged = result.oldUnitPrice !== result.newUnitPrice;
     // Audit trail: log the change to the job feed. Best-effort — a note failure
-    // must never undo the (already-committed) quantity edit. authorId is the
+    // must never undo the (already-committed) edit. authorId is the
     // user_company_access id (RLS requirement), resolved via getCurrentOperator.
     try {
       const me = await getCurrentOperator(companyId);
       if (me) {
         const partName = edited?.parts?.part_name ?? 'part';
-        const priceNote = result.priceReresolved
-          ? ` (unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)})`
-          : '';
-        await addJobNote(
-          jobId,
-          companyId,
-          me.id,
-          `Order quantity changed ${result.oldQuantity} → ${result.newQuantity} for ${partName}${priceNote}`,
-          { jobPartId: result.jobPart.id, noteType: 'event' },
-        );
+        const changes: string[] = [];
+        if (qtyChanged)
+          changes.push(`order quantity ${result.oldQuantity} → ${result.newQuantity}`);
+        if (priceChanged)
+          changes.push(`unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)}`);
+        if (changes.length > 0) {
+          await addJobNote(
+            jobId,
+            companyId,
+            me.id,
+            `Changed ${changes.join(' and ')} for ${partName}`,
+            { jobPartId: result.jobPart.id, noteType: 'event' },
+          );
+        }
       }
     } catch (err) {
-      console.warn('Job detail: failed to log quantity-change note', err);
+      console.warn('Job detail: failed to log line-change note', err);
     }
-    setQtySuccess(
-      `Order qty updated ${result.oldQuantity} → ${result.newQuantity}` +
-        (result.priceReresolved ? ` · unit price ${fmtUsd(result.newUnitPrice)}` : ''),
-    );
+    const toast: string[] = [];
+    if (qtyChanged) toast.push(`qty ${result.oldQuantity} → ${result.newQuantity}`);
+    if (priceChanged) toast.push(`unit price ${fmtUsd(result.newUnitPrice)}`);
+    setQtySuccess(toast.length ? `Line updated · ${toast.join(' · ')}` : 'Line updated');
     // Re-pull so the parts row, status block, and fulfillment chip reflect the edit.
     await fetchJob();
   };
@@ -318,11 +324,11 @@ export default function JobDetailPage() {
               <Tooltip
                 title={`Invoiced in QuickBooks${
                   qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
-                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
+                } — price & quantity locked. Revise the invoice in QuickBooks to change it.`}
               >
                 <span>
                   <Button variant="outlined" startIcon={<LockIcon />} disabled>
-                    Edit Quantity
+                    Edit line
                   </Button>
                 </span>
               </Tooltip>
@@ -334,7 +340,7 @@ export default function JobDetailPage() {
                   onClick={handleEditQtyClick}
                   disabled={actionLoading}
                 >
-                  Edit Quantity
+                  Edit line
                 </Button>
               )
             ))}
@@ -707,7 +713,7 @@ export default function JobDetailPage() {
           editQtyPart ? summariesByPart.get(editQtyPart.id)?.qty_shipped ?? 0 : 0
         }
         onClose={() => setEditQtyPart(null)}
-        onConfirmed={handleQtyConfirmed}
+        onConfirmed={handleLineConfirmed}
       />
 
       <Menu

@@ -735,6 +735,110 @@ export async function updateJobPartQuantity(
   };
 }
 
+/** Result of editing a job_part's unit price. */
+export interface UpdateJobPartPriceResult {
+  jobPart: JobPart;
+  oldUnitPrice: number | null;
+  newUnitPrice: number;
+  oldTotalPrice: number | null;
+  newTotalPrice: number;
+}
+
+/**
+ * Manually set a job_part's unit price after the job was created — a direct
+ * override of the resolved/tier price. total_price recomputes from the part's
+ * current quantity at 4dp. There is no job-level price; pricing lives per
+ * job_part.
+ *
+ * Unlike a quantity edit, price is orthogonal to fulfillment, so there's no
+ * shipped-floor check. Guardrails enforced before the write:
+ *  - newUnitPrice must be finite and >= 0 (0 = a no-charge line is allowed).
+ *  - blocked while a QuickBooks invoice exists for the job (same gate as the
+ *    quantity edit — revise/void the invoice in QuickBooks first).
+ *  - a cancelled part can't be repriced.
+ *
+ * Composition note: job_parts carries no override flag (unlike quote lines'
+ * is_quote_override), so the manual price is simply stored as unit_price. A
+ * later updateJobPartQuantity keeps it by default (resolveJobPartUnitPrice keeps
+ * the current unit_price unless the user opts into the tier price); opting into
+ * the tier price on a subsequent quantity edit discards this override — the same
+ * behavior a quote line has when the user picks the tier price.
+ */
+export async function updateJobPartPrice(
+  jobPartId: string,
+  newUnitPrice: number,
+): Promise<UpdateJobPartPriceResult> {
+  const supabase = getSupabase();
+
+  if (!Number.isFinite(newUnitPrice) || newUnitPrice < 0) {
+    throw new Error('Unit price must be a number of zero or more.');
+  }
+
+  // 1. Load the job_part.
+  const { data: jpRow, error: jpErr } = await supabase
+    .from('job_parts')
+    .select('id, job_id, company_id, quantity, unit_price, total_price, production_status')
+    .eq('id', jobPartId)
+    .single();
+  if (jpErr || !jpRow) {
+    console.error('Error loading job_part for price edit:', jpErr);
+    throw jpErr || new Error('Could not load the job part.');
+  }
+  const part = jpRow as unknown as {
+    id: string;
+    job_id: string;
+    company_id: string;
+    quantity: number;
+    unit_price: number | null;
+    total_price: number | null;
+    production_status: ProductionStatus;
+  };
+
+  if (part.production_status === 'cancelled') {
+    throw new Error('This part is cancelled — its price can no longer be edited.');
+  }
+
+  // 2. Invoice gate: same boundary as the quantity edit.
+  const invoiceLink = await getQuickBooksInvoiceLinkForJob(part.company_id, part.job_id);
+  if (invoiceLink) {
+    throw new Error(
+      `This job is already invoiced in QuickBooks${
+        invoiceLink.docNumber ? ` (${invoiceLink.docNumber})` : ''
+      }. Revise or void that invoice in QuickBooks before changing the price.`,
+    );
+  }
+
+  // 3. Recompute total at 4dp and write once. fulfillment_status is untouched
+  //    (price doesn't affect fulfillment).
+  const newTotalPrice = roundTotal4dp(newUnitPrice * part.quantity);
+  const updatePayload: JobPartUpdate = {
+    unit_price: newUnitPrice,
+    total_price: newTotalPrice,
+    updated_at: new Date().toISOString(),
+  };
+  const { data: updated, error: updErr } = await supabase
+    .from('job_parts')
+    .update(updatePayload)
+    .eq('id', jobPartId)
+    .eq('company_id', part.company_id)
+    .select('*')
+    .single();
+  if (updErr || !updated) {
+    console.error('Error updating job_part price:', updErr);
+    throw new Error(
+      friendlyErrorMessage(updErr, { entity: 'job', fallback: 'Failed to update the price.' }),
+    );
+  }
+
+  return {
+    jobPart: updated as unknown as JobPart,
+    oldUnitPrice: part.unit_price,
+    newUnitPrice,
+    oldTotalPrice: part.total_price,
+    newTotalPrice,
+  };
+}
+
 /**
  * Current job_part quantities for a (converted) quote, keyed by the source
  * quote line. Lets the read-only quote page reflect "current order qty N

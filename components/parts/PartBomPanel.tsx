@@ -172,48 +172,87 @@ export default function PartBomPanel({
       const supabase = getSupabase();
       const next = new Map<string, ChildCostTier[]>();
 
+      // Discover each child's qty break points in a fixed number of queries
+      // (was ~2 per child — a per-row fan-out that scaled with BOM size).
+      // Bought children take break points from their PREFERRED vendor's
+      // procurement tiers (compute_part_cost_at_qty restricts the rollup to
+      // preferred_vendor_id, so other vendors' tiers don't apply); made
+      // children take them from their own pricing tiers.
+      const boughtIds = rows
+        .filter((r) => r.child_part.source === 'bought')
+        .map((r) => r.child_part.id);
+      const madeIds = rows
+        .filter((r) => r.child_part.source !== 'bought')
+        .map((r) => r.child_part.id);
+
+      const breakpointsByChild = new Map<string, number[]>();
+      try {
+        if (boughtIds.length > 0) {
+          // Preferred vendor per bought child.
+          const { data: vendorRows } = await supabase
+            .from('parts')
+            .select('id, preferred_vendor_id')
+            .in('id', boughtIds);
+          const preferredByChild = new Map<string, string | null>();
+          for (const r of (vendorRows ?? []) as Array<{
+            id: string;
+            preferred_vendor_id: string | null;
+          }>) {
+            preferredByChild.set(r.id, r.preferred_vendor_id ?? null);
+          }
+
+          // All bought children's procurement tiers in one query; keep only
+          // the rows under each child's preferred vendor.
+          const { data: procRows } = await supabase
+            .from('part_procurement_tiers')
+            .select('part_id, vendor_id, min_quantity')
+            .in('part_id', boughtIds);
+          const qtysByChild = new Map<string, number[]>();
+          for (const t of (procRows ?? []) as Array<{
+            part_id: string;
+            vendor_id: string;
+            min_quantity: number | string;
+          }>) {
+            if (preferredByChild.get(t.part_id) !== t.vendor_id) continue;
+            const arr = qtysByChild.get(t.part_id) ?? [];
+            arr.push(Number(t.min_quantity));
+            qtysByChild.set(t.part_id, arr);
+          }
+          for (const [partId, qtys] of qtysByChild) {
+            breakpointsByChild.set(partId, [...new Set(qtys)].sort((a, b) => a - b));
+          }
+        }
+
+        if (madeIds.length > 0) {
+          // All made children's pricing tiers in one query, ordered by qty so
+          // each child's break points come out ascending (matches the prior
+          // per-child .order('quantity') behavior).
+          const { data: priceRows } = await supabase
+            .from('part_pricing_tiers')
+            .select('part_id, quantity')
+            .in('part_id', madeIds)
+            .order('quantity', { ascending: true });
+          for (const t of (priceRows ?? []) as Array<{
+            part_id: string;
+            quantity: number | string;
+          }>) {
+            const arr = breakpointsByChild.get(t.part_id) ?? [];
+            arr.push(Number(t.quantity));
+            breakpointsByChild.set(t.part_id, arr);
+          }
+        }
+      } catch (err) {
+        // Degrade to empty ladders (matches the prior per-child catch).
+        console.warn('Failed to load BOM tier break points', err);
+      }
+
+      // Cost ladder per row — one compute_part_cost_at_qty per (child, qty),
+      // parallelized exactly as before.
       await Promise.all(
         rows.map(async (row) => {
           const child = row.child_part;
           const unit = child.primary_unit ?? '';
-
-          let breakpoints: number[] = [];
-          try {
-            if (child.source === 'bought') {
-              const { data: partRow } = await supabase
-                .from('parts')
-                .select('preferred_vendor_id')
-                .eq('id', child.id)
-                .maybeSingle();
-              const preferred = partRow?.preferred_vendor_id ?? null;
-              // Only the preferred vendor's tiers contribute to the rollup
-              // (compute_part_cost_at_qty restricts to preferred_vendor_id),
-              // so showing other vendors here would suggest costs that don't
-              // actually apply.
-              if (preferred) {
-                const { data } = await supabase
-                  .from('part_procurement_tiers')
-                  .select('min_quantity')
-                  .eq('part_id', child.id)
-                  .eq('vendor_id', preferred);
-                const rows = (data ?? []) as Array<{ min_quantity: number | string }>;
-                breakpoints = [
-                  ...new Set(rows.map((t) => Number(t.min_quantity))),
-                ].sort((a, b) => a - b);
-              }
-            } else {
-              const { data } = await supabase
-                .from('part_pricing_tiers')
-                .select('quantity')
-                .eq('part_id', child.id)
-                .order('quantity', { ascending: true });
-              const rows = (data ?? []) as Array<{ quantity: number | string }>;
-              breakpoints = rows.map((t) => Number(t.quantity));
-            }
-          } catch (err) {
-            console.warn('Failed to load tier breakpoints for', child.id, err);
-            breakpoints = [];
-          }
+          const breakpoints = breakpointsByChild.get(child.id) ?? [];
 
           if (breakpoints.length === 0) {
             next.set(row.id, []);

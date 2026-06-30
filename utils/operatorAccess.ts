@@ -277,12 +277,26 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
   const supabase = getSupabase();
 
   const jobPartIds = readyRows.map((r) => r.job_part_id);
+  const jobIds = Array.from(new Set(readyRows.map((r) => r.job_id)));
 
-  // Fetch per-part progress (count of ops total + completed per part).
-  const { data: partOps } = await supabase
-    .from('job_operations')
-    .select('job_part_id, status')
-    .in('job_part_id', jobPartIds);
+  // Three independent reads, each already batched via .in(...). Run them in
+  // parallel — this is the operator hot path (station polling / whole-plant
+  // view), so collapsing 3 sequential round-trips to 1 matters most here.
+  const [{ data: partOps }, { data: jobMeta }, { data: partStatusRows }] =
+    await Promise.all([
+      // Per-part progress (count of ops total + completed per part).
+      supabase
+        .from('job_operations')
+        .select('job_part_id, status')
+        .in('job_part_id', jobPartIds),
+      // Each job's customer name.
+      supabase.from('jobs').select('id, customers(name)').in('id', jobIds),
+      // Each part's current production status.
+      supabase
+        .from('job_parts')
+        .select('id, production_status')
+        .in('id', jobPartIds),
+    ]);
 
   type PartOpRow = { job_part_id: string; status: string };
   const progressByPart = new Map<string, { total: number; done: number }>();
@@ -293,22 +307,12 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
     progressByPart.set(row.job_part_id, acc);
   }
 
-  // Fetch each part's current status + customer (one query per (jobs, job_parts)).
-  const jobIds = Array.from(new Set(readyRows.map((r) => r.job_id)));
-  const { data: jobMeta } = await supabase
-    .from('jobs')
-    .select('id, customers(name)')
-    .in('id', jobIds);
   type JobMeta = { id: string; customers: { name: string } | null };
   const customerByJob = new Map<string, string | null>();
   for (const j of (jobMeta ?? []) as JobMeta[]) {
     customerByJob.set(j.id, j.customers?.name ?? null);
   }
 
-  const { data: partStatusRows } = await supabase
-    .from('job_parts')
-    .select('id, production_status')
-    .in('id', jobPartIds);
   type PartStatus = { id: string; production_status: string };
   const statusByPart = new Map<string, string>();
   for (const r of (partStatusRows ?? []) as PartStatus[]) {

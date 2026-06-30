@@ -217,23 +217,28 @@ export async function getCustomerWithRelations(
     return null;
   }
 
-  const { count: quotesCount, error: quotesError } = await supabase
-    .from('quotes')
-    .select('*', { count: 'exact', head: true })
-    .eq('customer_id', customerId);
+  // The two counts are independent of each other (and of the customer fetch),
+  // so run them in parallel — was two sequential round-trips after the fetch.
+  const [quotesRes, jobsRes] = await Promise.all([
+    supabase
+      .from('quotes')
+      .select('*', { count: 'exact', head: true })
+      .eq('customer_id', customerId),
+    supabase
+      .from('jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('customer_id', customerId),
+  ]);
 
-  if (quotesError) {
-    console.error('Error fetching quotes count:', quotesError);
+  if (quotesRes.error) {
+    console.error('Error fetching quotes count:', quotesRes.error);
+  }
+  if (jobsRes.error) {
+    console.error('Error fetching jobs count:', jobsRes.error);
   }
 
-  const { count: jobsCount, error: jobsError } = await supabase
-    .from('jobs')
-    .select('*', { count: 'exact', head: true })
-    .eq('customer_id', customerId);
-
-  if (jobsError) {
-    console.error('Error fetching jobs count:', jobsError);
-  }
+  const quotesCount = quotesRes.count;
+  const jobsCount = jobsRes.count;
 
   const typedCustomer = customer as CustomerWithPrimaryContactRow & {
     addresses?: CustomerAddress[];

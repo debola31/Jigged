@@ -184,6 +184,19 @@ export default function JobDetailPage() {
     }
   };
 
+  // Explain-on-click instead of hiding/greying the button: a job with shipment
+  // records is kept for recordkeeping and can't be deleted — say so immediately
+  // rather than opening a confirm dialog that would only end in an error.
+  const handleDeleteClick = () => {
+    if (shipmentCount && shipmentCount > 0) {
+      setError(
+        "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
+      );
+      return;
+    }
+    setDeleteDialogOpen(true);
+  };
+
   const handleDelete = async () => {
     setActionLoading(true);
     try {
@@ -223,13 +236,13 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
-  // Only OFFER Delete when it can actually succeed: a not-started/cancelled job
-  // with no shipment records (show-the-action-that-works — we don't surface a
-  // Delete that would only error). The access layer still guards as a backstop.
-  // shipmentCount is null until loaded, so Delete stays hidden until we know.
+  // Delete is offered for any not-started or cancelled job — consistent with
+  // Reopen/Cancel being status-driven, so the option is always discoverable
+  // rather than appearing on some cancelled jobs but not others. Whether a
+  // specific job can actually be deleted (no shipment records) is explained on
+  // click; the access layer still guards as a backstop.
   const canDelete =
-    (job.production_status === 'not_started' || job.production_status === 'cancelled') &&
-    shipmentCount === 0;
+    job.production_status === 'not_started' || job.production_status === 'cancelled';
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
@@ -411,7 +424,7 @@ export default function JobDetailPage() {
               <span>
                 <IconButton
                   color="error"
-                  onClick={() => setDeleteDialogOpen(true)}
+                  onClick={handleDeleteClick}
                   disabled={actionLoading}
                   aria-label="Delete job"
                 >

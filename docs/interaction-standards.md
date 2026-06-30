@@ -137,24 +137,26 @@ not a status column:
 
 ---
 
-## 4. Unavailable actions (block vs. allow-then-error)
+## 4. Unavailable actions (keep-visible-and-explain, not hide/disable)
 
 When an action can't be performed in the current state, prefer (in order):
 
-1. **Show only the action that works.** Don't surface a control whose only
-   outcome is an error. If a state has a different valid action, show that one
-   instead. Example: a job with shipment records can't be hard-deleted (the
-   shipments FK / recordkeeping), so the detail page simply doesn't offer Delete
-   for it — Delete appears only for not-started/cancelled jobs with no shipments.
-   The access layer still refuses as a backstop.
-2. **Enabled + explain on attempt** for dynamic/validation gates — keep the
-   control clickable and explain what's wrong when they try. Disabled buttons +
-   hover tooltips are the weak pattern: keyboard/screen-reader users never get
-   the reason and the "why" is hidden ([Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/), [NN/g — error messages](https://www.nngroup.com/articles/error-message-guidelines/)).
-3. **Disable only for a stable lock** whose disabled state is itself meaningful —
-   and always pair it with a *visible* reason, not hover-only. Example: once a job
-   is invoiced in QuickBooks, "Edit line" is disabled with a 🔒 icon **and** a
-   visible "View invoice" button signalling the lock; the tooltip is supplementary.
+1. **Keep it visible; explain on attempt.** Leave the control where users expect
+   it and tell them what's wrong when they try — more discoverable and accessible
+   than hiding or graying out. A *disabled* button isn't focusable, so keyboard /
+   screen-reader users never learn it exists or why, and a hover tooltip hides the
+   reason ([NN/g — Why Disabled Buttons Hurt UX](https://www.nngroup.com/videos/why-disabled-buttons-hurt-ux-and-how-to-fix-them/), [NN/g — Disabled Accessibility: the pragmatic approach](https://www.nngroup.com/articles/disabled-accessibility-the-pragmatic-approach/), [Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/)).
+   Example: a not-started/cancelled job **always** shows Delete; if it has
+   shipment records (kept for recordkeeping, can't be deleted) clicking explains
+   that immediately — we don't hide the button or run a confirm→error two-step.
+2. **Disable only for a stable lock** whose disabled state is itself meaningful,
+   paired with a *visible* reason (not hover-only); prefer `aria-disabled` so it
+   stays focusable. Example: once invoiced in QuickBooks, "Edit line" is disabled
+   with a 🔒 icon **and** a visible "View invoice" button signalling the lock.
+3. **Hide only when the action is irrelevant in this context** — the user's role
+   or this object can *never* do it — not when it's merely temporarily blocked.
+   Hiding a temporarily-unavailable control hurts learnability: users can't tell
+   it exists, or assume it's never available ([Jakob Nielsen — Inactive Controls: Show, Disable, or Hide?](https://www.uxtigers.com/post/inactive-buttons)).
 
-Avoid: a confirm dialog that leads to an error ("are you sure?" → "can't do
-that"). That's two steps to a dead-end — resolve via rule 1 or 2 instead.
+Avoid: a confirm dialog that ends in an error ("are you sure?" → "can't do that")
+— two steps to a dead-end. Resolve via rule 1.

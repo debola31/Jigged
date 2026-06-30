@@ -725,6 +725,75 @@ export async function detectQuoteLineDrift(
   return drifted;
 }
 
+export interface RepriceQuoteResult {
+  repricedLineItemIds: string[];
+}
+
+/**
+ * Reprice every drifted, non-override line on a quote to its part's CURRENT
+ * tier table (rebuilding each line's pricing snapshot). Powers the quote DETAIL
+ * page's "Update prices to current" action — a one-click batch refresh, mirroring
+ * what updateQuote does for acceptDriftLineItemIds but without a form payload
+ * (the detail page has no editable form).
+ *
+ * Refuses converted/expired quotes — a converted quote is a historical record;
+ * its prices are edited on the job instead. Override lines are skipped by
+ * detectQuoteLineDrift, so they're never touched.
+ *
+ * Writes are sequential: the JS client has no multi-statement transaction (the
+ * same constraint convertQuoteToJob accepts). Each repriceLineItemToCurrent is
+ * idempotent (re-resolves to the same current tier) and the caller refetches
+ * after, so a partial failure mid-loop is recoverable, not corrupting.
+ */
+export async function repriceQuoteDriftedLinesToCurrent(
+  quoteId: string,
+  companyId: string,
+): Promise<RepriceQuoteResult> {
+  const supabase = getSupabase();
+
+  // Editability gate (defense in depth — the UI also hides the action when the
+  // quote is converted or expired).
+  const { data: existing, error } = await supabase
+    .from('quotes')
+    .select('status, converted_at, company_id')
+    .eq('id', quoteId)
+    .eq('company_id', companyId)
+    .single();
+  if (error || !existing) {
+    throw error || new Error('Quote not found.');
+  }
+  if (!isQuoteEditable(existing)) {
+    throw new Error(
+      'This quote is converted or expired and can no longer be repriced. ' +
+        'Edit prices on the job instead.',
+    );
+  }
+
+  const drifted = await detectQuoteLineDrift(quoteId);
+  if (drifted.length === 0) return { repricedLineItemIds: [] };
+
+  // detectQuoteLineDrift doesn't return part_id; load the line items once to map
+  // each drifted line to its part, and cache current tiers per distinct part.
+  const items = await getLineItemsForQuote(quoteId);
+  const partByLine = new Map(items.map((li) => [li.id, li.part_id]));
+  const tiersByPart = new Map<string, ComputedPartPricingTier[]>();
+  const repricedLineItemIds: string[] = [];
+
+  for (const d of drifted) {
+    const partId = partByLine.get(d.line_item_id);
+    if (!partId) continue;
+    let tiers = tiersByPart.get(partId);
+    if (!tiers) {
+      tiers = await getTiersWithComputedPrices(partId);
+      tiersByPart.set(partId, tiers);
+    }
+    await repriceLineItemToCurrent(d.line_item_id, tiers);
+    repricedLineItemIds.push(d.line_item_id);
+  }
+
+  return { repricedLineItemIds };
+}
+
 /**
  * Delete a quote (cascades to its line items and cost snapshots).
  */

@@ -32,7 +32,13 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 
-import { getQuoteWithRelations, deleteQuote } from '@/utils/quotesAccess';
+import {
+  getQuoteWithRelations,
+  deleteQuote,
+  detectQuoteLineDrift,
+  repriceQuoteDriftedLinesToCurrent,
+  type QuoteLineDriftInfo,
+} from '@/utils/quotesAccess';
 import { getJobQuantitiesForQuote } from '@/utils/jobsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
@@ -76,6 +82,12 @@ export default function QuoteDetailPage() {
   const [jobQtyByLine, setJobQtyByLine] = useState<
     Map<string, { quantity: number; job_id: string; job_number: string }>
   >(new Map());
+  // Lines whose price has drifted from the part's current tier table, keyed by
+  // line-item id (override lines are never included). Surfaced read-only on the
+  // detail page; the "Update prices to current" action reprices them all.
+  const [driftByLine, setDriftByLine] = useState<Map<string, QuoteLineDriftInfo>>(new Map());
+  const [repriceDialogOpen, setRepriceDialogOpen] = useState(false);
+  const [repricing, setRepricing] = useState(false);
   // useLoad keeps every setState inside the async callback, so the load effect
   // can't trip set-state-in-effect. `fetchQuote` (its reload) is reused after an
   // inline edit save below.
@@ -115,6 +127,25 @@ export default function QuoteDetailPage() {
     };
   }, [quote?.converted_at, quoteId]);
 
+  // Detect price drift once the quote is loaded (plain Supabase reads — no AI,
+  // safe on mount). Runs for converted/expired quotes too so the "was → now"
+  // indicator shows read-only; only the update action is gated by isEditable.
+  // Depending on `quote` re-runs this after fetchQuote() (useLoad returns a
+  // fresh object), so repricing clears the alert without a manual re-detect.
+  useEffect(() => {
+    if (!quote) return;
+    let cancelled = false;
+    detectQuoteLineDrift(quoteId)
+      .then((rows) => {
+        if (cancelled) return;
+        setDriftByLine(new Map(rows.map((r) => [r.line_item_id, r])));
+      })
+      .catch((err) => console.warn('Quote detail: drift detection failed', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [quote, quoteId]);
+
   const handleDelete = async () => {
     setActionLoading(true);
     try {
@@ -124,6 +155,22 @@ export default function QuoteDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to delete quote');
       setActionLoading(false);
       setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleReprice = async () => {
+    setRepricing(true);
+    try {
+      await repriceQuoteDriftedLinesToCurrent(quoteId, companyId);
+      setRepriceDialogOpen(false);
+      // fetchQuote() returns a fresh quote object → the drift effect re-runs and
+      // clears the alert + per-line indicators once prices are current.
+      await fetchQuote();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update prices');
+      setRepriceDialogOpen(false);
+    } finally {
+      setRepricing(false);
     }
   };
 
@@ -204,6 +251,19 @@ export default function QuoteDetailPage() {
     (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
     0,
   );
+
+  // Price-drift summary. detectQuoteLineDrift already excludes override lines, so
+  // every entry here is a real, repriceable change. The projected total applies
+  // each drifted line's current price; non-drifted lines keep theirs.
+  const driftCount = driftByLine.size;
+  const driftedNewTotal = lineItems.reduce((sum, li) => {
+    const d = driftByLine.get(li.id);
+    const unit =
+      d && !li.is_quote_override && d.current_unit_price !== null
+        ? d.current_unit_price
+        : li.unit_price;
+    return sum + unit * li.quantity;
+  }, 0);
 
   // Group line items by part (first-appearance order). A part with a single
   // quantity is a firm line; 2+ quantities is a price-options menu. The whole
@@ -525,6 +585,47 @@ export default function QuoteDetailPage() {
           </Card>
         </Grid>
 
+        {/* Price-drift notice — surfaced read-only on the detail page; the
+            single explicit action reprices all drifted lines (per-line keep/
+            replace nuance stays on the edit page). */}
+        {driftCount > 0 && (
+          <Grid size={{ xs: 12 }}>
+            <Alert
+              severity="info"
+              data-testid="quote-drift-summary"
+              action={
+                isEditable ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => setRepriceDialogOpen(true)}
+                  >
+                    Update prices to current
+                  </Button>
+                ) : (
+                  <Tooltip
+                    title={
+                      convertedLocked
+                        ? 'This quote is converted — update prices on the job instead.'
+                        : 'This quote is expired and read-only.'
+                    }
+                  >
+                    <span>
+                      <Button color="inherit" size="small" disabled>
+                        Update prices to current
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )
+              }
+            >
+              {driftCount === 1
+                ? '1 line has a price change since this quote was created.'
+                : `${driftCount} lines have price changes since this quote was created.`}
+            </Alert>
+          </Grid>
+        )}
+
         {/* Line items table */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
@@ -613,6 +714,27 @@ export default function QuoteDetailPage() {
                                   sx={{ ml: 1, height: 18 }}
                                 />
                               )}
+                              {(() => {
+                                const d = driftByLine.get(li.id);
+                                if (!d || li.is_quote_override) return null;
+                                return (
+                                  <Tooltip title="The part's tier pricing changed after this quote was created. The quote keeps its original price until you update it.">
+                                    <Box
+                                      component="span"
+                                      data-testid={`quote-line-drift-${li.id}`}
+                                      sx={{
+                                        display: 'block',
+                                        fontSize: '0.7rem',
+                                        fontWeight: 600,
+                                        color: 'warning.main',
+                                      }}
+                                    >
+                                      was {formatCurrency(d.snapshotted_unit_price)} → now{' '}
+                                      {formatCurrency(d.current_unit_price)}
+                                    </Box>
+                                  </Tooltip>
+                                );
+                              })()}
                             </td>
                             <td className="num">
                               {formatCurrency(li.total_price ?? li.unit_price * li.quantity)}
@@ -706,6 +828,45 @@ export default function QuoteDetailPage() {
             }
           >
             {actionLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Update-prices-to-current Confirmation Dialog */}
+      <Dialog
+        open={repriceDialogOpen}
+        onClose={repricing ? undefined : () => setRepriceDialogOpen(false)}
+      >
+        <DialogTitle>Update prices to current?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {driftCount === 1
+              ? 'Update 1 line to its current tier price?'
+              : `Update ${driftCount} lines to their current tier prices?`}
+            {isFirmQuote && (
+              <>
+                {' '}
+                Quote total {formatCurrency(grandTotal)} → {formatCurrency(driftedNewTotal)}.
+              </>
+            )}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This rewrites each line&apos;s price and pricing snapshot and can&apos;t be undone
+            from here. Use Edit quote for per-line control (keep some, update others).
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRepriceDialogOpen(false)} disabled={repricing}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleReprice}
+            color="primary"
+            variant="contained"
+            disabled={repricing}
+            startIcon={repricing ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {repricing ? 'Updating…' : 'Update prices'}
           </Button>
         </DialogActions>
       </Dialog>

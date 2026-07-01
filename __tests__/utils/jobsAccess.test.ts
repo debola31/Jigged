@@ -47,6 +47,7 @@ import {
   reopenJob,
   searchJobsByIdentifier,
   updateJobAddressContact,
+  updateJobDetails,
   updateJobPartPrice,
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
@@ -753,6 +754,35 @@ describe('jobsAccess', () => {
       installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
       await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/cancelled/i);
       expect(updates).toHaveLength(0);
+    });
+  });
+
+  describe('updateJobDetails', () => {
+    it('patches only the provided header fields; empty string clears to null', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      mockQueryBuilder.error = null;
+      await updateJobDetails('j1', 'co-1', { customer_po_number: 'PO-9', due_date: '' });
+      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch.customer_po_number).toBe('PO-9');
+      expect(patch.due_date).toBeNull();
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'j1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    });
+
+    it('omits keys that were not provided', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      await updateJobDetails('j1', 'co-1', { customer_po_number: 'PO-1' });
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch).not.toHaveProperty('due_date');
+      expect(patch.customer_po_number).toBe('PO-1');
+    });
+
+    it('throws a friendly (non-raw) error when supabase fails', async () => {
+      mockQueryBuilder.error = { message: 'permission denied' };
+      await expect(
+        updateJobDetails('j1', 'co-1', { due_date: '2026-07-01' }),
+      ).rejects.toThrow(/don't have permission/);
     });
   });
 });

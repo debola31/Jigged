@@ -31,21 +31,19 @@ import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
-import LockIcon from '@mui/icons-material/Lock';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, cancelJob, reopenJob, deleteJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob, deleteJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
-import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, EditJobPartQuantityModal } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -54,11 +52,6 @@ import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
-
-const fmtUsd = (v: number | null): string =>
-  v === null
-    ? '—'
-    : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -83,11 +76,9 @@ export default function JobDetailPage() {
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
   const [shipmentCount, setShipmentCount] = useState<number | null>(null);
-  const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
-  const [qtySuccess, setQtySuccess] = useState<string | null>(null);
-  // Anchors for the top-bar Edit-Quantity / Print-Traveler part pickers
-  // (only shown when a job has more than one part).
-  const [qtyMenuAnchor, setQtyMenuAnchor] = useState<null | HTMLElement>(null);
+  const [editMode, setEditMode] = useState(false);
+  // Anchor for the top-bar Print-Traveler part picker (shown when a job has
+  // more than one part).
   const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
@@ -254,18 +245,9 @@ export default function JobDetailPage() {
     parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
-  const editableParts = parts.filter((p) => p.production_status !== 'cancelled');
 
-  // Edit Quantity / Print Traveler are per-part actions surfaced in the top
-  // action bar for discoverability. With one part they act directly; with
-  // several they open a small picker menu.
-  const handleEditQtyClick = (e: ReactMouseEvent<HTMLElement>) => {
-    if (editableParts.length === 1) {
-      setEditQtyPart(editableParts[0]);
-    } else {
-      setQtyMenuAnchor(e.currentTarget);
-    }
-  };
+  // Print Traveler is a per-part action in the top bar: with one part it acts
+  // directly; with several it opens a small picker menu.
   const handleTravelerClick = (e: ReactMouseEvent<HTMLElement>) => {
     if (parts.length === 1) {
       setTravelerPart({ id: parts[0].id, name: parts[0].parts?.part_name ?? null });
@@ -287,43 +269,24 @@ export default function JobDetailPage() {
     await fetchJob();
   };
 
-  const handleLineConfirmed = async (result: UpdateJobPartQuantityResult) => {
-    const edited = editQtyPart;
-    setEditQtyPart(null);
-    const qtyChanged = result.oldQuantity !== result.newQuantity;
-    const priceChanged = result.oldUnitPrice !== result.newUnitPrice;
-    // Audit trail: log the change to the job feed. Best-effort — a note failure
-    // must never undo the (already-committed) edit. authorId is the
-    // user_company_access id (RLS requirement), resolved via getCurrentOperator.
-    try {
-      const me = await getCurrentOperator(companyId);
-      if (me) {
-        const partName = edited?.parts?.part_name ?? 'part';
-        const changes: string[] = [];
-        if (qtyChanged)
-          changes.push(`order quantity ${result.oldQuantity} → ${result.newQuantity}`);
-        if (priceChanged)
-          changes.push(`unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)}`);
-        if (changes.length > 0) {
-          await addJobNote(
-            jobId,
-            companyId,
-            me.id,
-            `Changed ${changes.join(' and ')} for ${partName}`,
-            { jobPartId: result.jobPart.id, noteType: 'event' },
-          );
-        }
-      }
-    } catch (err) {
-      console.warn('Job detail: failed to log line-change note', err);
-    }
-    const toast: string[] = [];
-    if (qtyChanged) toast.push(`qty ${result.oldQuantity} → ${result.newQuantity}`);
-    if (priceChanged) toast.push(`unit price ${fmtUsd(result.newUnitPrice)}`);
-    setQtySuccess(toast.length ? `Line updated · ${toast.join(' · ')}` : 'Line updated');
-    // Re-pull so the parts row, status block, and fulfillment chip reflect the edit.
-    await fetchJob();
-  };
+  // Single edit surface: the "Edit" button flips the page into JobEditForm
+  // (PO/due date, addresses, contact, and per-line qty/price with the same
+  // invoice/shipped locks), saved in one go — no scattered per-section edits.
+  if (editMode) {
+    return (
+      <JobEditForm
+        job={job}
+        companyId={companyId}
+        qbInvoiceLink={qbInvoiceLink}
+        shippedByPart={new Map(partSummaries.map((s) => [s.job_part_id, s.qty_shipped]))}
+        onCancel={() => setEditMode(false)}
+        onSaved={async () => {
+          setEditMode(false);
+          await fetchJob();
+        }}
+      />
+    );
+  }
 
   return (
     <Box>
@@ -357,31 +320,16 @@ export default function JobDetailPage() {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {parts.length > 0 &&
-            (qbInvoiceLink ? (
-              <Tooltip
-                title={`Invoiced in QuickBooks${
-                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
-                } — price & quantity locked. Revise the invoice in QuickBooks to change it.`}
-              >
-                <span>
-                  <Button variant="outlined" startIcon={<LockIcon />} disabled>
-                    Edit line
-                  </Button>
-                </span>
-              </Tooltip>
-            ) : (
-              editableParts.length > 0 && (
-                <Button
-                  variant="outlined"
-                  startIcon={<EditIcon />}
-                  onClick={handleEditQtyClick}
-                  disabled={actionLoading}
-                >
-                  Edit line
-                </Button>
-              )
-            ))}
+          {parts.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => setEditMode(true)}
+              disabled={actionLoading}
+            >
+              Edit
+            </Button>
+          )}
           {parts.length > 0 && (
             <Button
               variant="outlined"
@@ -541,7 +489,7 @@ export default function JobDetailPage() {
         </Grid>
 
         <Grid size={{ xs: 12 }}>
-          <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} />
+          <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} readOnly />
         </Grid>
 
         <Grid size={{ xs: 12 }}>
@@ -746,35 +694,6 @@ export default function JobDetailPage() {
         }}
       />
 
-      <EditJobPartQuantityModal
-        key={editQtyPart?.id ?? 'none'}
-        open={editQtyPart !== null}
-        jobPart={editQtyPart}
-        qtyShipped={
-          editQtyPart ? summariesByPart.get(editQtyPart.id)?.qty_shipped ?? 0 : 0
-        }
-        onClose={() => setEditQtyPart(null)}
-        onConfirmed={handleLineConfirmed}
-      />
-
-      <Menu
-        anchorEl={qtyMenuAnchor}
-        open={!!qtyMenuAnchor}
-        onClose={() => setQtyMenuAnchor(null)}
-      >
-        {editableParts.map((p) => (
-          <MenuItem
-            key={p.id}
-            onClick={() => {
-              setQtyMenuAnchor(null);
-              setEditQtyPart(p);
-            }}
-          >
-            {p.parts?.part_name ?? 'Part'} · qty {p.quantity}
-          </MenuItem>
-        ))}
-      </Menu>
-
       <Menu
         anchorEl={travelerMenuAnchor}
         open={!!travelerMenuAnchor}
@@ -798,14 +717,6 @@ export default function JobDetailPage() {
         autoHideDuration={5000}
         onClose={() => setPushSuccess(null)}
         message={pushSuccess ?? ''}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      />
-
-      <Snackbar
-        open={!!qtySuccess}
-        autoHideDuration={5000}
-        onClose={() => setQtySuccess(null)}
-        message={qtySuccess ?? ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
     </Box>

@@ -301,6 +301,45 @@ export async function updateJobAddressContact(
   return data as Job;
 }
 
+/**
+ * Update a job's header details — customer PO number and due date. Complements
+ * updateJobAddressContact so the single job-edit form can save every header
+ * field. Only the keys provided are patched; '' clears to NULL.
+ */
+export async function updateJobDetails(
+  jobId: string,
+  companyId: string,
+  fields: { customer_po_number?: string | null; due_date?: string | null },
+): Promise<Job> {
+  const supabase = getSupabase();
+  const toNull = (v: string | null | undefined): string | null | undefined =>
+    v === undefined ? undefined : v === '' ? null : v;
+
+  const patch: JobUpdate = { updated_at: new Date().toISOString() };
+  if (fields.customer_po_number !== undefined) {
+    patch.customer_po_number = toNull(fields.customer_po_number);
+  }
+  if (fields.due_date !== undefined) {
+    patch.due_date = toNull(fields.due_date);
+  }
+
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(patch)
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error updating job details:', error);
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to update job details.' }),
+    );
+  }
+  return data as Job;
+}
+
 // ============== Job Creation (direct from PO) ==============
 
 /** One line on a PO-direct job: an existing part, a quantity, an agreed price. */

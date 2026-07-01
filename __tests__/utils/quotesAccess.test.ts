@@ -127,6 +127,7 @@ import {
   bulkDeleteQuotes,
   convertQuoteToJob,
   detectQuoteLineDrift,
+  repriceQuoteDriftedLinesToCurrent,
 } from '@/utils/quotesAccess';
 
 describe('quotesAccess utilities', () => {
@@ -1221,6 +1222,97 @@ describe('quotesAccess utilities', () => {
       expect(flagged[0].basis_unknown).toBe(true);
       expect(flagged[0].snapshotted_unit_price).toBe(80);
       expect(flagged[0].current_unit_price).toBe(100);
+    });
+  });
+
+  describe('repriceQuoteDriftedLinesToCurrent', () => {
+    const driftedLine = {
+      id: 'li-A',
+      quote_id: 'quote-1',
+      company_id: 'company-1',
+      part_id: 'part-A',
+      source_tier_id: 't1',
+      sequence: 10,
+      quantity: 10,
+      unit_price: 100,
+      total_price: 1000,
+      markup_percent: 50,
+      base_cost_per_unit: 66.67,
+      is_quote_override: false,
+      pricing_basis_snapshot: {
+        tiers: [{ id: 't1', quantity: 1, unit_price: 100, markup_percent: 50 }],
+        resolved_tier_id: 't1',
+        resolved_quantity: 10,
+        captured_at: '2026-05-01T00:00:00Z',
+      },
+      basis_unknown: false,
+      created_at: '2026-05-01T00:00:00Z',
+    };
+    // Current tier moved 100 -> 120, so the snapshot drifts.
+    const driftedTiers = [
+      { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 120, markup_percent: 60, created_at: '', updated_at: '' },
+    ];
+
+    beforeEach(() => {
+      getLineItemsForQuoteMock.mockReset();
+      getTiersWithComputedPricesMock.mockReset();
+      repriceLineItemToCurrentMock.mockReset();
+      repriceLineItemToCurrentMock.mockResolvedValue({});
+    });
+
+    it('reprices each drifted non-override line to its current tiers', async () => {
+      mockQueryBuilder.data = { status: 'active', converted_at: null, company_id: 'company-1' };
+      getLineItemsForQuoteMock.mockResolvedValue([driftedLine]);
+      getTiersWithComputedPricesMock.mockResolvedValue(driftedTiers);
+
+      const result = await repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1');
+
+      expect(result.repricedLineItemIds).toEqual(['li-A']);
+      expect(repriceLineItemToCurrentMock).toHaveBeenCalledTimes(1);
+      expect(repriceLineItemToCurrentMock).toHaveBeenCalledWith('li-A', driftedTiers);
+    });
+
+    it('returns early without repricing when nothing has drifted', async () => {
+      mockQueryBuilder.data = { status: 'active', converted_at: null, company_id: 'company-1' };
+      getLineItemsForQuoteMock.mockResolvedValue([driftedLine]);
+      // Current tiers match the snapshot exactly → no drift.
+      getTiersWithComputedPricesMock.mockResolvedValue([
+        { id: 't1', part_id: 'part-A', company_id: 'company-1', sequence: 0, quantity: 1, unit_price: 100, markup_percent: 50, created_at: '', updated_at: '' },
+      ]);
+
+      const result = await repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1');
+
+      expect(result.repricedLineItemIds).toEqual([]);
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a converted quote and never reprices', async () => {
+      mockQueryBuilder.data = {
+        status: 'active',
+        converted_at: '2026-06-01T00:00:00Z',
+        company_id: 'company-1',
+      };
+
+      await expect(
+        repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1'),
+      ).rejects.toThrow(/converted or expired/i);
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses an expired (non-active) quote', async () => {
+      mockQueryBuilder.data = { status: 'expired', converted_at: null, company_id: 'company-1' };
+
+      await expect(
+        repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1'),
+      ).rejects.toThrow(/converted or expired/i);
+      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+    });
+
+    it('throws when the quote is not found', async () => {
+      mockQueryBuilder.data = null;
+      await expect(
+        repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1'),
+      ).rejects.toBeTruthy();
     });
   });
 

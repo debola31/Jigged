@@ -40,10 +40,13 @@ export default function JobBillingShippingCard({
   job,
   companyId,
   onUpdated,
+  readOnly = false,
 }: {
   job: JobWithRelations;
   companyId: string;
   onUpdated: () => void | Promise<void>;
+  /** Hide the in-card Edit button — editing happens via the job's single edit form. */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const addresses: JobAddress[] = job.customers?.addresses ?? [];
@@ -115,7 +118,7 @@ export default function JobBillingShippingCard({
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Billing &amp; Shipping
           </Typography>
-          {!editing && (
+          {!editing && !readOnly && (
             <Button size="small" startIcon={<EditIcon />} onClick={startEdit}>
               Edit
             </Button>

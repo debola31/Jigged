@@ -29,6 +29,10 @@ to the consequence.
     editor: BOM materials, pricing tiers, routing operations, quote line items,
     part notes. Use the shared [`components/common/DeleteIconButton`](../components/common/DeleteIconButton.tsx),
     which bakes in the hollow icon + `color="error"` so it can't be hand-rolled grey.
+- **Position — delete sits last.** In a header/toolbar action row the delete
+  control is always the **rightmost** item, set apart from the benign actions, so
+  the destructive option is predictably located and not crowded next to common
+  ones ([NN/g — consequential options near benign ones](https://www.nngroup.com/articles/proximity-consequential-options/)).
 - Enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts):
   a delete icon set to `text.secondary` fails CI. (Glyph choice is a per-call-site
   judgment, not machine-enforced.)
@@ -134,3 +138,31 @@ not a status column:
 - On the part page: a guidance banner **plus** per-row highlights at the source
   (operation missing a labor rate; BOM material with no cost) — show users
   *where* to fix it, not just that something's wrong ([NN/g — form errors](https://www.nngroup.com/articles/errors-forms-design-guidelines/), [GOV.UK — validation](https://design-system.service.gov.uk/patterns/validation/)).
+
+---
+
+## 4. Unavailable actions (keep-visible-and-explain, not hide/disable)
+
+When an action can't be performed in the current state, prefer (in order):
+
+1. **Keep it visible; explain on attempt.** Leave the control where users expect
+   it and tell them what's wrong when they try — more discoverable and accessible
+   than hiding or graying out. A *disabled* button isn't focusable, so keyboard /
+   screen-reader users never learn it exists or why, and a hover tooltip hides the
+   reason ([NN/g — Why Disabled Buttons Hurt UX](https://www.nngroup.com/videos/why-disabled-buttons-hurt-ux-and-how-to-fix-them/), [NN/g — Disabled Accessibility: the pragmatic approach](https://www.nngroup.com/articles/disabled-accessibility-the-pragmatic-approach/), [Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/)).
+   Example: Delete shows on **every** job, in any production status; clicking
+   explains the blocker when there is one — *kept for recordkeeping* when the job
+   has a shipment or a QuickBooks invoice — instead of hiding the button or
+   running a confirm→error two-step. Removal is gated by *records of value*, not
+   the status label (the discriminator shop ERPs use for hard-delete).
+2. **Disable only for a stable lock** whose disabled state is itself meaningful,
+   paired with a *visible* reason (not hover-only); prefer `aria-disabled` so it
+   stays focusable. Example: once invoiced in QuickBooks, "Edit line" is disabled
+   with a 🔒 icon **and** a visible "View invoice" button signalling the lock.
+3. **Hide only when the action is irrelevant in this context** — the user's role
+   or this object can *never* do it — not when it's merely temporarily blocked.
+   Hiding a temporarily-unavailable control hurts learnability: users can't tell
+   it exists, or assume it's never available ([Jakob Nielsen — Inactive Controls: Show, Disable, or Hide?](https://www.uxtigers.com/post/inactive-buttons)).
+
+Avoid: a confirm dialog that ends in an error ("are you sure?" → "can't do that")
+— two steps to a dead-end. Resolve via rule 1.

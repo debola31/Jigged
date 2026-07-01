@@ -15,6 +15,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
+import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Menu from '@mui/material/Menu';
@@ -30,20 +31,19 @@ import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
-import LockIcon from '@mui/icons-material/Lock';
+import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
 
-import { getJobWithRelations, cancelJob, reopenJob, type UpdateJobPartQuantityResult } from '@/utils/jobsAccess';
+import { getJobWithRelations, cancelJob, reopenJob, deleteJob } from '@/utils/jobsAccess';
 import { getCompany, type Company } from '@/utils/companyAccess';
-import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
-import { addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
+import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, EditJobPartQuantityModal } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -52,11 +52,6 @@ import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
-
-const fmtUsd = (v: number | null): string =>
-  v === null
-    ? '—'
-    : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -72,6 +67,7 @@ export default function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [shipModalOpen, setShipModalOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [pendingPreviewShipmentId, setPendingPreviewShipmentId] = useState<string | null>(null);
@@ -79,11 +75,10 @@ export default function JobDetailPage() {
   const [pushDialogOpen, setPushDialogOpen] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<string | null>(null);
   const [qbInvoiceLink, setQbInvoiceLink] = useState<QuickBooksInvoiceLink | null>(null);
-  const [editQtyPart, setEditQtyPart] = useState<JobPartWithRelations | null>(null);
-  const [qtySuccess, setQtySuccess] = useState<string | null>(null);
-  // Anchors for the top-bar Edit-Quantity / Print-Traveler part pickers
-  // (only shown when a job has more than one part).
-  const [qtyMenuAnchor, setQtyMenuAnchor] = useState<null | HTMLElement>(null);
+  const [shipmentCount, setShipmentCount] = useState<number | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  // Anchor for the top-bar Print-Traveler part picker (shown when a job has
+  // more than one part).
   const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
   const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
@@ -138,6 +133,23 @@ export default function JobDetailPage() {
     };
   }, [companyId, jobId]);
 
+  // Deletability depends on having no shipment records (voided included — the FK
+  // blocks either way). Fetch the count so we only OFFER Delete when it can
+  // actually succeed, instead of letting the user confirm and then hit an error.
+  useEffect(() => {
+    let cancelled = false;
+    countShipmentsForJob(jobId)
+      .then((n) => {
+        if (!cancelled) setShipmentCount(n);
+      })
+      .catch(() => {
+        if (!cancelled) setShipmentCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
   const handleReopen = async () => {
     setActionLoading(true);
     try {
@@ -160,6 +172,40 @@ export default function JobDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to cancel job');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Explain-on-click instead of hiding/greying: deletion is gated by records of
+  // value (a shipment or an invoice), not production status. If either exists,
+  // say so immediately rather than opening a confirm dialog that only errors;
+  // otherwise confirm + delete (any status).
+  const handleDeleteClick = () => {
+    if (shipmentCount && shipmentCount > 0) {
+      setError(
+        "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
+      );
+      return;
+    }
+    if (qbInvoiceLink) {
+      setError(
+        "This job has been invoiced in QuickBooks, so it's kept for recordkeeping and can't be deleted.",
+      );
+      return;
+    }
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    setActionLoading(true);
+    try {
+      await deleteJob(jobId, companyId);
+      // Navigate away on success — the job (and this page) no longer exist.
+      // Don't reset actionLoading here: the component unmounts on push.
+      router.push(`/dashboard/${companyId}/jobs`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete job');
+      setActionLoading(false);
+      setDeleteDialogOpen(false);
     }
   };
 
@@ -188,6 +234,10 @@ export default function JobDetailPage() {
   const canCancel =
     job.production_status !== 'completed' && job.production_status !== 'cancelled';
   const canReopen = job.production_status === 'cancelled';
+  // Delete is shown on every job, in any production status — removal is gated by
+  // records of value (a shipment or an invoice), not the status label, and that
+  // gate is explained on click (see handleDeleteClick) rather than by hiding the
+  // button. The access layer enforces the same gate as the backstop.
   const canShip =
     shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
@@ -195,18 +245,9 @@ export default function JobDetailPage() {
     parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
-  const editableParts = parts.filter((p) => p.production_status !== 'cancelled');
 
-  // Edit Quantity / Print Traveler are per-part actions surfaced in the top
-  // action bar for discoverability. With one part they act directly; with
-  // several they open a small picker menu.
-  const handleEditQtyClick = (e: ReactMouseEvent<HTMLElement>) => {
-    if (editableParts.length === 1) {
-      setEditQtyPart(editableParts[0]);
-    } else {
-      setQtyMenuAnchor(e.currentTarget);
-    }
-  };
+  // Print Traveler is a per-part action in the top bar: with one part it acts
+  // directly; with several it opens a small picker menu.
   const handleTravelerClick = (e: ReactMouseEvent<HTMLElement>) => {
     if (parts.length === 1) {
       setTravelerPart({ id: parts[0].id, name: parts[0].parts?.part_name ?? null });
@@ -228,37 +269,24 @@ export default function JobDetailPage() {
     await fetchJob();
   };
 
-  const handleQtyConfirmed = async (result: UpdateJobPartQuantityResult) => {
-    const edited = editQtyPart;
-    setEditQtyPart(null);
-    // Audit trail: log the change to the job feed. Best-effort — a note failure
-    // must never undo the (already-committed) quantity edit. authorId is the
-    // user_company_access id (RLS requirement), resolved via getCurrentOperator.
-    try {
-      const me = await getCurrentOperator(companyId);
-      if (me) {
-        const partName = edited?.parts?.part_name ?? 'part';
-        const priceNote = result.priceReresolved
-          ? ` (unit price ${fmtUsd(result.oldUnitPrice)} → ${fmtUsd(result.newUnitPrice)})`
-          : '';
-        await addJobNote(
-          jobId,
-          companyId,
-          me.id,
-          `Order quantity changed ${result.oldQuantity} → ${result.newQuantity} for ${partName}${priceNote}`,
-          { jobPartId: result.jobPart.id, noteType: 'event' },
-        );
-      }
-    } catch (err) {
-      console.warn('Job detail: failed to log quantity-change note', err);
-    }
-    setQtySuccess(
-      `Order qty updated ${result.oldQuantity} → ${result.newQuantity}` +
-        (result.priceReresolved ? ` · unit price ${fmtUsd(result.newUnitPrice)}` : ''),
+  // Single edit surface: the "Edit" button flips the page into JobEditForm
+  // (PO/due date, addresses, contact, and per-line qty/price with the same
+  // invoice/shipped locks), saved in one go — no scattered per-section edits.
+  if (editMode) {
+    return (
+      <JobEditForm
+        job={job}
+        companyId={companyId}
+        qbInvoiceLink={qbInvoiceLink}
+        shippedByPart={new Map(partSummaries.map((s) => [s.job_part_id, s.qty_shipped]))}
+        onCancel={() => setEditMode(false)}
+        onSaved={async () => {
+          setEditMode(false);
+          await fetchJob();
+        }}
+      />
     );
-    // Re-pull so the parts row, status block, and fulfillment chip reflect the edit.
-    await fetchJob();
-  };
+  }
 
   return (
     <Box>
@@ -292,31 +320,16 @@ export default function JobDetailPage() {
         </Box>
 
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {parts.length > 0 &&
-            (qbInvoiceLink ? (
-              <Tooltip
-                title={`Invoiced in QuickBooks${
-                  qbInvoiceLink.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''
-                } — quantity locked. Revise the invoice in QuickBooks to change it.`}
-              >
-                <span>
-                  <Button variant="outlined" startIcon={<LockIcon />} disabled>
-                    Edit Quantity
-                  </Button>
-                </span>
-              </Tooltip>
-            ) : (
-              editableParts.length > 0 && (
-                <Button
-                  variant="outlined"
-                  startIcon={<EditIcon />}
-                  onClick={handleEditQtyClick}
-                  disabled={actionLoading}
-                >
-                  Edit Quantity
-                </Button>
-              )
-            ))}
+          {parts.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => setEditMode(true)}
+              disabled={actionLoading}
+            >
+              Edit
+            </Button>
+          )}
           {parts.length > 0 && (
             <Button
               variant="outlined"
@@ -337,6 +350,29 @@ export default function JobDetailPage() {
               Create Shipment
             </Button>
           )}
+          {qbInvoiceLink ? (
+            <Button
+              variant="outlined"
+              startIcon={<OpenInNewIcon />}
+              href={qbInvoiceLink.url}
+              target="_blank"
+              rel="noopener"
+            >
+              View invoice
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              startIcon={<ReceiptLongIcon />}
+              onClick={() => setPushDialogOpen(true)}
+              disabled={actionLoading}
+            >
+              Create Invoice in QuickBooks
+            </Button>
+          )}
+
+          {/* The negative cluster sits at the right, after the benign + invoice
+              actions: the lifecycle toggle (Reopen/Cancel) then Delete last. */}
           {canReopen && (
             <Button
               variant="outlined"
@@ -358,27 +394,18 @@ export default function JobDetailPage() {
               Cancel
             </Button>
           )}
-
-          {qbInvoiceLink ? (
-            <Button
-              variant="outlined"
-              startIcon={<OpenInNewIcon />}
-              href={qbInvoiceLink.url}
-              target="_blank"
-              rel="noopener"
-            >
-              View invoice
-            </Button>
-          ) : (
-            <Button
-              variant="outlined"
-              startIcon={<ReceiptLongIcon />}
-              onClick={() => setPushDialogOpen(true)}
-              disabled={actionLoading}
-            >
-              Create Invoice in QuickBooks
-            </Button>
-          )}
+          <Tooltip title="Delete job">
+            <span>
+              <IconButton
+                color="error"
+                onClick={handleDeleteClick}
+                disabled={actionLoading}
+                aria-label="Delete job"
+              >
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -462,7 +489,7 @@ export default function JobDetailPage() {
         </Grid>
 
         <Grid size={{ xs: 12 }}>
-          <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} />
+          <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} readOnly />
         </Grid>
 
         <Grid size={{ xs: 12 }}>
@@ -605,6 +632,34 @@ export default function JobDetailPage() {
         </DialogActions>
       </Dialog>
 
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={actionLoading ? undefined : () => setDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Delete Job?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete <strong>{job.job_number}</strong>? This permanently
+            removes the job and all of its parts, operations, notes, and attachments. This
+            cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={actionLoading}>
+            Keep Job
+          </Button>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={actionLoading}
+            startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
+          >
+            {actionLoading ? 'Deleting…' : 'Delete Job'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {shipmentsEnabled && (
         <CreateShipmentModal
           open={shipModalOpen}
@@ -639,35 +694,6 @@ export default function JobDetailPage() {
         }}
       />
 
-      <EditJobPartQuantityModal
-        key={editQtyPart?.id ?? 'none'}
-        open={editQtyPart !== null}
-        jobPart={editQtyPart}
-        qtyShipped={
-          editQtyPart ? summariesByPart.get(editQtyPart.id)?.qty_shipped ?? 0 : 0
-        }
-        onClose={() => setEditQtyPart(null)}
-        onConfirmed={handleQtyConfirmed}
-      />
-
-      <Menu
-        anchorEl={qtyMenuAnchor}
-        open={!!qtyMenuAnchor}
-        onClose={() => setQtyMenuAnchor(null)}
-      >
-        {editableParts.map((p) => (
-          <MenuItem
-            key={p.id}
-            onClick={() => {
-              setQtyMenuAnchor(null);
-              setEditQtyPart(p);
-            }}
-          >
-            {p.parts?.part_name ?? 'Part'} · qty {p.quantity}
-          </MenuItem>
-        ))}
-      </Menu>
-
       <Menu
         anchorEl={travelerMenuAnchor}
         open={!!travelerMenuAnchor}
@@ -691,14 +717,6 @@ export default function JobDetailPage() {
         autoHideDuration={5000}
         onClose={() => setPushSuccess(null)}
         message={pushSuccess ?? ''}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      />
-
-      <Snackbar
-        open={!!qtySuccess}
-        autoHideDuration={5000}
-        onClose={() => setQtySuccess(null)}
-        message={qtySuccess ?? ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       />
     </Box>

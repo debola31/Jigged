@@ -288,6 +288,30 @@ export async function listShipmentsForCompany(
 }
 
 /**
+ * Count ALL shipment rows referencing a job — voided rows included.
+ *
+ * Used as a hard pre-delete guard in deleteJob: shipments_job_id_fkey has no
+ * ON DELETE clause, so any referencing row (even a voided one) would trip a
+ * raw FK violation. getJobPartShipmentSummaries deliberately ignores voided
+ * shipments, so it can't answer this question — hence a dedicated count that
+ * leans on the direct shipments.job_id column.
+ */
+export async function countShipmentsForJob(jobId: string): Promise<number> {
+  const supabase = getSupabase();
+
+  const { count, error } = await supabase
+    .from('shipments')
+    .select('id', { count: 'exact', head: true })
+    .eq('job_id', jobId);
+
+  if (error) {
+    console.error('countShipmentsForJob failed:', error);
+    throw new Error('Failed to check shipments.');
+  }
+  return count ?? 0;
+}
+
+/**
  * Per-job_part shipped summary. Used by the CreateShipmentModal to
  * prefill remaining-to-ship and by the job-detail per-part breakdown.
  *

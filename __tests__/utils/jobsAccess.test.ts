@@ -24,13 +24,17 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => mockSupabase,
 }));
 
-// updateJobPartQuantity orchestrates two cross-module readers — stub them so the
-// test drives only the job_parts / quote_line_items queries it owns.
+// updateJobPartQuantity / deleteJob orchestrate cross-module readers — stub them
+// so the test drives only the job_parts / jobs queries it owns.
 vi.mock('@/utils/shipmentsAccess', () => ({
   getJobPartShipmentSummaries: vi.fn(),
+  countShipmentsForJob: vi.fn(),
 }));
 vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksInvoiceLinkForJob: vi.fn(),
+}));
+vi.mock('@/utils/jobAttachmentsAccess', () => ({
+  deleteStoredFilesForJobs: vi.fn(),
 }));
 
 import {
@@ -43,10 +47,13 @@ import {
   reopenJob,
   searchJobsByIdentifier,
   updateJobAddressContact,
+  updateJobDetails,
+  updateJobPartPrice,
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
-import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
+import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 
 describe('jobsAccess', () => {
   beforeEach(() => {
@@ -65,16 +72,91 @@ describe('jobsAccess', () => {
   });
 
   describe('deleteJob', () => {
-    it('deletes by job id scoped to company_id', async () => {
-      mockQueryBuilder.error = null;
-      await deleteJob('j1', 'co-1');
-      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'j1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    // deleteJob gates on records of value (shipments + invoice), NOT production
+    // status: confirm existence, check countShipmentsForJob +
+    // getQuickBooksInvoiceLinkForJob, clean storage, then delete. The existence
+    // load and the delete both hit from('jobs'); the mock serves select+delete
+    // and captures the delete scoping.
+    function installJobsFrom(opts: {
+      jobRow?: { id: string } | null;
+      loadError?: { message: string } | null;
+      deleteError?: { message: string } | null;
+    }) {
+      const jobRow = opts.jobRow === undefined ? { id: 'j1' } : opts.jobRow;
+      const deleteEqArgs: Array<[string, unknown]> = [];
+      const deleteFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockImplementation((c1: string, v1: unknown) => {
+          deleteEqArgs.push([c1, v1]);
+          return {
+            eq: vi.fn().mockImplementation((c2: string, v2: unknown) => {
+              deleteEqArgs.push([c2, v2]);
+              return Promise.resolve({ error: opts.deleteError ?? null });
+            }),
+          };
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'jobs') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: vi
+                    .fn()
+                    .mockResolvedValue({ data: jobRow, error: opts.loadError ?? null }),
+                }),
+              }),
+            }),
+            delete: deleteFn,
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+      return { deleteFn, deleteEqArgs };
+    }
+
+    beforeEach(() => {
+      vi.mocked(countShipmentsForJob).mockResolvedValue(0);
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+      vi.mocked(deleteStoredFilesForJobs).mockResolvedValue(undefined);
     });
 
-    it('throws when supabase returns an error', async () => {
-      mockQueryBuilder.error = { message: 'boom' };
+    it('deletes a job with no shipments or invoice, scoped to company_id (any status)', async () => {
+      const { deleteFn, deleteEqArgs } = installJobsFrom({});
+      await deleteJob('j1', 'co-1');
+      expect(deleteStoredFilesForJobs).toHaveBeenCalledWith(['j1']);
+      expect(deleteFn).toHaveBeenCalledTimes(1);
+      expect(deleteEqArgs).toContainEqual(['id', 'j1']);
+      expect(deleteEqArgs).toContainEqual(['company_id', 'co-1']);
+    });
+
+    it('rejects when the job has shipment records and never deletes', async () => {
+      vi.mocked(countShipmentsForJob).mockResolvedValue(2);
+      const { deleteFn } = installJobsFrom({});
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/shipment records/);
+      expect(deleteFn).not.toHaveBeenCalled();
+      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the job has been invoiced and never deletes', async () => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
+        invoiceId: 'i1',
+        docNumber: '1001',
+        url: 'http://qb.example/invoice/1',
+      });
+      const { deleteFn } = installJobsFrom({});
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/invoiced in QuickBooks/i);
+      expect(deleteFn).not.toHaveBeenCalled();
+      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
+    });
+
+    it('throws "Job not found" when the job row is missing', async () => {
+      installJobsFrom({ jobRow: null });
+      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/not found/i);
+    });
+
+    it('throws a friendly error when the delete query fails', async () => {
+      installJobsFrom({ deleteError: { message: 'boom' } });
       await expect(deleteJob('j1', 'co-1')).rejects.toBeTruthy();
     });
   });
@@ -554,6 +636,153 @@ describe('jobsAccess', () => {
       installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
       await expect(updateJobPartQuantity('jp1', 15)).rejects.toThrow(/cancelled/i);
       expect(updates).toHaveLength(0);
+    });
+  });
+
+  describe('updateJobPartPrice', () => {
+    const baseJobPart = {
+      id: 'jp1',
+      job_id: 'job1',
+      company_id: 'co1',
+      quantity: 10,
+      unit_price: 100,
+      total_price: 1000,
+      production_status: 'in_progress',
+    };
+
+    // updateJobPartPrice writes job_parts via .update().eq('id').eq('company_id')
+    // .select('*').single() — two eq's, unlike the quantity path's single eq.
+    function installFrom(opts: {
+      jobPart?: Record<string, unknown> | null;
+      updates: Array<Record<string, unknown>>;
+    }) {
+      const jobPart = opts.jobPart === undefined ? baseJobPart : opts.jobPart;
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'job_parts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: jobPart, error: null }),
+              }),
+            }),
+            update: vi.fn().mockImplementation((patch: Record<string, unknown>) => ({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  select: vi.fn().mockReturnValue({
+                    single: vi.fn().mockImplementation(() => {
+                      opts.updates.push(patch);
+                      return Promise.resolve({ data: { ...jobPart, ...patch }, error: null });
+                    }),
+                  }),
+                }),
+              }),
+            })),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+    });
+
+    it('recomputes the total at the new price; never writes fulfillment_status', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      const result = await updateJobPartPrice('jp1', 125);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].unit_price).toBe(125);
+      expect(updates[0].total_price).toBe(1250);
+      expect(updates[0]).not.toHaveProperty('fulfillment_status');
+      expect(result.oldUnitPrice).toBe(100);
+      expect(result.newUnitPrice).toBe(125);
+      expect(result.oldTotalPrice).toBe(1000);
+      expect(result.newTotalPrice).toBe(1250);
+    });
+
+    it('rounds the recomputed total to 4dp', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, quantity: 3 }, updates });
+      await updateJobPartPrice('jp1', 1.3333);
+      expect(updates[0].total_price).toBe(3.9999);
+    });
+
+    it('allows a zero (no-charge) price', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      const result = await updateJobPartPrice('jp1', 0);
+      expect(updates[0].unit_price).toBe(0);
+      expect(updates[0].total_price).toBe(0);
+      expect(result.newTotalPrice).toBe(0);
+    });
+
+    it('sets a real price on a NULL-priced (legacy) line', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({
+        jobPart: { ...baseJobPart, unit_price: null, total_price: null, quantity: 4 },
+        updates,
+      });
+      const result = await updateJobPartPrice('jp1', 50);
+      expect(updates[0].unit_price).toBe(50);
+      expect(updates[0].total_price).toBe(200);
+      expect(result.oldUnitPrice).toBeNull();
+      expect(result.newUnitPrice).toBe(50);
+    });
+
+    it('rejects a negative price before any read', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      await expect(updateJobPartPrice('jp1', -5)).rejects.toThrow(/zero or more/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('rejects when the job is already invoiced', async () => {
+      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
+        invoiceId: 'i1',
+        docNumber: '1001',
+        url: 'http://qb.example/invoice/1',
+      });
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/invoiced in QuickBooks/i);
+      expect(updates).toHaveLength(0);
+    });
+
+    it('refuses to edit a cancelled part', async () => {
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ jobPart: { ...baseJobPart, production_status: 'cancelled' }, updates });
+      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/cancelled/i);
+      expect(updates).toHaveLength(0);
+    });
+  });
+
+  describe('updateJobDetails', () => {
+    it('patches only the provided header fields; empty string clears to null', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      mockQueryBuilder.error = null;
+      await updateJobDetails('j1', 'co-1', { customer_po_number: 'PO-9', due_date: '' });
+      expect(mockSupabase.from).toHaveBeenCalledWith('jobs');
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch.customer_po_number).toBe('PO-9');
+      expect(patch.due_date).toBeNull();
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'j1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+    });
+
+    it('omits keys that were not provided', async () => {
+      mockQueryBuilder.data = { id: 'j1' };
+      await updateJobDetails('j1', 'co-1', { customer_po_number: 'PO-1' });
+      const patch = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(patch).not.toHaveProperty('due_date');
+      expect(patch.customer_po_number).toBe('PO-1');
+    });
+
+    it('throws a friendly (non-raw) error when supabase fails', async () => {
+      mockQueryBuilder.error = { message: 'permission denied' };
+      await expect(
+        updateJobDetails('j1', 'co-1', { due_date: '2026-07-01' }),
+      ).rejects.toThrow(/don't have permission/);
     });
   });
 });

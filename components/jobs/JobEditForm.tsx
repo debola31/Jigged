@@ -32,7 +32,6 @@ import {
   updateJobPartPrice,
 } from '@/utils/jobsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
-import type { QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
@@ -45,10 +44,11 @@ interface LineDraft {
 interface JobEditFormProps {
   job: JobWithRelations;
   companyId: string;
-  /** Present when the job is invoiced in QuickBooks — locks line qty/price. */
-  qbInvoiceLink: QuickBooksInvoiceLink | null;
-  /** job_part_id -> already-shipped quantity (the floor a quantity can't drop below). */
+  /** job_part_id -> already-shipped quantity (part of the quantity floor). */
   shippedByPart: Map<string, number>;
+  /** job_part_id -> already-invoiced quantity. Locks that part's price and joins the
+   *  quantity floor (can't drop below what's shipped OR invoiced). */
+  invoicedByPart: Map<string, number>;
   onCancel: () => void;
   onSaved: () => void | Promise<void>;
 }
@@ -56,16 +56,19 @@ interface JobEditFormProps {
 /**
  * The single edit surface for a job (mirrors the quote edit form): one screen to
  * change PO number, due date, billing/shipping address, contact, and each line's
- * quantity + unit price, with one Save. Line qty/price is locked when the job is
- * invoiced (a visible 🔒 note, not just a disabled field) or the part is
- * cancelled; a quantity can't drop below what's already shipped. Header details
- * and addresses stay editable regardless.
+ * quantity + unit price, with one Save.
+ *
+ * Per-part locks reflect the progressive-invoicing model: a part's UNIT PRICE is
+ * frozen once ANY quantity of it is invoiced (each invoice snapshotted its price);
+ * QUANTITY stays editable upward even after invoicing (that's how you bill more —
+ * raise the order, then invoice the delta) but can't drop below max(shipped,
+ * invoiced). A cancelled part is fully locked. Header details + addresses always edit.
  */
 export default function JobEditForm({
   job,
   companyId,
-  qbInvoiceLink,
   shippedByPart,
+  invoicedByPart,
   onCancel,
   onSaved,
 }: JobEditFormProps) {
@@ -73,7 +76,6 @@ export default function JobEditForm({
   const addresses = job.customers?.addresses ?? [];
   const contacts = job.customers?.customer_contacts ?? [];
   const parts: JobPartWithRelations[] = job.job_parts ?? [];
-  const invoiced = !!qbInvoiceLink;
   const customerHref = `/dashboard/${companyId}/customers/${job.customer_id}`;
 
   const [po, setPo] = useState(job.customer_po_number ?? '');
@@ -100,8 +102,10 @@ export default function JobEditForm({
   const setLine = (id: string, patch: Partial<LineDraft>) =>
     setLines((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
 
-  const lineLocked = (p: JobPartWithRelations) =>
-    invoiced || p.production_status === 'cancelled';
+  const isCancelled = (p: JobPartWithRelations) => p.production_status === 'cancelled';
+  const qtyInvoiced = (p: JobPartWithRelations) => invoicedByPart.get(p.id) ?? 0;
+  // Price freezes once any quantity is invoiced; a cancelled part is fully locked.
+  const priceLocked = (p: JobPartWithRelations) => isCancelled(p) || qtyInvoiced(p) > 0;
 
   const qtyError = (p: JobPartWithRelations): string | null => {
     const d = lines[p.id];
@@ -109,7 +113,12 @@ export default function JobEditForm({
     const q = parseFloat(d.qtyStr);
     if (!(q > 0)) return 'Quantity must be greater than zero.';
     const shipped = shippedByPart.get(p.id) ?? 0;
-    if (q < shipped) return `${shipped} already shipped — can't go below that.`;
+    const floor = Math.max(shipped, qtyInvoiced(p));
+    if (q < floor) {
+      return qtyInvoiced(p) > shipped
+        ? `${floor} already invoiced — can't go below that.`
+        : `${floor} already shipped — can't go below that.`;
+    }
     return null;
   };
   const priceError = (p: JobPartWithRelations): string | null => {
@@ -119,8 +128,11 @@ export default function JobEditForm({
     return Number.isFinite(n) && n >= 0 ? null : 'Enter a price of zero or more.';
   };
 
+  // A cancelled part is uneditable; otherwise quantity must be valid, and price must
+  // be valid unless it's locked (invoiced) — a locked price field is disabled anyway.
   const canSave =
-    !saving && parts.every((p) => lineLocked(p) || (!qtyError(p) && !priceError(p)));
+    !saving &&
+    parts.every((p) => isCancelled(p) || (!qtyError(p) && (priceLocked(p) || !priceError(p))));
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -137,17 +149,21 @@ export default function JobEditForm({
       // total), then a manual price if the user changed it — same order the
       // access layer expects.
       for (const p of parts) {
-        if (lineLocked(p)) continue;
+        if (isCancelled(p)) continue;
         const d = lines[p.id];
+        // Quantity is always editable (upward) — even on an invoiced part.
         const newQty = parseFloat(d.qtyStr);
         if (Number.isFinite(newQty) && newQty !== Number(p.quantity)) {
           await updateJobPartQuantity(p.id, newQty);
         }
-        const trimmed = d.priceStr.trim();
-        if (trimmed !== '') {
-          const newPrice = parseFloat(trimmed);
-          if (Number.isFinite(newPrice) && newPrice !== (p.unit_price ?? NaN)) {
-            await updateJobPartPrice(p.id, newPrice);
+        // Price only when not locked (no invoiced quantity on this part).
+        if (!priceLocked(p)) {
+          const trimmed = d.priceStr.trim();
+          if (trimmed !== '') {
+            const newPrice = parseFloat(trimmed);
+            if (Number.isFinite(newPrice) && newPrice !== (p.unit_price ?? NaN)) {
+              await updateJobPartPrice(p.id, newPrice);
+            }
           }
         }
       }
@@ -339,19 +355,22 @@ export default function JobEditForm({
                 Line items
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              {invoiced && (
-                <Alert severity="info" icon={<LockIcon fontSize="small" />} sx={{ mb: 2 }}>
-                  Invoiced in QuickBooks
-                  {qbInvoiceLink?.docNumber ? ` (${qbInvoiceLink.docNumber})` : ''} — quantities and
-                  prices are locked. Revise the invoice in QuickBooks to change them.
-                </Alert>
-              )}
               <Stack spacing={2}>
                 {parts.map((p) => {
-                  const locked = lineLocked(p);
+                  const cancelled = isCancelled(p);
                   const shipped = shippedByPart.get(p.id) ?? 0;
+                  const invoiced = qtyInvoiced(p);
+                  const pLocked = priceLocked(p);
                   const qErr = qtyError(p);
                   const pErr = priceError(p);
+                  const qtyHelp =
+                    !cancelled && qErr
+                      ? qErr
+                      : invoiced > 0
+                        ? `${invoiced} invoiced${shipped > invoiced ? `, ${shipped} shipped` : ''}`
+                        : shipped > 0
+                          ? `${shipped} shipped`
+                          : ' ';
                   return (
                     <Box
                       key={p.id}
@@ -370,7 +389,7 @@ export default function JobEditForm({
                         <Typography fontWeight={600}>
                           {p.parts?.part_name ?? 'Part'}
                         </Typography>
-                        {p.production_status === 'cancelled' && (
+                        {cancelled && (
                           <Typography variant="caption" color="error.main">
                             Cancelled
                           </Typography>
@@ -385,12 +404,10 @@ export default function JobEditForm({
                           }
                         }}
                         size="small"
-                        disabled={locked}
-                        error={!locked && !!qErr}
-                        helperText={
-                          !locked && qErr ? qErr : shipped > 0 ? `${shipped} shipped` : ' '
-                        }
-                        sx={{ width: 140 }}
+                        disabled={cancelled}
+                        error={!cancelled && !!qErr}
+                        helperText={qtyHelp}
+                        sx={{ width: 160 }}
                         slotProps={{ htmlInput: { inputMode: 'decimal' } }}
                       />
                       <TextField
@@ -402,14 +419,29 @@ export default function JobEditForm({
                           }
                         }}
                         size="small"
-                        disabled={locked}
-                        error={!locked && !!pErr}
-                        helperText={!locked && pErr ? pErr : ' '}
-                        sx={{ width: 160 }}
+                        disabled={pLocked}
+                        error={!pLocked && !!pErr}
+                        helperText={
+                          pLocked && invoiced > 0
+                            ? 'Invoiced — price locked'
+                            : !pLocked && pErr
+                              ? pErr
+                              : ' '
+                        }
+                        sx={{ width: 170 }}
                         slotProps={{
                           htmlInput: { inputMode: 'decimal' },
                           input: {
                             startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                            ...(pLocked && invoiced > 0
+                              ? {
+                                  endAdornment: (
+                                    <InputAdornment position="end">
+                                      <LockIcon fontSize="small" color="disabled" />
+                                    </InputAdornment>
+                                  ),
+                                }
+                              : {}),
                           },
                         }}
                       />

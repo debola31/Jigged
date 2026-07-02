@@ -32,7 +32,10 @@ import { isJobDone } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
-import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
+import {
+  getQuickBooksInvoiceLinkForJob,
+  getJobPartInvoiceSummaries,
+} from '@/utils/quickbooksAccess';
 
 /**
  * Sanitize search string for use in LIKE/ILIKE queries
@@ -149,7 +152,7 @@ export async function getAllJobs(
       throw error;
     }
 
-    allData = [...allData, ...((data || []) as JobWithRelations[])];
+    allData = [...allData, ...((data || []) as unknown as JobWithRelations[])];
     hasMore = (data?.length || 0) === BATCH_SIZE;
     offset += BATCH_SIZE;
   }
@@ -662,9 +665,11 @@ export async function getJobPartPricingBasis(
  *
  * Guardrails (all enforced before the write):
  *  - newQuantity must be finite and > 0 (decimals allowed — fractional units).
- *  - cannot reduce below already-shipped qty for the part.
- *  - blocked while a QuickBooks invoice exists for the job (Phase 1 — invoiced
- *    jobs get the void-and-reissue / memo flow in a later phase).
+ *  - cannot reduce below max(already-shipped, already-invoiced) for the part.
+ *    Increases are always allowed even on an invoiced job — that's how a job grows
+ *    to bill more (10 -> 15 to invoice the extra 6 on a NEW invoice). The
+ *    invoiced-floor only bites when a shipment was voided AFTER invoicing, leaving
+ *    invoiced > shipped; reducing below the invoiced qty needs a QuickBooks credit.
  *
  * fulfillment_status is NOT written here — the AFTER UPDATE OF quantity DB
  * trigger (trigger_recompute_jp_fulfillment_on_qty) recomputes it from the
@@ -710,27 +715,28 @@ export async function updateJobPartQuantity(
     throw new Error('This part is cancelled — its quantity can no longer be edited.');
   }
 
-  // 2. Invoice gate (Phase 1): block when a QuickBooks invoice already exists.
-  const invoiceLink = await getQuickBooksInvoiceLinkForJob(part.company_id, part.job_id);
-  if (invoiceLink) {
+  // 2. Floor guard: can't drop below what's already committed downstream —
+  //    max(shipped, invoiced). Increases are always allowed (invoicing more is done
+  //    by raising the order then billing the delta on a new invoice). invoiced can
+  //    exceed shipped only when a shipment was voided after invoicing.
+  const [shipSummaries, invSummaries] = await Promise.all([
+    getJobPartShipmentSummaries(part.job_id),
+    getJobPartInvoiceSummaries(part.job_id),
+  ]);
+  const qtyShipped = shipSummaries.find((s) => s.job_part_id === jobPartId)?.qty_shipped ?? 0;
+  const qtyInvoiced = invSummaries.find((s) => s.job_part_id === jobPartId)?.qty_invoiced ?? 0;
+  const floor = Math.max(qtyShipped, qtyInvoiced);
+  if (newQuantity < floor) {
     throw new Error(
-      `This job is already invoiced in QuickBooks${
-        invoiceLink.docNumber ? ` (${invoiceLink.docNumber})` : ''
-      }. Revise or void that invoice in QuickBooks before changing the quantity.`,
+      qtyInvoiced > qtyShipped
+        ? `Cannot set quantity to ${newQuantity} — ${qtyInvoiced} have already been invoiced on ` +
+          'this part. Credit or void that invoice in QuickBooks first.'
+        : `Cannot set quantity to ${newQuantity} — ${qtyShipped} have already shipped on this part. ` +
+          'Void a packing slip first to ship fewer.',
     );
   }
 
-  // 3. Shipped-floor guard: can't drop below what already shipped.
-  const summaries = await getJobPartShipmentSummaries(part.job_id);
-  const qtyShipped = summaries.find((s) => s.job_part_id === jobPartId)?.qty_shipped ?? 0;
-  if (newQuantity < qtyShipped) {
-    throw new Error(
-      `Cannot set quantity to ${newQuantity} — ${qtyShipped} have already shipped on this part. ` +
-        'Void a packing slip first to ship fewer.',
-    );
-  }
-
-  // 4. Re-resolve price (keep agreed by default; cross a tier only on opt-in).
+  // 3. Re-resolve price (keep agreed by default; cross a tier only on opt-in).
   const basis = await getJobPartPricingBasis(jobPartId);
   const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(
     part.unit_price,
@@ -742,7 +748,7 @@ export async function updateJobPartQuantity(
   const priceReresolved = newUnitPrice !== part.unit_price;
   const newTotalPrice = newUnitPrice !== null ? roundTotal4dp(newUnitPrice * newQuantity) : null;
 
-  // 5. Single write. fulfillment_status handled by the DB trigger.
+  // 4. Single write. fulfillment_status + invoicing_status handled by DB triggers.
   const updatePayload: JobPartUpdate = {
     quantity: newQuantity,
     unit_price: newUnitPrice,
@@ -792,8 +798,10 @@ export interface UpdateJobPartPriceResult {
  * Unlike a quantity edit, price is orthogonal to fulfillment, so there's no
  * shipped-floor check. Guardrails enforced before the write:
  *  - newUnitPrice must be finite and >= 0 (0 = a no-charge line is allowed).
- *  - blocked while a QuickBooks invoice exists for the job (same gate as the
- *    quantity edit — revise/void the invoice in QuickBooks first).
+ *  - blocked once ANY quantity of this part has been invoiced — a per-PART price
+ *    lock (each invoice froze its own price snapshot; the order total must stay a
+ *    faithful revenue figure). Untouched parts on a partially-invoiced job stay
+ *    repriceable. Repricing an invoiced part is a QuickBooks credit/reissue.
  *  - a cancelled part can't be repriced.
  *
  * Composition note: job_parts carries no override flag (unlike quote lines'
@@ -837,13 +845,14 @@ export async function updateJobPartPrice(
     throw new Error('This part is cancelled — its price can no longer be edited.');
   }
 
-  // 2. Invoice gate: same boundary as the quantity edit.
-  const invoiceLink = await getQuickBooksInvoiceLinkForJob(part.company_id, part.job_id);
-  if (invoiceLink) {
+  // 2. Price-lock gate (per-part): once ANY quantity of this part is invoiced, its
+  //    price is frozen. Untouched parts on a partially-invoiced job stay repriceable.
+  const invSummaries = await getJobPartInvoiceSummaries(part.job_id);
+  const qtyInvoiced = invSummaries.find((s) => s.job_part_id === jobPartId)?.qty_invoiced ?? 0;
+  if (qtyInvoiced > 0) {
     throw new Error(
-      `This job is already invoiced in QuickBooks${
-        invoiceLink.docNumber ? ` (${invoiceLink.docNumber})` : ''
-      }. Revise or void that invoice in QuickBooks before changing the price.`,
+      'This part has been invoiced, so its price is locked. Credit or reissue the invoice in ' +
+        'QuickBooks to change what was billed.',
     );
   }
 
@@ -1519,7 +1528,7 @@ export async function getOverdueJobs(
     throw error;
   }
 
-  return (data || []) as JobWithRelations[];
+  return (data || []) as unknown as JobWithRelations[];
 }
 
 // ============== Current Operation Batch Query ==============

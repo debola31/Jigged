@@ -10,3 +10,4 @@ export { default as CompleteOperationModal } from "./CompleteOperationModal";
 export { default as JobTravelerPreviewDialog } from "./JobTravelerPreviewDialog";
 export { default as JobBillingShippingCard } from "./JobBillingShippingCard";
 export { default as JobEditForm } from "./JobEditForm";
+export { default as InvoicesCard } from "./InvoicesCard";

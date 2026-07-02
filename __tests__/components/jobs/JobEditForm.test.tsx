@@ -57,8 +57,6 @@ const baseJob = {
   ],
 } as unknown as JobWithRelations;
 
-const invoiceLink = { invoiceId: 'i1', docNumber: '1001', url: 'http://qb.example/1' };
-
 const wrap = (ui: React.ReactElement) => (
   <ThemeProvider theme={jiggedTheme}>{ui}</ThemeProvider>
 );
@@ -69,8 +67,8 @@ const renderForm = (over: Partial<React.ComponentProps<typeof JobEditForm>> = {}
       <JobEditForm
         job={baseJob}
         companyId="co-1"
-        qbInvoiceLink={null}
         shippedByPart={new Map()}
+        invoicedByPart={new Map()}
         onCancel={vi.fn()}
         onSaved={vi.fn()}
         {...over}
@@ -115,11 +113,22 @@ describe('JobEditForm', () => {
     expect(updateJobPartPrice).not.toHaveBeenCalled();
   });
 
-  it('locks line qty/price when the job is invoiced', () => {
-    renderForm({ qbInvoiceLink: invoiceLink });
-    expect(screen.getByLabelText(/quantity/i)).toBeDisabled();
+  it('locks only the PRICE (not quantity) once the part is invoiced', () => {
+    // 4 of 10 invoiced: price is frozen, but quantity stays editable (you can
+    // raise the order to bill more on a new invoice).
+    renderForm({ invoicedByPart: new Map([['jp-1', 4]]) });
+    expect(screen.getByLabelText(/quantity/i)).not.toBeDisabled();
     expect(screen.getByLabelText(/unit price/i)).toBeDisabled();
-    expect(screen.getByText(/Invoiced in QuickBooks/i)).toBeInTheDocument();
+    expect(screen.getByText(/price locked/i)).toBeInTheDocument();
+  });
+
+  it('blocks saving a quantity below what has already been invoiced', async () => {
+    renderForm({ invoicedByPart: new Map([['jp-1', 6]]) });
+    const qty = screen.getByLabelText(/quantity/i);
+    await userEvent.clear(qty);
+    await userEvent.type(qty, '3');
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    expect(screen.getByText(/already invoiced/i)).toBeInTheDocument();
   });
 
   it('blocks saving a quantity below what has already shipped', async () => {

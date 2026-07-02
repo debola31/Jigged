@@ -322,9 +322,11 @@ pnpm test:coverage
 pnpm test:ui
 
 # Backend API tests (pytest; from /api)
-cd api && pytest                      # full suite
-cd api && pytest tests/unit/          # only unit tests
-cd api && pytest -m integration       # integration marker (needs DB)
+# ALWAYS use the "jigged" conda env — it has all backend deps. Do NOT create a new
+# venv (python -m venv / virtualenv); use `conda run -n jigged <cmd>` or activate it.
+cd api && conda run -n jigged pytest                      # full suite
+cd api && conda run -n jigged pytest tests/unit/          # only unit tests
+cd api && conda run -n jigged pytest -m integration       # integration marker (needs DB)
 
 # Type-check the whole frontend (no emit)
 pnpm exec tsc --noEmit -p tsconfig.json
@@ -483,6 +485,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Parts](docs/modules/parts.md)
 - [Quotes](docs/modules/quotes.md)
 - [Jobs](docs/modules/jobs.md)
+- [Invoicing](docs/modules/invoicing.md)
 - [Operations](docs/modules/operations.md)
 - [Dashboard](docs/modules/dashboard.md)
 - [Routings](docs/modules/routings.md)

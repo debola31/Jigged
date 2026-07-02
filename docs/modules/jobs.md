@@ -97,8 +97,8 @@ Overdue surfaces as:
 **Editing order quantity:** Customers commonly change quantity (up or down) after a quote converts, so `job_parts.quantity` is editable from the Job detail page (edit icon next to the "Order qty" chip) via `updateJobPartQuantity(jobPartId, newQty, opts?)`. The job — not the now-read-only quote — is the post-conversion source of truth. Behaviour:
 
 - **Pricing:** defaults to keeping the agreed `unit_price`; if the new qty crosses a price break in the source quote line's frozen tier snapshot, the modal offers the re-resolved price (the user opts in). `total_price` is recomputed at 4 dp. PO-sourced / override / `basis_unknown` lines always keep their price.
-- **Guardrails:** quantity must be `> 0` (decimals allowed); cannot drop below already-shipped qty; **blocked while a QuickBooks invoice exists** for the job (the invoiced-job revision flow is a later phase — the control shows a lock icon). Cancelled parts are not editable.
-- **Fulfillment:** the `trigger_recompute_jp_fulfillment_on_qty` DB trigger recomputes `fulfillment_status` from `compute_job_part_fulfillment_status` after the edit (a part can flip `fully_shipped → partially_shipped` when qty increases). The access layer never writes `fulfillment_status` itself.
+- **Guardrails:** quantity must be `> 0` (decimals allowed); cannot drop below `max(already-shipped, already-invoiced)`. **Increases are always allowed even on an invoiced job** — that's how you bill more: raise the order, then invoice the delta on a new invoice. A part's unit price is locked once any quantity of it is invoiced (see [Invoicing](invoicing.md)). Cancelled parts are not editable.
+- **Fulfillment & invoicing:** the `trigger_recompute_jp_fulfillment_on_qty` DB trigger recomputes `fulfillment_status` from `compute_job_part_fulfillment_status` after the edit (a part can flip `fully_shipped → partially_shipped` when qty increases); a parallel `trigger_recompute_jp_invoicing_on_qty` does the same for `invoicing_status` (`fully_invoiced → partially_invoiced`). The access layer never writes either status itself.
 - **Audit:** the change is logged to the job feed as an `event`-type `job_note` (old → new qty, and any unit-price change).
 - The originating quote stays read-only but reflects the live job quantity ("now N on job"); see the Quotes module.
 
@@ -172,7 +172,7 @@ Both paths store the agreed price on each `job_part` (`unit_price` / `total_pric
 
 ▸ **Invoicing (QuickBooks)**
 
-- **Create Invoice in QuickBooks** / **View invoice** lives on the job — invoicing is **job-keyed** (see [Architecture](../architecture.md)). The quote page only links through to the job. Works the same for quote- and PO-sourced jobs, reading price from `job_parts.unit_price`.
+- **Create invoice** lives on the job (invoicing is **job-keyed**; see [Architecture](../architecture.md)), and a job can have **many** invoices — progressive billing. The picker bills a chosen quantity of **shipped-but-unbilled** parts (ship-capped); each invoice snapshots its price, so a part's price locks once any quantity of it is invoiced. An **Invoices card** lists every created invoice with a "View in QuickBooks" link (replacing the old single "View invoice" button). Quote- and PO-sourced jobs invoice identically, reading price from `job_parts.unit_price`. Full spec: [Invoicing](invoicing.md).
 
 ▸ **Customer**
 

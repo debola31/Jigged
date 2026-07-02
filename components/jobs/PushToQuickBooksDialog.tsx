@@ -19,12 +19,14 @@ import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
+import TextField from '@mui/material/TextField';
 import {
   preflightJobPush,
   pushJobToQuickBooks,
   type PreflightResult,
   type PushCustomerDecision,
 } from '@/utils/quickbooksAccess';
+import { isValidQuantityInput } from '@/lib/quantityInput';
 
 const CREATE_SENTINEL = '__create__';
 
@@ -41,6 +43,12 @@ function formatCurrency(n: number): string {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
+/**
+ * Create ONE QuickBooks invoice for a job, billing a chosen quantity of each part.
+ * A job can have many invoices (progressive billing); this dialog bills what has
+ * shipped but isn't yet invoiced (the ship-cap). Each open mints a fresh
+ * idempotency id so a double-click can't create two invoices.
+ */
 export default function PushToQuickBooksDialog({
   open,
   companyId,
@@ -54,6 +62,9 @@ export default function PushToQuickBooksDialog({
   const [error, setError] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [choice, setChoice] = useState<string>(CREATE_SENTINEL);
+  const [qtyById, setQtyById] = useState<Record<string, string>>({});
+  // Client-minted idempotency key for THIS invoice draft — one per dialog open.
+  const [requestId, setRequestId] = useState<string>('');
 
   const runPreflight = useCallback(async () => {
     setLoading(true);
@@ -62,6 +73,7 @@ export default function PushToQuickBooksDialog({
     try {
       const result = await preflightJobPush(companyId, jobId);
       setPreflight(result);
+      setRequestId(crypto.randomUUID());
       const c = result.customer;
       if (c) {
         if (c.status === 'mapped' || c.status === 'exact_match') {
@@ -72,12 +84,49 @@ export default function PushToQuickBooksDialog({
           setChoice(CREATE_SENTINEL);
         }
       }
+      // Default each line to bill everything shipped-but-unbilled (the invoiceable qty).
+      const initial: Record<string, string> = {};
+      for (const p of result.parts ?? []) {
+        initial[p.job_part_id] = p.qty_invoiceable > 0 ? String(p.qty_invoiceable) : '0';
+      }
+      setQtyById(initial);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to prepare the QuickBooks push.');
     } finally {
       setLoading(false);
     }
   }, [companyId, jobId]);
+
+  const setQty = (id: string, value: string) => {
+    if (value === '' || isValidQuantityInput(value)) {
+      setQtyById((prev) => ({ ...prev, [id]: value }));
+    }
+  };
+
+  const parts = preflight?.parts ?? [];
+  const billable = parts.filter((p) => p.qty_invoiceable > 0 && p.unit_price !== null);
+
+  const lineQty = (id: string): number => {
+    const n = parseFloat(qtyById[id] ?? '');
+    return Number.isFinite(n) ? n : 0;
+  };
+  const lineError = (jobPartId: string, invoiceable: number): string | null => {
+    const s = qtyById[jobPartId] ?? '';
+    if (s.trim() === '') return null;
+    const n = parseFloat(s);
+    if (!Number.isFinite(n) || n < 0) return 'Enter a quantity of zero or more.';
+    if (n > invoiceable + 1e-9) return `Only ${invoiceable} shipped and not yet invoiced.`;
+    return null;
+  };
+
+  const total = billable.reduce((sum, p) => sum + lineQty(p.job_part_id) * (p.unit_price ?? 0), 0);
+  const anyToBill = billable.some((p) => lineQty(p.job_part_id) > 0);
+  const anyError = billable.some((p) => !!lineError(p.job_part_id, p.qty_invoiceable));
+
+  const notConnected = preflight !== null && preflight.connected === false;
+  const nothingBillable = preflight?.connected === true && billable.length === 0;
+  const canPush =
+    !loading && !pushing && preflight?.connected === true && anyToBill && !anyError;
 
   const handlePush = async () => {
     setPushing(true);
@@ -87,9 +136,12 @@ export default function PushToQuickBooksDialog({
         choice === CREATE_SENTINEL
           ? { action: 'create' }
           : { action: 'use_existing', qb_customer_id: choice };
-      const result = await pushJobToQuickBooks(companyId, jobId, customer);
+      const lines = billable
+        .filter((p) => lineQty(p.job_part_id) > 0)
+        .map((p) => ({ job_part_id: p.job_part_id, quantity: lineQty(p.job_part_id) }));
+      const result = await pushJobToQuickBooks(companyId, jobId, customer, requestId, lines);
       if (result.in_progress) {
-        setError('A push for this job is already in progress. Please refresh in a moment.');
+        setError('This invoice is already being created. Please refresh in a moment.');
         return;
       }
       const docRef = result.doc_number ? `Invoice ${result.doc_number}` : 'Invoice';
@@ -106,15 +158,11 @@ export default function PushToQuickBooksDialog({
   };
 
   const customer = preflight?.customer;
-  const lines = preflight?.lines_preview ?? [];
-  const total = lines.reduce((sum, ln) => sum + ln.amount, 0);
-
-  const notConnected = preflight !== null && preflight.connected === false;
-  const alreadyPushed = preflight?.already_pushed === true;
-  const canPush = !loading && !pushing && preflight?.connected === true && !alreadyPushed;
-
   const showCustomerChoices =
-    customer && (customer.status === 'exact_match' || customer.status === 'candidates' || customer.status === 'unmatched');
+    customer &&
+    (customer.status === 'exact_match' ||
+      customer.status === 'candidates' ||
+      customer.status === 'unmatched');
 
   return (
     <Dialog
@@ -122,8 +170,7 @@ export default function PushToQuickBooksDialog({
       onClose={pushing ? undefined : onClose}
       maxWidth="sm"
       fullWidth
-      // Run the preflight check each time the dialog opens (house convention:
-      // onEnter, not a useEffect, which would trip set-state-in-effect).
+      // Run preflight each time the dialog opens (house convention: onEnter, not useEffect).
       TransitionProps={{ onEnter: runPreflight }}
     >
       <DialogTitle>Create QuickBooks invoice for {jobNumber}</DialogTitle>
@@ -141,27 +188,6 @@ export default function PushToQuickBooksDialog({
             {error && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
                 {error}
-              </Alert>
-            )}
-            {alreadyPushed && (
-              <Alert
-                severity="success"
-                sx={{ mb: 2 }}
-                action={
-                  preflight?.invoice_url ? (
-                    <Button
-                      color="inherit"
-                      size="small"
-                      href={preflight.invoice_url}
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      View in QuickBooks
-                    </Button>
-                  ) : undefined
-                }
-              >
-                This job has already been pushed to QuickBooks.
               </Alert>
             )}
 
@@ -206,38 +232,64 @@ export default function PushToQuickBooksDialog({
             <Divider sx={{ mb: 2 }} />
 
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-              Invoice lines
+              Quantities to invoice
             </Typography>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Part</TableCell>
-                  <TableCell align="right">Qty</TableCell>
-                  <TableCell align="right">Rate</TableCell>
-                  <TableCell align="right">Amount</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {lines.map((ln, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{ln.part_name}</TableCell>
-                    <TableCell align="right">{ln.quantity}</TableCell>
-                    <TableCell align="right">
-                      {ln.unit_price !== null ? formatCurrency(ln.unit_price) : '—'}
-                    </TableCell>
-                    <TableCell align="right">{formatCurrency(ln.amount)}</TableCell>
+            {nothingBillable ? (
+              <Alert severity="info">
+                Nothing to invoice yet. An invoice covers parts that have shipped but aren&apos;t
+                billed — ship items first (or everything shipped is already invoiced).
+              </Alert>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Part</TableCell>
+                    <TableCell align="right">Shipped, unbilled</TableCell>
+                    <TableCell align="right">Qty to bill</TableCell>
+                    <TableCell align="right">Amount</TableCell>
                   </TableRow>
-                ))}
-                <TableRow>
-                  <TableCell colSpan={3} align="right" sx={{ fontWeight: 600, border: 0 }}>
-                    Total
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600, border: 0 }}>
-                    {formatCurrency(total)}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {billable.map((p) => {
+                    const err = lineError(p.job_part_id, p.qty_invoiceable);
+                    return (
+                      <TableRow key={p.job_part_id}>
+                        <TableCell>
+                          {p.part_name}
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {p.qty_invoiced > 0 ? `${p.qty_invoiced} of ${p.qty_ordered} invoiced` : `${p.qty_ordered} ordered`}
+                            {p.unit_price !== null ? ` · ${formatCurrency(p.unit_price)}/ea` : ''}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">{p.qty_invoiceable}</TableCell>
+                        <TableCell align="right">
+                          <TextField
+                            value={qtyById[p.job_part_id] ?? ''}
+                            onChange={(e) => setQty(p.job_part_id, e.target.value)}
+                            size="small"
+                            error={!!err}
+                            helperText={err ?? ' '}
+                            sx={{ width: 110 }}
+                            slotProps={{ htmlInput: { inputMode: 'decimal', style: { textAlign: 'right' } } }}
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatCurrency(lineQty(p.job_part_id) * (p.unit_price ?? 0))}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow>
+                    <TableCell colSpan={3} align="right" sx={{ fontWeight: 600, border: 0 }}>
+                      Total
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 600, border: 0 }}>
+                      {formatCurrency(total)}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            )}
           </>
         )}
       </DialogContent>

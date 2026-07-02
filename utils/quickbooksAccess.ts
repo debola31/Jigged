@@ -33,19 +33,26 @@ export interface PreflightCustomer {
   jigged_name: string;
 }
 
-export interface PreflightLine {
+/**
+ * Per-part billing context for the invoice quantity picker. `qty_invoiceable`
+ * is the ship-cap: shipped − already-invoiced (what you may bill on this invoice).
+ */
+export interface BillablePart {
+  job_part_id: string;
   part_name: string;
-  quantity: number;
+  description: string | null;
   unit_price: number | null;
-  amount: number;
+  qty_ordered: number;
+  qty_shipped: number;
+  qty_invoiced: number;
+  qty_invoiceable: number;
+  production_status: string | null;
 }
 
 export interface PreflightResult {
   connected: boolean;
-  already_pushed?: boolean;
-  invoice_url?: string | null;
   customer?: PreflightCustomer;
-  lines_preview?: PreflightLine[];
+  parts?: BillablePart[];
 }
 
 export interface PushCustomerDecision {
@@ -152,14 +159,28 @@ export function preflightJobPush(
   });
 }
 
+/** One line the user chose to bill on this invoice. */
+export interface InvoiceLineSelection {
+  job_part_id: string;
+  quantity: number;
+}
+
+/**
+ * Create ONE invoice for a job billing the selected per-part quantities. `requestId`
+ * is a client-minted idempotency key (one per dialog open) — a retried submit reuses
+ * it so a double-click can't create two QuickBooks invoices. A job may have many
+ * invoices; each call creates a distinct one for what has shipped-but-not-yet-invoiced.
+ */
 export function pushJobToQuickBooks(
   companyId: string,
   jobId: string,
   customer: PushCustomerDecision,
+  requestId: string,
+  lines: InvoiceLineSelection[],
 ): Promise<PushResult> {
   return qbRequest<PushResult>(`/${companyId}/jobs/${jobId}/invoice`, {
     method: 'POST',
-    body: { customer },
+    body: { customer, request_id: requestId, lines },
   });
 }
 
@@ -189,4 +210,140 @@ export async function getQuickBooksInvoiceLinkForJob(
     docNumber: data.qb_invoice_doc_number,
     url: data.qb_invoice_url,
   };
+}
+
+/** Per-part invoiced quantity (created, non-void invoices) for a job. The
+ * Jigged-side truth for "how much of each part is already billed" — mirrors
+ * getJobPartShipmentSummaries. Used by the editing gates (invoiced-floor) and the
+ * job page's per-part breakdown. */
+export interface JobPartInvoiceSummary {
+  job_part_id: string;
+  qty_ordered: number;
+  qty_invoiced: number;
+}
+
+export async function getJobPartInvoiceSummaries(
+  jobId: string,
+): Promise<JobPartInvoiceSummary[]> {
+  const supabase = getSupabase();
+
+  const { data: rawParts, error: partsErr } = await supabase
+    .from('job_parts')
+    .select('id, quantity')
+    .eq('job_id', jobId)
+    .order('sequence', { ascending: true });
+  if (partsErr || !rawParts) {
+    console.error('Error fetching job_parts for invoice summary:', partsErr);
+    throw new Error('Failed to load job parts.');
+  }
+  type JobPartRow = { id: string; quantity: number };
+  const parts = rawParts as unknown as JobPartRow[];
+  if (parts.length === 0) return [];
+  const partIds = parts.map((p) => p.id);
+
+  const { data: invoiced, error: invErr } = await supabase
+    .from('quickbooks_invoice_line_items')
+    .select('job_part_id, quantity, link:quickbooks_invoice_links!inner (status, voided_at)')
+    .in('job_part_id', partIds);
+  if (invErr) {
+    console.error('Error fetching invoice line items:', invErr);
+    throw new Error('Failed to load invoiced quantities.');
+  }
+  type InvRow = {
+    job_part_id: string;
+    quantity: number;
+    link: { status: string; voided_at: string | null } | null;
+  };
+  const byPart = new Map<string, number>();
+  for (const row of (invoiced ?? []) as unknown as InvRow[]) {
+    // Only created, non-voided invoices count as billed (mirrors the SQL compute fn).
+    if (!row.link || row.link.status !== 'created' || row.link.voided_at !== null) continue;
+    byPart.set(row.job_part_id, (byPart.get(row.job_part_id) ?? 0) + Number(row.quantity));
+  }
+
+  return parts.map((p) => ({
+    job_part_id: p.id,
+    qty_ordered: Number(p.quantity),
+    qty_invoiced: byPart.get(p.id) ?? 0,
+  }));
+}
+
+export interface QuickBooksInvoiceLineView {
+  jobPartId: string;
+  partName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+/** One created invoice for the job's Invoices card. */
+export interface QuickBooksInvoiceView {
+  id: string;
+  invoiceId: string | null;
+  docNumber: string | null;
+  url: string | null;
+  createdAt: string;
+  lines: QuickBooksInvoiceLineView[];
+  total: number;
+}
+
+/** All created (non-void) invoices for a job, newest first, with their per-part
+ * lines — replaces the single-invoice assumption of getQuickBooksInvoiceLinkForJob
+ * for the job page's Invoices card. Plain member read (RLS), no backend round-trip. */
+export async function getQuickBooksInvoiceLinksForJob(
+  companyId: string,
+  jobId: string,
+): Promise<QuickBooksInvoiceView[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('quickbooks_invoice_links')
+    .select(
+      `id, qb_invoice_id, qb_invoice_doc_number, qb_invoice_url, created_at,
+       quickbooks_invoice_line_items (
+         job_part_id, quantity, unit_price, total_price,
+         job_part:job_parts ( part:parts ( part_name ) )
+       )`,
+    )
+    .eq('company_id', companyId)
+    .eq('job_id', jobId)
+    .eq('status', 'created')
+    .is('voided_at', null)
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('Error fetching invoices for job:', error);
+    throw new Error('Failed to load invoices.');
+  }
+  type LineRow = {
+    job_part_id: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    job_part: { part: { part_name: string } | null } | null;
+  };
+  type LinkRow = {
+    id: string;
+    qb_invoice_id: string | null;
+    qb_invoice_doc_number: string | null;
+    qb_invoice_url: string | null;
+    created_at: string;
+    quickbooks_invoice_line_items: LineRow[];
+  };
+  return ((data ?? []) as unknown as LinkRow[]).map((r) => {
+    const lines: QuickBooksInvoiceLineView[] = (r.quickbooks_invoice_line_items ?? []).map((li) => ({
+      jobPartId: li.job_part_id,
+      partName: li.job_part?.part?.part_name ?? 'Part',
+      quantity: Number(li.quantity),
+      unitPrice: Number(li.unit_price),
+      totalPrice: Number(li.total_price),
+    }));
+    return {
+      id: r.id,
+      invoiceId: r.qb_invoice_id,
+      docNumber: r.qb_invoice_doc_number,
+      url: r.qb_invoice_url,
+      createdAt: r.created_at,
+      lines,
+      total: lines.reduce((s, l) => s + l.totalPrice, 0),
+    };
+  });
 }

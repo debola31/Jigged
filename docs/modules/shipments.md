@@ -74,7 +74,9 @@ The derivation functions are:
 
 A job auto-closes (fulfillment_status → `fully_shipped`) when `SUM(shipped) ≥ SUM(ordered)` for all non-cancelled job_parts.
 
-`qty_remaining` (from `getJobPartShipmentSummaries`) is derived live as `job_parts.quantity − SUM(non-voided shipped)`, so it always reflects the **current** ordered quantity — including a post-conversion edit. Conversely, `updateJobPartQuantity` refuses to lower a part's quantity below what has already shipped.
+`qty_remaining` (from `getJobPartShipmentSummaries`) is derived live as `job_parts.quantity − SUM(non-voided shipped)`, so it always reflects the **current** ordered quantity — including a post-conversion edit. Conversely, `updateJobPartQuantity` refuses to lower a part's quantity below `max(already-shipped, already-invoiced)`.
+
+**Invoicing is gated on shipping.** An invoice can only bill what has shipped but isn't yet invoiced (`invoiceable = SUM(non-voided shipped) − SUM(created-invoice qty)`). A **third** axis, `invoicing_status` (`uninvoiced | partially_invoiced | fully_invoiced`), mirrors this whole trigger family for invoices — so the "dual-status" model above is really three independent axes now. Voiding a shipment lowers shipped qty (which can leave a part invoiced-above-shipped, a legitimate state). Full spec: [Invoicing](invoicing.md).
 
 ---
 

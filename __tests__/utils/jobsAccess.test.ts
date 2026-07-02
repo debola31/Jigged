@@ -32,6 +32,7 @@ vi.mock('@/utils/shipmentsAccess', () => ({
 }));
 vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksInvoiceLinkForJob: vi.fn(),
+  getJobPartInvoiceSummaries: vi.fn(),
 }));
 vi.mock('@/utils/jobAttachmentsAccess', () => ({
   deleteStoredFilesForJobs: vi.fn(),
@@ -52,7 +53,10 @@ import {
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
-import { getQuickBooksInvoiceLinkForJob } from '@/utils/quickbooksAccess';
+import {
+  getQuickBooksInvoiceLinkForJob,
+  getJobPartInvoiceSummaries,
+} from '@/utils/quickbooksAccess';
 import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 
 describe('jobsAccess', () => {
@@ -540,7 +544,9 @@ describe('jobsAccess', () => {
       vi.mocked(getJobPartShipmentSummaries).mockResolvedValue([
         { job_part_id: 'jp1', qty_ordered: 10, qty_shipped: 0, qty_remaining: 10, last_ship_date: null },
       ]);
-      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 0 },
+      ]);
     });
 
     it('keeps the agreed unit price by default and recomputes the total; never writes fulfillment_status', async () => {
@@ -615,15 +621,28 @@ describe('jobsAccess', () => {
       expect(updates).toHaveLength(0);
     });
 
-    it('blocks editing once the job is invoiced in QuickBooks', async () => {
-      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
-        invoiceId: 'i1',
-        docNumber: 'INV-42',
-        url: 'https://qbo/INV-42',
-      });
+    it('allows INCREASING quantity even after the part is invoiced (the 10 -> 15 case)', async () => {
+      // 9 invoiced; raising the order to 15 is how you bill the extra 6 on a new invoice.
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 9 },
+      ]);
       const updates: Array<Record<string, unknown>> = [];
       installFrom({ quoteLine: tieredLine, updates });
-      await expect(updateJobPartQuantity('jp1', 15)).rejects.toThrow(/invoiced in QuickBooks/i);
+      const result = await updateJobPartQuantity('jp1', 15);
+      expect(updates).toHaveLength(1);
+      expect(updates[0].quantity).toBe(15);
+      expect(result.newQuantity).toBe(15);
+    });
+
+    it('blocks reducing below the already-invoiced quantity', async () => {
+      // Shipment voided after invoicing → invoiced (9) exceeds shipped (0); the
+      // invoiced-floor still blocks dropping below 9.
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 9 },
+      ]);
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ quoteLine: tieredLine, updates });
+      await expect(updateJobPartQuantity('jp1', 5)).rejects.toThrow(/already been invoiced/i);
       expect(updates).toHaveLength(0);
     });
 
@@ -684,7 +703,9 @@ describe('jobsAccess', () => {
     }
 
     beforeEach(() => {
-      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 0 },
+      ]);
     });
 
     it('recomputes the total at the new price; never writes fulfillment_status', async () => {
@@ -737,16 +758,27 @@ describe('jobsAccess', () => {
       expect(updates).toHaveLength(0);
     });
 
-    it('rejects when the job is already invoiced', async () => {
-      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
-        invoiceId: 'i1',
-        docNumber: '1001',
-        url: 'http://qb.example/invoice/1',
-      });
+    it('locks the price once ANY quantity of the part is invoiced', async () => {
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 4 },
+      ]);
       const updates: Array<Record<string, unknown>> = [];
       installFrom({ updates });
-      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/invoiced in QuickBooks/i);
+      await expect(updateJobPartPrice('jp1', 125)).rejects.toThrow(/price is locked/i);
       expect(updates).toHaveLength(0);
+    });
+
+    it('still allows repricing a part with no invoiced quantity on a partially-invoiced job', async () => {
+      // jp1 has 0 invoiced (a sibling part on the job may be invoiced) → repriceable.
+      vi.mocked(getJobPartInvoiceSummaries).mockResolvedValue([
+        { job_part_id: 'jp1', qty_ordered: 10, qty_invoiced: 0 },
+        { job_part_id: 'jp2', qty_ordered: 5, qty_invoiced: 5 },
+      ]);
+      const updates: Array<Record<string, unknown>> = [];
+      installFrom({ updates });
+      const result = await updateJobPartPrice('jp1', 125);
+      expect(updates[0].unit_price).toBe(125);
+      expect(result.newUnitPrice).toBe(125);
     });
 
     it('refuses to edit a cancelled part', async () => {

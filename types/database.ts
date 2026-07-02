@@ -1106,6 +1106,7 @@ export type Database = {
           current_operation_sequence: number | null
           fulfillment_status: string
           id: string
+          invoicing_status: string
           job_id: string
           part_id: string
           production_status: string
@@ -1125,6 +1126,7 @@ export type Database = {
           current_operation_sequence?: number | null
           fulfillment_status: string
           id?: string
+          invoicing_status?: string
           job_id: string
           part_id: string
           production_status: string
@@ -1144,6 +1146,7 @@ export type Database = {
           current_operation_sequence?: number | null
           fulfillment_status?: string
           id?: string
+          invoicing_status?: string
           job_id?: string
           part_id?: string
           production_status?: string
@@ -1203,6 +1206,7 @@ export type Database = {
           due_date: string | null
           fulfillment_status: string
           id: string
+          invoicing_status: string
           job_number: string
           lead_time_days: number | null
           production_status: string
@@ -1228,6 +1232,7 @@ export type Database = {
           due_date?: string | null
           fulfillment_status: string
           id?: string
+          invoicing_status?: string
           job_number: string
           lead_time_days?: number | null
           production_status: string
@@ -1253,6 +1258,7 @@ export type Database = {
           due_date?: string | null
           fulfillment_status?: string
           id?: string
+          invoicing_status?: string
           job_number?: string
           lead_time_days?: number | null
           production_status?: string
@@ -1899,6 +1905,64 @@ export type Database = {
           },
         ]
       }
+      quickbooks_invoice_line_items: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          invoice_link_id: string
+          job_part_id: string
+          quantity: number
+          total_price: number
+          unit_price: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          invoice_link_id: string
+          job_part_id: string
+          quantity: number
+          total_price: number
+          unit_price: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          invoice_link_id?: string
+          job_part_id?: string
+          quantity?: number
+          total_price?: number
+          unit_price?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qb_ili_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qb_ili_job_part_fk"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qb_ili_link_fk"
+            columns: ["invoice_link_id"]
+            isOneToOne: false
+            referencedRelation: "quickbooks_invoice_links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quickbooks_invoice_links: {
         Row: {
           company_id: string
@@ -1915,6 +1979,8 @@ export type Database = {
           realm_id: string
           status: string
           updated_at: string
+          voided_at: string | null
+          voided_by: string | null
         }
         Insert: {
           company_id: string
@@ -1931,6 +1997,8 @@ export type Database = {
           realm_id: string
           status?: string
           updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Update: {
           company_id?: string
@@ -1947,6 +2015,8 @@ export type Database = {
           realm_id?: string
           status?: string
           updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
         }
         Relationships: [
           {
@@ -2919,7 +2989,15 @@ export type Database = {
         Args: { p_job_id: string }
         Returns: string
       }
+      compute_job_invoicing_status: {
+        Args: { p_job_id: string }
+        Returns: string
+      }
       compute_job_part_fulfillment_status: {
+        Args: { p_job_part_id: string }
+        Returns: string
+      }
+      compute_job_part_invoicing_status: {
         Args: { p_job_part_id: string }
         Returns: string
       }
@@ -2986,6 +3064,10 @@ export type Database = {
         Args: { p_initial_location_id?: string; p_part_id: string }
         Returns: Json
       }
+      enable_location_tracking_for_company: {
+        Args: { p_company_id: string }
+        Returns: Json
+      }
       generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string
@@ -3035,6 +3117,10 @@ export type Database = {
       inv_assert_location_in_company: {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
+      }
+      inv_get_or_create_unassigned: {
+        Args: { p_company_id: string }
+        Returns: string
       }
       inv_location_path_label: {
         Args: { p_location_id: string }

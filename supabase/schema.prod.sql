@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-06-23T13:00:08Z
+-- Generated: 2026-07-02T15:54:11Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -269,9 +269,11 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "bill_to_address" jsonb,
     "ship_to_address" jsonb,
     "contact_snapshot" jsonb,
+    "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
+    CONSTRAINT "jobs_invoicing_status_check" CHECK ((invoicing_status = ANY (ARRAY['uninvoiced'::text, 'partially_invoiced'::text, 'fully_invoiced'::text]))),
     CONSTRAINT "jobs_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text])))
 );
 
@@ -418,8 +420,9 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_links"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "qb_invoice_url" text,
+    "voided_at" timestamp with time zone,
+    "voided_by" uuid,
     CONSTRAINT "quickbooks_invoice_links_pkey" PRIMARY KEY (id),
-    CONSTRAINT "quickbooks_invoice_links_job_realm_key" UNIQUE (job_id, realm_id),
     CONSTRAINT "quickbooks_invoice_links_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'created'::text, 'error'::text])))
 );
 
@@ -528,13 +531,13 @@ CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
     "part_id" uuid NOT NULL,
     "company_id" uuid NOT NULL,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
-    "markup_percent" numeric(5,2),
+    "quantity" numeric NOT NULL,
+    "markup_percent" numeric(10,6),
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_pricing_tiers_pkey" PRIMARY KEY (id),
     CONSTRAINT "part_pricing_tiers_unique_seq" UNIQUE (part_id, sequence),
-    CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "part_pricing_tiers_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_procurement_tiers"
@@ -592,7 +595,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "part_id" uuid NOT NULL,
     "source_tier_id" uuid,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
+    "quantity" numeric NOT NULL,
     "unit_price" numeric(12,4) NOT NULL,
     "total_price" numeric(12,4),
     "markup_percent" numeric(5,2),
@@ -603,7 +606,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "basis_unknown" boolean NOT NULL DEFAULT false,
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
-    CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_parts"
@@ -614,7 +617,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     "part_id" uuid NOT NULL,
     "source_quote_line_item_id" uuid,
     "sequence" integer NOT NULL,
-    "quantity" integer NOT NULL,
+    "quantity" numeric NOT NULL,
     "status_changed_at" timestamp with time zone,
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
@@ -625,12 +628,14 @@ CREATE TABLE IF NOT EXISTS "public"."job_parts"
     "fulfillment_status" text NOT NULL,
     "unit_price" numeric(12,4),
     "total_price" numeric(12,4),
+    "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
     CONSTRAINT "job_parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_parts_job_part_unique" UNIQUE (job_id, part_id),
     CONSTRAINT "job_parts_job_sequence_unique" UNIQUE (job_id, sequence),
     CONSTRAINT "job_parts_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
+    CONSTRAINT "job_parts_invoicing_status_check" CHECK ((invoicing_status = ANY (ARRAY['uninvoiced'::text, 'partially_invoiced'::text, 'fully_invoiced'::text]))),
     CONSTRAINT "job_parts_production_status_check" CHECK ((production_status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text]))),
-    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > 0))
+    CONSTRAINT "job_parts_quantity_check" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_materials"
@@ -646,6 +651,22 @@ CREATE TABLE IF NOT EXISTS "public"."job_materials"
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "job_materials_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_materials_expected_quantity_check" CHECK ((expected_quantity >= (0)::numeric))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."quickbooks_invoice_line_items"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "invoice_link_id" uuid NOT NULL,
+    "job_part_id" uuid NOT NULL,
+    "quantity" numeric(12,4) NOT NULL,
+    "unit_price" numeric(12,4) NOT NULL,
+    "total_price" numeric(12,4) NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "quickbooks_invoice_line_items_pkey" PRIMARY KEY (id),
+    CONSTRAINT "qb_ili_link_part_unique" UNIQUE (invoice_link_id, job_part_id),
+    CONSTRAINT "qb_ili_quantity_positive" CHECK ((quantity > (0)::numeric))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quote_materials"
@@ -701,7 +722,7 @@ CREATE TABLE IF NOT EXISTS "public"."shipment_line_items"
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "shipment_id" uuid NOT NULL,
     "job_part_id" uuid NOT NULL,
-    "quantity" numeric(12,2) NOT NULL,
+    "quantity" numeric NOT NULL,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "shipment_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipment_line_items_quantity_positive" CHECK ((quantity > (0)::numeric))
@@ -896,6 +917,7 @@ ALTER TABLE "public"."parts_bom" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts_unit_conversions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quickbooks_connections" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quickbooks_customer_map" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."quickbooks_invoice_line_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quickbooks_invoice_links" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_line_items" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."quote_materials" ENABLE ROW LEVEL SECURITY;
@@ -1693,6 +1715,12 @@ CREATE POLICY "ai_readonly_select"
 DROP POLICY IF EXISTS "Users can view their company's qb customer map" ON "public"."quickbooks_customer_map";
 CREATE POLICY "Users can view their company's qb customer map"
     ON "public"."quickbooks_customer_map"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view their company's qb invoice line items" ON "public"."quickbooks_invoice_line_items";
+CREATE POLICY "Users can view their company's qb invoice line items"
+    ON "public"."quickbooks_invoice_line_items"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
@@ -2508,6 +2536,15 @@ ALTER TABLE "public"."quickbooks_customer_map"
 ALTER TABLE "public"."quickbooks_customer_map"
     ADD CONSTRAINT "quickbooks_customer_map_linked_by_fkey" FOREIGN KEY (linked_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."quickbooks_invoice_line_items"
+    ADD CONSTRAINT "qb_ili_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."quickbooks_invoice_line_items"
+    ADD CONSTRAINT "qb_ili_job_part_fk" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE RESTRICT;
+
+ALTER TABLE "public"."quickbooks_invoice_line_items"
+    ADD CONSTRAINT "qb_ili_link_fk" FOREIGN KEY (invoice_link_id) REFERENCES quickbooks_invoice_links(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."quickbooks_invoice_links"
     ADD CONSTRAINT "quickbooks_invoice_links_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2698,6 +2735,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (custome
 CREATE INDEX IF NOT EXISTS idx_jobs_customer_po_number ON public.jobs USING btree (company_id, customer_po_number) WHERE (customer_po_number IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer_po_number_trgm ON public.jobs USING gin (customer_po_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_fulfillment_status ON public.jobs USING btree (company_id, fulfillment_status);
+CREATE INDEX IF NOT EXISTS idx_jobs_invoicing_status ON public.jobs USING btree (company_id, invoicing_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_job_number_trgm ON public.jobs USING gin (job_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
@@ -2723,8 +2761,12 @@ CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btre
 CREATE INDEX IF NOT EXISTS idx_parts_bom_child ON public.parts_bom USING btree (child_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_bom_parent ON public.parts_bom USING btree (parent_part_id);
 CREATE INDEX IF NOT EXISTS idx_parts_unit_conversions_part ON public.parts_unit_conversions USING btree (part_id);
+CREATE INDEX IF NOT EXISTS idx_qb_ili_job_part ON public.quickbooks_invoice_line_items USING btree (job_part_id);
+CREATE INDEX IF NOT EXISTS idx_qb_ili_link ON public.quickbooks_invoice_line_items USING btree (invoice_link_id);
 CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_job ON public.quickbooks_invoice_links USING btree (job_id);
+CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_job_status ON public.quickbooks_invoice_links USING btree (company_id, job_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_qb_invoice_links_quote ON public.quickbooks_invoice_links USING btree (quote_id);
+CREATE UNIQUE INDEX IF NOT EXISTS quickbooks_invoice_links_realm_request_key ON public.quickbooks_invoice_links USING btree (realm_id, qb_request_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_company ON public.quote_line_items USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_part ON public.quote_line_items USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_quote_line_items_quote ON public.quote_line_items USING btree (quote_id, sequence);
@@ -3008,6 +3050,71 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.assert_invoice_not_over_ordered()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_ordered numeric;
+    v_existing numeric;
+BEGIN
+    SELECT quantity INTO v_ordered FROM public.job_parts WHERE id = NEW.job_part_id;
+    IF v_ordered IS NULL THEN
+        RAISE EXCEPTION 'Job part % not found for invoice line', NEW.job_part_id;
+    END IF;
+    SELECT COALESCE(SUM(ili.quantity), 0) INTO v_existing
+      FROM public.quickbooks_invoice_line_items ili
+      JOIN public.quickbooks_invoice_links l ON l.id = ili.invoice_link_id
+     WHERE ili.job_part_id = NEW.job_part_id
+       AND ili.invoice_link_id <> NEW.invoice_link_id
+       AND l.status = 'created'
+       AND l.voided_at IS NULL;
+    IF v_existing + NEW.quantity > v_ordered THEN
+        RAISE EXCEPTION 'Cannot invoice % of job_part %: % ordered, % already invoiced',
+            NEW.quantity, NEW.job_part_id, v_ordered, v_existing
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.auto_track_stocked_part()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_loc  uuid;
+    v_flag boolean;
+BEGIN
+    -- Cheap exits first (no DB read): only stocked, not-yet-tracked parts.
+    IF NEW.is_stocked IS NOT TRUE OR NEW.is_location_tracked IS TRUE THEN
+        RETURN NULL;
+    END IF;
+    -- Only companies that use inventory locations.
+    SELECT (settings->'features'->>'inventory_locations')::boolean INTO v_flag
+      FROM public.companies WHERE id = NEW.company_id;
+    IF COALESCE(v_flag, false) IS NOT TRUE THEN
+        RETURN NULL;
+    END IF;
+
+    v_loc := public.inv_get_or_create_unassigned(NEW.company_id);
+
+    UPDATE public.parts SET is_location_tracked = true WHERE id = NEW.id;
+
+    INSERT INTO public.part_location_stock (company_id, part_id, location_id, quantity)
+    VALUES (NEW.company_id, NEW.id, v_loc, NEW.quantity)
+    ON CONFLICT (part_id, location_id) DO NOTHING;
+
+    RETURN NULL; -- AFTER trigger
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.bulk_apply_markup_rate(p_company_id uuid, p_part_ids uuid[], p_rate_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -3118,6 +3225,31 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.compute_job_invoicing_status(p_job_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_total int;
+    v_full int;
+    v_partial int;
+BEGIN
+    SELECT count(*),
+           count(*) FILTER (WHERE invoicing_status = 'fully_invoiced'),
+           count(*) FILTER (WHERE invoicing_status = 'partially_invoiced')
+      INTO v_total, v_full, v_partial
+      FROM public.job_parts WHERE job_id = p_job_id;
+
+    IF v_total = 0 THEN RETURN 'uninvoiced'; END IF;
+    IF v_full = v_total THEN RETURN 'fully_invoiced'; END IF;
+    IF v_full > 0 OR v_partial > 0 THEN RETURN 'partially_invoiced'; END IF;
+    RETURN 'uninvoiced';
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.compute_job_part_fulfillment_status(p_job_part_id uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -3148,6 +3280,41 @@ BEGIN
         RETURN 'fully_shipped';
     END IF;
     RETURN 'partially_shipped';
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_part_invoicing_status(p_job_part_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_qty_ordered numeric;
+    v_qty_invoiced numeric;
+BEGIN
+    SELECT jp.quantity INTO v_qty_ordered
+      FROM public.job_parts jp
+     WHERE jp.id = p_job_part_id;
+    IF v_qty_ordered IS NULL THEN
+        RETURN 'uninvoiced';
+    END IF;
+
+    SELECT COALESCE(SUM(ili.quantity), 0) INTO v_qty_invoiced
+      FROM public.quickbooks_invoice_line_items ili
+      JOIN public.quickbooks_invoice_links l ON l.id = ili.invoice_link_id
+     WHERE ili.job_part_id = p_job_part_id
+       AND l.status = 'created'
+       AND l.voided_at IS NULL;
+
+    IF v_qty_invoiced <= 0 THEN
+        RETURN 'uninvoiced';
+    END IF;
+    IF v_qty_invoiced >= v_qty_ordered THEN
+        RETURN 'fully_invoiced';
+    END IF;
+    RETURN 'partially_invoiced';
 END $function$
 
 ;
@@ -3895,6 +4062,38 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.enable_location_tracking_for_company(p_company_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_loc   uuid;
+    v_count integer;
+BEGIN
+    v_loc := public.inv_get_or_create_unassigned(p_company_id);
+
+    -- Flip stocked+untracked parts to tracked (quantity unchanged -> guard skips)
+    -- and seed each one's whole quantity at "Unassigned" in the same statement,
+    -- scoped to ONLY the parts just flipped (so already-tracked parts are untouched).
+    WITH flipped AS (
+        UPDATE public.parts
+           SET is_location_tracked = true, updated_at = now()
+         WHERE company_id = p_company_id AND is_stocked AND NOT is_location_tracked
+        RETURNING id, company_id, quantity
+    )
+    INSERT INTO public.part_location_stock (company_id, part_id, location_id, quantity)
+    SELECT company_id, id, v_loc, quantity FROM flipped
+    ON CONFLICT (part_id, location_id) DO NOTHING;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+
+    RETURN jsonb_build_object('location_id', v_loc, 'parts_tracked', v_count);
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.enforce_job_address_contact_customer()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4315,7 +4514,7 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.get_ready_operations_for_station(p_company_id uuid, p_work_center_id uuid)
- RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity integer)
+ RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity numeric)
  LANGUAGE plpgsql
  STABLE
 AS $function$
@@ -4515,6 +4714,30 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.inv_get_or_create_unassigned(p_company_id uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_loc uuid;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('inv_unassigned:' || p_company_id::text));
+    SELECT id INTO v_loc
+      FROM public.inventory_locations
+     WHERE company_id = p_company_id AND name = 'Unassigned';
+    IF v_loc IS NULL THEN
+        INSERT INTO public.inventory_locations (company_id, name, kind)
+        VALUES (p_company_id, 'Unassigned', 'system')
+        RETURNING id INTO v_loc;
+    END IF;
+    RETURN v_loc;
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.inv_location_path_label(p_location_id uuid)
  RETURNS text
  LANGUAGE sql
@@ -4639,6 +4862,29 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.recompute_job_part_fulfillment_from_qty()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_new text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    -- AFTER trigger: compute_* re-reads job_parts.quantity, which already
+    -- holds the new value at this point, so it resolves against NEW.quantity.
+    v_new := public.compute_job_part_fulfillment_status(NEW.id);
+    IF v_new IS DISTINCT FROM NEW.fulfillment_status THEN
+        UPDATE public.job_parts
+           SET fulfillment_status = v_new,
+               updated_at = now()
+         WHERE id = NEW.id;
+    END IF;
+    RETURN NULL;
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.recompute_job_part_fulfillment_from_void()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4666,6 +4912,77 @@ BEGIN
              WHERE id = r.job_part_id;
         END IF;
     END LOOP;
+    RETURN NULL;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_part_invoicing_from_line()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_jp_id uuid;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    v_jp_id := COALESCE(NEW.job_part_id, OLD.job_part_id);
+    v_new := public.compute_job_part_invoicing_status(v_jp_id);
+    SELECT invoicing_status INTO v_old FROM public.job_parts WHERE id = v_jp_id;
+    IF v_new IS DISTINCT FROM v_old THEN
+        UPDATE public.job_parts SET invoicing_status = v_new, updated_at = now() WHERE id = v_jp_id;
+    END IF;
+    RETURN NULL;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_part_invoicing_from_link()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    r record;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    IF NEW.status IS NOT DISTINCT FROM OLD.status
+       AND NEW.voided_at IS NOT DISTINCT FROM OLD.voided_at THEN
+        RETURN NULL;
+    END IF;
+    FOR r IN
+        SELECT DISTINCT ili.job_part_id
+          FROM public.quickbooks_invoice_line_items ili
+         WHERE ili.invoice_link_id = NEW.id
+    LOOP
+        v_new := public.compute_job_part_invoicing_status(r.job_part_id);
+        SELECT invoicing_status INTO v_old FROM public.job_parts WHERE id = r.job_part_id;
+        IF v_new IS DISTINCT FROM v_old THEN
+            UPDATE public.job_parts SET invoicing_status = v_new, updated_at = now() WHERE id = r.job_part_id;
+        END IF;
+    END LOOP;
+    RETURN NULL;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_part_invoicing_from_qty()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_new text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    v_new := public.compute_job_part_invoicing_status(NEW.id);
+    IF v_new IS DISTINCT FROM NEW.invoicing_status THEN
+        UPDATE public.job_parts SET invoicing_status = v_new, updated_at = now() WHERE id = NEW.id;
+    END IF;
     RETURN NULL;
 END $function$
 
@@ -5356,6 +5673,28 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.sync_job_invoicing_status_from_parts()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_job_id uuid;
+    v_new text;
+    v_old text;
+BEGIN
+    IF pg_trigger_depth() > 2 THEN RETURN NULL; END IF;
+    v_job_id := COALESCE(NEW.job_id, OLD.job_id);
+    v_new := public.compute_job_invoicing_status(v_job_id);
+    SELECT invoicing_status INTO v_old FROM public.jobs WHERE id = v_job_id;
+    IF v_new IS DISTINCT FROM v_old THEN
+        UPDATE public.jobs SET invoicing_status = v_new, updated_at = now() WHERE id = v_job_id;
+    END IF;
+    RETURN NULL;
+END $function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.sync_job_production_status_from_parts()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -5618,6 +5957,12 @@ CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations 
 DROP TRIGGER IF EXISTS "job_parts_updated_at" ON "public"."job_parts";
 CREATE TRIGGER job_parts_updated_at BEFORE UPDATE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_fulfillment_on_qty" ON "public"."job_parts";
+CREATE TRIGGER trigger_recompute_jp_fulfillment_on_qty AFTER UPDATE OF quantity ON public.job_parts FOR EACH ROW WHEN ((old.quantity IS DISTINCT FROM new.quantity)) EXECUTE FUNCTION recompute_job_part_fulfillment_from_qty();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_qty" ON "public"."job_parts";
+CREATE TRIGGER trigger_recompute_jp_invoicing_on_qty AFTER UPDATE OF quantity ON public.job_parts FOR EACH ROW WHEN ((old.quantity IS DISTINCT FROM new.quantity)) EXECUTE FUNCTION recompute_job_part_invoicing_from_qty();
+
 DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_del" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
 
@@ -5626,6 +5971,15 @@ CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_ins AFTER INSERT ON publi
 
 DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_upd" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_upd AFTER UPDATE OF fulfillment_status ON public.job_parts FOR EACH ROW WHEN ((old.fulfillment_status IS DISTINCT FROM new.fulfillment_status)) EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_invoicing_from_parts_del" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_invoicing_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_invoicing_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_invoicing_from_parts_ins" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_invoicing_from_parts_ins AFTER INSERT ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_invoicing_status_from_parts();
+
+DROP TRIGGER IF EXISTS "trigger_sync_job_invoicing_from_parts_upd" ON "public"."job_parts";
+CREATE TRIGGER trigger_sync_job_invoicing_from_parts_upd AFTER UPDATE OF invoicing_status ON public.job_parts FOR EACH ROW WHEN ((old.invoicing_status IS DISTINCT FROM new.invoicing_status)) EXECUTE FUNCTION sync_job_invoicing_status_from_parts();
 
 DROP TRIGGER IF EXISTS "trigger_sync_job_production_status_from_parts_del" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_production_status_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_production_status_from_parts();
@@ -5663,6 +6017,9 @@ CREATE TRIGGER part_procurement_tiers_updated_at BEFORE UPDATE ON public.part_pr
 DROP TRIGGER IF EXISTS "parts_updated_at" ON "public"."parts";
 CREATE TRIGGER parts_updated_at BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trg_auto_track_stocked_part" ON "public"."parts";
+CREATE TRIGGER trg_auto_track_stocked_part AFTER INSERT OR UPDATE OF is_stocked ON public.parts FOR EACH ROW EXECUTE FUNCTION auto_track_stocked_part();
+
 DROP TRIGGER IF EXISTS "trg_enforce_tracked_part_quantity" ON "public"."parts";
 CREATE TRIGGER trg_enforce_tracked_part_quantity BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION enforce_tracked_part_quantity();
 
@@ -5678,8 +6035,26 @@ CREATE TRIGGER quickbooks_connections_updated_at BEFORE UPDATE ON public.quickbo
 DROP TRIGGER IF EXISTS "quickbooks_customer_map_updated_at" ON "public"."quickbooks_customer_map";
 CREATE TRIGGER quickbooks_customer_map_updated_at BEFORE UPDATE ON public.quickbooks_customer_map FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "quickbooks_invoice_line_items_updated_at" ON "public"."quickbooks_invoice_line_items";
+CREATE TRIGGER quickbooks_invoice_line_items_updated_at BEFORE UPDATE ON public.quickbooks_invoice_line_items FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trigger_assert_invoice_not_over_ordered" ON "public"."quickbooks_invoice_line_items";
+CREATE TRIGGER trigger_assert_invoice_not_over_ordered BEFORE INSERT OR UPDATE OF quantity, job_part_id, invoice_link_id ON public.quickbooks_invoice_line_items FOR EACH ROW EXECUTE FUNCTION assert_invoice_not_over_ordered();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_line_del" ON "public"."quickbooks_invoice_line_items";
+CREATE TRIGGER trigger_recompute_jp_invoicing_on_line_del AFTER DELETE ON public.quickbooks_invoice_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_invoicing_from_line();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_line_ins" ON "public"."quickbooks_invoice_line_items";
+CREATE TRIGGER trigger_recompute_jp_invoicing_on_line_ins AFTER INSERT ON public.quickbooks_invoice_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_invoicing_from_line();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_line_upd" ON "public"."quickbooks_invoice_line_items";
+CREATE TRIGGER trigger_recompute_jp_invoicing_on_line_upd AFTER UPDATE OF quantity, job_part_id, invoice_link_id ON public.quickbooks_invoice_line_items FOR EACH ROW EXECUTE FUNCTION recompute_job_part_invoicing_from_line();
+
 DROP TRIGGER IF EXISTS "quickbooks_invoice_links_updated_at" ON "public"."quickbooks_invoice_links";
 CREATE TRIGGER quickbooks_invoice_links_updated_at BEFORE UPDATE ON public.quickbooks_invoice_links FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_link" ON "public"."quickbooks_invoice_links";
+CREATE TRIGGER trigger_recompute_jp_invoicing_on_link AFTER UPDATE OF status, voided_at ON public.quickbooks_invoice_links FOR EACH ROW EXECUTE FUNCTION recompute_job_part_invoicing_from_link();
 
 DROP TRIGGER IF EXISTS "enforce_quote_address_contact_customer_trg" ON "public"."quotes";
 CREATE TRIGGER enforce_quote_address_contact_customer_trg BEFORE INSERT OR UPDATE OF billing_address_id, shipping_address_id, contact_id, customer_id ON public.quotes FOR EACH ROW EXECUTE FUNCTION enforce_quote_address_contact_customer();
@@ -5798,6 +6173,9 @@ COMMENT ON TABLE "public"."parts_bom"
 
 COMMENT ON TABLE "public"."parts_unit_conversions"
     IS 'Per-part conversion factors from alternate units to the part primary_unit. Replaces inventory_unit_conversions.';
+
+COMMENT ON TABLE "public"."quickbooks_invoice_line_items"
+    IS 'Per-part quantity + price snapshot for each QuickBooks invoice push. The Jigged-side source of truth for "how much of each job_part is invoiced" (created, non-void links). Written service-role by the FastAPI push endpoint, atomic with the Intuit call.';
 
 COMMENT ON TABLE "public"."routing_operations"
     IS 'Linear list of operations within a routing. Renamed from routing_nodes. Each row points at a work_center; cost field set varies by work_center.kind (internal vs external).';
@@ -6062,6 +6440,9 @@ COMMENT ON COLUMN "public"."parts_bom"."sequence"
 
 COMMENT ON COLUMN "public"."parts_unit_conversions"."to_primary_factor"
     IS 'Multiplier: quantity_in_from_unit * to_primary_factor = quantity_in_primary_unit.';
+
+COMMENT ON COLUMN "public"."quickbooks_invoice_links"."voided_at"
+    IS 'Reserved for the deferred invoice-void phase. Compute functions already exclude voided links so voiding needs no schema change when built.';
 
 COMMENT ON COLUMN "public"."quote_line_items"."pricing_basis_snapshot"
     IS 'JSON snapshot of the pricing tiers, markup, and resolved tier at quote-create time. Shape: { tiers: [{ id, quantity, unit_price, markup_percent }], resolved_tier_id, resolved_quantity, captured_at }. NULL when basis_unknown=true (pre-snapshot rows).';

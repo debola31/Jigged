@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -29,13 +29,11 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
 
 import { getJobWithRelations, cancelJob, reopenJob, deleteJob } from '@/utils/jobsAccess';
-import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
@@ -47,11 +45,16 @@ import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobP
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
+import InvoicesCard from '@/components/jobs/InvoicesCard';
 import { CreateShipmentModal } from '@/components/shipments';
-import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
-import { getQuickBooksInvoiceLinkForJob, type QuickBooksInvoiceLink } from '@/utils/quickbooksAccess';
+import {
+  getQuickBooksInvoiceLinkForJob,
+  getJobPartInvoiceSummaries,
+  type QuickBooksInvoiceLink,
+  type JobPartInvoiceSummary,
+} from '@/utils/quickbooksAccess';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -60,8 +63,9 @@ export default function JobDetailPage() {
   const jobId = params.jobId as string;
 
   const [job, setJob] = useState<JobWithRelations | null>(null);
-  const [company, setCompany] = useState<Company | null>(null);
   const [partSummaries, setPartSummaries] = useState<JobPartShipmentSummary[]>([]);
+  const [invoiceSummaries, setInvoiceSummaries] = useState<JobPartInvoiceSummary[]>([]);
+  const [invoicesRefreshKey, setInvoicesRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +85,6 @@ export default function JobDetailPage() {
   // more than one part).
   const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
-  const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -93,6 +96,12 @@ export default function JobDetailPage() {
         setPartSummaries(summaries);
       } catch (err) {
         console.warn('Job detail: per-part shipment summaries failed', err);
+      }
+      try {
+        const invSummaries = await getJobPartInvoiceSummaries(jobId);
+        setInvoiceSummaries(invSummaries);
+      } catch (err) {
+        console.warn('Job detail: per-part invoice summaries failed', err);
       }
       setError(null);
     } catch (err) {
@@ -109,15 +118,7 @@ export default function JobDetailPage() {
     // callers — kept as-is rather than restructured to the .then() shape.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchJob();
-    (async () => {
-      try {
-        const c = await getCompany(companyId);
-        setCompany(c);
-      } catch (err) {
-        console.warn('Job detail: company fetch failed', err);
-      }
-    })();
-  }, [fetchJob, companyId]);
+  }, [fetchJob]);
 
   // Surface a "View invoice" deep link if this job already has a QBO invoice.
   // Plain Supabase read (no AI), safe on mount.
@@ -239,7 +240,6 @@ export default function JobDetailPage() {
   // gate is explained on click (see handleDeleteClick) rather than by hiding the
   // button. The access layer enforces the same gate as the backstop.
   const canShip =
-    shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
     job.fulfillment_status !== 'fully_shipped' &&
     parts.length > 0;
@@ -277,8 +277,8 @@ export default function JobDetailPage() {
       <JobEditForm
         job={job}
         companyId={companyId}
-        qbInvoiceLink={qbInvoiceLink}
         shippedByPart={new Map(partSummaries.map((s) => [s.job_part_id, s.qty_shipped]))}
+        invoicedByPart={new Map(invoiceSummaries.map((s) => [s.job_part_id, s.qty_invoiced]))}
         onCancel={() => setEditMode(false)}
         onSaved={async () => {
           setEditMode(false);
@@ -350,24 +350,17 @@ export default function JobDetailPage() {
               Create Shipment
             </Button>
           )}
-          {qbInvoiceLink ? (
-            <Button
-              variant="outlined"
-              startIcon={<OpenInNewIcon />}
-              href={qbInvoiceLink.url}
-              target="_blank"
-              rel="noopener"
-            >
-              View invoice
-            </Button>
-          ) : (
+          {/* A job now has MANY invoices (progressive billing) — created invoices live
+              in the Invoices card below. This action opens the picker to bill what has
+              shipped-but-unbilled; the dialog explains when nothing is billable yet. */}
+          {parts.length > 0 && (
             <Button
               variant="outlined"
               startIcon={<ReceiptLongIcon />}
               onClick={() => setPushDialogOpen(true)}
               disabled={actionLoading}
             >
-              Create Invoice in QuickBooks
+              Create invoice
             </Button>
           )}
 
@@ -546,7 +539,7 @@ export default function JobDetailPage() {
                               label={`Order qty ${part.quantity}`}
                               variant="outlined"
                             />
-                            {shipmentsEnabled && summary && summary.qty_shipped > 0 && (
+                            {summary && summary.qty_shipped > 0 && (
                               <Typography variant="body2" color="text.secondary">
                                 {summary.qty_shipped} of {summary.qty_ordered} shipped
                                 {summary.qty_remaining > 0
@@ -560,12 +553,10 @@ export default function JobDetailPage() {
                               status={part.production_status}
                               size="small"
                             />
-                            {shipmentsEnabled && (
-                              <FulfillmentStatusChip
-                                status={part.fulfillment_status}
-                                size="small"
-                              />
-                            )}
+                            <FulfillmentStatusChip
+                              status={part.fulfillment_status}
+                              size="small"
+                            />
                           </Box>
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
@@ -596,16 +587,18 @@ export default function JobDetailPage() {
           </Card>
         </Grid>
 
-        {shipmentsEnabled && (
-          <Grid size={{ xs: 12 }}>
-            <ShipmentHistoryCard
-              jobId={jobId}
-              refreshKey={historyRefreshKey}
-              initialPreviewShipmentId={pendingPreviewShipmentId}
-              onShipmentVoided={fetchJob}
-            />
-          </Grid>
-        )}
+        <Grid size={{ xs: 12 }}>
+          <ShipmentHistoryCard
+            jobId={jobId}
+            refreshKey={historyRefreshKey}
+            initialPreviewShipmentId={pendingPreviewShipmentId}
+            onShipmentVoided={fetchJob}
+          />
+        </Grid>
+
+        <Grid size={{ xs: 12 }}>
+          <InvoicesCard companyId={companyId} jobId={jobId} refreshKey={invoicesRefreshKey} />
+        </Grid>
       </Grid>
 
       <Dialog open={cancelDialogOpen} onClose={() => setCancelDialogOpen(false)}>
@@ -660,15 +653,13 @@ export default function JobDetailPage() {
         </DialogActions>
       </Dialog>
 
-      {shipmentsEnabled && (
-        <CreateShipmentModal
-          open={shipModalOpen}
-          jobId={jobId}
-          companyId={companyId}
-          onClose={() => setShipModalOpen(false)}
-          onCreated={handleCreated}
-        />
-      )}
+      <CreateShipmentModal
+        open={shipModalOpen}
+        jobId={jobId}
+        companyId={companyId}
+        onClose={() => setShipModalOpen(false)}
+        onCreated={handleCreated}
+      />
 
       <JobTravelerPreviewDialog
         open={travelerPart !== null}
@@ -688,9 +679,13 @@ export default function JobDetailPage() {
         onPushed={(message) => {
           setPushDialogOpen(false);
           setPushSuccess(message);
+          setInvoicesRefreshKey((k) => k + 1);
           getQuickBooksInvoiceLinkForJob(companyId, jobId)
             .then(setQbInvoiceLink)
             .catch(() => {});
+          // Refresh job (invoicing_status) + per-part invoice summaries so the toolbar,
+          // edit-form floor, and per-part breakdown reflect the new invoice.
+          fetchJob();
         }}
       />
 

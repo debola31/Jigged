@@ -1,20 +1,21 @@
 /**
  * Per-tenant feature flags stored in companies.settings (jsonb).
  *
- * Phase-1 shipments is rolled out to the pilot customer only by setting
- * `settings.features.shipments = true` on that company's row. The DB
- * columns + triggers ship to every tenant (they're harmless when no
- * shipments exist), so the gate is UI + access-layer only.
+ * A flag gates a not-yet-general feature to specific tenants by setting
+ * `settings.features.<key> = true` on that company's row (UI + access-layer
+ * gate; DB columns/triggers ship to everyone). Shipments + invoicing used to
+ * be gated this way; they're now core (always on) and the flag was removed —
+ * `inventory_locations` is the remaining example.
  *
  * Toggle for a pilot tenant:
  *   UPDATE public.companies
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
- *                               '{features,shipments}', 'true')
+ *                               '{features,inventory_locations}', 'true')
  *    WHERE id = '<pilot-company-uuid>';
  *
  * Rollback:
  *   UPDATE public.companies
- *      SET settings = settings #- '{features,shipments}'
+ *      SET settings = settings #- '{features,inventory_locations}'
  *    WHERE id = '<pilot-company-uuid>';
  */
 
@@ -38,12 +39,6 @@ export interface FeatureFlagDescriptor {
 }
 
 export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
-  {
-    key: 'shipments',
-    label: 'Shipments',
-    description:
-      'Packing-slip generation, shipment history, and dual production / fulfillment status on jobs.',
-  },
   {
     key: 'inventory_locations',
     label: 'Inventory Locations',
@@ -75,12 +70,6 @@ export function isFeatureEnabled(
   feature: string,
 ): boolean {
   return readFeatureFlag(company, feature);
-}
-
-export function isShipmentsEnabled(
-  company: Pick<Company, 'settings'> | null | undefined,
-): boolean {
-  return readFeatureFlag(company, 'shipments');
 }
 
 export function isInventoryLocationsEnabled(

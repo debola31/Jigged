@@ -118,6 +118,9 @@ def _map_qb_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail=str(exc))
     if isinstance(exc, qb.QuickBooksNotConnected):
         return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, qb.QuickBooksValidationError):
+        # Our own guard (e.g. billing more than has shipped) — a bad request, not a QBO failure.
+        return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, qb.QuickBooksApiError):
         return HTTPException(status_code=502, detail="QuickBooks rejected the request.")
     return HTTPException(status_code=500, detail="Unexpected error")
@@ -259,18 +262,6 @@ async def preflight(company_id: str, job_id: str, request: Request):
     realm = conn["realm_id"]
     job = await _load_gated_job(db, company_id, job_id)
 
-    link = (
-        db.table("quickbooks_invoice_links")
-        .select("status, qb_invoice_url")
-        .eq("job_id", job_id)
-        .eq("realm_id", realm)
-        .limit(1)
-        .execute()
-        .data
-    )
-    already_pushed = bool(link and link[0]["status"] == "created")
-    invoice_url = link[0].get("qb_invoice_url") if already_pushed else None
-
     customer = (
         db.table("customers").select("id, name").eq("id", job["customer_id"]).limit(1).execute().data
     )
@@ -297,26 +288,18 @@ async def preflight(company_id: str, job_id: str, request: Request):
             }
         else:
             customer_res = qb.find_customer_candidates(db, company_id, customer["name"])
-        lines, _ = qb.load_firm_invoice_lines(db, company_id, job)
+        # Per-part billing context (ordered / shipped / invoiced / invoiceable + price)
+        # for the quantity picker. Replaces the old whole-job "lines_preview": a job now
+        # has many invoices, each billing a chosen quantity of shipped-but-unbilled parts.
+        parts = qb.load_billable_parts(db, company_id, job, realm)
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)
 
     customer_res.update({"jigged_customer_id": customer["id"], "jigged_name": customer["name"]})
-    preview = [
-        {
-            "part_name": ln["part_name"],
-            "quantity": ln["quantity"],
-            "unit_price": ln["unit_price"],
-            "amount": round((ln["unit_price"] or 0) * ln["quantity"], 2),
-        }
-        for ln in lines
-    ]
     return {
         "connected": True,
-        "already_pushed": already_pushed,
-        "invoice_url": invoice_url,
         "customer": customer_res,
-        "lines_preview": preview,
+        "parts": parts,
     }
 
 
@@ -325,8 +308,19 @@ class CommitCustomer(BaseModel):
     qb_customer_id: str | None = None
 
 
+class InvoiceLineSelection(BaseModel):
+    job_part_id: str
+    quantity: float  # billed on THIS invoice; validated server-side against the ship-cap
+
+
 class CommitBody(BaseModel):
     customer: CommitCustomer
+    # request_id: client-minted idempotency key for THIS draft invoice (one per dialog
+    # open). Re-homes idempotency off (job_id, realm_id) now that a job has many invoices;
+    # a double-submit reuses it and collides on the unique index instead of double-POSTing.
+    request_id: str
+    # lines: the per-part quantities to bill. Empty/omitted is rejected server-side.
+    lines: list[InvoiceLineSelection] = []
 
 
 def _upsert_customer_map(
@@ -364,33 +358,54 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
     realm = conn["realm_id"]
     job = await _load_gated_job(db, company_id, job_id)
 
-    # ── Idempotency claim (race-safe): only the insert-winner POSTs. ──
+    if not body.request_id:
+        raise HTTPException(status_code=400, detail="Missing invoice request id.")
+
+    # ── Idempotency claim, keyed on the client-minted request_id. A job now has MANY
+    #    invoices, so (job_id, realm) no longer identifies "the invoice" — the draft's
+    #    request_id does (unique index quickbooks_invoice_links_realm_request_key).
+    #    Check for a replay of THIS draft BEFORE validating the selection: a completed
+    #    draft's own lines are already counted in qty-invoiced, so re-validating would
+    #    wrongly trip the over-cap guard. ──
     existing = (
         db.table("quickbooks_invoice_links")
         .select("*")
-        .eq("job_id", job_id)
         .eq("realm_id", realm)
+        .eq("qb_request_id", body.request_id)
         .limit(1)
         .execute()
         .data
     )
-    if existing:
+    if existing and existing[0]["status"] == "created":
         row = existing[0]
-        if row["status"] == "created":
-            return {
-                "qb_invoice_id": row["qb_invoice_id"],
-                "doc_number": row["qb_invoice_doc_number"],
-                "url": row.get("qb_invoice_url"),
-                "already_existed": True,
-            }
-        if row["status"] == "pending" and _pending_is_fresh(row):
-            # A sibling request is in flight — do not double-POST.
-            return {"in_progress": True}
+        return {
+            "qb_invoice_id": row["qb_invoice_id"],
+            "doc_number": row["qb_invoice_doc_number"],
+            "url": row.get("qb_invoice_url"),
+            "already_existed": True,
+        }
+    if existing and existing[0]["status"] == "pending" and _pending_is_fresh(existing[0]):
+        # A sibling request for this same draft is in flight — do not double-POST.
+        return {"in_progress": True}
+
+    # Build + validate the selected lines (ship-cap, price snapshot). Done after the
+    # created/pending short-circuit above but before claiming a NEW row, so a bad
+    # selection returns 400 without leaving a junk pending link (resume of an
+    # error/stale row re-validates cleanly — its lines aren't counted yet).
+    selection = [{"job_part_id": ln.job_part_id, "quantity": ln.quantity} for ln in body.lines]
+    try:
+        lines, bill_addr, snapshot_rows = qb.load_firm_invoice_lines(
+            db, company_id, job, selection, realm
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _map_qb_error(exc)
+
+    if existing:
         # Stale pending or prior error → resume with the SAME request id (QBO replays).
-        request_id = row["qb_request_id"]
-        link_id = row["id"]
+        request_id = existing[0]["qb_request_id"]
+        link_id = existing[0]["id"]
     else:
-        request_id = str(uuid4())
+        request_id = body.request_id
         try:
             inserted = (
                 db.table("quickbooks_invoice_links")
@@ -418,7 +433,6 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         if not customer:
             raise HTTPException(status_code=400, detail="Job has no customer to invoice.")
         customer = customer[0]
-        lines, bill_addr = qb.load_firm_invoice_lines(db, company_id, job)
 
         cmap = (
             db.table("quickbooks_customer_map")
@@ -462,15 +476,49 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         logger.exception("QuickBooks push failed for job %s", job_id)
         raise _map_qb_error(exc)
 
-    db.table("quickbooks_invoice_links").update(
+    # Success: flip the link to created. This fires the invoicing_status recompute
+    # triggers — but only after the line rows exist, so insert them first.
+    line_rows = [
         {
-            "status": "created",
-            "qb_invoice_id": result["id"],
-            "qb_invoice_doc_number": result["doc_number"],
-            "qb_invoice_sync_token": result["sync_token"],
-            "qb_invoice_url": invoice_url,
+            "company_id": company_id,
+            "invoice_link_id": link_id,
+            "job_part_id": r["job_part_id"],
+            "quantity": r["quantity"],
+            "unit_price": r["unit_price"],
+            "total_price": r["total_price"],
         }
-    ).eq("id", link_id).execute()
+        for r in snapshot_rows
+    ]
+    try:
+        # Resume-safe: unique(invoice_link_id, job_part_id) + ignore-duplicates makes a
+        # replay a no-op rather than double-billing. Insert BEFORE the status flip so the
+        # on-link-status trigger sees the lines; the over-invoice BEFORE trigger backstops.
+        db.table("quickbooks_invoice_line_items").upsert(
+            line_rows, on_conflict="invoice_link_id,job_part_id", ignore_duplicates=True
+        ).execute()
+        db.table("quickbooks_invoice_links").update(
+            {
+                "status": "created",
+                "qb_invoice_id": result["id"],
+                "qb_invoice_doc_number": result["doc_number"],
+                "qb_invoice_sync_token": result["sync_token"],
+                "qb_invoice_url": invoice_url,
+            }
+        ).eq("id", link_id).execute()
+    except Exception:  # noqa: BLE001
+        # The QBO invoice exists but we couldn't record its lines/status. Mark the link
+        # so the anomaly is visible, and surface a reconcile error rather than silently
+        # under-counting invoiced qty (which could later allow over-invoicing).
+        db.table("quickbooks_invoice_links").update(
+            {"status": "error", "qb_invoice_id": result["id"], "qb_invoice_url": invoice_url}
+        ).eq("id", link_id).execute()
+        logger.exception(
+            "Invoice %s created in QBO but recording its lines failed (link %s)", result["id"], link_id
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Invoice created in QuickBooks, but recording it in Jigged failed. Refresh; if it persists, contact support.",
+        )
 
     return {
         "qb_invoice_id": result["id"],

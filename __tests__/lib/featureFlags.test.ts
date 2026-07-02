@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   isInventoryLocationsEnabled,
-  isShipmentsEnabled,
   readCompanyFeatures,
   KNOWN_FEATURES,
 } from '@/lib/featureFlags';
@@ -20,15 +19,17 @@ describe('featureFlags: inventory_locations', () => {
     expect(isInventoryLocationsEnabled(undefined)).toBe(false);
   });
 
-  it('defaults OFF and is independent of the shipments flag', () => {
-    const shipmentsOnly = { settings: { features: { shipments: true } } };
-    expect(isInventoryLocationsEnabled(shipmentsOnly)).toBe(false);
-    expect(isShipmentsEnabled(shipmentsOnly)).toBe(true);
+  it('defaults OFF and is independent of other flags', () => {
+    const otherOnly = { settings: { features: { some_other_flag: true } } };
+    expect(isInventoryLocationsEnabled(otherOnly)).toBe(false);
   });
 
   it('readCompanyFeatures includes the new key', () => {
     const features = readCompanyFeatures({ settings: { features: { inventory_locations: true } } });
     expect(features.inventory_locations).toBe(true);
-    expect(features.shipments).toBe(false);
+  });
+
+  it('shipments is no longer a feature flag (now core / always-on)', () => {
+    expect(KNOWN_FEATURES.map((f) => f.key)).not.toContain('shipments');
   });
 });

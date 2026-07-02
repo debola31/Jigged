@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -34,7 +34,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
 
 import { getJobWithRelations, cancelJob, reopenJob, deleteJob } from '@/utils/jobsAccess';
-import { getCompany, type Company } from '@/utils/companyAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
@@ -48,7 +47,6 @@ import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
 import InvoicesCard from '@/components/jobs/InvoicesCard';
 import { CreateShipmentModal } from '@/components/shipments';
-import { isShipmentsEnabled } from '@/lib/featureFlags';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import {
@@ -65,7 +63,6 @@ export default function JobDetailPage() {
   const jobId = params.jobId as string;
 
   const [job, setJob] = useState<JobWithRelations | null>(null);
-  const [company, setCompany] = useState<Company | null>(null);
   const [partSummaries, setPartSummaries] = useState<JobPartShipmentSummary[]>([]);
   const [invoiceSummaries, setInvoiceSummaries] = useState<JobPartInvoiceSummary[]>([]);
   const [invoicesRefreshKey, setInvoicesRefreshKey] = useState(0);
@@ -88,7 +85,6 @@ export default function JobDetailPage() {
   // more than one part).
   const [travelerMenuAnchor, setTravelerMenuAnchor] = useState<null | HTMLElement>(null);
 
-  const shipmentsEnabled = useMemo(() => isShipmentsEnabled(company), [company]);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -122,15 +118,7 @@ export default function JobDetailPage() {
     // callers — kept as-is rather than restructured to the .then() shape.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchJob();
-    (async () => {
-      try {
-        const c = await getCompany(companyId);
-        setCompany(c);
-      } catch (err) {
-        console.warn('Job detail: company fetch failed', err);
-      }
-    })();
-  }, [fetchJob, companyId]);
+  }, [fetchJob]);
 
   // Surface a "View invoice" deep link if this job already has a QBO invoice.
   // Plain Supabase read (no AI), safe on mount.
@@ -252,7 +240,6 @@ export default function JobDetailPage() {
   // gate is explained on click (see handleDeleteClick) rather than by hiding the
   // button. The access layer enforces the same gate as the backstop.
   const canShip =
-    shipmentsEnabled &&
     job.production_status !== 'cancelled' &&
     job.fulfillment_status !== 'fully_shipped' &&
     parts.length > 0;
@@ -552,7 +539,7 @@ export default function JobDetailPage() {
                               label={`Order qty ${part.quantity}`}
                               variant="outlined"
                             />
-                            {shipmentsEnabled && summary && summary.qty_shipped > 0 && (
+                            {summary && summary.qty_shipped > 0 && (
                               <Typography variant="body2" color="text.secondary">
                                 {summary.qty_shipped} of {summary.qty_ordered} shipped
                                 {summary.qty_remaining > 0
@@ -566,12 +553,10 @@ export default function JobDetailPage() {
                               status={part.production_status}
                               size="small"
                             />
-                            {shipmentsEnabled && (
-                              <FulfillmentStatusChip
-                                status={part.fulfillment_status}
-                                size="small"
-                              />
-                            )}
+                            <FulfillmentStatusChip
+                              status={part.fulfillment_status}
+                              size="small"
+                            />
                           </Box>
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
@@ -602,16 +587,14 @@ export default function JobDetailPage() {
           </Card>
         </Grid>
 
-        {shipmentsEnabled && (
-          <Grid size={{ xs: 12 }}>
-            <ShipmentHistoryCard
-              jobId={jobId}
-              refreshKey={historyRefreshKey}
-              initialPreviewShipmentId={pendingPreviewShipmentId}
-              onShipmentVoided={fetchJob}
-            />
-          </Grid>
-        )}
+        <Grid size={{ xs: 12 }}>
+          <ShipmentHistoryCard
+            jobId={jobId}
+            refreshKey={historyRefreshKey}
+            initialPreviewShipmentId={pendingPreviewShipmentId}
+            onShipmentVoided={fetchJob}
+          />
+        </Grid>
 
         <Grid size={{ xs: 12 }}>
           <InvoicesCard companyId={companyId} jobId={jobId} refreshKey={invoicesRefreshKey} />
@@ -670,15 +653,13 @@ export default function JobDetailPage() {
         </DialogActions>
       </Dialog>
 
-      {shipmentsEnabled && (
-        <CreateShipmentModal
-          open={shipModalOpen}
-          jobId={jobId}
-          companyId={companyId}
-          onClose={() => setShipModalOpen(false)}
-          onCreated={handleCreated}
-        />
-      )}
+      <CreateShipmentModal
+        open={shipModalOpen}
+        jobId={jobId}
+        companyId={companyId}
+        onClose={() => setShipModalOpen(false)}
+        onCreated={handleCreated}
+      />
 
       <JobTravelerPreviewDialog
         open={travelerPart !== null}

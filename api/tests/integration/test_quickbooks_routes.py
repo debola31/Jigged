@@ -396,32 +396,51 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
 
 
 # ───────────────────────── ship-cap + progressive invoicing ─────────────────────────
-async def test_invoice_rejects_billing_more_than_shipped(supabase_admin, seeded_user_a, monkeypatch):
+async def test_invoicing_is_ordered_capped_not_ship_capped(supabase_admin, seeded_user_a, monkeypatch):
+    """Billing is capped at ORDERED, not shipped: you MAY bill ahead of shipping
+    (a packing slip isn't a delivery), but not beyond the ordered quantity."""
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
     _seed_connection(supabase_admin, cid)
-    seed = _seed_quote(supabase_admin, cid, converted=True)
+    seed = _seed_quote(supabase_admin, cid, converted=True)  # ordered qty = 10
     _map_customer(supabase_admin, cid, seed["customer_id"])
-    # Only 4 shipped, but try to invoice 10 → blocked by the ship-cap (400), no QBO call.
+    # Only 4 shipped — yet billing all 10 (ordered) is allowed.
     _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], seed["job_part_id"], 4)
 
     calls = {"n": 0}
 
     def _fake_create_invoice(db, company_id, payload, request_id):
         calls["n"] += 1
-        return {"id": "INV-X", "doc_number": "D-X", "sync_token": "0"}
+        return {"id": f"INV-{calls['n']}", "doc_number": f"D-{calls['n']}", "sync_token": "0"}
 
     monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
-    body = {
-        "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
-        "request_id": str(uuid4()),
-        "lines": [{"job_part_id": seed["job_part_id"], "quantity": 10}],
-    }
     path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
     try:
-        resp = await _post(seeded_user_a["access_token"], path, body)
-        assert resp.status_code == 400, resp.text
-        assert calls["n"] == 0  # never reached QBO
+        # Bill 10 of 10 ordered even though only 4 shipped → allowed.
+        ok = await _post(
+            seeded_user_a["access_token"],
+            path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 10}],
+            },
+        )
+        assert ok.status_code == 200, ok.text
+        assert calls["n"] == 1
+
+        # Now try 1 more → over the ordered qty → 400, no further QBO call.
+        over = await _post(
+            seeded_user_a["access_token"],
+            path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 1}],
+            },
+        )
+        assert over.status_code == 400, over.text
+        assert calls["n"] == 1
     finally:
         _cleanup(supabase_admin, cid)
 

@@ -631,7 +631,11 @@ def load_billable_parts(db: Client, company_id: str, job: dict, realm: str) -> l
                 "qty_ordered": float(r["quantity"]),
                 "qty_shipped": qty_shipped,
                 "qty_invoiced": qty_invoiced,
-                "qty_invoiceable": max(0.0, qty_shipped - qty_invoiced),
+                # Invoicing is capped at the ORDERED quantity (not shipped): a packing
+                # slip is a document, not a delivery, so we don't hard-gate billing on
+                # it. The picker DEFAULTS to shipped-unbilled and warns when you bill
+                # beyond it, but you may bill up to what's ordered.
+                "qty_invoiceable": max(0.0, float(r["quantity"]) - qty_invoiced),
                 "production_status": r.get("production_status"),
             }
         )
@@ -674,12 +678,13 @@ def load_firm_invoice_lines(
             raise QuickBooksValidationError(
                 f"{ctx['part_name']} has no unit price and can't be invoiced."
             )
-        # Ship-cap: bill only what has shipped and isn't already invoiced. (Tiny
-        # epsilon absorbs 4dp fractional-unit rounding.)
+        # Hard cap: can't bill more than is ordered-but-not-yet-invoiced. (The
+        # shipped quantity only drives the picker's default + a soft warning, not this
+        # gate.) Tiny epsilon absorbs 4dp fractional-unit rounding.
         if qty > ctx["qty_invoiceable"] + 1e-9:
             raise QuickBooksValidationError(
                 f"Can't invoice {qty:g} of {ctx['part_name']}: only "
-                f"{ctx['qty_invoiceable']:g} shipped and not yet invoiced."
+                f"{ctx['qty_invoiceable']:g} left to invoice."
             )
         up = float(ctx["unit_price"])
         lines.append(

@@ -172,7 +172,7 @@ Both paths store the agreed price on each `job_part` (`unit_price` / `total_pric
 
 ▸ **Invoicing (QuickBooks)**
 
-- **Create invoice** lives on the job (invoicing is **job-keyed**; see [Architecture](../architecture.md)), and a job can have **many** invoices — progressive billing. The picker bills a chosen quantity of **shipped-but-unbilled** parts (ship-capped); each invoice snapshots its price, so a part's price locks once any quantity of it is invoiced. An **Invoices card** lists every created invoice with a "View in QuickBooks" link (replacing the old single "View invoice" button). Quote- and PO-sourced jobs invoice identically, reading price from `job_parts.unit_price`. Full spec: [Invoicing](invoicing.md).
+- **Create invoice** lives on the job (invoicing is **job-keyed**; see [Architecture](../architecture.md)), and a job can have **many** invoices — progressive billing. The picker defaults each line to the **shipped-but-unbilled** qty and caps it at **ordered-but-unbilled** (billing ahead of shipping is allowed — a packing slip isn't a delivery — just softly flagged). Each invoice snapshots its price, so a part's price locks once any quantity of it is invoiced. Shipments + invoices live under a **Fulfillment** collapsible section; an **Invoices card** lists every created invoice with a "View in QuickBooks" link (replacing the old single "View invoice" button). Quote- and PO-sourced jobs invoice identically, reading price from `job_parts.unit_price`. Full spec: [Invoicing](invoicing.md).
 
 ▸ **Customer**
 

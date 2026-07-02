@@ -19,6 +19,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -54,9 +55,14 @@ def _now_iso(**delta) -> str:
 
 def _cleanup(admin, company_id: str) -> None:
     for table in (
+        # quickbooks_invoice_links delete cascades to quickbooks_invoice_line_items
+        # (qb_ili_job_part_fk is RESTRICT, so these must go before job_parts).
         "quickbooks_invoice_links",
         "quickbooks_customer_map",
         "quickbooks_connections",
+        # shipments delete cascades to shipment_line_items (whose job_part FK is
+        # NO ACTION), so shipments must also go before job_parts.
+        "shipments",
         "job_parts",
         "jobs",
         "quote_line_items",
@@ -142,23 +148,58 @@ def _seed_quote(admin, company_id: str, converted: bool) -> dict:
             .data[0]
         )
         job_id = job["id"]
-        admin.table("job_parts").insert(
+        job_part = (
+            admin.table("job_parts")
+            .insert(
+                {
+                    "company_id": company_id,
+                    "job_id": job_id,
+                    "part_id": part["id"],
+                    "source_quote_line_item_id": qli["id"],
+                    "sequence": 0,
+                    "quantity": 10,
+                    # Invoicing reads price off job_parts now (single read shape),
+                    # so the seed must carry it like convert/create-from-PO do.
+                    "unit_price": 12.5,
+                    "total_price": 125,
+                    "production_status": "not_started",
+                    "fulfillment_status": "unshipped",
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        job_part_id = job_part["id"]
+    else:
+        job_part_id = None
+    return {
+        "customer_id": customer["id"],
+        "quote_id": quote["id"],
+        "job_id": job_id,
+        "job_part_id": job_part_id,
+    }
+
+
+def _seed_shipment(admin, company_id: str, customer_id: str, job_id: str, job_part_id: str, qty: float) -> None:
+    """Ship `qty` of a job_part so it becomes invoiceable (invoicing is ship-capped:
+    invoiceable = shipped - already-invoiced)."""
+    shipment = (
+        admin.table("shipments")
+        .insert(
             {
                 "company_id": company_id,
+                "customer_id": customer_id,
                 "job_id": job_id,
-                "part_id": part["id"],
-                "source_quote_line_item_id": qli["id"],
-                "sequence": 0,
-                "quantity": 10,
-                # Invoicing reads price off job_parts now (single read shape),
-                # so the seed must carry it like convert/create-from-PO do.
-                "unit_price": 12.5,
-                "total_price": 125,
-                "production_status": "not_started",
-                "fulfillment_status": "unshipped",
+                "packing_slip_number": f"PS-RT-{uuid4().hex[:8]}",
+                "ship_date": datetime.now(timezone.utc).date().isoformat(),
             }
-        ).execute()
-    return {"customer_id": customer["id"], "quote_id": quote["id"], "job_id": job_id}
+        )
+        .execute()
+        .data[0]
+    )
+    admin.table("shipment_line_items").insert(
+        {"shipment_id": shipment["id"], "job_part_id": job_part_id, "quantity": qty}
+    ).execute()
 
 
 def _map_customer(admin, company_id: str, customer_id: str) -> None:
@@ -206,7 +247,11 @@ async def test_invoice_404_for_missing_job(supabase_admin, seeded_user_a):
         resp = await _post(
             seeded_user_a["access_token"],
             f"/api/quickbooks/{cid}/jobs/00000000-0000-0000-0000-000000000000/invoice",
-            {"customer": {"action": "create"}},
+            {
+                "customer": {"action": "create"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": "00000000-0000-0000-0000-000000000001", "quantity": 1}],
+            },
         )
         assert resp.status_code == 404
     finally:
@@ -234,6 +279,8 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
     _seed_connection(supabase_admin, cid)
     seed = _seed_quote(supabase_admin, cid, converted=True)
     _map_customer(supabase_admin, cid, seed["customer_id"])
+    # Ship all 10 so the whole line is invoiceable (invoicing is ship-capped).
+    _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], seed["job_part_id"], 10)
 
     calls = {"n": 0}
 
@@ -242,11 +289,16 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         return {"id": f"INV-{calls['n']}", "doc_number": "D-1", "sync_token": "0"}
 
     monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
-    body = {"customer": {"action": "use_existing", "qb_customer_id": "QB-1"}}
+    # Same request_id on both submits → idempotent replay (a double-click of ONE draft).
+    body = {
+        "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+        "request_id": str(uuid4()),
+        "lines": [{"job_part_id": seed["job_part_id"], "quantity": 10}],
+    }
     path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
     try:
         r1 = await _post(seeded_user_a["access_token"], path, body)
-        assert r1.status_code == 200
+        assert r1.status_code == 200, r1.text
         d1 = r1.json()
         assert d1["already_existed"] is False
         assert d1["qb_invoice_id"] == "INV-1"
@@ -254,7 +306,7 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         assert d1["url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
 
         r2 = await _post(seeded_user_a["access_token"], path, body)
-        assert r2.status_code == 200
+        assert r2.status_code == 200, r2.text
         d2 = r2.json()
         assert d2["already_existed"] is True
         assert d2["qb_invoice_id"] == "INV-1"
@@ -263,13 +315,36 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         assert calls["n"] == 1  # QBO invoice created exactly once
         links = (
             supabase_admin.table("quickbooks_invoice_links")
-            .select("status, qb_invoice_url")
+            .select("id, status, qb_invoice_url")
             .eq("job_id", seed["job_id"])
             .execute()
             .data
         )
         assert len(links) == 1 and links[0]["status"] == "created"
         assert links[0]["qb_invoice_url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
+
+        # The per-part line snapshot is persisted (the Jigged-side qty-invoiced truth)...
+        line_items = (
+            supabase_admin.table("quickbooks_invoice_line_items")
+            .select("job_part_id, quantity, unit_price, total_price")
+            .eq("invoice_link_id", links[0]["id"])
+            .execute()
+            .data
+        )
+        assert len(line_items) == 1
+        assert line_items[0]["job_part_id"] == seed["job_part_id"]
+        assert float(line_items[0]["quantity"]) == 10
+        assert float(line_items[0]["total_price"]) == 125
+        # ...and the invoicing_status axis flipped to fully_invoiced (10 of 10).
+        jp = (
+            supabase_admin.table("job_parts")
+            .select("invoicing_status")
+            .eq("id", seed["job_part_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert jp["invoicing_status"] == "fully_invoiced"
     finally:
         _cleanup(supabase_admin, cid)
 
@@ -281,6 +356,7 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
     _seed_connection(supabase_admin, cid)
     seed = _seed_quote(supabase_admin, cid, converted=True)
     _map_customer(supabase_admin, cid, seed["customer_id"])
+    _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], seed["job_part_id"], 10)
 
     calls = {"n": 0}
 
@@ -289,7 +365,12 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
         return {"id": "INV-1", "doc_number": "D-1", "sync_token": "0"}
 
     monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
-    body = {"customer": {"action": "use_existing", "qb_customer_id": "QB-1"}}
+    # Same request_id on both concurrent submits — the unique index lets exactly one win.
+    body = {
+        "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+        "request_id": str(uuid4()),
+        "lines": [{"job_part_id": seed["job_part_id"], "quantity": 10}],
+    }
     path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
     try:
         transport = ASGITransport(app=app)
@@ -310,6 +391,116 @@ async def test_concurrent_double_submit_creates_one_invoice(supabase_admin, seed
             .data
         )
         assert len(links) == 1 and links[0]["status"] == "created"
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+# ───────────────────────── ship-cap + progressive invoicing ─────────────────────────
+async def test_invoice_rejects_billing_more_than_shipped(supabase_admin, seeded_user_a, monkeypatch):
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    _map_customer(supabase_admin, cid, seed["customer_id"])
+    # Only 4 shipped, but try to invoice 10 → blocked by the ship-cap (400), no QBO call.
+    _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], seed["job_part_id"], 4)
+
+    calls = {"n": 0}
+
+    def _fake_create_invoice(db, company_id, payload, request_id):
+        calls["n"] += 1
+        return {"id": "INV-X", "doc_number": "D-X", "sync_token": "0"}
+
+    monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
+    body = {
+        "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+        "request_id": str(uuid4()),
+        "lines": [{"job_part_id": seed["job_part_id"], "quantity": 10}],
+    }
+    path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
+    try:
+        resp = await _post(seeded_user_a["access_token"], path, body)
+        assert resp.status_code == 400, resp.text
+        assert calls["n"] == 0  # never reached QBO
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_two_invoices_bill_remaining(supabase_admin, seeded_user_a, monkeypatch):
+    """Progressive billing: ship 10, invoice 6 on one invoice, then 4 on a second —
+    two links, qty fully invoiced. Distinct request_ids => two distinct invoices."""
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    _map_customer(supabase_admin, cid, seed["customer_id"])
+    _seed_shipment(supabase_admin, cid, seed["customer_id"], seed["job_id"], seed["job_part_id"], 10)
+
+    calls = {"n": 0}
+
+    def _fake_create_invoice(db, company_id, payload, request_id):
+        calls["n"] += 1
+        return {"id": f"INV-{calls['n']}", "doc_number": f"D-{calls['n']}", "sync_token": "0"}
+
+    monkeypatch.setattr(qbservice, "create_invoice", _fake_create_invoice)
+    path = f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice"
+    try:
+        r1 = await _post(
+            seeded_user_a["access_token"],
+            path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 6}],
+            },
+        )
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["already_existed"] is False
+
+        r2 = await _post(
+            seeded_user_a["access_token"],
+            path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 4}],
+            },
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["already_existed"] is False
+
+        assert calls["n"] == 2  # two distinct invoices created
+        links = (
+            supabase_admin.table("quickbooks_invoice_links")
+            .select("id")
+            .eq("job_id", seed["job_id"])
+            .eq("status", "created")
+            .execute()
+            .data
+        )
+        assert len(links) == 2
+
+        # 6 + 4 = 10 invoiced → fully_invoiced; a third invoice is now blocked (0 left).
+        jp = (
+            supabase_admin.table("job_parts")
+            .select("invoicing_status")
+            .eq("id", seed["job_part_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert jp["invoicing_status"] == "fully_invoiced"
+
+        r3 = await _post(
+            seeded_user_a["access_token"],
+            path,
+            {
+                "customer": {"action": "use_existing", "qb_customer_id": "QB-1"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 1}],
+            },
+        )
+        assert r3.status_code == 400, r3.text  # nothing left to invoice
     finally:
         _cleanup(supabase_admin, cid)
 

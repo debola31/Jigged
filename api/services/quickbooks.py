@@ -72,6 +72,12 @@ class QuickBooksApiError(RuntimeError):
         self.tid = tid  # Intuit transaction id (intuit_tid) for support troubleshooting
 
 
+class QuickBooksValidationError(ValueError):
+    """A caller-supplied invoice request is invalid (e.g. billing more than has
+    shipped, or a part not on the job) -> HTTP 400. Distinct from
+    QuickBooksApiError (a QBO-side rejection -> 502): this is our own guard."""
+
+
 class _InvalidGrant(RuntimeError):
     """Internal: the OAuth token endpoint returned invalid_grant."""
 
@@ -536,39 +542,165 @@ def _to_qb_addr(a: dict) -> Optional[dict]:
     return out or None
 
 
-def load_firm_invoice_lines(db: Client, company_id: str, job: dict) -> tuple[list[dict], Optional[dict]]:
-    """Firm invoice lines from the JOB. job_parts.quantity is the chosen firm qty
-    and job_parts.unit_price is the agreed price — a single read shape for both
-    quote-sourced and PO-sourced jobs (price is written onto job_parts at
-    create/convert time; historic rows were backfilled). Returns (lines, bill_addr)."""
+def sum_shipped_by_part(db: Client, job_id: str) -> dict[str, float]:
+    """Non-voided shipped quantity per job_part for a job. Mirrors the TS
+    getJobPartShipmentSummaries (voided slips contribute zero)."""
+    parts = db.table("job_parts").select("id").eq("job_id", job_id).execute().data or []
+    part_ids = [p["id"] for p in parts]
+    out: dict[str, float] = {pid: 0.0 for pid in part_ids}
+    if not part_ids:
+        return out
+    rows = (
+        db.table("shipment_line_items")
+        .select("job_part_id, quantity, shipment:shipments!inner(voided_at)")
+        .in_("job_part_id", part_ids)
+        .execute()
+        .data
+        or []
+    )
+    for r in rows:
+        ship = r.get("shipment") or {}
+        if ship.get("voided_at") is not None:
+            continue
+        out[r["job_part_id"]] = out.get(r["job_part_id"], 0.0) + float(r["quantity"])
+    return out
+
+
+def sum_invoiced_by_part(db: Client, job_id: str, realm: str) -> dict[str, float]:
+    """Created, non-voided invoiced quantity per job_part for a job in this realm.
+    The Jigged-side source of truth for 'how much of each part is already billed'."""
+    parts = db.table("job_parts").select("id").eq("job_id", job_id).execute().data or []
+    part_ids = [p["id"] for p in parts]
+    out: dict[str, float] = {pid: 0.0 for pid in part_ids}
+    if not part_ids:
+        return out
+    rows = (
+        db.table("quickbooks_invoice_line_items")
+        .select("job_part_id, quantity, link:quickbooks_invoice_links!inner(status, voided_at, realm_id)")
+        .in_("job_part_id", part_ids)
+        .execute()
+        .data
+        or []
+    )
+    for r in rows:
+        link = r.get("link") or {}
+        if link.get("status") != "created" or link.get("voided_at") is not None:
+            continue
+        if realm is not None and link.get("realm_id") != realm:
+            continue
+        out[r["job_part_id"]] = out.get(r["job_part_id"], 0.0) + float(r["quantity"])
+    return out
+
+
+def load_billable_parts(db: Client, company_id: str, job: dict, realm: str) -> list[dict]:
+    """Per-part billing context for the invoice picker + preflight: ordered,
+    shipped, already-invoiced, and invoiceable (= shipped - invoiced, the ship-cap)
+    quantities, plus the agreed unit price. Ordered by job_part sequence."""
+    job_id = job["id"]
     job_parts = (
         db.table("job_parts")
-        .select("part_id, quantity, unit_price, sequence")
-        .eq("job_id", job["id"])
+        .select("id, part_id, quantity, unit_price, sequence, production_status")
+        .eq("job_id", job_id)
         .order("sequence", desc=False)
         .execute()
         .data
         or []
     )
     part_ids = [r["part_id"] for r in job_parts if r.get("part_id")]
-
     part_by_id: dict[str, dict] = {}
     if part_ids:
         for r in db.table("parts").select("id, part_name, description").in_("id", part_ids).execute().data or []:
             part_by_id[r["id"]] = r
 
-    lines: list[dict] = []
+    shipped = sum_shipped_by_part(db, job_id)
+    invoiced = sum_invoiced_by_part(db, job_id, realm)
+
+    out: list[dict] = []
     for r in job_parts:
-        unit_price = r.get("unit_price")
+        jp_id = r["id"]
         part = part_by_id.get(r["part_id"], {})
-        lines.append(
+        qty_shipped = shipped.get(jp_id, 0.0)
+        qty_invoiced = invoiced.get(jp_id, 0.0)
+        unit_price = r.get("unit_price")
+        out.append(
             {
-                "quantity": r["quantity"],
-                "unit_price": float(unit_price) if unit_price is not None else None,
+                "job_part_id": jp_id,
                 "part_name": part.get("part_name") or "Part",
                 "description": part.get("description"),
+                "unit_price": float(unit_price) if unit_price is not None else None,
+                "qty_ordered": float(r["quantity"]),
+                "qty_shipped": qty_shipped,
+                "qty_invoiced": qty_invoiced,
+                "qty_invoiceable": max(0.0, qty_shipped - qty_invoiced),
+                "production_status": r.get("production_status"),
             }
         )
+    return out
+
+
+def load_firm_invoice_lines(
+    db: Client, company_id: str, job: dict, selection: list[dict], realm: str
+) -> tuple[list[dict], Optional[dict], list[dict]]:
+    """Build QBO invoice lines from an explicit per-part quantity SELECTION
+    ([{job_part_id, quantity}]) — the multi-invoice-per-job model. Enforces the
+    ship-cap (each selected qty must be > 0 and <= shipped - already-invoiced) and
+    snapshots each part's agreed unit_price. Returns (qbo_lines, bill_addr,
+    snapshot_rows) where snapshot_rows are the quickbooks_invoice_line_items to
+    persist on success. Raises QuickBooksValidationError (-> HTTP 400) for a bad
+    selection.
+
+    Note the SIGNATURE CHANGE from the old whole-job version: invoicing is no longer
+    'all parts at full quantity, once' but 'a chosen quantity of chosen parts, many
+    times' (see migration 20260702011324)."""
+    if not selection:
+        raise QuickBooksValidationError("Select at least one part quantity to invoice.")
+
+    context = {c["job_part_id"]: c for c in load_billable_parts(db, company_id, job, realm)}
+
+    lines: list[dict] = []
+    snapshot_rows: list[dict] = []
+    for sel in selection:
+        jp_id = sel.get("job_part_id")
+        ctx = context.get(jp_id)
+        if ctx is None:
+            raise QuickBooksValidationError("A selected part is not on this job.")
+        try:
+            qty = float(sel.get("quantity"))
+        except (TypeError, ValueError):
+            raise QuickBooksValidationError("Invalid invoice quantity.")
+        if qty <= 0:
+            continue  # skip zero-qty rows rather than erroring
+        if ctx["unit_price"] is None:
+            raise QuickBooksValidationError(
+                f"{ctx['part_name']} has no unit price and can't be invoiced."
+            )
+        # Ship-cap: bill only what has shipped and isn't already invoiced. (Tiny
+        # epsilon absorbs 4dp fractional-unit rounding.)
+        if qty > ctx["qty_invoiceable"] + 1e-9:
+            raise QuickBooksValidationError(
+                f"Can't invoice {qty:g} of {ctx['part_name']}: only "
+                f"{ctx['qty_invoiceable']:g} shipped and not yet invoiced."
+            )
+        up = float(ctx["unit_price"])
+        lines.append(
+            {
+                "quantity": qty,
+                "unit_price": up,
+                "part_name": ctx["part_name"],
+                "description": ctx["description"],
+            }
+        )
+        snapshot_rows.append(
+            {
+                "job_part_id": jp_id,
+                "quantity": qty,
+                "unit_price": up,
+                "total_price": round(qty * up, 4),
+            }
+        )
+
+    if not lines:
+        raise QuickBooksValidationError("Nothing to invoice — all selected quantities are zero.")
 
     bill_addr = None
     if job.get("billing_address_id"):
@@ -582,7 +714,7 @@ def load_firm_invoice_lines(db: Client, company_id: str, job: dict) -> tuple[lis
         )
         if addr:
             bill_addr = _to_qb_addr(addr[0])
-    return lines, bill_addr
+    return lines, bill_addr, snapshot_rows
 
 
 # ───────────────────────── Mapping + invoice creation ─────────────────────────

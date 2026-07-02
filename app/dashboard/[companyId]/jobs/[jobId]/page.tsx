@@ -41,7 +41,7 @@ import {
   ProductionStatusChip,
   FulfillmentStatusChip,
 } from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm } from '@/components/jobs';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
 import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
@@ -246,6 +246,13 @@ export default function JobDetailPage() {
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
 
+  // Fulfillment section summary + default-open heuristic (static, state-based — not
+  // remembered per user): open the Fulfillment section only once there's activity.
+  const totalOrdered = parts.reduce((a, p) => a + Number(p.quantity), 0);
+  const totalShipped = partSummaries.reduce((a, s) => a + s.qty_shipped, 0);
+  const totalInvoiced = invoiceSummaries.reduce((a, s) => a + s.qty_invoiced, 0);
+  const fulfillmentHasActivity = (shipmentCount ?? 0) > 0 || totalInvoiced > 0;
+
   // Print Traveler is a per-part action in the top bar: with one part it acts
   // directly; with several it opens a small picker menu.
   const handleTravelerClick = (e: ReactMouseEvent<HTMLElement>) => {
@@ -411,93 +418,94 @@ export default function JobDetailPage() {
       )}
 
       {job.quote_id && job.quotes && (
-        <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Created from{' '}
           <MuiLink
             component={Link}
             href={`/dashboard/${companyId}/quotes/${job.quote_id}`}
-            sx={{ fontWeight: 600 }}
+            sx={{ fontWeight: 500 }}
           >
             Quote {job.quotes.quote_number}
           </MuiLink>
-        </Alert>
+        </Typography>
       )}
 
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12 }}>
+        {/* Compact details + billing, side by side (mirrors the edit view). */}
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
                 Job Details
               </Typography>
               <Divider sx={{ mb: 2 }} />
-              <Stack spacing={2}>
+              <Stack spacing={1.5}>
                 <Box>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="caption" color="text.secondary">
                     Customer
                   </Typography>
                   {job.customers ? (
                     <MuiLink
                       component={Link}
                       href={`/dashboard/${companyId}/customers/${job.customer_id}`}
-                      sx={{ fontWeight: 500 }}
+                      sx={{ display: 'block', fontWeight: 500 }}
                     >
                       {job.customers.name}
                     </MuiLink>
                   ) : (
-                    <Typography variant="body1" color="text.secondary">—</Typography>
+                    <Typography>—</Typography>
                   )}
                 </Box>
                 {job.customer_po_number && (
                   <Box>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="caption" color="text.secondary">
                       Customer PO
                     </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {job.customer_po_number}
-                    </Typography>
+                    <Typography fontWeight={500}>{job.customer_po_number}</Typography>
                   </Box>
                 )}
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Created
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatDate(job.created_at)}
-                  </Typography>
-                </Box>
-                {job.due_date && (
+                <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Due
+                    <Typography variant="caption" color="text.secondary">
+                      Created
                     </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {formatDate(job.due_date)}
-                    </Typography>
+                    <Typography fontWeight={500}>{formatDate(job.created_at)}</Typography>
                   </Box>
-                )}
+                  {job.due_date && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Due
+                      </Typography>
+                      <Typography fontWeight={500}>{formatDate(job.due_date)}</Typography>
+                    </Box>
+                  )}
+                </Box>
               </Stack>
             </CardContent>
           </Card>
         </Grid>
 
-        <Grid size={{ xs: 12 }}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <JobBillingShippingCard job={job} companyId={companyId} onUpdated={fetchJob} readOnly />
         </Grid>
 
         <Grid size={{ xs: 12 }}>
-          <JobAttachmentsCard jobId={jobId} companyId={companyId} />
-        </Grid>
-
-        <Grid size={{ xs: 12 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-                Parts ({parts.length})
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
+          <CollapsibleSection
+            title="Production"
+            defaultExpanded
+            summary={
+              <>
+                <ProductionStatusChip status={job.production_status} size="small" />
+                <Typography variant="body2" color="text.secondary">
+                  {parts.length} {parts.length === 1 ? 'part' : 'parts'}
+                </Typography>
+              </>
+            }
+          >
               {parts.length === 0 ? (
-                <Typography color="text.secondary">No parts on this job.</Typography>
+                <Typography color="text.secondary" sx={{ px: 1 }}>
+                  No parts on this job.
+                </Typography>
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {parts.map((part) => {
@@ -583,21 +591,36 @@ export default function JobDetailPage() {
                   })}
                 </Box>
               )}
-            </CardContent>
-          </Card>
+          </CollapsibleSection>
+        </Grid>
+
+        {/* Fulfillment — open only once there's shipment/invoice activity. */}
+        <Grid size={{ xs: 12 }}>
+          <CollapsibleSection
+            title="Fulfillment"
+            defaultExpanded={fulfillmentHasActivity}
+            summary={
+              <Typography variant="body2" color="text.secondary">
+                Shipped {totalShipped}/{totalOrdered} · Invoiced {totalInvoiced}/{totalOrdered}
+              </Typography>
+            }
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <ShipmentHistoryCard
+                jobId={jobId}
+                refreshKey={historyRefreshKey}
+                initialPreviewShipmentId={pendingPreviewShipmentId}
+                onShipmentVoided={fetchJob}
+              />
+              <InvoicesCard companyId={companyId} jobId={jobId} refreshKey={invoicesRefreshKey} />
+            </Box>
+          </CollapsibleSection>
         </Grid>
 
         <Grid size={{ xs: 12 }}>
-          <ShipmentHistoryCard
-            jobId={jobId}
-            refreshKey={historyRefreshKey}
-            initialPreviewShipmentId={pendingPreviewShipmentId}
-            onShipmentVoided={fetchJob}
-          />
-        </Grid>
-
-        <Grid size={{ xs: 12 }}>
-          <InvoicesCard companyId={companyId} jobId={jobId} refreshKey={invoicesRefreshKey} />
+          <CollapsibleSection title="Attachments" defaultExpanded={false}>
+            <JobAttachmentsCard jobId={jobId} companyId={companyId} />
+          </CollapsibleSection>
         </Grid>
       </Grid>
 

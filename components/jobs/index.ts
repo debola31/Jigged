@@ -11,3 +11,4 @@ export { default as JobTravelerPreviewDialog } from "./JobTravelerPreviewDialog"
 export { default as JobBillingShippingCard } from "./JobBillingShippingCard";
 export { default as JobEditForm } from "./JobEditForm";
 export { default as InvoicesCard } from "./InvoicesCard";
+export { default as CollapsibleSection } from "./CollapsibleSection";

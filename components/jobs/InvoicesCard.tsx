@@ -54,7 +54,7 @@ export default function InvoicesCard({ companyId, jobId, refreshKey = 0 }: Invoi
   const invoices = data ?? EMPTY_INVOICES;
 
   return (
-    <Card elevation={2}>
+    <Card elevation={2} data-testid="invoices-card">
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
@@ -89,7 +89,7 @@ export default function InvoicesCard({ companyId, jobId, refreshKey = 0 }: Invoi
             </TableHead>
             <TableBody>
               {invoices.map((inv) => (
-                <TableRow key={inv.id}>
+                <TableRow key={inv.id} data-testid="invoice-row">
                   <TableCell sx={{ fontWeight: 600 }}>{inv.docNumber ?? '—'}</TableCell>
                   <TableCell>{formatDate(inv.createdAt)}</TableCell>
                   <TableCell>

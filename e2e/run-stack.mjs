@@ -37,6 +37,10 @@ const services = [
     cwd: 'api',
     readyUrl: 'http://localhost:8000/docs',
     timeoutMs: 30_000,
+    // Hermetic QuickBooks: no Intuit call. create_invoice returns a deterministic
+    // fake so the invoicing spec can exercise the full push against the real DB.
+    // (Guarded off in production by QUICKBOOKS_ENVIRONMENT != 'production'.)
+    env: { QUICKBOOKS_FAKE: '1', QUICKBOOKS_ENVIRONMENT: 'sandbox' },
   },
   {
     name: 'next',
@@ -44,6 +48,9 @@ const services = [
     args: ['next', 'dev'],
     readyUrl: 'http://localhost:3000',
     timeoutMs: 120_000,
+    // Point the browser app at the local FastAPI (QuickBooks push goes through it).
+    // Respect an existing value (dev .env.local); default to the stack's backend.
+    env: { NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000' },
   },
 ];
 
@@ -95,7 +102,7 @@ async function main() {
     const child = spawn(svc.cmd, svc.args, {
       cwd: svc.cwd,
       stdio: 'inherit',
-      env: process.env,
+      env: { ...process.env, ...(svc.env || {}) },
     });
     child.on('exit', (code, signal) => {
       // If a backing service dies before Playwright runs, abort early —

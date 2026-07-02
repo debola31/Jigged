@@ -782,6 +782,15 @@ def quote_to_invoice_payload(
 
 
 def create_invoice(db: Client, company_id: str, payload: dict, request_id: str) -> dict:
+    # Hermetic test escape hatch: when QUICKBOOKS_FAKE is set (E2E / local), skip the
+    # Intuit call and return a deterministic fake invoice. Everything else (connection,
+    # customer map, item, the link + line-item persistence, idempotency, triggers) runs
+    # for real against the DB. Guarded off in production so a stray flag can't fake real
+    # invoices. The fake id is derived from request_id → stable per draft, distinct across
+    # drafts (so idempotency + multi-invoice behavior are exercised end-to-end).
+    if os.getenv("QUICKBOOKS_FAKE") and _environment() != "production":
+        rid = str(request_id)
+        return {"id": f"E2E-{rid[:8]}", "doc_number": f"E2E-{rid[:4]}", "sync_token": "0"}
     created = qb_request(
         db, company_id, "POST", "invoice", json_body=payload, params={"requestid": str(request_id)}
     )

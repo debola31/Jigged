@@ -35,7 +35,9 @@ export interface PreflightCustomer {
 
 /**
  * Per-part billing context for the invoice quantity picker. `qty_invoiceable`
- * is the ship-cap: shipped − already-invoiced (what you may bill on this invoice).
+ * is the hard cap = ordered − already-invoiced (invoicing isn't gated on shipping —
+ * a packing slip is a document, not a delivery). `qty_shipped` drives the picker's
+ * default and a soft "more than shipped" nudge, not the cap.
  */
 export interface BillablePart {
   job_part_id: string;

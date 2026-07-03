@@ -12,11 +12,13 @@ A job has **many** invoices (progressive billing), independent of shipments — 
 have 3 invoices + 3 shipments, 1 invoice covering 3 shipments, or 2 + 3, in any
 combination. When creating an invoice the user picks a **per-part quantity to bill**.
 
-- **Ship-cap:** you can only invoice what has **shipped but isn't yet invoiced**
-  (`invoiceable = qty_shipped − qty_invoiced`). This matches "parts can be invoiced once
-  they ship" and prevents overbilling short shipments. It's enforced at push time (not as
-  an at-rest invariant — a shipment voided *after* invoicing may legitimately leave
-  invoiced > shipped).
+- **Ordered-cap (not ship-cap):** you can bill up to the **ordered** quantity that isn't
+  yet invoiced (`invoiceable = qty_ordered − qty_invoiced`). Invoicing is **not** hard-gated
+  on shipping — a packing slip is a document, not a delivery, and coupling billing to it
+  created awkward states (voiding a slip yanking on invoiceable). The picker **defaults**
+  each line to the shipped-but-unbilled qty and shows a soft "only N shipped so far" nudge
+  when you bill beyond it, but you may bill ahead. The over-invoice DB trigger enforces the
+  `≤ ordered` invariant at rest.
 - **Price lock:** each invoice **snapshots** the part's `unit_price` at push time. Once
   *any* quantity of a part is invoiced, that part's price is locked (edit it via a
   QuickBooks credit/reissue). This keeps `job_parts.total_price` a faithful revenue figure.
@@ -51,7 +53,7 @@ to `partially_invoiced` via a trigger.
    resolution + per-part billing context (`load_billable_parts`: ordered / shipped /
    invoiced / invoiceable + price).
 2. **Create invoice** (`POST …/{job}/invoice`, body `{customer, request_id, lines[]}`):
-   validate the selection against the ship-cap (`load_firm_invoice_lines`), claim the
+   validate the selection against the ordered-cap (`load_firm_invoice_lines`), claim the
    idempotency row by `qb_request_id`, POST to QBO (`?requestid=` dedups), then persist
    the link (`status='created'`) + line snapshots. A double-submit of the same draft
    reuses `request_id` → one invoice; a genuinely new invoice carries a new id.
@@ -59,7 +61,12 @@ to `partially_invoiced` via a trigger.
 ## UI (job detail page)
 
 - **Create invoice** toolbar action → a per-part quantity picker (defaults to
-  shipped−invoiced, capped there) + the customer step. Mints a fresh `request_id` per open.
+  shipped−invoiced, capped at ordered−invoiced, with a soft "N shipped so far" nudge when
+  billing ahead) + the customer step. Mints a fresh `request_id` per open.
+- **Job page layout:** the detail page is grouped into collapsible **Production** /
+  **Fulfillment** (shipments + invoices) / **Attachments** sections (static, state-based
+  default expansion — Fulfillment opens once there's shipment/invoice activity; no per-user
+  memory). Shipping + invoicing live together under Fulfillment.
 - **Invoices card** lists every created invoice (doc #, date, parts × qty, amount, "View in
   QuickBooks"). Replaces the old single "View invoice" button.
 - **Edit job**: quantity stays editable (upward) even after invoicing, down to

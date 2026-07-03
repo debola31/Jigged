@@ -25,6 +25,7 @@ import {
   pushJobToQuickBooks,
   type PreflightResult,
   type PushCustomerDecision,
+  type BillablePart,
 } from '@/utils/quickbooksAccess';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 
@@ -45,9 +46,10 @@ function formatCurrency(n: number): string {
 
 /**
  * Create ONE QuickBooks invoice for a job, billing a chosen quantity of each part.
- * A job can have many invoices (progressive billing); this dialog bills what has
- * shipped but isn't yet invoiced (the ship-cap). Each open mints a fresh
- * idempotency id so a double-click can't create two invoices.
+ * A job can have many invoices (progressive billing). The picker defaults each line
+ * to the shipped-but-unbilled qty and caps it at ordered-but-unbilled — billing
+ * beyond what's shipped is allowed (a packing slip isn't a delivery), just nudged.
+ * Each open mints a fresh idempotency id so a double-click can't create two invoices.
  */
 export default function PushToQuickBooksDialog({
   open,
@@ -87,7 +89,10 @@ export default function PushToQuickBooksDialog({
       // Default each line to bill everything shipped-but-unbilled (the invoiceable qty).
       const initial: Record<string, string> = {};
       for (const p of result.parts ?? []) {
-        initial[p.job_part_id] = p.qty_invoiceable > 0 ? String(p.qty_invoiceable) : '0';
+        // Default to what's shipped-but-unbilled (the common "bill what went out"
+        // case); the user can raise it up to the ordered-but-unbilled cap.
+        const su = Math.max(0, p.qty_shipped - p.qty_invoiced);
+        initial[p.job_part_id] = su > 0 ? String(su) : '0';
       }
       setQtyById(initial);
     } catch (err) {
@@ -110,13 +115,22 @@ export default function PushToQuickBooksDialog({
     const n = parseFloat(qtyById[id] ?? '');
     return Number.isFinite(n) ? n : 0;
   };
+  const shippedUnbilled = (p: BillablePart): number => Math.max(0, p.qty_shipped - p.qty_invoiced);
   const lineError = (jobPartId: string, invoiceable: number): string | null => {
     const s = qtyById[jobPartId] ?? '';
     if (s.trim() === '') return null;
     const n = parseFloat(s);
     if (!Number.isFinite(n) || n < 0) return 'Enter a quantity of zero or more.';
-    if (n > invoiceable + 1e-9) return `Only ${invoiceable} shipped and not yet invoiced.`;
+    if (n > invoiceable + 1e-9) return `Only ${invoiceable} left to invoice.`;
     return null;
+  };
+  // Non-blocking nudge: billing more than has shipped is allowed (a packing slip
+  // isn't a delivery), just flagged so it's a conscious choice.
+  const lineWarn = (p: BillablePart): string | null => {
+    if (lineError(p.job_part_id, p.qty_invoiceable)) return null;
+    return lineQty(p.job_part_id) > shippedUnbilled(p) + 1e-9
+      ? `only ${shippedUnbilled(p)} shipped so far`
+      : null;
   };
 
   const total = billable.reduce((sum, p) => sum + lineQty(p.job_part_id) * (p.unit_price ?? 0), 0);
@@ -131,6 +145,12 @@ export default function PushToQuickBooksDialog({
   const handlePush = async () => {
     setPushing(true);
     setError(null);
+    // Pre-open a tab *synchronously* within this click so the browser's popup
+    // blocker allows it; we point it at the QuickBooks invoice once the push
+    // returns. (A window.open after the await loses the user-activation the
+    // blocker requires.) If the push yields no invoice, close the placeholder.
+    const invoiceWindow = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    if (invoiceWindow) invoiceWindow.opener = null; // reverse-tabnabbing guard
     try {
       const customer: PushCustomerDecision =
         choice === CREATE_SENTINEL
@@ -141,8 +161,17 @@ export default function PushToQuickBooksDialog({
         .map((p) => ({ job_part_id: p.job_part_id, quantity: lineQty(p.job_part_id) }));
       const result = await pushJobToQuickBooks(companyId, jobId, customer, requestId, lines);
       if (result.in_progress) {
+        invoiceWindow?.close();
         setError('This invoice is already being created. Please refresh in a moment.');
         return;
+      }
+      // Take the user straight to the invoice that was just created (or already
+      // existed) in QuickBooks, rather than only flashing a notification.
+      if (result.url) {
+        if (invoiceWindow) invoiceWindow.location.href = result.url;
+        else window.open(result.url, '_blank', 'noopener,noreferrer');
+      } else {
+        invoiceWindow?.close();
       }
       const docRef = result.doc_number ? `Invoice ${result.doc_number}` : 'Invoice';
       onPushed(
@@ -151,6 +180,7 @@ export default function PushToQuickBooksDialog({
           : `${docRef} created in QuickBooks.`,
       );
     } catch (err) {
+      invoiceWindow?.close();
       setError(err instanceof Error ? err.message : 'Failed to push to QuickBooks.');
     } finally {
       setPushing(false);
@@ -236,15 +266,14 @@ export default function PushToQuickBooksDialog({
             </Typography>
             {nothingBillable ? (
               <Alert severity="info">
-                Nothing to invoice yet. An invoice covers parts that have shipped but aren&apos;t
-                billed — ship items first (or everything shipped is already invoiced).
+                Everything on this job is already invoiced.
               </Alert>
             ) : (
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell>Part</TableCell>
-                    <TableCell align="right">Shipped, unbilled</TableCell>
+                    <TableCell align="right">Left to invoice</TableCell>
                     <TableCell align="right">Qty to bill</TableCell>
                     <TableCell align="right">Amount</TableCell>
                   </TableRow>
@@ -252,12 +281,14 @@ export default function PushToQuickBooksDialog({
                 <TableBody>
                   {billable.map((p) => {
                     const err = lineError(p.job_part_id, p.qty_invoiceable);
+                    const warn = lineWarn(p);
                     return (
                       <TableRow key={p.job_part_id}>
                         <TableCell>
                           {p.part_name}
                           <Typography variant="caption" color="text.secondary" display="block">
-                            {p.qty_invoiced > 0 ? `${p.qty_invoiced} of ${p.qty_ordered} invoiced` : `${p.qty_ordered} ordered`}
+                            {p.qty_ordered} ordered · {p.qty_shipped} shipped
+                            {p.qty_invoiced > 0 ? ` · ${p.qty_invoiced} invoiced` : ''}
                             {p.unit_price !== null ? ` · ${formatCurrency(p.unit_price)}/ea` : ''}
                           </Typography>
                         </TableCell>
@@ -268,8 +299,8 @@ export default function PushToQuickBooksDialog({
                             onChange={(e) => setQty(p.job_part_id, e.target.value)}
                             size="small"
                             error={!!err}
-                            helperText={err ?? ' '}
-                            sx={{ width: 110 }}
+                            helperText={err ?? warn ?? ' '}
+                            sx={{ width: 120 }}
                             slotProps={{ htmlInput: { inputMode: 'decimal', style: { textAlign: 'right' } } }}
                           />
                         </TableCell>

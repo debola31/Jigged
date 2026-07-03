@@ -161,13 +161,15 @@ test.describe('Job invoicing (QuickBooks)', () => {
 
     await page.goto(`/dashboard/${companyId}/jobs/${jobId}`);
 
-    // No invoices yet.
-    await expect(page.getByTestId('invoices-card')).toContainText(/Invoices \(0\)/, {
-      timeout: 15_000,
+    // No invoices yet — the toolbar dropdown shows the count.
+    await expect(page.getByRole('button', { name: /Invoices \(0\)/i })).toBeVisible({
+      timeout: 20_000,
     });
 
-    // Open the picker; preflight resolves the mapped customer + billable parts.
-    await page.getByRole('button', { name: /Create invoice/i }).click();
+    // Open the Invoices dropdown → Create invoice → the picker (preflight resolves the
+    // mapped customer + billable parts).
+    await page.getByRole('button', { name: /Invoices \(/i }).click();
+    await page.getByRole('menuitem', { name: /Create invoice/i }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText(/Quantities to invoice/i)).toBeVisible({ timeout: 15_000 });
     // Defaults to the shipped-unbilled qty (10) → $1,000 total.
@@ -175,12 +177,27 @@ test.describe('Job invoicing (QuickBooks)', () => {
 
     const createBtn = dialog.getByRole('button', { name: /Create Invoice/i });
     await expect(createBtn).toBeEnabled();
-    await createBtn.click();
 
-    // Success snackbar + the Invoices card lists the new invoice for the part.
+    // Creating the invoice opens a new tab pointed straight at the QuickBooks
+    // invoice deep link (not just a snackbar). Stub the external QBO page so the
+    // popup navigation commits to that URL — otherwise a real (unauthenticated)
+    // hit to Intuit redirects to its sign-in page and the URL check is flaky.
+    await page.context().route('**/app/invoice**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html>QBO invoice</html>' }),
+    );
+    const popupPromise = page.waitForEvent('popup');
+    await createBtn.click();
+    const invoiceTab = await popupPromise;
+    await invoiceTab.waitForURL(/app\/invoice/, { timeout: 10_000 });
+    expect(invoiceTab.url()).toContain('/app/invoice');
+    await invoiceTab.close();
+
+    // Success snackbar + the toolbar Invoices dropdown now shows the new invoice.
     await expect(page.getByText(/created in QuickBooks/i)).toBeVisible({ timeout: 20_000 });
-    const card = page.getByTestId('invoices-card');
-    await expect(card).toContainText(/Invoices \(1\)/, { timeout: 15_000 });
-    await expect(card.getByTestId('invoice-row')).toContainText('E2E-MFG-001');
+    await expect(page.getByRole('button', { name: /Invoices \(1\)/i })).toBeVisible({
+      timeout: 15_000,
+    });
+    await page.getByRole('button', { name: /Invoices \(1\)/i }).click();
+    await expect(page.getByRole('menuitem').filter({ hasText: '$1,000.00' })).toBeVisible();
   });
 });

@@ -179,7 +179,6 @@ def _ship(admin: Client, env: ShipmentEnv, quantity: float) -> str:
         "p_ship_date": None,
         "p_carrier": None,
         "p_shipping_method": None,
-        "p_notes": None,
         "p_line_items": [
             {"job_part_id": env.job_part_id, "quantity": quantity}
         ],

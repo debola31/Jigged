@@ -38,6 +38,17 @@ const EMPTY_ATTACHMENTS: JobAttachment[] = [];
 interface JobAttachmentsCardProps {
   jobId: string;
   companyId: string;
+  /**
+   * Read-only surface: list + view/download only, no upload or delete. Adding and
+   * removing attachments live on the Edit screen (JobEditForm), so the job detail
+   * page shows the files without letting them be changed in place.
+   */
+  readOnly?: boolean;
+  /**
+   * Render inline (a caption + list, no outer Card) so this can sit inside the
+   * Job Details card at the top of the page instead of a separate boxed section.
+   */
+  embedded?: boolean;
 }
 
 function formatBytes(bytes: number | null): string {
@@ -61,11 +72,21 @@ function isViewable(att: JobAttachment): boolean {
 }
 
 /**
- * Attachments panel for the job detail page — the customer PO PDF and any other
- * reference files. Listing on mount is a plain Supabase read (no AI). Upload is
- * immediate; download opens a fresh signed URL.
+ * Attachments panel for the job — the customer PO PDF and any other reference
+ * files. Listing on mount is a plain Supabase read (no AI). Upload is immediate;
+ * download opens a fresh signed URL.
+ *
+ * Two surfaces share this one component:
+ * - `readOnly embedded` inside the Job Details card (the job detail page): view +
+ *   download only, no add/remove.
+ * - the default editable Card on the Edit screen: upload + delete + view/download.
  */
-export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsCardProps) {
+export default function JobAttachmentsCard({
+  jobId,
+  companyId,
+  readOnly = false,
+  embedded = false,
+}: JobAttachmentsCardProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -146,12 +167,22 @@ export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsC
     }
   };
 
-  return (
-    <Card elevation={2}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-          <Typography variant="h6">Attachments</Typography>
-          <input ref={inputRef} type="file" accept="application/pdf" hidden onChange={handleSelect} />
+  const header = embedded ? (
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+      Attachments
+    </Typography>
+  ) : (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+      <Typography variant="h6">Attachments</Typography>
+      {!readOnly && (
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf"
+            hidden
+            onChange={handleSelect}
+          />
           <Button
             size="small"
             startIcon={uploading ? <CircularProgress size={16} /> : <AttachFileIcon />}
@@ -160,57 +191,77 @@ export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsC
           >
             Upload PDF
           </Button>
+        </>
+      )}
+    </Box>
+  );
+
+  const content = (
+    <>
+      {header}
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+          <CircularProgress size={20} />
         </Box>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
-
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-            <CircularProgress size={20} />
-          </Box>
-        ) : attachments.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No attachments yet. Upload the customer PO or any reference PDF.
-          </Typography>
-        ) : (
-          <List dense disablePadding>
-            {attachments.map((att) => (
-              <ListItem
-                key={att.id}
-                disableGutters
-                secondaryAction={
-                  <Box>
-                    {isViewable(att) && (
-                      <Tooltip title="View">
-                        <IconButton edge="end" aria-label="View" onClick={() => handleView(att)}>
-                          <VisibilityIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                    <IconButton edge="end" aria-label="Download" onClick={() => handleDownload(att)}>
-                      <DownloadIcon fontSize="small" />
-                    </IconButton>
+      ) : attachments.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {readOnly ? 'None' : 'No attachments yet. Upload the customer PO or any reference PDF.'}
+        </Typography>
+      ) : (
+        <List dense disablePadding>
+          {attachments.map((att) => (
+            <ListItem
+              key={att.id}
+              disableGutters
+              secondaryAction={
+                <Box>
+                  {isViewable(att) && (
+                    <Tooltip title="View">
+                      <IconButton edge="end" aria-label="View" onClick={() => handleView(att)}>
+                        <VisibilityIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  <IconButton edge="end" aria-label="Download" onClick={() => handleDownload(att)}>
+                    <DownloadIcon fontSize="small" />
+                  </IconButton>
+                  {!readOnly && (
                     <IconButton edge="end" aria-label="Delete" onClick={() => handleDelete(att)}>
                       <DeleteOutlineIcon fontSize="small" />
                     </IconButton>
-                  </Box>
-                }
-              >
-                <AttachFileIcon fontSize="small" color="action" sx={{ mr: 1 }} />
-                <ListItemText
-                  primary={att.file_name}
-                  secondary={formatBytes(att.size_bytes)}
-                  slotProps={{ primary: { variant: 'body2', noWrap: true } }}
-                />
-              </ListItem>
-            ))}
-          </List>
-        )}
-      </CardContent>
+                  )}
+                </Box>
+              }
+            >
+              <AttachFileIcon fontSize="small" color="action" sx={{ mr: 1 }} />
+              <ListItemText
+                primary={att.file_name}
+                secondary={formatBytes(att.size_bytes)}
+                slotProps={{ primary: { variant: 'body2', noWrap: true } }}
+              />
+            </ListItem>
+          ))}
+        </List>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        <Box>{content}</Box>
+      ) : (
+        <Card elevation={2}>
+          <CardContent>{content}</CardContent>
+        </Card>
+      )}
 
       {/* Inline preview — keeps the user on the job page instead of forcing a
           download. PDFs render in an iframe, images in an <img>. */}
@@ -257,6 +308,6 @@ export default function JobAttachmentsCard({ jobId, companyId }: JobAttachmentsC
           <Button onClick={handleCloseViewer}>Close</Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </>
   );
 }

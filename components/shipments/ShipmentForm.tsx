@@ -47,10 +47,8 @@ import {
 } from '@/utils/shipmentsAccess';
 import {
   lineShipConsequence,
-  projectSlip,
   type ShipConsequence,
 } from '@/components/shipments/shipmentMath';
-import { FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
 /** UI-only carrier selection. 'other' reveals a free-text field whose value
  *  is what actually gets stored in shipments.carrier. */
@@ -131,7 +129,6 @@ export default function ShipmentForm({
   const [shippingMethod, setShippingMethod] = useState<ShippingMethod | ''>('');
   const [carrierChoice, setCarrierChoice] = useState<CarrierChoice>('');
   const [carrierOther, setCarrierOther] = useState('');
-  const [notes, setNotes] = useState('');
 
   const [lines, setLines] = useState<LineRow[]>([]);
 
@@ -430,29 +427,6 @@ export default function ShipmentForm({
     };
   }, [lines, isCustomerMode, shippingAddressId, shippingMethod, carrierChoice, carrierOther]);
 
-  // ---------- Derived: slip-level projection for the summary ----------
-  // What this packing slip does to the job once it commits — shown above
-  // the submit button so the clerk sees "Job will be Partially Shipped"
-  // before the pre-filled quantities silently close the order out.
-  const slipProjection = useMemo(() => {
-    if (!validation.selectedJobId) return null;
-    const shipNowByPart = new Map(
-      validation.contributing.map((c) => [c.job_part_id, c.quantity]),
-    );
-    const jobLines = lines.filter((l) => l.job_id === validation.selectedJobId);
-    return projectSlip(
-      jobLines.map((l) => ({
-        job_part_id: l.job_part_id,
-        qty_ordered: l.qty_ordered,
-        qty_shipped_prior: l.qty_shipped_prior,
-      })),
-      shipNowByPart,
-    );
-  }, [lines, validation.selectedJobId, validation.contributing]);
-
-  const slipJobNumber =
-    validation.contributing[0]?.row.job_number ?? jobNumberForTitle ?? '';
-
   // ---------- Helpers to mutate a single line by id ----------
   const patchLine = useCallback((jobPartId: string, patch: Partial<LineRow>) => {
     setLines((prev) =>
@@ -480,7 +454,6 @@ export default function ShipmentForm({
       ship_date: shipDate || todayLocalISODate(),
       carrier: resolvedCarrier,
       shipping_method: shippingMethod === '' ? null : shippingMethod,
-      notes: notes.trim() || null,
       line_items: validation.contributing.map((c) => ({
         job_part_id: c.job_part_id,
         quantity: c.quantity,
@@ -501,7 +474,7 @@ export default function ShipmentForm({
     }
   }, [
     customer, validation, shippingAddressId, shipDate, carrierChoice, carrierOther,
-    shippingMethod, notes, companyId, onCreated,
+    shippingMethod, companyId, onCreated,
   ]);
 
   // ---------- Render ----------
@@ -706,29 +679,6 @@ export default function ShipmentForm({
 
       <Divider />
 
-      <TextField
-        label="Notes"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        multiline
-        minRows={2}
-        fullWidth
-      />
-
-      {slipProjection && slipProjection.unitsNow > 0 && (
-        <Alert severity={slipProjection.projectedStatus === 'fully_shipped' ? 'success' : 'info'}>
-          <Typography variant="body2">
-            This slip ships <strong>{slipProjection.unitsNow}</strong>{' '}
-            unit{slipProjection.unitsNow === 1 ? '' : 's'} across{' '}
-            {slipProjection.linesShipping} line{slipProjection.linesShipping === 1 ? '' : 's'}.
-            {' '}After it,{slipJobNumber ? ` Job ${slipJobNumber}` : ' this job'} will be{' '}
-            <strong>{FULFILLMENT_STATUS_CONFIG[slipProjection.projectedStatus].label}</strong>{' '}
-            ({slipProjection.partsComplete} of {slipProjection.partsTotal} part
-            {slipProjection.partsTotal === 1 ? '' : 's'} complete).
-          </Typography>
-        </Alert>
-      )}
-
       {!validation.canSubmit && validation.blockingMessages.length > 0 && (
         <Alert severity="info">
           <Stack spacing={0.5}>
@@ -784,7 +734,7 @@ function renderJobLineTable(
           <TableCell align="right">Ordered</TableCell>
           <TableCell align="right">Already Shipped</TableCell>
           <TableCell align="right">Remaining</TableCell>
-          <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
+          <TableCell align="right" sx={{ width: 230 }}>Ship Now</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -798,8 +748,12 @@ function renderJobLineTable(
             <TableCell align="right">{row.qty_ordered}</TableCell>
             <TableCell align="right">{row.qty_shipped_prior}</TableCell>
             <TableCell align="right">{row.qty_remaining}</TableCell>
+            {/* Caption sits inline to the left of the input on one line, so the row
+                stays a single line tall and the input stays vertically centered with
+                the numeric cells. */}
             <TableCell align="right">
-              <Stack spacing={0.25} alignItems="flex-end">
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+                <ConsequenceCaption qtyInput={row.qty_input} qtyRemaining={row.qty_remaining} />
                 <TextField
                   value={row.qty_input}
                   onChange={(e) => patchLine(row.job_part_id, { qty_input: e.target.value })}
@@ -809,9 +763,9 @@ function renderJobLineTable(
                     style: { textAlign: 'right' },
                   }}
                   error={Boolean(warnByPart.get(row.job_part_id))}
+                  sx={{ width: 90, flexShrink: 0 }}
                 />
-                <ConsequenceCaption qtyInput={row.qty_input} qtyRemaining={row.qty_remaining} />
-              </Stack>
+              </Box>
             </TableCell>
           </TableRow>
         ))}
@@ -876,7 +830,7 @@ function renderCustomerLineGroups(
                   <TableCell align="right">Ordered</TableCell>
                   <TableCell align="right">Shipped</TableCell>
                   <TableCell align="right">Remaining</TableCell>
-                  <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
+                  <TableCell align="right" sx={{ width: 230 }}>Ship Now</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -910,7 +864,13 @@ function renderCustomerLineGroups(
                       <TableCell align="right">{row.qty_shipped_prior}</TableCell>
                       <TableCell align="right">{row.qty_remaining}</TableCell>
                       <TableCell align="right">
-                        <Stack spacing={0.25} alignItems="flex-end">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+                          {row.selected && !rowDisabled && (
+                            <ConsequenceCaption
+                              qtyInput={row.qty_input}
+                              qtyRemaining={row.qty_remaining}
+                            />
+                          )}
                           <TextField
                             value={row.qty_input}
                             onChange={(e) =>
@@ -922,14 +882,9 @@ function renderCustomerLineGroups(
                               inputMode: 'decimal',
                               style: { textAlign: 'right' },
                             }}
+                            sx={{ width: 90, flexShrink: 0 }}
                           />
-                          {row.selected && !rowDisabled && (
-                            <ConsequenceCaption
-                              qtyInput={row.qty_input}
-                              qtyRemaining={row.qty_remaining}
-                            />
-                          )}
-                        </Stack>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -944,11 +899,12 @@ function renderCustomerLineGroups(
 }
 
 /**
- * Small right-aligned caption translating a line's Ship-Now quantity into
- * its plain-language consequence + colour. This is what stops the
- * pre-filled "full remaining" default from silently closing a line: a
- * full count now reads "Completes this line", a short count reads
- * "N will remain owed", an over-count reads "Over-ships by N".
+ * Small caption translating a line's Ship-Now quantity into its plain-language
+ * consequence + colour. This is what stops the pre-filled "full remaining"
+ * default from silently closing a line: a full count reads "Completes this line",
+ * a short count reads "N will remain owed", an over-count reads "Over-ships by N".
+ * Rendered inline to the LEFT of the input (single line, never wrapping) so the row
+ * stays one line tall and the input stays vertically centred with the numeric cells.
  */
 function ConsequenceCaption({
   qtyInput,
@@ -960,7 +916,10 @@ function ConsequenceCaption({
   const display = consequenceDisplay(lineShipConsequence(qtyInput, qtyRemaining));
   if (!display) return null;
   return (
-    <Typography variant="caption" sx={{ color: display.color, lineHeight: 1.2 }}>
+    <Typography
+      variant="caption"
+      sx={{ color: display.color, lineHeight: 1.2, whiteSpace: 'nowrap' }}
+    >
       {display.text}
     </Typography>
   );

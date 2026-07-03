@@ -34,6 +34,9 @@ export interface JobOperation {
   completed_at: string | null;
   assigned_to: string | null;
   completed_by: string | null;
+  /** Resolved display name of `completed_by` (from user_company_access), attached by
+   *  getJobWithRelations — not a DB column. Null if unresolved/unset. */
+  completed_by_name?: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;

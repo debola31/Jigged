@@ -16,14 +16,18 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
+import type { JobNote } from '@/types/operator';
 import { formatTime } from '@/types/routings';
 import OperationStatusChip from './OperationStatusChip';
+import OperationNotes from './OperationNotes';
 
 interface OperationCardProps {
   operation: JobOperation;
   hasInProgressOperation: boolean;
   isNextReady: boolean;
   disabled?: boolean;
+  /** Operator step-tagged notes + photos for this operation (from the activity feed). */
+  stepNotes?: JobNote[];
   onStart: (operationId: string) => void;
   onComplete: (operationId: string) => void;
   onUndo: (operationId: string) => void;
@@ -50,6 +54,7 @@ export default function OperationCard({
   hasInProgressOperation,
   isNextReady,
   disabled = false,
+  stepNotes = [],
   onStart,
   onComplete,
   onUndo,
@@ -72,7 +77,8 @@ export default function OperationCard({
   const hasDetails =
     operation.started_at ||
     operation.completed_at ||
-    operation.notes;
+    operation.notes ||
+    stepNotes.length > 0;
 
   return (
     <Box
@@ -112,6 +118,7 @@ export default function OperationCard({
               <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
               <Typography variant="caption" color="text.secondary">
                 Completed {formatDateTime(operation.completed_at)}
+                {operation.completed_by_name ? ` by ${operation.completed_by_name}` : ''}
               </Typography>
             </Box>
           )}
@@ -185,6 +192,8 @@ export default function OperationCard({
             size="small"
             onClick={() => setExpanded(!expanded)}
             sx={{ color: 'text.secondary' }}
+            data-testid="operation-expand"
+            aria-label={expanded ? 'Collapse operation details' : 'Expand operation details'}
           >
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
@@ -212,7 +221,7 @@ export default function OperationCard({
             </Box>
           )}
 
-          {/* Notes */}
+          {/* Notes captured at completion (admin Complete modal). */}
           {operation.notes && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>
@@ -223,6 +232,9 @@ export default function OperationCard({
               </Typography>
             </Box>
           )}
+
+          {/* Operator step-tagged notes + photos (from the activity feed). */}
+          <OperationNotes notes={stepNotes} />
         </Box>
       </Collapse>
     </Box>

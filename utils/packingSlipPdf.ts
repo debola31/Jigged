@@ -480,22 +480,6 @@ export async function generatePackingSlipPdf(
     cursorY += 6;
   }
 
-  // ---------- Notes ----------
-  if (shipment.notes && shipment.notes.trim()) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('NOTES', MARGIN, cursorY);
-    cursorY += 14;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(60);
-    const wrapped = doc.splitTextToSize(shipment.notes.trim(), pageWidth - MARGIN * 2);
-    doc.text(wrapped, MARGIN, cursorY);
-    cursorY += wrapped.length * 12 + 10;
-  }
-
   // ---------- Signature lines ----------
   const sigBlockHeight = 56;
   if (cursorY + sigBlockHeight > pageHeight - MARGIN - 30) {

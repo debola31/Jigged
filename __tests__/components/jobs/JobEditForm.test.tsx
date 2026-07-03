@@ -14,6 +14,15 @@ vi.mock('@/utils/jobsAccess', () => ({
   updateJobPartQuantity: vi.fn().mockResolvedValue({}),
   updateJobPartPrice: vi.fn().mockResolvedValue({}),
 }));
+// The edit form now embeds the (editable) attachments card; stub its access layer
+// so the component's on-mount list read doesn't pull in the real Supabase client.
+vi.mock('@/utils/jobAttachmentsAccess', () => ({
+  listJobAttachments: vi.fn().mockResolvedValue([]),
+  uploadJobAttachment: vi.fn().mockResolvedValue({}),
+  deleteJobAttachment: vi.fn().mockResolvedValue({}),
+  getJobAttachmentUrl: vi.fn().mockResolvedValue('https://example.test/file.pdf'),
+  validateAttachmentFile: vi.fn().mockReturnValue(null),
+}));
 
 import {
   updateJobDetails,

@@ -1,7 +1,6 @@
 export { default as JobStatusChip } from "./JobStatusChip";
 export { ProductionStatusChip, FulfillmentStatusChip } from "./JobStatusChip";
 export { default as JobStatusBlock } from "./JobStatusBlock";
-export { default as ShipmentHistoryCard } from "./ShipmentHistoryCard";
 export { default as OperationStatusChip } from "./OperationStatusChip";
 export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";
@@ -10,4 +9,6 @@ export { default as CompleteOperationModal } from "./CompleteOperationModal";
 export { default as JobTravelerPreviewDialog } from "./JobTravelerPreviewDialog";
 export { default as JobBillingShippingCard } from "./JobBillingShippingCard";
 export { default as JobEditForm } from "./JobEditForm";
-export { default as InvoicesCard } from "./InvoicesCard";
+export { default as CollapsibleSection } from "./CollapsibleSection";
+export { default as InvoicesMenu } from "./InvoicesMenu";
+export { default as ShipmentsMenu } from "./ShipmentsMenu";

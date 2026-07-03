@@ -6,7 +6,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -735,7 +734,7 @@ function renderJobLineTable(
           <TableCell align="right">Ordered</TableCell>
           <TableCell align="right">Already Shipped</TableCell>
           <TableCell align="right">Remaining</TableCell>
-          <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
+          <TableCell align="right" sx={{ width: 230 }}>Ship Now</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -749,24 +748,24 @@ function renderJobLineTable(
             <TableCell align="right">{row.qty_ordered}</TableCell>
             <TableCell align="right">{row.qty_shipped_prior}</TableCell>
             <TableCell align="right">{row.qty_remaining}</TableCell>
-            {/* The input alone keeps the row compact and vertically centered with the
-                numeric cells; the consequence caption floats over the bottom divider
-                (right-anchored, single line) so it can be wider than this narrow cell
-                without wrapping and without adding height to the row. */}
-            <TableCell align="right" sx={{ position: 'relative' }}>
-              <TextField
-                value={row.qty_input}
-                onChange={(e) => patchLine(row.job_part_id, { qty_input: e.target.value })}
-                size="small"
-                inputProps={{
-                  inputMode: 'decimal',
-                  style: { textAlign: 'right' },
-                }}
-                error={Boolean(warnByPart.get(row.job_part_id))}
-              />
-              <ConsequenceCaptionOnDivider>
+            {/* Caption sits inline to the left of the input on one line, so the row
+                stays a single line tall and the input stays vertically centered with
+                the numeric cells. */}
+            <TableCell align="right">
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
                 <ConsequenceCaption qtyInput={row.qty_input} qtyRemaining={row.qty_remaining} />
-              </ConsequenceCaptionOnDivider>
+                <TextField
+                  value={row.qty_input}
+                  onChange={(e) => patchLine(row.job_part_id, { qty_input: e.target.value })}
+                  size="small"
+                  inputProps={{
+                    inputMode: 'decimal',
+                    style: { textAlign: 'right' },
+                  }}
+                  error={Boolean(warnByPart.get(row.job_part_id))}
+                  sx={{ width: 90, flexShrink: 0 }}
+                />
+              </Box>
             </TableCell>
           </TableRow>
         ))}
@@ -831,7 +830,7 @@ function renderCustomerLineGroups(
                   <TableCell align="right">Ordered</TableCell>
                   <TableCell align="right">Shipped</TableCell>
                   <TableCell align="right">Remaining</TableCell>
-                  <TableCell align="right" sx={{ width: 120 }}>Ship Now</TableCell>
+                  <TableCell align="right" sx={{ width: 230 }}>Ship Now</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -864,27 +863,28 @@ function renderCustomerLineGroups(
                       <TableCell align="right">{row.qty_ordered}</TableCell>
                       <TableCell align="right">{row.qty_shipped_prior}</TableCell>
                       <TableCell align="right">{row.qty_remaining}</TableCell>
-                      <TableCell align="right" sx={{ position: 'relative' }}>
-                        <TextField
-                          value={row.qty_input}
-                          onChange={(e) =>
-                            patchLine(row.job_part_id, { qty_input: e.target.value })
-                          }
-                          size="small"
-                          disabled={rowDisabled || !row.selected}
-                          inputProps={{
-                            inputMode: 'decimal',
-                            style: { textAlign: 'right' },
-                          }}
-                        />
-                        {row.selected && !rowDisabled && (
-                          <ConsequenceCaptionOnDivider>
+                      <TableCell align="right">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+                          {row.selected && !rowDisabled && (
                             <ConsequenceCaption
                               qtyInput={row.qty_input}
                               qtyRemaining={row.qty_remaining}
                             />
-                          </ConsequenceCaptionOnDivider>
-                        )}
+                          )}
+                          <TextField
+                            value={row.qty_input}
+                            onChange={(e) =>
+                              patchLine(row.job_part_id, { qty_input: e.target.value })
+                            }
+                            size="small"
+                            disabled={rowDisabled || !row.selected}
+                            inputProps={{
+                              inputMode: 'decimal',
+                              style: { textAlign: 'right' },
+                            }}
+                            sx={{ width: 90, flexShrink: 0 }}
+                          />
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -899,41 +899,12 @@ function renderCustomerLineGroups(
 }
 
 /**
- * Floats the consequence caption over the Ship Now cell's bottom divider,
- * right-anchored. Absolute so it adds no height to the row (the input alone keeps
- * the row compact and vertically centered with the numeric cells); single-line so
- * a longer message like "Completes this line" can be wider than this narrow cell
- * without wrapping; and given the dialog's surface colour as a background so the
- * divider rule doesn't strike through the text. Requires the TableCell to be
- * position: relative.
- */
-function ConsequenceCaptionOnDivider({ children }: { children: ReactNode }) {
-  return (
-    <Box
-      sx={{
-        position: 'absolute',
-        right: 16, // matches the TableCell's horizontal padding → aligns with the input's right edge
-        bottom: 0, // the cell's bottom edge is the row divider
-        transform: 'translateY(50%)',
-        px: 0.5,
-        // The Create Shipment dialog paints a #111439 → #1a1f4a gradient; the Ship
-        // Now column sits at the right end (~#1a1f4a), so this masks the divider.
-        bgcolor: '#1a1f4a',
-        whiteSpace: 'nowrap',
-        pointerEvents: 'none',
-      }}
-    >
-      {children}
-    </Box>
-  );
-}
-
-/**
- * Small right-aligned caption translating a line's Ship-Now quantity into
- * its plain-language consequence + colour. This is what stops the
- * pre-filled "full remaining" default from silently closing a line: a
- * full count now reads "Completes this line", a short count reads
- * "N will remain owed", an over-count reads "Over-ships by N".
+ * Small caption translating a line's Ship-Now quantity into its plain-language
+ * consequence + colour. This is what stops the pre-filled "full remaining"
+ * default from silently closing a line: a full count reads "Completes this line",
+ * a short count reads "N will remain owed", an over-count reads "Over-ships by N".
+ * Rendered inline to the LEFT of the input (single line, never wrapping) so the row
+ * stays one line tall and the input stays vertically centred with the numeric cells.
  */
 function ConsequenceCaption({
   qtyInput,
@@ -945,7 +916,10 @@ function ConsequenceCaption({
   const display = consequenceDisplay(lineShipConsequence(qtyInput, qtyRemaining));
   if (!display) return null;
   return (
-    <Typography variant="caption" sx={{ color: display.color, lineHeight: 1.2 }}>
+    <Typography
+      variant="caption"
+      sx={{ color: display.color, lineHeight: 1.2, whiteSpace: 'nowrap' }}
+    >
       {display.text}
     </Typography>
   );

@@ -6,6 +6,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -748,27 +749,24 @@ function renderJobLineTable(
             <TableCell align="right">{row.qty_ordered}</TableCell>
             <TableCell align="right">{row.qty_shipped_prior}</TableCell>
             <TableCell align="right">{row.qty_remaining}</TableCell>
-            <TableCell align="right">
-              <Stack spacing={0.25} alignItems="flex-end">
-                {/* Invisible mirror of the caption reserves matching space ABOVE the
-                    input, keeping the field vertically centered with the Ordered/
-                    Shipped/Remaining cells — the visible caption below would otherwise
-                    pull the input up off the row's centerline. */}
-                <Box sx={{ visibility: 'hidden' }} aria-hidden>
-                  <ConsequenceCaption qtyInput={row.qty_input} qtyRemaining={row.qty_remaining} />
-                </Box>
-                <TextField
-                  value={row.qty_input}
-                  onChange={(e) => patchLine(row.job_part_id, { qty_input: e.target.value })}
-                  size="small"
-                  inputProps={{
-                    inputMode: 'decimal',
-                    style: { textAlign: 'right' },
-                  }}
-                  error={Boolean(warnByPart.get(row.job_part_id))}
-                />
+            {/* The input alone keeps the row compact and vertically centered with the
+                numeric cells; the consequence caption floats over the bottom divider
+                (right-anchored, single line) so it can be wider than this narrow cell
+                without wrapping and without adding height to the row. */}
+            <TableCell align="right" sx={{ position: 'relative' }}>
+              <TextField
+                value={row.qty_input}
+                onChange={(e) => patchLine(row.job_part_id, { qty_input: e.target.value })}
+                size="small"
+                inputProps={{
+                  inputMode: 'decimal',
+                  style: { textAlign: 'right' },
+                }}
+                error={Boolean(warnByPart.get(row.job_part_id))}
+              />
+              <ConsequenceCaptionOnDivider>
                 <ConsequenceCaption qtyInput={row.qty_input} qtyRemaining={row.qty_remaining} />
-              </Stack>
+              </ConsequenceCaptionOnDivider>
             </TableCell>
           </TableRow>
         ))}
@@ -866,37 +864,27 @@ function renderCustomerLineGroups(
                       <TableCell align="right">{row.qty_ordered}</TableCell>
                       <TableCell align="right">{row.qty_shipped_prior}</TableCell>
                       <TableCell align="right">{row.qty_remaining}</TableCell>
-                      <TableCell align="right">
-                        <Stack spacing={0.25} alignItems="flex-end">
-                          {/* Invisible caption mirror keeps the input centered with the
-                              numeric cells when the consequence caption shows below. */}
-                          {row.selected && !rowDisabled && (
-                            <Box sx={{ visibility: 'hidden' }} aria-hidden>
-                              <ConsequenceCaption
-                                qtyInput={row.qty_input}
-                                qtyRemaining={row.qty_remaining}
-                              />
-                            </Box>
-                          )}
-                          <TextField
-                            value={row.qty_input}
-                            onChange={(e) =>
-                              patchLine(row.job_part_id, { qty_input: e.target.value })
-                            }
-                            size="small"
-                            disabled={rowDisabled || !row.selected}
-                            inputProps={{
-                              inputMode: 'decimal',
-                              style: { textAlign: 'right' },
-                            }}
-                          />
-                          {row.selected && !rowDisabled && (
+                      <TableCell align="right" sx={{ position: 'relative' }}>
+                        <TextField
+                          value={row.qty_input}
+                          onChange={(e) =>
+                            patchLine(row.job_part_id, { qty_input: e.target.value })
+                          }
+                          size="small"
+                          disabled={rowDisabled || !row.selected}
+                          inputProps={{
+                            inputMode: 'decimal',
+                            style: { textAlign: 'right' },
+                          }}
+                        />
+                        {row.selected && !rowDisabled && (
+                          <ConsequenceCaptionOnDivider>
                             <ConsequenceCaption
                               qtyInput={row.qty_input}
                               qtyRemaining={row.qty_remaining}
                             />
-                          )}
-                        </Stack>
+                          </ConsequenceCaptionOnDivider>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -907,6 +895,36 @@ function renderCustomerLineGroups(
         );
       })}
     </Stack>
+  );
+}
+
+/**
+ * Floats the consequence caption over the Ship Now cell's bottom divider,
+ * right-anchored. Absolute so it adds no height to the row (the input alone keeps
+ * the row compact and vertically centered with the numeric cells); single-line so
+ * a longer message like "Completes this line" can be wider than this narrow cell
+ * without wrapping; and given the dialog's surface colour as a background so the
+ * divider rule doesn't strike through the text. Requires the TableCell to be
+ * position: relative.
+ */
+function ConsequenceCaptionOnDivider({ children }: { children: ReactNode }) {
+  return (
+    <Box
+      sx={{
+        position: 'absolute',
+        right: 16, // matches the TableCell's horizontal padding → aligns with the input's right edge
+        bottom: 0, // the cell's bottom edge is the row divider
+        transform: 'translateY(50%)',
+        px: 0.5,
+        // The Create Shipment dialog paints a #111439 → #1a1f4a gradient; the Ship
+        // Now column sits at the right end (~#1a1f4a), so this masks the divider.
+        bgcolor: '#1a1f4a',
+        whiteSpace: 'nowrap',
+        pointerEvents: 'none',
+      }}
+    >
+      {children}
+    </Box>
   );
 }
 

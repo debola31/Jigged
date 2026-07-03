@@ -25,6 +25,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import SaveIcon from '@mui/icons-material/Save';
 
 import { addressToLines } from '@/components/common/AddressDisplay';
+import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import {
   updateJobDetails,
   updateJobAddressContact,
@@ -451,6 +452,12 @@ export default function JobEditForm({
               </Stack>
             </CardContent>
           </Card>
+        </Grid>
+
+        {/* Attachments — the single place to add or remove the customer PO PDF and any
+            reference files. Uploads persist immediately (independent of Save changes). */}
+        <Grid size={{ xs: 12 }}>
+          <JobAttachmentsCard jobId={job.id} companyId={companyId} />
         </Grid>
       </Grid>
     </Box>

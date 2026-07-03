@@ -466,6 +466,9 @@ export default function JobDetailPage() {
                     </MuiLink>
                   </Box>
                 )}
+                {/* Attachments (customer PO PDF, drawings) live here with the rest of the
+                    job metadata — read-only; adding/removing is on the Edit screen. */}
+                <JobAttachmentsCard jobId={jobId} companyId={companyId} readOnly embedded />
               </Stack>
             </CardContent>
           </Card>
@@ -575,13 +578,9 @@ export default function JobDetailPage() {
         </Grid>
 
         {/* Shipping + invoicing now live entirely in the top toolbar dropdowns
-            (Shipments / Invoices), so there's no bottom Fulfillment section. */}
-
-        <Grid size={{ xs: 12 }}>
-          <CollapsibleSection title="Attachments" defaultExpanded={false}>
-            <JobAttachmentsCard jobId={jobId} companyId={companyId} />
-          </CollapsibleSection>
-        </Grid>
+            (Shipments / Invoices), so there's no bottom Fulfillment section.
+            Attachments moved up into the Job Details card (read-only there;
+            add/remove on the Edit screen). */}
       </Grid>
 
       <Dialog open={cancelDialogOpen} onClose={() => setCancelDialogOpen(false)}>

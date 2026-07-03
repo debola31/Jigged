@@ -177,7 +177,20 @@ test.describe('Job invoicing (QuickBooks)', () => {
 
     const createBtn = dialog.getByRole('button', { name: /Create Invoice/i });
     await expect(createBtn).toBeEnabled();
+
+    // Creating the invoice opens a new tab pointed straight at the QuickBooks
+    // invoice deep link (not just a snackbar). Stub the external QBO page so the
+    // popup navigation commits to that URL — otherwise a real (unauthenticated)
+    // hit to Intuit redirects to its sign-in page and the URL check is flaky.
+    await page.context().route('**/app/invoice**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html>QBO invoice</html>' }),
+    );
+    const popupPromise = page.waitForEvent('popup');
     await createBtn.click();
+    const invoiceTab = await popupPromise;
+    await invoiceTab.waitForURL(/app\/invoice/, { timeout: 10_000 });
+    expect(invoiceTab.url()).toContain('/app/invoice');
+    await invoiceTab.close();
 
     // Success snackbar + the toolbar Invoices dropdown now shows the new invoice.
     await expect(page.getByText(/created in QuickBooks/i)).toBeVisible({ timeout: 20_000 });

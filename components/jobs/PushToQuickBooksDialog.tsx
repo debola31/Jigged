@@ -145,6 +145,12 @@ export default function PushToQuickBooksDialog({
   const handlePush = async () => {
     setPushing(true);
     setError(null);
+    // Pre-open a tab *synchronously* within this click so the browser's popup
+    // blocker allows it; we point it at the QuickBooks invoice once the push
+    // returns. (A window.open after the await loses the user-activation the
+    // blocker requires.) If the push yields no invoice, close the placeholder.
+    const invoiceWindow = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    if (invoiceWindow) invoiceWindow.opener = null; // reverse-tabnabbing guard
     try {
       const customer: PushCustomerDecision =
         choice === CREATE_SENTINEL
@@ -155,8 +161,17 @@ export default function PushToQuickBooksDialog({
         .map((p) => ({ job_part_id: p.job_part_id, quantity: lineQty(p.job_part_id) }));
       const result = await pushJobToQuickBooks(companyId, jobId, customer, requestId, lines);
       if (result.in_progress) {
+        invoiceWindow?.close();
         setError('This invoice is already being created. Please refresh in a moment.');
         return;
+      }
+      // Take the user straight to the invoice that was just created (or already
+      // existed) in QuickBooks, rather than only flashing a notification.
+      if (result.url) {
+        if (invoiceWindow) invoiceWindow.location.href = result.url;
+        else window.open(result.url, '_blank', 'noopener,noreferrer');
+      } else {
+        invoiceWindow?.close();
       }
       const docRef = result.doc_number ? `Invoice ${result.doc_number}` : 'Invoice';
       onPushed(
@@ -165,6 +180,7 @@ export default function PushToQuickBooksDialog({
           : `${docRef} created in QuickBooks.`,
       );
     } catch (err) {
+      invoiceWindow?.close();
       setError(err instanceof Error ? err.message : 'Failed to push to QuickBooks.');
     } finally {
       setPushing(false);

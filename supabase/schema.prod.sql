@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-03T05:18:04Z
+-- Generated: 2026-07-03T05:29:30Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -313,7 +313,6 @@ CREATE TABLE IF NOT EXISTS "public"."shipments"
     "packing_slip_number" text NOT NULL,
     "ship_date" date NOT NULL DEFAULT CURRENT_DATE,
     "carrier" text,
-    "notes" text,
     "created_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "voided_at" timestamp with time zone,
@@ -3706,7 +3705,7 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.create_shipment_with_line_items(p_company_id uuid, p_customer_id uuid, p_shipping_address_id uuid, p_one_time_address jsonb, p_ship_date date, p_carrier text, p_shipping_method text, p_notes text, p_line_items jsonb)
+CREATE OR REPLACE FUNCTION public.create_shipment_with_line_items(p_company_id uuid, p_customer_id uuid, p_shipping_address_id uuid, p_one_time_address jsonb, p_ship_date date, p_carrier text, p_shipping_method text, p_line_items jsonb, p_notes text DEFAULT NULL::text)
  RETURNS uuid
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3771,11 +3770,11 @@ BEGIN
     INSERT INTO public.shipments (
         company_id, customer_id, shipping_address_id, one_time_address,
         packing_slip_number, ship_date, job_id, carrier, shipping_method,
-        notes, created_by
+        created_by
     ) VALUES (
         p_company_id, p_customer_id, p_shipping_address_id, p_one_time_address,
         v_packing_slip, COALESCE(p_ship_date, current_date), v_job_id, p_carrier, p_shipping_method,
-        p_notes, v_user_id
+        v_user_id
     ) RETURNING id INTO v_shipment_id;
 
     FOR v_item IN SELECT * FROM jsonb_array_elements(p_line_items) LOOP

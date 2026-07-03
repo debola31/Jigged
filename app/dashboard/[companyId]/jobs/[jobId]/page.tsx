@@ -37,7 +37,6 @@ import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import type { JobNote } from '@/types/operator';
 import { getJobNotes } from '@/utils/operatorAccess';
-import { FulfillmentStatusChip } from '@/components/jobs/JobStatusChip';
 import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
@@ -498,56 +497,43 @@ export default function JobDetailPage() {
                     const summary = summariesByPart.get(part.id);
                     return (
                       <Box key={part.id}>
+                        {/* Per-part fulfillment is shown as the "X of Y shipped" text below,
+                            not a chip — the single job-level fulfillment chip lives up top
+                            (mirrors how production status is one chip, not one per part). */}
                         <Box
                           sx={{
                             display: 'flex',
                             alignItems: 'baseline',
-                            justifyContent: 'space-between',
+                            gap: 1.5,
                             flexWrap: 'wrap',
-                            gap: 1,
                             mb: 1,
                           }}
                         >
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              alignItems: 'baseline',
-                              gap: 1.5,
-                              flexWrap: 'wrap',
-                            }}
+                          <MuiLink
+                            component={Link}
+                            href={`/dashboard/${companyId}/parts/${part.part_id}`}
+                            sx={{ fontWeight: 600, fontSize: '1.05rem' }}
                           >
-                            <MuiLink
-                              component={Link}
-                              href={`/dashboard/${companyId}/parts/${part.part_id}`}
-                              sx={{ fontWeight: 600, fontSize: '1.05rem' }}
-                            >
-                              {part.parts?.part_name ?? 'Part'}
-                            </MuiLink>
-                            {part.parts?.description && (
-                              <Typography variant="body2" color="text.secondary">
-                                {part.parts.description}
-                              </Typography>
-                            )}
-                            <Chip
-                              size="small"
-                              label={`Order qty ${part.quantity}`}
-                              variant="outlined"
-                            />
-                            {summary && summary.qty_shipped > 0 && (
-                              <Typography variant="body2" color="text.secondary">
-                                {summary.qty_shipped} of {summary.qty_ordered} shipped
-                                {summary.qty_remaining > 0
-                                  ? ` · ${summary.qty_remaining} remaining`
-                                  : ''}
-                              </Typography>
-                            )}
-                          </Box>
-                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <FulfillmentStatusChip
-                              status={part.fulfillment_status}
-                              size="small"
-                            />
-                          </Box>
+                            {part.parts?.part_name ?? 'Part'}
+                          </MuiLink>
+                          {part.parts?.description && (
+                            <Typography variant="body2" color="text.secondary">
+                              {part.parts.description}
+                            </Typography>
+                          )}
+                          <Chip
+                            size="small"
+                            label={`Order qty ${part.quantity}`}
+                            variant="outlined"
+                          />
+                          {summary && summary.qty_shipped > 0 && (
+                            <Typography variant="body2" color="text.secondary">
+                              {summary.qty_shipped} of {summary.qty_ordered} shipped
+                              {summary.qty_remaining > 0
+                                ? ` · ${summary.qty_remaining} remaining`
+                                : ''}
+                            </Typography>
+                          )}
                         </Box>
                         {part.job_operations && part.job_operations.length > 0 ? (
                           <OperationsPanel

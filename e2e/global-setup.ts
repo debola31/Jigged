@@ -86,6 +86,15 @@ function makeAdminClient(env: SetupEnv): SupabaseClient {
  * Find-or-create the test auth user. Local Supabase's `admin.listUsers`
  * isn't filterable by email, so we paginate the first page and match by
  * email — for an ephemeral local DB the user list is tiny.
+ *
+ * When the user already exists we RESET its password to `TEST_PASSWORD`
+ * rather than returning it as-is. Local Supabase persists its DB volume
+ * across `supabase start`, so a user seeded by an earlier stack can carry a
+ * stale password (or its hash can be invalidated by a JWT-secret change) —
+ * a plain find-or-create then leaves every spec failing at login with
+ * "Invalid login credentials" until someone runs `supabase db reset`. The
+ * reset makes re-runs deterministic without a full DB reset. (On CI the DB
+ * is always fresh, so this is a no-op there.)
  */
 async function ensureAuthUser(supabase: SupabaseClient): Promise<User> {
   const { data: existingList, error: listErr } = await supabase.auth.admin.listUsers({
@@ -93,7 +102,16 @@ async function ensureAuthUser(supabase: SupabaseClient): Promise<User> {
   });
   if (listErr) throw new Error(`listUsers failed: ${listErr.message}`);
   const existing = existingList.users.find((u) => u.email === TEST_EMAIL);
-  if (existing) return existing;
+  if (existing) {
+    const { data, error } = await supabase.auth.admin.updateUserById(existing.id, {
+      password: TEST_PASSWORD,
+      email_confirm: true,
+    });
+    if (error || !data.user) {
+      throw new Error(`updateUser (password reset) failed for ${TEST_EMAIL}: ${error?.message}`);
+    }
+    return data.user;
+  }
 
   const { data, error } = await supabase.auth.admin.createUser({
     email: TEST_EMAIL,

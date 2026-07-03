@@ -42,10 +42,16 @@ CI enforces that the committed `types/database.ts` matches the migrations: the
 backend job in [`.github/workflows/test.yml`](.github/workflows/test.yml)
 regenerates types from the migration-replayed local stack and fails on any diff
 (issue #406) — so a schema change without a regen, or a hand-edited types file,
-goes red. Because that check diffs a `--local` regen, the Supabase CLI is pinned
-(currently `2.109.0`) in both CI workflows; if you bump your local CLI and the
-check flags a formatting-only diff, regenerate + commit and bump the CI pin to
-match — treat `types/database.ts` like a lockfile.
+goes red.
+
+Because that check diffs a `--local` regen, the **generator version is pinned in
+the `gen:db-types` script itself** (`npx supabase@<version>`), so your globally
+installed `supabase` CLI can auto-update freely without ever affecting type
+generation. The same version is pinned in the two CI workflows' `setup-cli`. To
+move to a newer CLI, bump the version in **three places together** —
+`package.json` (`gen:db-types`), `.github/workflows/test.yml`, and
+`.github/workflows/e2e-tests.yml` — then `pnpm gen:db-types` and commit. Treat
+`types/database.ts` like a lockfile.
 
 ---
 

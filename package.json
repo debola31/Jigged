@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:local": "node e2e/run-stack.mjs",
-    "seed": "node scripts/seed-dev.ts",
+    "seed": "supabase db reset",
     "gen:db-types": "supabase gen types typescript --linked > types/database.ts"
   },
   "dependencies": {

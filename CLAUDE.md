@@ -305,6 +305,23 @@ cd api && python index.py
 pnpm build
 ```
 
+### Local dev data (seeding)
+
+`supabase/seed.sql` is the canonical dev / preview seed — a rich "Vanguard
+Precision Works" company (parts + multi-level BOMs, inventory, customers,
+quotes → jobs → operations → shipments, activity) with **dynamic dates** (jobs
+and quotes are always current, computed via `now() - interval`) and fixed
+UUIDs. It runs automatically on `supabase db reset` and on every Supabase
+preview-branch creation:
+
+```bash
+supabase db reset   # replays migrations + supabase/seed.sql   (alias: pnpm seed)
+```
+
+Login: `dev@jigged.test` / `jigged-dev-1234`. It writes `auth.users` directly,
+so it is **local / preview only** — never run against prod. (Replaced the old
+`scripts/seed-dev.ts`.)
+
 ---
 
 ## Running tests

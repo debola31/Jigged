@@ -61,7 +61,6 @@ export async function createShipment(
     p_ship_date: payload.ship_date,
     p_carrier: payload.carrier ?? null,
     p_shipping_method: payload.shipping_method ?? null,
-    p_notes: payload.notes ?? null,
     p_line_items: payload.line_items,
   };
   const { data: shipmentId, error } = await supabase.rpc(

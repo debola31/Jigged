@@ -41,7 +41,6 @@ export interface Shipment {
   /** UPS / FedEx / USPS or a free-text "Other" carrier; only set when shipping_method === 'shipment'. */
   carrier: string | null;
   shipping_method: ShippingMethod | null;
-  notes: string | null;
   created_by: string | null;
   created_at: string;
   voided_at: string | null;
@@ -143,7 +142,6 @@ export interface CreateShipmentPayload {
   ship_date: string;
   carrier?: string | null;
   shipping_method?: ShippingMethod | null;
-  notes?: string | null;
   line_items: Array<{
     job_part_id: string;
     quantity: number;

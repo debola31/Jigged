@@ -2580,7 +2580,6 @@ export type Database = {
           customer_name: string | null
           id: string
           job_id: string
-          notes: string | null
           one_time_address: Json | null
           packing_slip_number: string
           ship_date: string
@@ -2600,7 +2599,6 @@ export type Database = {
           customer_name?: string | null
           id?: string
           job_id: string
-          notes?: string | null
           one_time_address?: Json | null
           packing_slip_number: string
           ship_date?: string
@@ -2620,7 +2618,6 @@ export type Database = {
           customer_name?: string | null
           id?: string
           job_id?: string
-          notes?: string | null
           one_time_address?: Json | null
           packing_slip_number?: string
           ship_date?: string
@@ -3035,7 +3032,7 @@ export type Database = {
           p_company_id: string
           p_customer_id: string
           p_line_items: Json
-          p_notes: string
+          p_notes?: string
           p_one_time_address: Json
           p_ship_date: string
           p_shipping_address_id: string

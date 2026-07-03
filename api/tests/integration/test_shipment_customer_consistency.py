@@ -288,18 +288,18 @@ def test_shipment_immutability_trigger_allows_other_field_updates(admin: Client)
 
         admin.table("shipments").update({
             "carrier": "UPS",
-            "notes": "left at dock B",
+            "shipping_method": "shipment",
         }).eq("id", shipment_id).execute()
 
         row = (
             admin.table("shipments")
-            .select("carrier, notes")
+            .select("carrier, shipping_method")
             .eq("id", shipment_id)
             .single()
             .execute()
             .data
         )
         assert row["carrier"] == "UPS"
-        assert row["notes"] == "left at dock B"
+        assert row["shipping_method"] == "shipment"
     finally:
         _teardown(admin, env)

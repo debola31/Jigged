@@ -481,7 +481,7 @@ class TestShipmentsRLS:
     ):
         result = (
             _user_a_table(seeded_user_a, "shipments")
-            .update({"notes": "RLS Attack — should not stick"})
+            .update({"carrier": "RLS Attack — should not stick"})
             .eq("id", seeded_company_b_graph["shipment_id"])
             .execute()
         )

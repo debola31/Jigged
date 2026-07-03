@@ -58,7 +58,7 @@ export default function CollapsibleSection({
         </Box>
         <ExpandMoreIcon
           sx={{
-            color: 'text.secondary',
+            color: 'text.primary',
             transition: 'transform 150ms',
             transform: expanded ? 'rotate(180deg)' : 'none',
           }}

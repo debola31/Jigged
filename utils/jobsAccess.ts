@@ -253,6 +253,31 @@ export async function getJobWithRelations(
     }
   }
 
+  // Resolve who completed each operation (job_operations.completed_by → member name)
+  // so the page can show attribution, not just the timestamp. One batched query.
+  const completerIds = new Set<string>();
+  for (const part of job.job_parts ?? []) {
+    for (const op of part.job_operations ?? []) {
+      if (op.completed_by) completerIds.add(op.completed_by);
+    }
+  }
+  if (completerIds.size > 0) {
+    const { data: members } = await supabase
+      .from('user_company_access')
+      .select('user_id, name')
+      .eq('company_id', companyId)
+      .in('user_id', Array.from(completerIds));
+    const nameByUser = new Map<string, string | null>();
+    for (const m of (members ?? []) as Array<{ user_id: string; name: string | null }>) {
+      nameByUser.set(m.user_id, m.name);
+    }
+    for (const part of job.job_parts ?? []) {
+      for (const op of part.job_operations ?? []) {
+        op.completed_by_name = op.completed_by ? nameByUser.get(op.completed_by) ?? null : null;
+      }
+    }
+  }
+
   return job;
 }
 

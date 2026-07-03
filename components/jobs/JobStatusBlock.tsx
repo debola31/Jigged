@@ -11,7 +11,7 @@ import { getJobShipmentSummary } from '@/utils/shipmentsAccess';
 import type { JobShipmentSummary } from '@/types/shipment';
 
 interface JobStatusBlockProps {
-  job: Pick<Job, 'id' | 'production_status' | 'fulfillment_status'>;
+  job: Pick<Job, 'id' | 'production_status' | 'fulfillment_status' | 'created_at' | 'due_date'>;
   parts: Array<Pick<JobPart, 'id' | 'quantity' | 'fulfillment_status'>>;
 }
 
@@ -83,14 +83,24 @@ export default function JobStatusBlock({ job, parts }: JobStatusBlockProps) {
         </Box>
       </Stack>
 
-      {summary && summary.shipment_count > 0 && (
+      {(job.created_at || job.due_date) && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Last shipment:{' '}
-          <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
-            {summary.latest_packing_slip_number}
-          </Box>
-          {summary.last_ship_date && ` · ${formatShipDate(summary.last_ship_date)}`}
-          {summary.shipment_count > 1 && ` · ${summary.shipment_count} shipments`}
+          {job.created_at && (
+            <>
+              Created{' '}
+              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                {formatShipDate(job.created_at)}
+              </Box>
+            </>
+          )}
+          {job.due_date && (
+            <>
+              {job.created_at ? ' · ' : ''}Due{' '}
+              <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                {formatShipDate(job.due_date)}
+              </Box>
+            </>
+          )}
         </Typography>
       )}
     </Box>

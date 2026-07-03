@@ -26,9 +26,7 @@ import MuiLink from '@mui/material/Link';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Snackbar from '@mui/material/Snackbar';
@@ -37,16 +35,14 @@ import { getJobWithRelations, cancelJob, reopenJob, deleteJob } from '@/utils/jo
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
-import {
-  ProductionStatusChip,
-  FulfillmentStatusChip,
-} from '@/components/jobs/JobStatusChip';
-import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection } from '@/components/jobs';
+import type { JobNote } from '@/types/operator';
+import { getJobNotes } from '@/utils/operatorAccess';
+import { FulfillmentStatusChip } from '@/components/jobs/JobStatusChip';
+import { OperationsPanel, JobTravelerPreviewDialog, JobBillingShippingCard, JobPartMaterialsCard, JobEditForm, CollapsibleSection, ShipmentsMenu, InvoicesMenu } from '@/components/jobs';
 import JobOverdueBadge from '@/components/jobs/JobOverdueBadge';
 import JobStatusBlock from '@/components/jobs/JobStatusBlock';
-import ShipmentHistoryCard from '@/components/jobs/ShipmentHistoryCard';
-import InvoicesCard from '@/components/jobs/InvoicesCard';
 import { CreateShipmentModal } from '@/components/shipments';
+import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
 import JobAttachmentsCard from '@/components/jobs/JobAttachmentsCard';
 import {
@@ -66,6 +62,7 @@ export default function JobDetailPage() {
   const [partSummaries, setPartSummaries] = useState<JobPartShipmentSummary[]>([]);
   const [invoiceSummaries, setInvoiceSummaries] = useState<JobPartInvoiceSummary[]>([]);
   const [invoicesRefreshKey, setInvoicesRefreshKey] = useState(0);
+  const [notesByOperation, setNotesByOperation] = useState<Map<string, JobNote[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +99,23 @@ export default function JobDetailPage() {
         setInvoiceSummaries(invSummaries);
       } catch (err) {
         console.warn('Job detail: per-part invoice summaries failed', err);
+      }
+      try {
+        // Operator step-tagged notes + photos, grouped by operation, so a completed
+        // operation's expand can show who noted what (and any pictures).
+        const allNotes = await getJobNotes(jobId, companyId);
+        const byOp = new Map<string, JobNote[]>();
+        for (const n of allNotes) {
+          if (!n.job_operation_id) continue;
+          const arr = byOp.get(n.job_operation_id) ?? [];
+          arr.push(n);
+          byOp.set(n.job_operation_id, arr);
+        }
+        // getJobNotes is newest-first; show a step's notes oldest-first.
+        for (const arr of byOp.values()) arr.reverse();
+        setNotesByOperation(byOp);
+      } catch (err) {
+        console.warn('Job detail: step notes failed', err);
       }
       setError(null);
     } catch (err) {
@@ -210,11 +224,6 @@ export default function JobDetailPage() {
     }
   };
 
-  const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString();
-  };
-
   if (loading && !job) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -245,13 +254,6 @@ export default function JobDetailPage() {
     parts.length > 0;
 
   const summariesByPart = new Map(partSummaries.map((s) => [s.job_part_id, s]));
-
-  // Fulfillment section summary + default-open heuristic (static, state-based — not
-  // remembered per user): open the Fulfillment section only once there's activity.
-  const totalOrdered = parts.reduce((a, p) => a + Number(p.quantity), 0);
-  const totalShipped = partSummaries.reduce((a, s) => a + s.qty_shipped, 0);
-  const totalInvoiced = invoiceSummaries.reduce((a, s) => a + s.qty_invoiced, 0);
-  const fulfillmentHasActivity = (shipmentCount ?? 0) > 0 || totalInvoiced > 0;
 
   // Print Traveler is a per-part action in the top bar: with one part it acts
   // directly; with several it opens a small picker menu.
@@ -347,28 +349,27 @@ export default function JobDetailPage() {
               Print Traveler
             </Button>
           )}
-          {canShip && (
-            <Button
-              variant="outlined"
-              startIcon={<LocalShippingIcon />}
-              onClick={() => setShipModalOpen(true)}
-              disabled={actionLoading}
-            >
-              Create Shipment
-            </Button>
-          )}
-          {/* A job now has MANY invoices (progressive billing) — created invoices live
-              in the Invoices card below. This action opens the picker to bill what has
-              shipped-but-unbilled; the dialog explains when nothing is billable yet. */}
+          {/* Shipments + invoices are dropdowns (view existing + create) so both are
+              reachable from the top without scrolling, and the toolbar doesn't grow a
+              separate button per action. Full detail lives in the Fulfillment section. */}
           {parts.length > 0 && (
-            <Button
-              variant="outlined"
-              startIcon={<ReceiptLongIcon />}
-              onClick={() => setPushDialogOpen(true)}
+            <ShipmentsMenu
+              jobId={jobId}
+              refreshKey={historyRefreshKey}
+              canShip={canShip}
+              onCreate={() => setShipModalOpen(true)}
+              onVoided={fetchJob}
               disabled={actionLoading}
-            >
-              Create invoice
-            </Button>
+            />
+          )}
+          {parts.length > 0 && (
+            <InvoicesMenu
+              companyId={companyId}
+              jobId={jobId}
+              refreshKey={invoicesRefreshKey}
+              onCreate={() => setPushDialogOpen(true)}
+              disabled={actionLoading}
+            />
           )}
 
           {/* The negative cluster sits at the right, after the benign + invoice
@@ -417,19 +418,6 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
-      {job.quote_id && job.quotes && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Created from{' '}
-          <MuiLink
-            component={Link}
-            href={`/dashboard/${companyId}/quotes/${job.quote_id}`}
-            sx={{ fontWeight: 500 }}
-          >
-            Quote {job.quotes.quote_number}
-          </MuiLink>
-        </Typography>
-      )}
-
       <Grid container spacing={3}>
         {/* Compact details + billing, side by side (mirrors the edit view). */}
         <Grid size={{ xs: 12, md: 6 }}>
@@ -464,22 +452,20 @@ export default function JobDetailPage() {
                     <Typography fontWeight={500}>{job.customer_po_number}</Typography>
                   </Box>
                 )}
-                <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {job.quote_id && job.quotes && (
                   <Box>
                     <Typography variant="caption" color="text.secondary">
-                      Created
+                      Source
                     </Typography>
-                    <Typography fontWeight={500}>{formatDate(job.created_at)}</Typography>
+                    <MuiLink
+                      component={Link}
+                      href={`/dashboard/${companyId}/quotes/${job.quote_id}`}
+                      sx={{ display: 'block', fontWeight: 500 }}
+                    >
+                      Quote {job.quotes.quote_number}
+                    </MuiLink>
                   </Box>
-                  {job.due_date && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        Due
-                      </Typography>
-                      <Typography fontWeight={500}>{formatDate(job.due_date)}</Typography>
-                    </Box>
-                  )}
-                </Box>
+                )}
               </Stack>
             </CardContent>
           </Card>
@@ -494,12 +480,9 @@ export default function JobDetailPage() {
             title="Production"
             defaultExpanded
             summary={
-              <>
-                <ProductionStatusChip status={job.production_status} size="small" />
-                <Typography variant="body2" color="text.secondary">
-                  {parts.length} {parts.length === 1 ? 'part' : 'parts'}
-                </Typography>
-              </>
+              <Typography variant="body2" color="text.secondary">
+                {parts.length} {parts.length === 1 ? 'part' : 'parts'}
+              </Typography>
             }
           >
               {parts.length === 0 ? (
@@ -557,10 +540,6 @@ export default function JobDetailPage() {
                             )}
                           </Box>
                           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <ProductionStatusChip
-                              status={part.production_status}
-                              size="small"
-                            />
                             <FulfillmentStatusChip
                               status={part.fulfillment_status}
                               size="small"
@@ -573,6 +552,7 @@ export default function JobDetailPage() {
                             operations={part.job_operations}
                             onOperationUpdate={fetchJob}
                             disabled={actionLoading}
+                            notesByOperation={notesByOperation}
                           />
                         ) : (
                           <Typography
@@ -594,28 +574,8 @@ export default function JobDetailPage() {
           </CollapsibleSection>
         </Grid>
 
-        {/* Fulfillment — open only once there's shipment/invoice activity. */}
-        <Grid size={{ xs: 12 }}>
-          <CollapsibleSection
-            title="Fulfillment"
-            defaultExpanded={fulfillmentHasActivity}
-            summary={
-              <Typography variant="body2" color="text.secondary">
-                Shipped {totalShipped}/{totalOrdered} · Invoiced {totalInvoiced}/{totalOrdered}
-              </Typography>
-            }
-          >
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <ShipmentHistoryCard
-                jobId={jobId}
-                refreshKey={historyRefreshKey}
-                initialPreviewShipmentId={pendingPreviewShipmentId}
-                onShipmentVoided={fetchJob}
-              />
-              <InvoicesCard companyId={companyId} jobId={jobId} refreshKey={invoicesRefreshKey} />
-            </Box>
-          </CollapsibleSection>
-        </Grid>
+        {/* Shipping + invoicing now live entirely in the top toolbar dropdowns
+            (Shipments / Invoices), so there's no bottom Fulfillment section. */}
 
         <Grid size={{ xs: 12 }}>
           <CollapsibleSection title="Attachments" defaultExpanded={false}>
@@ -682,6 +642,13 @@ export default function JobDetailPage() {
         companyId={companyId}
         onClose={() => setShipModalOpen(false)}
         onCreated={handleCreated}
+      />
+
+      {/* Auto-preview the packing slip right after a shipment is created. */}
+      <PackingSlipPreviewDialog
+        open={!!pendingPreviewShipmentId}
+        shipmentId={pendingPreviewShipmentId}
+        onClose={() => setPendingPreviewShipmentId(null)}
       />
 
       <JobTravelerPreviewDialog

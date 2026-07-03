@@ -11,6 +11,7 @@ import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 
 import type { Job, JobOperation, ProductionStatus } from '@/types/job';
+import type { JobNote } from '@/types/operator';
 import {
   startJobOperation,
   completeJobOperation,
@@ -24,6 +25,8 @@ interface OperationsPanelProps {
   operations: JobOperation[];
   onOperationUpdate: () => void;
   disabled?: boolean;
+  /** Operator step-tagged notes + photos keyed by job_operation_id. */
+  notesByOperation?: Map<string, JobNote[]>;
 }
 
 interface SnackbarState {
@@ -37,6 +40,7 @@ export default function OperationsPanel({
   operations,
   onOperationUpdate,
   disabled = false,
+  notesByOperation,
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
@@ -217,6 +221,7 @@ export default function OperationsPanel({
                 hasInProgressOperation={hasInProgressOperation}
                 isNextReady={operation.id === nextReadyOperationId}
                 disabled={isDisabled}
+                stepNotes={notesByOperation?.get(operation.id)}
                 onStart={handleStart}
                 onComplete={handleCompleteClick}
                 onUndo={handleUndo}

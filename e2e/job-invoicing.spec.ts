@@ -161,13 +161,15 @@ test.describe('Job invoicing (QuickBooks)', () => {
 
     await page.goto(`/dashboard/${companyId}/jobs/${jobId}`);
 
-    // No invoices yet.
-    await expect(page.getByTestId('invoices-card')).toContainText(/Invoices \(0\)/, {
-      timeout: 15_000,
+    // No invoices yet — the toolbar dropdown shows the count.
+    await expect(page.getByRole('button', { name: /Invoices \(0\)/i })).toBeVisible({
+      timeout: 20_000,
     });
 
-    // Open the picker; preflight resolves the mapped customer + billable parts.
-    await page.getByRole('button', { name: /Create invoice/i }).click();
+    // Open the Invoices dropdown → Create invoice → the picker (preflight resolves the
+    // mapped customer + billable parts).
+    await page.getByRole('button', { name: /Invoices \(/i }).click();
+    await page.getByRole('menuitem', { name: /Create invoice/i }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText(/Quantities to invoice/i)).toBeVisible({ timeout: 15_000 });
     // Defaults to the shipped-unbilled qty (10) → $1,000 total.
@@ -177,10 +179,12 @@ test.describe('Job invoicing (QuickBooks)', () => {
     await expect(createBtn).toBeEnabled();
     await createBtn.click();
 
-    // Success snackbar + the Invoices card lists the new invoice for the part.
+    // Success snackbar + the toolbar Invoices dropdown now shows the new invoice.
     await expect(page.getByText(/created in QuickBooks/i)).toBeVisible({ timeout: 20_000 });
-    const card = page.getByTestId('invoices-card');
-    await expect(card).toContainText(/Invoices \(1\)/, { timeout: 15_000 });
-    await expect(card.getByTestId('invoice-row')).toContainText('E2E-MFG-001');
+    await expect(page.getByRole('button', { name: /Invoices \(1\)/i })).toBeVisible({
+      timeout: 15_000,
+    });
+    await page.getByRole('button', { name: /Invoices \(1\)/i }).click();
+    await expect(page.getByRole('menuitem').filter({ hasText: '$1,000.00' })).toBeVisible();
   });
 });

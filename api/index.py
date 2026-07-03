@@ -28,12 +28,16 @@ sentry_sdk.init(
     send_default_pii=True,
 )
 
-# Initialize Supabase client
+# Initialize Supabase client.
+# Prefer SUPABASE_SECRET_KEY (recommended); fall back to SUPABASE_SERVICE_ROLE_KEY
+# — the name the Supabase<->Vercel branching integration injects — so preview
+# deployments against a branch DB don't silently disable database features.
+# Mirrors the fallback already used in operators_routes.py / admin_routes.py.
 supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_SECRET_KEY")
+supabase_key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not supabase_url or not supabase_key:
-    logger.warning("SUPABASE_URL or SUPABASE_SECRET_KEY not set - database features disabled")
+    logger.warning("SUPABASE_URL or SUPABASE_SECRET_KEY/SERVICE_ROLE_KEY not set - database features disabled")
     supabase: Client = None
 else:
     supabase: Client = create_client(supabase_url, supabase_key)

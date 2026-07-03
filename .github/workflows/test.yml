@@ -75,11 +75,34 @@ jobs:
         with:
           # Pinned (not `latest`): resolving "latest" hits the releases API,
           # which flakes with a Gateway Time-out and isn't reproducible.
-          version: 2.106.0
+          # Keep in lockstep with e2e-tests.yml and the CLI devs use for
+          # `pnpm gen:db-types` — the types-drift check below diffs a --local
+          # regen, so a version skew would produce a spurious failure.
+          version: 2.109.0
 
       - name: Start local Supabase
         working-directory: ./
         run: supabase start
+
+      - name: Verify generated DB types match migrations (issue #406)
+        working-directory: ./
+        # The local stack (started above) has replayed supabase/migrations/.
+        # Regenerate types/database.ts from it and assert the committed file is
+        # identical — catches a migration that changed the schema without a
+        # `pnpm gen:db-types`, or a hand-edited types file (the class that let
+        # PR #405 ship green). Pinned CLI + fixed config.toml make this a
+        # deterministic, normalization-free diff: the --local generator emits
+        # no volatile PostgrestVersion header.
+        run: |
+          supabase gen types typescript --local > types/database.ts
+          if ! git diff --exit-code -- types/database.ts; then
+            echo "::error::types/database.ts is out of sync with supabase/migrations/."
+            echo "A migration changed the schema but the committed types were not"
+            echo "regenerated (or types/database.ts was hand-edited). Fix with:"
+            echo "    supabase start && pnpm gen:db-types"
+            echo "then commit the updated types/database.ts."
+            exit 1
+          fi
 
       - name: Export prod-aligned env vars
         # `supabase status -o env` emits API_URL / ANON_KEY / SERVICE_ROLE_KEY.

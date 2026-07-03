@@ -38,7 +38,9 @@ jobs:
         with:
           # Pinned (not `latest`): resolving "latest" hits the releases API,
           # which flakes with a Gateway Time-out and isn't reproducible.
-          version: 2.106.0
+          # Keep in lockstep with test.yml — its types-drift check diffs a
+          # --local regen, so the pinned CLI version must match everywhere.
+          version: 2.109.0
 
       - name: Start local Supabase
         run: supabase start

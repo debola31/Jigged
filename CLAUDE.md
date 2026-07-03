@@ -26,15 +26,32 @@ Jigged is a web-based data platform for small-scale precision manufacturing shop
 `lib/supabase.ts` exposes two getters that share one singleton:
 
 - `getSupabase()` — untyped. Existing `utils/*Access.ts` files use this. Schema mistakes compile silently (this is how the May 2026 `jobs.status` regression shipped).
-- `getTypedSupabase()` — `<Database>`-generic. Every `.from('table').select('...')` chain is checked against [`types/database.ts`](types/database.ts), generated from the linked Supabase project.
+- `getTypedSupabase()` — `<Database>`-generic. Every `.from('table').select('...')` chain is checked against [`types/database.ts`](types/database.ts), generated from the **local** Supabase stack (migrations replayed) — see the regen + CI-enforcement note below.
 
 **Use `getTypedSupabase()` for any new access function.** When converting an existing file, expect `tsc` to surface real bugs (column drift, narrow-enum mismatches, missing NOT-NULL columns on inserts) — fix them rather than papering over with `as any`. The [`schemaEmbedCheck`](scripts/schemaEmbedCheck.ts) test catches the embed-string class of drift today; typed mode catches everything else.
 
-Regenerate types after every migration that changes columns:
+Regenerate types after every migration that changes columns — run it against a
+running local stack (`supabase start`), since it now reads the local DB (not a
+remote project):
 
 ```bash
-pnpm gen:db-types  # wraps: supabase gen types typescript --linked
+pnpm gen:db-types  # wraps: supabase gen types typescript --local
 ```
+
+CI enforces that the committed `types/database.ts` matches the migrations: the
+backend job in [`.github/workflows/test.yml`](.github/workflows/test.yml)
+regenerates types from the migration-replayed local stack and fails on any diff
+(issue #406) — so a schema change without a regen, or a hand-edited types file,
+goes red.
+
+Because that check diffs a `--local` regen, the **generator version is pinned in
+the `gen:db-types` script itself** (`npx supabase@<version>`), so your globally
+installed `supabase` CLI can auto-update freely without ever affecting type
+generation. The same version is pinned in the two CI workflows' `setup-cli`. To
+move to a newer CLI, bump the version in **three places together** —
+`package.json` (`gen:db-types`), `.github/workflows/test.yml`, and
+`.github/workflows/e2e-tests.yml` — then `pnpm gen:db-types` and commit. Treat
+`types/database.ts` like a lockfile.
 
 ---
 

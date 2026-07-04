@@ -14,13 +14,17 @@
 --                          is produced by the same DB logic the app uses, so the
 --                          seed stays correct as the schema evolves.
 --
--- Logins after reset — all password `jigged-dev-1234`, all @ Vanguard Precision Works:
+-- Logins after reset — all password `jigged-dev-1234`.
+-- Vanguard Precision Works team:
 --   dev@jigged.test         admin     (Dev Seed User)
 --   admin2@jigged.test      admin     (Morgan Reyes)
 --   user1@jigged.test       user      (Sam Carter)
 --   user2@jigged.test       user      (Jamie Lin)
 --   operator1@jigged.test   operator  (Diego Alvarez)
 --   operator2@jigged.test   operator  (Priya Nair)
+-- Platform-level system admin (spans all companies; only the /admin surface,
+-- deliberately NOT a member of any company):
+--   sysadmin@jigged.test    system admin  (System Admin)
 --
 -- LOCAL / PREVIEW ONLY — never run against production (it writes auth.users
 -- directly). Designed for a fresh DB, which `supabase db reset` and preview-
@@ -108,6 +112,35 @@ insert into public.user_company_access (id, user_id, company_id, role, name) val
   ('23000000-0000-0000-0000-000000000004','11111111-1111-1111-1111-111111111114','22222222-2222-2222-2222-222222222222','user',     'Jamie Lin'),
   ('23000000-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111115','22222222-2222-2222-2222-222222222222','operator', 'Diego Alvarez'),
   ('23000000-0000-0000-0000-000000000006','11111111-1111-1111-1111-111111111116','22222222-2222-2222-2222-222222222222','operator', 'Priya Nair')
+on conflict do nothing;
+
+-- ── Platform-level system admin ──────────────────────────────────────────────
+-- A system administrator: platform-wide privileges spanning ALL companies, kept
+-- deliberately separate from the per-company roles above (see public.system_admins
+-- / is_system_admin() and the /admin surface behind SystemAdminGuard). Has NO
+-- user_company_access row on purpose — it is a pure platform admin, not a member
+-- of any company. created_by is self-referential (bootstrap; the column is
+-- nullable precisely for this first-admin case).
+insert into auth.users (
+  instance_id, id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at,
+  confirmation_token, recovery_token, email_change, email_change_token_new
+) values (
+  '00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111117','authenticated','authenticated','sysadmin@jigged.test', crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"System Admin"}'::jsonb, now() - interval '365 days', now(), '', '', '', ''
+) on conflict (id) do nothing;
+
+insert into auth.identities (
+  provider_id, user_id, identity_data, provider,
+  last_sign_in_at, created_at, updated_at
+) values (
+  '11111111-1111-1111-1111-111111111117','11111111-1111-1111-1111-111111111117','{"sub":"11111111-1111-1111-1111-111111111117","email":"sysadmin@jigged.test"}'::jsonb, 'email', now(), now() - interval '365 days', now()
+) on conflict do nothing;
+
+insert into public.system_admins (id, user_id, created_by) values
+  ('24000000-0000-0000-0000-000000000001',
+   '11111111-1111-1111-1111-111111111117',
+   '11111111-1111-1111-1111-111111111117')
 on conflict do nothing;
 
 -- ── Vendors (+ one contact each) ─────────────────────────────────────────────

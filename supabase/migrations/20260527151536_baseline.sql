@@ -1,6 +1,9 @@
 
 
 
+-- Baseline made preview-branch-portable: two Database Webhook triggers that
+-- called supabase_functions.http_request (a schema fresh preview branches lack)
+-- were removed — see the "(Removed for branch portability)" notes below.
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -4234,7 +4237,13 @@ CREATE OR REPLACE TRIGGER "enforce_transaction_notes_only_update" BEFORE UPDATE 
 
 
 
-CREATE OR REPLACE TRIGGER "feedback" AFTER INSERT ON "public"."feedback" FOR EACH ROW EXECUTE FUNCTION "supabase_functions"."http_request"('https://rxjrshezmuttbbxmhojd.supabase.co/functions/v1/notify-feedback', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4anJzaGV6bXV0dGJieG1ob2pkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzUzMzY0NCwiZXhwIjoyMDg5MTA5NjQ0fQ.TpegQhEp_3NCIZ2MMDNyW_tmUX0mcajre-koWIrtIuw"}', '{}', '5000');
+-- (Removed for branch portability) "feedback" Database Webhook trigger →
+-- notify-feedback. This was a dashboard-managed webhook captured from a
+-- live-DB dump: it hardcoded the (retired) staging project URL + a service-role
+-- token, and it depends on the supabase_functions schema that a fresh preview
+-- branch does not have — which broke migration replay on branches. Prod keeps
+-- its already-applied trigger; if prod feedback notifications are still wanted,
+-- re-create the webhook in the PROD dashboard pointing at prod's edge function.
 
 
 
@@ -4362,7 +4371,8 @@ CREATE OR REPLACE TRIGGER "vendors_updated_at" BEFORE UPDATE ON "public"."vendor
 
 
 
-CREATE OR REPLACE TRIGGER "waitlist" AFTER INSERT OR UPDATE ON "public"."waitlist" FOR EACH ROW EXECUTE FUNCTION "supabase_functions"."http_request"('https://rxjrshezmuttbbxmhojd.supabase.co/functions/v1/notify-waitlist', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4anJzaGV6bXV0dGJieG1ob2pkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzUzMzY0NCwiZXhwIjoyMDg5MTA5NjQ0fQ.TpegQhEp_3NCIZ2MMDNyW_tmUX0mcajre-koWIrtIuw"}', '{}', '5000');
+-- (Removed for branch portability) "waitlist" Database Webhook trigger →
+-- notify-waitlist. Same rationale as the "feedback" webhook removal above.
 
 
 

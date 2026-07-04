@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -22,7 +21,6 @@ import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import EmailIcon from '@mui/icons-material/Email';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ToggleOnIcon from '@mui/icons-material/ToggleOn';
@@ -77,7 +75,6 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export default function AdminCompaniesPage() {
-  const router = useRouter();
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -153,14 +150,11 @@ export default function AdminCompaniesPage() {
   }, [companies, search]);
 
   // --- Actions handlers ---
-
-  const handleVisitDashboard = useCallback(
-    (e: React.MouseEvent, company: CompanyListItem) => {
-      e.stopPropagation();
-      router.push(`/dashboard/${company.id}`);
-    },
-    [router]
-  );
+  // Note: no "visit dashboard" action here. System admins are platform managers,
+  // not tenant members — they have no user_company_access row, so RLS (and the
+  // dashboard AuthGuard) correctly deny reads of a company's business data.
+  // Opening a tenant dashboard would just bounce to no-access, so this surface
+  // stays scoped to company management (rename, features, delete, create).
 
   const handleEditOpen = useCallback((e: React.MouseEvent, company: CompanyListItem) => {
     e.stopPropagation();
@@ -398,7 +392,7 @@ export default function AdminCompaniesPage() {
       {
         colId: 'actions',
         headerName: '',
-        width: 170,
+        width: 140,
         sortable: false,
         resizable: false,
         pinned: 'right' as const,
@@ -407,11 +401,6 @@ export default function AdminCompaniesPage() {
           const company = params.data;
           return (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
-              <Tooltip title="Visit Dashboard">
-                <IconButton size="small" onClick={(e) => handleVisitDashboard(e, company)}>
-                  <OpenInNewIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
               <Tooltip title="Feature flags">
                 <IconButton size="small" onClick={(e) => handleFeaturesOpen(e, company)}>
                   <ToggleOnIcon fontSize="small" />
@@ -436,7 +425,7 @@ export default function AdminCompaniesPage() {
         },
       },
     ],
-    [handleVisitDashboard, handleEditOpen, handleDeleteOpen, handleFeaturesOpen]
+    [handleEditOpen, handleDeleteOpen, handleFeaturesOpen]
   );
 
   // --- Create form handlers ---

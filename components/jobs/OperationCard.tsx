@@ -5,6 +5,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
+import Badge from '@mui/material/Badge';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -74,13 +75,14 @@ export default function OperationCard({
     return new Date(dateStr).toLocaleString();
   };
 
-  // Expandability is driven purely by whether there are notes to reveal — an
-  // admin completion note or operator step-notes. This is independent of
-  // completion status, so a pending operation with operator notes is expandable
-  // too (the office needs to see floor notes before an op is finished). The
-  // timestamps aren't a reason to expand: the completed time already shows
-  // inline on the collapsed row, and the started time is redundant with it.
-  const hasNotes = !!operation.notes || stepNotes.length > 0;
+  // The expand affordance is ALWAYS shown so an operation never looks like it
+  // lacks the feature just because an icon is conditionally hidden; the badge
+  // communicates how much there is to reveal. A "note" is the admin completion
+  // note (0 or 1) plus each operator step-note. This is independent of
+  // completion status — a pending operation with floor notes is expandable too.
+  // Timestamps aren't counted: the completed time already shows inline on the
+  // collapsed row.
+  const noteCount = (operation.notes ? 1 : 0) + stepNotes.length;
 
   return (
     <Box
@@ -188,18 +190,24 @@ export default function OperationCard({
           )}
         </Box>
 
-        {/* Expand Button */}
-        {hasNotes && (
+        {/* Expand Button — always shown; the badge carries the note count
+            (including 0) so the affordance never looks absent. */}
+        <Badge
+          badgeContent={noteCount}
+          showZero
+          color="default"
+          data-testid="operation-note-count"
+        >
           <IconButton
             size="small"
             onClick={() => setExpanded(!expanded)}
             sx={{ color: 'text.secondary' }}
             data-testid="operation-expand"
-            aria-label={expanded ? 'Collapse operation details' : 'Expand operation details'}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} operation details (${noteCount} ${noteCount === 1 ? 'note' : 'notes'})`}
           >
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
-        )}
+        </Badge>
       </Box>
 
       {/* Expanded Details */}
@@ -227,6 +235,14 @@ export default function OperationCard({
 
           {/* Operator step-tagged notes + photos (from the activity feed). */}
           <OperationNotes notes={stepNotes} />
+
+          {/* With zero notes the two blocks above render nothing; show an
+              explicit empty state so expanding always reveals something. */}
+          {noteCount === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              No notes yet
+            </Typography>
+          )}
         </Box>
       </Collapse>
     </Box>

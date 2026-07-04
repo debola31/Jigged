@@ -508,26 +508,9 @@ describe('quotesAccess utilities', () => {
     // flow it covered no longer exists. Update happy-path coverage against the
     // metadata-only updateQuote is sub-PR 3f territory.
 
-    it('rejects updating expired quotes', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: { status: 'expired', converted_to_job_id: null, part_id: null, base_cost: null, markup_percent: null, company_id: 'company-1' },
-              error: null,
-            }),
-          }),
-        }),
-      }));
-
-      await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
-        'This quote cannot be edited'
-      );
-    });
-
+    // Expired quotes ARE editable now — editing reactivates them (covered in
+    // the 'updateQuote — status reactivation' block below). Only converted
+    // quotes remain hard-locked.
     it('rejects updating converted quotes', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
         ...mockQueryBuilder,
@@ -544,7 +527,7 @@ describe('quotesAccess utilities', () => {
       }));
 
       await expect(updateQuote('quote-1', updateFormData)).rejects.toThrow(
-        'This quote cannot be edited'
+        /converted to a job/i
       );
     });
   });
@@ -863,6 +846,32 @@ describe('quotesAccess utilities', () => {
     }));
   }
 
+  /**
+   * Like stubUpdateQuoteHappyPath but lets the caller set the CURRENT db status
+   * (to exercise reactivation) and returns the update() spy so a test can read
+   * the payload updateQuote wrote (status / status_changed_at / expiration_date).
+   */
+  function stubUpdateQuoteCapture(existingStatus: 'active' | 'expired') {
+    const editableRow = { status: existingStatus, converted_at: null, company_id: 'company-1' };
+    const updatedRow = { id: 'quote-1', company_id: 'company-1', status: 'active' };
+    const updateSpy = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: updatedRow, error: null }),
+        }),
+      }),
+    });
+    (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: editableRow, error: null }),
+        }),
+      }),
+      update: updateSpy,
+    }));
+    return { updateSpy };
+  }
+
   describe('updateQuote — reconcile (Issue #324 / #317 policy)', () => {
     const baseFormData: QuoteFormData = {
       customer_id: 'customer-1',
@@ -1117,6 +1126,85 @@ describe('quotesAccess utilities', () => {
     });
   });
 
+  describe('updateQuote — status reactivation', () => {
+    // Computed relative to "now" so the tests don't rot as the calendar moves.
+    const futureDate = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+    const pastDate = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+
+    const formWith = (expiration_date: string): QuoteFormData => ({
+      customer_id: 'customer-1',
+      contact_id: '',
+      billing_address_id: '',
+      shipping_address_id: '',
+      parts: [{ part_id: 'part-1', order_quantity: 10 }],
+      lead_time_value: '14',
+      lead_time_unit: 'business_days',
+      payment_terms: '',
+      expiration_date,
+    });
+
+    beforeEach(() => {
+      // reconcileQuoteLineItems runs after the metadata update; stub its helpers
+      // so the save resolves. Empty existing lines → the form's part is inserted.
+      getLineItemsForQuoteMock.mockReset();
+      insertLineItemForPartMock.mockReset();
+      updateLineItemQuantityMock.mockReset();
+      repriceLineItemToCurrentMock.mockReset();
+      deleteLineItemMock.mockReset();
+      getTiersWithComputedPricesMock.mockReset();
+      getLineItemsForQuoteMock.mockResolvedValue([]);
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+      updateLineItemQuantityMock.mockResolvedValue({});
+      repriceLineItemToCurrentMock.mockResolvedValue({});
+      deleteLineItemMock.mockResolvedValue(undefined);
+    });
+
+    it('reactivates an expired quote when the new date is in the future', async () => {
+      const { updateSpy } = stubUpdateQuoteCapture('expired');
+
+      await expect(updateQuote('quote-1', formWith(futureDate))).resolves.toBeDefined();
+
+      const payload = updateSpy.mock.calls[0][0];
+      expect(payload.status).toBe('active');
+      expect(payload.expiration_date).toBe(futureDate);
+      // A real transition (expired → active) stamps status_changed_at.
+      expect(payload.status_changed_at).toEqual(expect.any(String));
+    });
+
+    it('keeps an expired quote expired when the saved date is still in the past', async () => {
+      const { updateSpy } = stubUpdateQuoteCapture('expired');
+
+      await updateQuote('quote-1', formWith(pastDate));
+
+      const payload = updateSpy.mock.calls[0][0];
+      expect(payload.status).toBe('expired');
+      // No transition → don't churn the audit timestamp.
+      expect(payload).not.toHaveProperty('status_changed_at');
+    });
+
+    it('does not restamp status_changed_at on a normal active edit', async () => {
+      const { updateSpy } = stubUpdateQuoteCapture('active');
+
+      await updateQuote('quote-1', formWith(futureDate));
+
+      const payload = updateSpy.mock.calls[0][0];
+      expect(payload.status).toBe('active');
+      expect(payload).not.toHaveProperty('status_changed_at');
+    });
+
+    it('treats a blank expiration date as active (never past)', async () => {
+      const { updateSpy } = stubUpdateQuoteCapture('expired');
+
+      await updateQuote('quote-1', formWith(''));
+
+      const payload = updateSpy.mock.calls[0][0];
+      expect(payload.status).toBe('active');
+      expect(payload.expiration_date).toBeNull();
+      expect(payload.status_changed_at).toEqual(expect.any(String));
+    });
+  });
+
   describe('detectQuoteLineDrift', () => {
     beforeEach(() => {
       getLineItemsForQuoteMock.mockReset();
@@ -1295,17 +1383,19 @@ describe('quotesAccess utilities', () => {
 
       await expect(
         repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1'),
-      ).rejects.toThrow(/converted or expired/i);
+      ).rejects.toThrow(/converted/i);
       expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
     });
 
-    it('refuses an expired (non-active) quote', async () => {
+    it('reprices an expired quote — refreshing stale prices is the reactivation case', async () => {
       mockQueryBuilder.data = { status: 'expired', converted_at: null, company_id: 'company-1' };
+      getLineItemsForQuoteMock.mockResolvedValue([driftedLine]);
+      getTiersWithComputedPricesMock.mockResolvedValue(driftedTiers);
 
-      await expect(
-        repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1'),
-      ).rejects.toThrow(/converted or expired/i);
-      expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
+      const result = await repriceQuoteDriftedLinesToCurrent('quote-1', 'company-1');
+
+      expect(result.repricedLineItemIds).toEqual(['li-A']);
+      expect(repriceLineItemToCurrentMock).toHaveBeenCalledWith('li-A', driftedTiers);
     });
 
     it('throws when the quote is not found', async () => {

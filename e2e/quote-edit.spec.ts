@@ -494,4 +494,91 @@ test.describe('Quote edit — reload contract', () => {
       timeout: 15_000,
     });
   });
+
+  test('editing an expired quote with a future date reactivates it', async ({ page }) => {
+    // Feature: expired quotes are editable, and saving with a today-or-later
+    // expiration date reactivates them (status expired → active). This drives
+    // the full path: create expired-by-date → sweep → edit → save → reload.
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
+
+    await navigateTo(page, 'Quotes');
+    await expect(page).toHaveURL(/\/quotes/);
+    await page.getByRole('button', { name: /New Quote/i }).click();
+    await expect(page).toHaveURL(/\/quotes\/new/, { timeout: 15_000 });
+
+    const customerField = page.getByRole('combobox', { name: /^Customer$/i });
+    await customerField.click();
+    await customerField.fill('E2E Test Customer');
+    await page
+      .getByRole('listbox')
+      .getByRole('option')
+      .filter({ hasText: /E2E Test Customer/i })
+      .first()
+      .click();
+
+    await page.getByRole('button', { name: /Add part/i }).click();
+    const partField = page.getByRole('combobox', { name: /^Part 1$/i });
+    await partField.click();
+    await partField.fill('E2E-MFG-001');
+    await page
+      .getByRole('listbox')
+      .getByRole('option')
+      .filter({ hasText: /E2E-MFG-001/i })
+      .first()
+      .click();
+    await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
+    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({ timeout: 10_000 });
+
+    // Force a past expiration date (the form otherwise defaults to today + 10),
+    // so the quote is expired-by-date the moment it's created.
+    await page.getByLabel(/Expiration date/i).fill('2020-01-01');
+
+    await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
+    await page.getByRole('combobox', { name: 'Unit' }).click();
+    await page.getByRole('option', { name: 'Weeks' }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('option', { name: 'Net 30', exact: true }).click();
+    await page.getByRole('button', { name: /Create Quote/i }).click();
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
+    // Capture THIS quote's URL so we can return to it deterministically —
+    // clicking "first row" in the list is racy under parallel specs (it may be
+    // a sibling spec's quote).
+    const quoteUrl = page.url();
+
+    // The detail page computes expiry from the date, so it reads "Expired"
+    // immediately — independent of the lazy sweep.
+    await expect(page.getByText(/^Expired/i).first()).toBeVisible({ timeout: 10_000 });
+
+    // Visit the Quotes list to fire sweepExpiredQuotes (flips the row to
+    // status='expired'), then return to THIS quote by URL — proving Edit is
+    // available on a fully-expired quote, not merely a date-expired one.
+    await navigateTo(page, 'Quotes');
+    await expect(page.getByRole('button', { name: /New Quote/i })).toBeVisible({ timeout: 15_000 });
+    await page.goto(quoteUrl);
+    await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });
+
+    // Edit is now available on the expired quote.
+    await page.getByRole('button', { name: /^Edit$/i }).click();
+    await expect(page.getByRole('button', { name: /Save changes/i })).toBeVisible();
+
+    // Reactivation banner + a pre-filled future expiration date.
+    await expect(page.getByText(/This quote is expired/i)).toBeVisible();
+    const prefilled = await page.getByLabel(/Expiration date/i).inputValue();
+    const today = new Date().toISOString().slice(0, 10);
+    // ISO dates compare correctly as strings.
+    expect(prefilled >= today, `expected a future pre-fill, got ${prefilled}`).toBeTruthy();
+
+    // Save (keeping the pre-filled future date) reactivates the quote.
+    await page.getByRole('button', { name: /Save changes/i }).click();
+    await expect(page.getByRole('button', { name: /Convert to Job/i })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Reload: the quote is Active again and no longer shows "Expired".
+    await page.reload();
+    await expect(page.getByText(/Q-\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/Expires in/i)).toBeVisible();
+    await expect(page.getByText(/^Expired/i)).toHaveCount(0);
+  });
 });

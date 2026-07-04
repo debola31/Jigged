@@ -17,7 +17,7 @@ import type {
   QuoteLineItem,
   CompanyMember,
 } from '@/types/quote';
-import { isQuoteExpired, leadTimeToDays } from '@/types/quote';
+import { isExpirationDatePast, isQuoteExpired, leadTimeToDays } from '@/types/quote';
 import type { LeadTimeUnit } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
@@ -89,11 +89,15 @@ function sanitizeSearchString(search: string): string {
 }
 
 /**
- * Metadata on a quote stays editable while the quote is still active
- * and has no jobs spawned from it yet. Line items are immutable once created.
+ * A quote stays editable until it's converted to a job — converting is the
+ * only hard lock, because the job then becomes the live document. "Expired" is
+ * a soft state, not a lock: editing an expired quote is allowed, and when the
+ * saved expiration date is today-or-later, updateQuote lifts it back to active.
+ * `status` is kept in the row shape because updateQuote reads it to decide
+ * whether a status transition actually happened (see status_changed_at there).
  */
 function isQuoteEditable(row: { status: string; converted_at: string | null | undefined }): boolean {
-  return row.status === 'active' && (row.converted_at === null || row.converted_at === undefined);
+  return row.converted_at === null || row.converted_at === undefined;
 }
 
 /**
@@ -509,7 +513,9 @@ export async function updateQuote(
   }
 
   if (!isQuoteEditable(existing)) {
-    throw new Error('This quote cannot be edited. Expired or converted quotes are read-only.');
+    // Only converted quotes reach here now — expired quotes are editable (and
+    // reactivate on save). The job is the live document once converted.
+    throw new Error('This quote has been converted to a job and can no longer be edited.');
   }
 
   const companyId = existing.company_id;
@@ -535,6 +541,15 @@ export async function updateQuote(
   const nullIfEmpty = (s: string | null | undefined) =>
     s && s.trim() !== '' ? s : null;
 
+  // Editing can reactivate an expired quote. The persisted status is derived
+  // from the saved expiration date (mirroring isQuoteExpired), never from the
+  // form — QuoteForm never sets formData.status. A today-or-later (or null)
+  // date is active; a still-past date keeps it expired. Only stamp
+  // status_changed_at on an actual transition so the audit timestamp stays
+  // meaningful (same convention as expireQuote / sweepExpiredQuotes).
+  const newExpiration = formData.expiration_date || null;
+  const nextStatus = isExpirationDatePast(newExpiration) ? 'expired' : 'active';
+
   const { data, error } = await supabase
     .from('quotes')
     .update({
@@ -546,7 +561,11 @@ export async function updateQuote(
       lead_time_value: leadTimeValue,
       lead_time_unit: leadTimeUnit,
       payment_terms: nullIfBlank(formData.payment_terms),
-      expiration_date: formData.expiration_date || null,
+      expiration_date: newExpiration,
+      status: nextStatus,
+      ...(nextStatus !== existing.status
+        ? { status_changed_at: new Date().toISOString() }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', quoteId)
@@ -736,8 +755,10 @@ export interface RepriceQuoteResult {
  * what updateQuote does for acceptDriftLineItemIds but without a form payload
  * (the detail page has no editable form).
  *
- * Refuses converted/expired quotes — a converted quote is a historical record;
- * its prices are edited on the job instead. Override lines are skipped by
+ * Refuses converted quotes — a converted quote is a historical record; its
+ * prices are edited on the job instead. Expired quotes ARE repriceable: a
+ * lapsed quote usually has the stalest prices, and refreshing them is exactly
+ * what you want when reactivating it. Override lines are skipped by
  * detectQuoteLineDrift, so they're never touched.
  *
  * Writes are sequential: the JS client has no multi-statement transaction (the
@@ -752,7 +773,7 @@ export async function repriceQuoteDriftedLinesToCurrent(
   const supabase = getSupabase();
 
   // Editability gate (defense in depth — the UI also hides the action when the
-  // quote is converted or expired).
+  // quote is converted).
   const { data: existing, error } = await supabase
     .from('quotes')
     .select('status, converted_at, company_id')
@@ -764,7 +785,7 @@ export async function repriceQuoteDriftedLinesToCurrent(
   }
   if (!isQuoteEditable(existing)) {
     throw new Error(
-      'This quote is converted or expired and can no longer be repriced. ' +
+      'This quote is converted and can no longer be repriced. ' +
         'Edit prices on the job instead.',
     );
   }

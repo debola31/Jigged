@@ -183,6 +183,58 @@ export function isJobDone(
 }
 
 /**
+ * "Closed" = terminal for the jobs-list default view. Built ON TOP of the
+ * canonical isJobDone predicate (produced AND fully shipped) plus cancelled,
+ * so there is a single definition of "done" — the list hides closed jobs by
+ * default and the "Show completed & cancelled" toggle reveals them. A
+ * cancelled job counts as closed at any shipment state (its remaining order
+ * never ships).
+ */
+export function isJobClosed(
+  job: Pick<Job, 'production_status' | 'fulfillment_status'>,
+): boolean {
+  return isJobDone(job) || job.production_status === 'cancelled';
+}
+
+/**
+ * Single combined lifecycle stage for the jobs list — collapses the two
+ * independent status axes (production + fulfillment) into one "where is this
+ * order?" value used by the combined Status filter and the row chip.
+ */
+export type JobLifecycleStage =
+  | 'not_started'
+  | 'in_progress'
+  | 'ready_to_ship'
+  | 'partially_shipped'
+  | 'completed'
+  | 'cancelled';
+
+/**
+ * Map a job's production + fulfillment statuses to one lifecycle stage.
+ * Total over all production×fulfillment combinations; precedence order
+ * matters:
+ *   1. cancelled  — production cancelled, any shipment state (own terminal bucket)
+ *   2. completed  — fully shipped (covers the FR-18 done case AND the rare
+ *                   shipped-before-ops-marked-complete edge)
+ *   3. partially_shipped — some but not all shipped
+ *   4. ready_to_ship     — production complete, nothing shipped yet
+ *   5. in_progress       — production underway, nothing shipped
+ *   6. not_started       — nothing done yet
+ * Keep in lockstep with STAGE_TO_JOB_FILTERS (the inverse, for querying).
+ */
+export function getJobLifecycleStage(
+  job: Pick<Job, 'production_status' | 'fulfillment_status'>,
+): JobLifecycleStage {
+  if (job.production_status === 'cancelled') return 'cancelled';
+  if (job.fulfillment_status === 'fully_shipped') return 'completed';
+  if (job.fulfillment_status === 'partially_shipped') return 'partially_shipped';
+  // Unshipped from here down — resolve by production.
+  if (job.production_status === 'completed') return 'ready_to_ship';
+  if (job.production_status === 'in_progress') return 'in_progress';
+  return 'not_started';
+}
+
+/**
  * Current operation info for the jobs list "Current Op" column.
  */
 export interface CurrentOperationInfo {
@@ -267,8 +319,10 @@ export interface JobFilters {
    */
   search?: string;
   overdue?: boolean;
-  /** When true (default), hide jobs that satisfy the FR-18 done predicate. */
-  excludeDone?: boolean;
+  /** When true (default), hide "closed" jobs — the FR-18 done predicate OR
+   *  cancelled (see isJobClosed). The jobs list turns this off when the user
+   *  ticks "Show completed & cancelled" or selects a closed stage. */
+  excludeClosed?: boolean;
 }
 
 /**
@@ -294,6 +348,54 @@ export const FULFILLMENT_STATUS_CONFIG: Record<
   unshipped: { label: 'Not Shipped', color: 'default' },
   partially_shipped: { label: 'Partially Shipped', color: 'info' },
   fully_shipped: { label: 'Shipped', color: 'success' },
+};
+
+/**
+ * Combined lifecycle-stage display + classification config for the jobs
+ * list. `closed: true` marks the terminal stages that are hidden by default
+ * (revealed by the "Show completed & cancelled" toggle). Key order defines
+ * the Status dropdown option order. Colors are MUI Chip palette slots.
+ */
+export const JOB_LIFECYCLE_STAGE_CONFIG: Record<
+  JobLifecycleStage,
+  {
+    label: string;
+    color: 'default' | 'info' | 'success' | 'error' | 'warning' | 'secondary';
+    closed: boolean;
+  }
+> = {
+  not_started: { label: 'Not Started', color: 'default', closed: false },
+  in_progress: { label: 'In Progress', color: 'info', closed: false },
+  ready_to_ship: { label: 'Ready to Ship', color: 'warning', closed: false },
+  partially_shipped: { label: 'Partially Shipped', color: 'secondary', closed: false },
+  completed: { label: 'Completed', color: 'success', closed: true },
+  cancelled: { label: 'Cancelled', color: 'error', closed: true },
+};
+
+/**
+ * Inverse of getJobLifecycleStage: translate a selected stage into the
+ * existing getAllJobs filter params. The two `.in()` column filters combine
+ * as AND server-side, which is exactly the semantics each stage needs.
+ * `showClosed: true` on the terminal stages means picking "Completed" or
+ * "Cancelled" turns off excludeClosed so those otherwise-hidden rows appear.
+ * The `completed` production set is "not cancelled" (all three non-cancelled
+ * statuses) so it matches getJobLifecycleStage's `completed` = fully shipped
+ * AND not cancelled, including the shipped-but-ops-in-progress edge.
+ */
+export const STAGE_TO_JOB_FILTERS: Record<
+  JobLifecycleStage,
+  Pick<JobFilters, 'productionStatus' | 'fulfillmentStatus'> & { showClosed?: boolean }
+> = {
+  not_started: { productionStatus: ['not_started'], fulfillmentStatus: ['unshipped'] },
+  in_progress: { productionStatus: ['in_progress'], fulfillmentStatus: ['unshipped'] },
+  ready_to_ship: { productionStatus: ['completed'], fulfillmentStatus: ['unshipped'] },
+  partially_shipped: { fulfillmentStatus: ['partially_shipped'] },
+  completed: {
+    productionStatus: ['not_started', 'in_progress', 'completed'],
+    fulfillmentStatus: ['fully_shipped'],
+    showClosed: true,
+  },
+  cancelled: { productionStatus: ['cancelled'], showClosed: true },
 };
 
 // ============== Operation Types ==============

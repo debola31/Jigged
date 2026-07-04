@@ -19,6 +19,7 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import Chip from '@mui/material/Chip';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -39,20 +40,19 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllJobs, bulkCancelJobs, getCustomersForSelect } from '@/utils/jobsAccess';
+import { getAllJobs, bulkCancelJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import { isJobOverdue } from '@/types/job';
+import {
+  isJobOverdue,
+  getJobLifecycleStage,
+  JOB_LIFECYCLE_STAGE_CONFIG,
+  STAGE_TO_JOB_FILTERS,
+} from '@/types/job';
 import Tooltip from '@mui/material/Tooltip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddIcon from '@mui/icons-material/Add';
 import AcceptPurchaseOrderModal from '@/components/jobs/AcceptPurchaseOrderModal';
-import type {
-  JobWithRelations,
-  JobFilters,
-  ProductionStatus,
-  FulfillmentStatus,
-} from '@/types/job';
-import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
+import type { JobWithRelations, JobFilters, JobLifecycleStage } from '@/types/job';
 
 /**
  * Human-readable label for the match_source value returned by
@@ -76,35 +76,11 @@ function matchSourceLabel(source: string): string {
   }
 }
 
-const VALID_PRODUCTION_STATUSES: ProductionStatus[] = [
-  'not_started',
-  'in_progress',
-  'completed',
-  'cancelled',
-];
-const VALID_FULFILLMENT_STATUSES: FulfillmentStatus[] = [
-  'unshipped',
-  'partially_shipped',
-  'fully_shipped',
-];
-
-// Parse a comma-separated list of statuses from the URL (?production=foo,bar).
-function parseProductionParam(v: string | null): ProductionStatus[] | 'all' | undefined {
-  if (!v) return undefined;
-  if (v === 'all') return 'all';
-  const parts = v.split(',').filter((p) =>
-    (VALID_PRODUCTION_STATUSES as string[]).includes(p),
-  );
-  return parts.length > 0 ? (parts as ProductionStatus[]) : undefined;
-}
-
-function parseFulfillmentParam(v: string | null): FulfillmentStatus[] | 'all' | undefined {
-  if (!v) return undefined;
-  if (v === 'all') return 'all';
-  const parts = v.split(',').filter((p) =>
-    (VALID_FULFILLMENT_STATUSES as string[]).includes(p),
-  );
-  return parts.length > 0 ? (parts as FulfillmentStatus[]) : undefined;
+// Parse the combined lifecycle-stage filter from the URL (?status=in_progress).
+// Returns '' (Any) when absent or unrecognized.
+function parseStatusParam(v: string | null): JobLifecycleStage | '' {
+  if (v && v in JOB_LIFECYCLE_STAGE_CONFIG) return v as JobLifecycleStage;
+  return '';
 }
 
 // Stable empty fallback so derived data doesn't churn while the first load runs.
@@ -118,17 +94,18 @@ export default function JobsPage() {
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [productionFilter, setProductionFilter] = useState<
-    JobFilters['productionStatus']
-  >(() => parseProductionParam(searchParams.get('production')));
-  const [fulfillmentFilter, setFulfillmentFilter] = useState<
-    JobFilters['fulfillmentStatus']
-  >(() => parseFulfillmentParam(searchParams.get('fulfillment')));
-  const [customerFilter, setCustomerFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<JobLifecycleStage | ''>(
+    () => parseStatusParam(searchParams.get('status')),
+  );
+  const [showClosed, setShowClosed] = useState<boolean>(
+    () => searchParams.get('closed') === 'true',
+  );
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
   );
-  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
+  // Customer deep-link support (e.g. a link from a customer page) with no
+  // toolbar control — the search box already covers customer-name lookup.
+  const [customerId] = useState<string>(() => searchParams.get('customer') ?? '');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',
     sort: 'desc',
@@ -157,45 +134,32 @@ export default function JobsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch customers for filter dropdown
-  useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        const data = await getCustomersForSelect(companyId);
-        setCustomers(data);
-      } catch (error) {
-        console.error('Error fetching customers:', error);
-      }
-    };
-    fetchCustomers();
-  }, [companyId]);
-
-  // Fetch jobs. FR-19: hide done jobs by default — unless the user has
-  // explicitly filtered Fulfillment to include "Fully Shipped", in which case
-  // they've asked to see those rows.
+  // Fetch jobs. The combined Status filter maps to the underlying
+  // production/fulfillment params via STAGE_TO_JOB_FILTERS. Closed jobs
+  // (completed + cancelled) are hidden unless the user ticks "Show completed
+  // & cancelled" or selects a closed stage (which carries its own showClosed).
   const {
     data: jobsData,
     loading,
     reload: fetchJobs,
   } = useLoad(
     () => {
-      const fulfillmentIncludesShipped =
-        Array.isArray(fulfillmentFilter) && fulfillmentFilter.includes('fully_shipped');
+      const stage = statusFilter ? STAGE_TO_JOB_FILTERS[statusFilter] : null;
       const filters: JobFilters = {
-        productionStatus: productionFilter,
-        fulfillmentStatus: fulfillmentFilter,
-        customerId: customerFilter || undefined,
+        productionStatus: stage?.productionStatus,
+        fulfillmentStatus: stage?.fulfillmentStatus,
+        customerId: customerId || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
-        excludeDone: !fulfillmentIncludesShipped,
+        excludeClosed: !(showClosed || stage?.showClosed),
       };
       return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
     },
     [
       companyId,
-      productionFilter,
-      fulfillmentFilter,
-      customerFilter,
+      statusFilter,
+      showClosed,
+      customerId,
       searchDebounced,
       sortModel,
       overdueOnly,
@@ -382,18 +346,20 @@ export default function JobsPage() {
       },
     },
     {
-      // Status reads as an inline phrase ("In Progress / Not Shipped"). No
-      // weight or color differentiation — matches the cell typography of
-      // the other columns so the row reads as a single horizontal line.
+      // Single combined lifecycle-stage chip (e.g. "Ready to Ship"), so the
+      // row reads consistently with the combined Status filter in the toolbar.
       colId: 'status',
       headerName: 'Status',
-      width: 240,
+      width: 200,
       sortable: false,
-      valueGetter: (params) => {
-        if (!params.data) return '';
-        const prod = PRODUCTION_STATUS_CONFIG[params.data.production_status];
-        const ful = FULFILLMENT_STATUS_CONFIG[params.data.fulfillment_status];
-        return `${prod.label} | ${ful.label}`;
+      cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
+        if (!params.data) return null;
+        const cfg = JOB_LIFECYCLE_STAGE_CONFIG[getJobLifecycleStage(params.data)];
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+            <Chip label={cfg.label} color={cfg.color} size="small" />
+          </Box>
+        );
       },
     },
     {
@@ -441,34 +407,11 @@ export default function JobsPage() {
     },
   ];
 
-  const productionStatusOptions: SelectOption[] = (
-    Object.keys(PRODUCTION_STATUS_CONFIG) as ProductionStatus[]
+  const statusOptions: SelectOption[] = (
+    Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]
   ).map((key) => ({
     id: key,
-    label: PRODUCTION_STATUS_CONFIG[key].label,
-  }));
-
-  const fulfillmentStatusOptions: SelectOption[] = (
-    Object.keys(FULFILLMENT_STATUS_CONFIG) as FulfillmentStatus[]
-  ).map((key) => ({
-    id: key,
-    label: FULFILLMENT_STATUS_CONFIG[key].label,
-  }));
-
-  /** First value of the filter, or '' when the filter is unset/'all'. The
-   *  SearchableSelect is single-value; multi-select UI lands in PR 6. */
-  const productionFilterValue =
-    productionFilter && productionFilter !== 'all' && productionFilter.length > 0
-      ? productionFilter[0]
-      : '';
-  const fulfillmentFilterValue =
-    fulfillmentFilter && fulfillmentFilter !== 'all' && fulfillmentFilter.length > 0
-      ? fulfillmentFilter[0]
-      : '';
-
-  const customerOptions: SelectOption[] = customers.map((c) => ({
-    id: c.id,
-    label: c.name,
+    label: JOB_LIFECYCLE_STAGE_CONFIG[key].label,
   }));
 
   return (
@@ -505,50 +448,39 @@ export default function JobsPage() {
           }}
         />
 
-        <Box sx={{ minWidth: 180 }}>
+        <Box sx={{ minWidth: 200 }}>
           <SearchableSelect
-            options={productionStatusOptions}
-            value={productionFilterValue}
+            options={statusOptions}
+            value={statusFilter}
             onChange={(value) => {
-              setProductionFilter(value ? ([value] as ProductionStatus[]) : undefined);
+              setStatusFilter((value as JobLifecycleStage) || '');
               clearSelection();
             }}
-            label="Production Status"
+            label="Status"
             allowNone
             noneLabel="Any"
             size="small"
           />
         </Box>
 
-        <Box sx={{ minWidth: 180 }}>
-          <SearchableSelect
-            options={fulfillmentStatusOptions}
-            value={fulfillmentFilterValue}
-            onChange={(value) => {
-              setFulfillmentFilter(value ? ([value] as FulfillmentStatus[]) : undefined);
-              clearSelection();
-            }}
-            label="Fulfillment Status"
-            allowNone
-            noneLabel="Any"
-            size="small"
-          />
-        </Box>
-
-        <Box sx={{ minWidth: 220 }}>
-          <SearchableSelect
-            options={customerOptions}
-            value={customerFilter}
-            onChange={(value) => {
-              setCustomerFilter(value);
-              clearSelection();
-            }}
-            label="Customer"
-            allowNone
-            noneLabel="All Customers"
-            size="small"
-          />
-        </Box>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={showClosed}
+              onChange={(e) => {
+                setShowClosed(e.target.checked);
+                clearSelection();
+              }}
+              size="small"
+              sx={{
+                color: 'rgba(255,255,255,0.6)',
+                '&.Mui-checked': { color: 'primary.light' },
+              }}
+            />
+          }
+          label="Show completed & cancelled"
+          sx={{ ml: 0 }}
+        />
 
         <FormControlLabel
           control={
@@ -612,11 +544,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || customerFilter || productionFilterValue || fulfillmentFilterValue || overdueOnly
+              {searchDebounced || statusFilter || overdueOnly || showClosed || customerId
                 ? 'No jobs match your filters.'
                 : 'Jobs come from converting an accepted quote, or directly from a customer PO.'}
             </Typography>
-            {!searchDebounced && !customerFilter && !productionFilterValue && !fulfillmentFilterValue && !overdueOnly && (
+            {!searchDebounced && !statusFilter && !overdueOnly && !showClosed && !customerId && (
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
                 <Button
                   variant="contained"

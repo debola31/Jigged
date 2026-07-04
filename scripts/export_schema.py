@@ -5,8 +5,8 @@ PostgreSQL/Supabase Schema Export Script
 Exports a complete database schema with deterministic ordering for git diffs.
 Includes RLS policies, functions, triggers, and all constraints.
 
-Exports separate schema files for prod and staging environments to
-supabase/schema.prod.sql and supabase/schema.staging.sql.
+Exports the prod schema snapshot to supabase/schema.prod.sql. (Staging was
+retired when the project moved to Supabase Branching.)
 
 SOURCE-OF-TRUTH NOTE
 --------------------
@@ -15,22 +15,21 @@ purposes; keep them straight:
 
 1. supabase/migrations/<timestamp>_baseline.sql (and any migrations layered
    on top): the source of truth for what gets *applied* to a fresh database
-   via `supabase start` or `supabase db push`. This is the executable
-   history. New schema changes land here as new migration files.
+   via `supabase start` / `db reset` locally, on every preview branch, and to
+   prod on merge to `main`. This is the executable history. New schema changes
+   land here as new migration files.
 
-2. supabase/schema.staging.sql and supabase/schema.prod.sql: cached,
-   greppable snapshots of the live database state at the time this script
-   last ran. Regenerate after every prod push so the cached snapshot tracks
-   reality. Never edit by hand — they get clobbered on the next export.
+2. supabase/schema.prod.sql: a cached, greppable snapshot of the live prod
+   database at the time this script last ran. Regenerate after a merge has
+   deployed to prod so the snapshot tracks reality. Never edit by hand — it
+   gets clobbered on the next export.
 
 Use the schema files for "what does column X look like today" lookups
 without spinning up Postgres. Use the baseline + migrations for "what should
 the schema be" answers and for any code path that actually creates the DB.
 
 Usage:
-    python scripts/export_schema.py                  # Export both prod and staging
-    python scripts/export_schema.py --env prod       # Export prod only
-    python scripts/export_schema.py --env staging    # Export staging only
+    python scripts/export_schema.py                  # Export the prod snapshot
     python scripts/export_schema.py --dry-run        # Print to stdout
 """
 
@@ -787,7 +786,7 @@ def export_env(env_name: str, db_url: str, output_file: str, schemas: List[str],
 # Environment configuration: name -> (env var, output file)
 ENVIRONMENTS = {
     "prod": ("PROD_SUPABASE_DATABASE_URL", "supabase/schema.prod.sql"),
-    "staging": ("SUPABASE_DATABASE_URL", "supabase/schema.staging.sql"),
+    # staging retired (moved to Supabase Branching); prod is the only live target.
 }
 
 
@@ -797,14 +796,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Export both prod and staging schemas
+    # Export the prod schema snapshot
     python scripts/export_schema.py
-
-    # Export prod only
-    python scripts/export_schema.py --env prod
-
-    # Export staging only
-    python scripts/export_schema.py --env staging
 
     # Export specific schemas only
     python scripts/export_schema.py --schemas public
@@ -817,9 +810,9 @@ Examples:
     parser.add_argument(
         "--env",
         "-e",
-        choices=["prod", "staging"],
+        choices=["prod"],
         default=None,
-        help="Environment to export (default: both prod and staging)",
+        help="Environment to export (only prod remains; staging retired)",
     )
     parser.add_argument(
         "--schemas",
@@ -837,7 +830,7 @@ Examples:
     args = parser.parse_args()
 
     # Determine which environments to export
-    envs_to_export = [args.env] if args.env else ["prod", "staging"]
+    envs_to_export = [args.env] if args.env else ["prod"]
 
     exported = 0
     for env_name in envs_to_export:

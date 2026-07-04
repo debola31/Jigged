@@ -105,10 +105,10 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 **How to apply (workflow per change):**
 1. `supabase migration new <slug>` — creates the file with a fresh 14-digit timestamp.
 2. Write the SQL into the new file.
-3. Confirm the linked project is staging before pushing — `supabase projects list` (the `●` marks the linked one; the staging project's name contains "Staging"). Relink with `supabase link --project-ref <ref>` if needed; never push without verifying.
-4. `supabase db push` to apply to the linked staging project, then verify the change works in the app.
-5. **Prod pushes are owned by the human, not Claude.** Stop after staging and hand off — surface the new migration filename and ask the user to push to prod themselves. Do not run `supabase link` to prod or `supabase db push` against prod from a Claude session.
-6. After the human confirms prod is updated, `python scripts/export_schema.py` to refresh `supabase/schema.staging.sql` and `supabase/schema.prod.sql`.
+3. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
+4. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
+5. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
+6. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
 
 The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_anon_waitlist.sql`) are grandfathered — leave them alone. Never reuse the 8-digit pattern for new files.
 
@@ -116,8 +116,8 @@ The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_ano
 
 Two artifacts describe the database schema. They serve different purposes:
 
-- `supabase/migrations/<timestamp>_baseline.sql` (and any migrations on top of it) is the source of truth for what *gets applied* to a fresh database via `supabase start` or `supabase db push`. This is the executable history. New schema changes land here as new migration files.
-- `supabase/schema.staging.sql` / `supabase/schema.prod.sql` are *cached snapshots* of the live database state at the time `scripts/export_schema.py` last ran. Regenerate after every prod push so the cached snapshot tracks reality. Never edit by hand — they get clobbered on the next export.
+- `supabase/migrations/<timestamp>_baseline.sql` (and any migrations on top of it) is the source of truth for what *gets applied* to a fresh database — via `supabase start` / `db reset` locally, on every preview branch, and to prod on merge to `main`. This is the executable history. New schema changes land here as new migration files.
+- `supabase/schema.prod.sql` is a *cached snapshot* of the live prod database at the time `scripts/export_schema.py` last ran. Regenerate after a merge has deployed to prod so the snapshot tracks reality. Never edit by hand — it gets clobbered on the next export.
 
 Use the schema files for "what does column X look like today" lookups without spinning up Postgres. Use the baseline + migrations for "what should the schema be" answers and for any code path that actually creates the DB. They should match; if they don't, regenerate the schema file (don't edit the migration).
 
@@ -390,7 +390,7 @@ gate; this is just to shorten the feedback loop before push.
 | Component / page / logic in `app/`, `components/`, or `lib/` | `pnpm test --run __tests__/<path>.test.ts` (file-scoped). Fall back to full `pnpm test --run` if the change is to a widely-imported helper. |
 | `utils/*Access.ts` or other Supabase access | `pnpm exec tsc --noEmit -p tsconfig.json` + matching `pnpm test --run __tests__/utils/<file>.test.ts`. |
 | Backend (`api/**/*.py`) | `cd api && pytest tests/unit/test_<area>.py` (or `pytest -m unit` for the fast suite). |
-| `supabase/migrations/*` schema work | Re-export with `python scripts/export_schema.py --env staging` and skim the diff. Spot-check any access layer that touched the changed columns/tables. |
+| `supabase/migrations/*` schema work | `supabase db reset` (replays the migration + seed on a fresh local DB) and skim for errors; the PR's preview branch is the real gate. Spot-check any access layer that touched the changed columns/tables. |
 | `e2e/*.spec.ts`, or UI on a path a spec exercises (parts page, routing builder, auth flow) | Run the affected spec only: `pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list`. |
 | Doc / config / CI YAML / `.gitignore` / `scripts/` | Skip pre-PR validation. CI is the right gate. |
 
@@ -458,7 +458,7 @@ entry in `git worktree list`). Do this once at the top of a worktree session:
 
 ```bash
 PRIMARY=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
-cp "$PRIMARY/.env.local" .                   # dev server (staging creds)
+cp "$PRIMARY/.env.local" .                   # dev-server Supabase creds
 [ -f "$PRIMARY/.env.test.local" ] && cp "$PRIMARY/.env.test.local" .
 [ -f "$PRIMARY/e2e/.env.test.local" ] && cp "$PRIMARY/e2e/.env.test.local" e2e/
 ```

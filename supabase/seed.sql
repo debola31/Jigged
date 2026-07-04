@@ -14,7 +14,13 @@
 --                          is produced by the same DB logic the app uses, so the
 --                          seed stays correct as the schema evolves.
 --
--- Login after reset:  dev@jigged.test / jigged-dev-1234   (Vanguard Precision Works)
+-- Logins after reset — all password `jigged-dev-1234`, all @ Vanguard Precision Works:
+--   dev@jigged.test         admin     (Dev Seed User)
+--   admin2@jigged.test      admin     (Morgan Reyes)
+--   user1@jigged.test       user      (Sam Carter)
+--   user2@jigged.test       user      (Jamie Lin)
+--   operator1@jigged.test   operator  (Diego Alvarez)
+--   operator2@jigged.test   operator  (Priya Nair)
 --
 -- LOCAL / PREVIEW ONLY — never run against production (it writes auth.users
 -- directly). Designed for a fresh DB, which `supabase db reset` and preview-
@@ -65,6 +71,43 @@ insert into public.user_company_access (id, user_id, company_id, role, name) val
   ('23000000-0000-0000-0000-000000000001',
    '11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222', 'admin', 'Dev Seed User')
+on conflict do nothing;
+
+-- ── Additional team members ──────────────────────────────────────────────────
+-- A realistic roster so role-based behaviour can be exercised in dev: two admins
+-- (incl. dev@jigged.test above), two users, two operators. Same password as the
+-- primary dev user; the email prefix encodes the role for easy login. Same
+-- auth.users / auth.identities / user_company_access shape as the dev user.
+insert into auth.users (
+  instance_id, id, aud, role, email, encrypted_password,
+  email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at,
+  confirmation_token, recovery_token, email_change, email_change_token_new
+) values
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111112','authenticated','authenticated','admin2@jigged.test',    crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Morgan Reyes"}'::jsonb,   now() - interval '365 days', now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111113','authenticated','authenticated','user1@jigged.test',     crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Sam Carter"}'::jsonb,     now() - interval '365 days', now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111114','authenticated','authenticated','user2@jigged.test',     crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Jamie Lin"}'::jsonb,      now() - interval '365 days', now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111115','authenticated','authenticated','operator1@jigged.test', crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Diego Alvarez"}'::jsonb,  now() - interval '365 days', now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111116','authenticated','authenticated','operator2@jigged.test', crypt('jigged-dev-1234', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Priya Nair"}'::jsonb,     now() - interval '365 days', now(), '', '', '', '')
+on conflict (id) do nothing;
+
+insert into auth.identities (
+  provider_id, user_id, identity_data, provider,
+  last_sign_in_at, created_at, updated_at
+) values
+  ('11111111-1111-1111-1111-111111111112','11111111-1111-1111-1111-111111111112','{"sub":"11111111-1111-1111-1111-111111111112","email":"admin2@jigged.test"}'::jsonb,    'email', now(), now() - interval '365 days', now()),
+  ('11111111-1111-1111-1111-111111111113','11111111-1111-1111-1111-111111111113','{"sub":"11111111-1111-1111-1111-111111111113","email":"user1@jigged.test"}'::jsonb,     'email', now(), now() - interval '365 days', now()),
+  ('11111111-1111-1111-1111-111111111114','11111111-1111-1111-1111-111111111114','{"sub":"11111111-1111-1111-1111-111111111114","email":"user2@jigged.test"}'::jsonb,     'email', now(), now() - interval '365 days', now()),
+  ('11111111-1111-1111-1111-111111111115','11111111-1111-1111-1111-111111111115','{"sub":"11111111-1111-1111-1111-111111111115","email":"operator1@jigged.test"}'::jsonb, 'email', now(), now() - interval '365 days', now()),
+  ('11111111-1111-1111-1111-111111111116','11111111-1111-1111-1111-111111111116','{"sub":"11111111-1111-1111-1111-111111111116","email":"operator2@jigged.test"}'::jsonb, 'email', now(), now() - interval '365 days', now())
+on conflict do nothing;
+
+insert into public.user_company_access (id, user_id, company_id, role, name) values
+  ('23000000-0000-0000-0000-000000000002','11111111-1111-1111-1111-111111111112','22222222-2222-2222-2222-222222222222','admin',    'Morgan Reyes'),
+  ('23000000-0000-0000-0000-000000000003','11111111-1111-1111-1111-111111111113','22222222-2222-2222-2222-222222222222','user',     'Sam Carter'),
+  ('23000000-0000-0000-0000-000000000004','11111111-1111-1111-1111-111111111114','22222222-2222-2222-2222-222222222222','user',     'Jamie Lin'),
+  ('23000000-0000-0000-0000-000000000005','11111111-1111-1111-1111-111111111115','22222222-2222-2222-2222-222222222222','operator', 'Diego Alvarez'),
+  ('23000000-0000-0000-0000-000000000006','11111111-1111-1111-1111-111111111116','22222222-2222-2222-2222-222222222222','operator', 'Priya Nair')
 on conflict do nothing;
 
 -- ── Vendors (+ one contact each) ─────────────────────────────────────────────

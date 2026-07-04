@@ -1329,66 +1329,13 @@ async function getJobIdForOperation(
 }
 
 /**
- * Start a job_operation (pending → in_progress). At most one operation can
- * be in_progress on a single job_part at a time. Auto-flips the job_part's
- * status to 'in_progress'; the trigger then auto-flips the parent job.
- */
-export async function startJobOperation(
-  operationId: string,
-  jobId: string,
-): Promise<OperationUpdateResult> {
-  const supabase = getSupabase();
-  const ctx = await getJobIdForOperation(operationId);
-  void jobId; // Caller passes for backward compat; we trust the lookup.
-
-  // Concurrency guard: no other in-progress op on this part.
-  const { data: inProgressOps, error: checkError } = await supabase
-    .from('job_operations')
-    .select('id')
-    .eq('job_part_id', ctx.jobPartId)
-    .eq('status', 'in_progress');
-  if (checkError) {
-    console.error('Error checking in-progress operations:', checkError);
-    throw checkError;
-  }
-  if (inProgressOps && inProgressOps.length > 0) {
-    throw new Error('Another operation is already in progress on this part. Complete it first.');
-  }
-
-  const { data: operation, error: updateError } = await supabase
-    .from('job_operations')
-    .update({
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', operationId)
-    .eq('status', 'pending')
-    .select(`
-      *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
-    `)
-    .single();
-  if (updateError) {
-    console.error('Error starting operation:', updateError);
-    throw updateError;
-  }
-
-  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
-  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
-
-  return {
-    operation: operation as JobOperation,
-    jobPartStatusChanged: partResult.changed,
-    newJobPartProductionStatus: partResult.changed ? partResult.newStatus : undefined,
-    jobStatusChanged: jobResult.changed,
-    newJobProductionStatus: jobResult.newStatus,
-  };
-}
-
-/**
  * Complete a job_operation with optional notes. Flips the
  * job_part to 'completed' once every op on that part is completed.
+ *
+ * Completes from either 'pending' or 'in_progress' (no Start step required) —
+ * the admin op list is now one-click complete, mirroring the operator view
+ * (operatorAccess.completeOperation). A never-started op gets its started_at
+ * stamped at completion so labor windows stay coherent.
  */
 export async function completeJobOperation(
   operationId: string,
@@ -1400,12 +1347,21 @@ export async function completeJobOperation(
   void jobId;
 
   const { data: { user } } = await supabase.auth.getUser();
+  const now = new Date().toISOString();
+
+  // Preserve an existing start stamp; back-fill it if the op was never started.
+  const { data: existing } = await supabase
+    .from('job_operations')
+    .select('started_at')
+    .eq('id', operationId)
+    .single();
 
   const updateData: JobOperationUpdate = {
     status: 'completed',
-    completed_at: new Date().toISOString(),
+    completed_at: now,
     completed_by: user?.id || null,
-    updated_at: new Date().toISOString(),
+    started_at: existing?.started_at ?? now,
+    updated_at: now,
   };
   if (data.notes !== undefined) updateData.notes = data.notes;
 
@@ -1413,7 +1369,7 @@ export async function completeJobOperation(
     .from('job_operations')
     .update(updateData)
     .eq('id', operationId)
-    .eq('status', 'in_progress')
+    .neq('status', 'completed')
     .select(`
       *,
       work_center:work_centers!left(id, name, labor_rate, kind)

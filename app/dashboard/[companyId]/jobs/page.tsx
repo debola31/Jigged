@@ -19,8 +19,13 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select, { type SelectChangeEvent } from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import ListItemText from '@mui/material/ListItemText';
+import OutlinedInput from '@mui/material/OutlinedInput';
 import Chip from '@mui/material/Chip';
-import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
@@ -46,7 +51,6 @@ import {
   isJobOverdue,
   getJobLifecycleStage,
   JOB_LIFECYCLE_STAGE_CONFIG,
-  STAGE_TO_JOB_FILTERS,
 } from '@/types/job';
 import Tooltip from '@mui/material/Tooltip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -76,11 +80,23 @@ function matchSourceLabel(source: string): string {
   }
 }
 
-// Parse the combined lifecycle-stage filter from the URL (?status=in_progress).
-// Returns '' (Any) when absent or unrecognized.
-function parseStatusParam(v: string | null): JobLifecycleStage | '' {
-  if (v && v in JOB_LIFECYCLE_STAGE_CONFIG) return v as JobLifecycleStage;
-  return '';
+// The default Status selection: every open (non-closed) stage. Completed and
+// cancelled jobs are hidden until the user explicitly picks them — this replaces
+// the old "Show completed & cancelled" checkbox.
+const DEFAULT_STATUS_FILTER: JobLifecycleStage[] = (
+  Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]
+).filter((key) => !JOB_LIFECYCLE_STAGE_CONFIG[key].closed);
+
+// Parse the multi-select lifecycle-stage filter from the URL
+// (?status=in_progress,ready_to_ship). Falls back to the open-stages default
+// when absent; ignores unrecognized tokens.
+function parseStatusParam(v: string | null): JobLifecycleStage[] {
+  if (!v) return DEFAULT_STATUS_FILTER;
+  const stages = v
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s): s is JobLifecycleStage => s in JOB_LIFECYCLE_STAGE_CONFIG);
+  return stages.length > 0 ? stages : DEFAULT_STATUS_FILTER;
 }
 
 // Stable empty fallback so derived data doesn't churn while the first load runs.
@@ -94,11 +110,8 @@ export default function JobsPage() {
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<JobLifecycleStage | ''>(
+  const [statusFilter, setStatusFilter] = useState<JobLifecycleStage[]>(
     () => parseStatusParam(searchParams.get('status')),
-  );
-  const [showClosed, setShowClosed] = useState<boolean>(
-    () => searchParams.get('closed') === 'true',
   );
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
@@ -134,31 +147,33 @@ export default function JobsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Fetch jobs. The combined Status filter maps to the underlying
-  // production/fulfillment params via STAGE_TO_JOB_FILTERS. Closed jobs
-  // (completed + cancelled) are hidden unless the user ticks "Show completed
-  // & cancelled" or selects a closed stage (which carries its own showClosed).
+  // Fetch jobs. The Status control is a multi-select over derived lifecycle
+  // stages; we only tell the server whether to include closed jobs (completed +
+  // cancelled), then filter to the exact selected stages client-side via
+  // getJobLifecycleStage (see visibleJobs). Closed jobs are fetched only when a
+  // closed stage is selected — the default (open stages only) hides them.
   const {
     data: jobsData,
     loading,
     reload: fetchJobs,
   } = useLoad(
     () => {
-      const stage = statusFilter ? STAGE_TO_JOB_FILTERS[statusFilter] : null;
+      const includesClosed = statusFilter.some(
+        (s) => JOB_LIFECYCLE_STAGE_CONFIG[s].closed,
+      );
       const filters: JobFilters = {
-        productionStatus: stage?.productionStatus,
-        fulfillmentStatus: stage?.fulfillmentStatus,
         customerId: customerId || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
-        excludeClosed: !(showClosed || stage?.showClosed),
+        // Empty selection = no constraint (show everything). Otherwise hide
+        // closed jobs unless a closed stage is explicitly selected.
+        excludeClosed: statusFilter.length > 0 && !includesClosed,
       };
       return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
     },
     [
       companyId,
       statusFilter,
-      showClosed,
       customerId,
       searchDebounced,
       sortModel,
@@ -172,6 +187,26 @@ export default function JobsPage() {
   );
   const jobs = jobsData ?? EMPTY_JOBS;
 
+  // Narrow to the exact stages the user selected. Stages are derived from
+  // (production_status, fulfillment_status), so we match on the same helper the
+  // Status column renders. Empty selection = no filter.
+  const visibleJobs = useMemo(
+    () =>
+      statusFilter.length === 0
+        ? jobs
+        : jobs.filter((j) => statusFilter.includes(getJobLifecycleStage(j))),
+    [jobs, statusFilter],
+  );
+
+  // The Status default (open stages) counts as "unfiltered" for the empty-state
+  // — a brand-new shop still sees the onboarding CTA. Any deviation, or a
+  // search/overdue/customer filter, flips the empty message to "no matches".
+  const isDefaultStatusFilter =
+    statusFilter.length === DEFAULT_STATUS_FILTER.length &&
+    DEFAULT_STATUS_FILTER.every((s) => statusFilter.includes(s));
+  const hasActiveFilters =
+    !!searchDebounced || overdueOnly || !!customerId || !isDefaultStatusFilter;
+
   // Clear selection when search or any filter changes — the rows on screen
   // change, so any ids selected before may no longer be visible. Called from
   // each control's onChange (not an effect) to avoid set-state-in-effect.
@@ -181,13 +216,13 @@ export default function JobsPage() {
   }, []);
 
   const gridHeight = useMemo(() => {
-    if (loading || jobs.length === 0) return 600;
+    if (loading || visibleJobs.length === 0) return 600;
     const headerHeight = 56;
     const rowHeight = 52;
     const paginationHeight = 56;
-    const displayedRows = Math.min(jobs.length, 25);
+    const displayedRows = Math.min(visibleJobs.length, 25);
     return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
-  }, [loading, jobs.length]);
+  }, [loading, visibleJobs.length]);
 
   const handleGridReady = (event: GridReadyEvent<JobWithRelations>) => {
     event.api.applyColumnState({
@@ -270,11 +305,11 @@ export default function JobsPage() {
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key !== 'Enter') return;
-      if (jobs.length === 1) {
-        router.push(`/dashboard/${companyId}/jobs/${jobs[0].id}`);
+      if (visibleJobs.length === 1) {
+        router.push(`/dashboard/${companyId}/jobs/${visibleJobs[0].id}`);
       }
     },
-    [jobs, router, companyId],
+    [visibleJobs, router, companyId],
   );
 
   const formatDate = (dateStr: string | null): string => {
@@ -296,10 +331,14 @@ export default function JobsPage() {
       headerName: 'Job #',
       width: 160,
       pinned: 'left' as const,
+      // Custom cell renderers don't inherit AG Grid's default vertical centering,
+      // so center the cell content explicitly (the optional "matched …" subline
+      // otherwise pins the value to the top of the row).
+      cellStyle: { display: 'flex', alignItems: 'center' },
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         const ms = params.data?.match_source ?? null;
         return (
-          <Box sx={{ lineHeight: 1.2, py: 0.5 }}>
+          <Box sx={{ lineHeight: 1.2 }}>
             <Box>{params.value}</Box>
             {ms && (
               <Box
@@ -352,14 +391,11 @@ export default function JobsPage() {
       headerName: 'Status',
       width: 200,
       sortable: false,
+      cellStyle: { display: 'flex', alignItems: 'center' },
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
         const cfg = JOB_LIFECYCLE_STAGE_CONFIG[getJobLifecycleStage(params.data)];
-        return (
-          <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <Chip label={cfg.label} color={cfg.color} size="small" />
-          </Box>
-        );
+        return <Chip label={cfg.label} color={cfg.color} size="small" />;
       },
     },
     {
@@ -407,12 +443,23 @@ export default function JobsPage() {
     },
   ];
 
-  const statusOptions: SelectOption[] = (
+  const statusOptions = (
     Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]
   ).map((key) => ({
     id: key,
     label: JOB_LIFECYCLE_STAGE_CONFIG[key].label,
   }));
+
+  const handleStatusChange = (event: SelectChangeEvent<JobLifecycleStage[]>) => {
+    const value = event.target.value;
+    // MUI hands back a string for a single value; normalize to an array.
+    setStatusFilter(
+      (typeof value === 'string'
+        ? (value.split(',') as JobLifecycleStage[])
+        : value),
+    );
+    clearSelection();
+  };
 
   return (
     <Box>
@@ -448,39 +495,33 @@ export default function JobsPage() {
           }}
         />
 
-        <Box sx={{ minWidth: 200 }}>
-          <SearchableSelect
-            options={statusOptions}
+        <FormControl size="small" sx={{ minWidth: 240, maxWidth: 360 }}>
+          <InputLabel id="jobs-status-filter-label">Status</InputLabel>
+          <Select
+            labelId="jobs-status-filter-label"
+            multiple
             value={statusFilter}
-            onChange={(value) => {
-              setStatusFilter((value as JobLifecycleStage) || '');
-              clearSelection();
-            }}
-            label="Status"
-            allowNone
-            noneLabel="Any"
-            size="small"
-          />
-        </Box>
-
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={showClosed}
-              onChange={(e) => {
-                setShowClosed(e.target.checked);
-                clearSelection();
-              }}
-              size="small"
-              sx={{
-                color: 'rgba(255,255,255,0.6)',
-                '&.Mui-checked': { color: 'primary.light' },
-              }}
-            />
-          }
-          label="Show completed & cancelled"
-          sx={{ ml: 0 }}
-        />
+            onChange={handleStatusChange}
+            input={<OutlinedInput label="Status" />}
+            renderValue={(selected) =>
+              selected.length === 0
+                ? 'Any'
+                : selected
+                    .map((s) => JOB_LIFECYCLE_STAGE_CONFIG[s].label)
+                    .join(', ')
+            }
+          >
+            {statusOptions.map((opt) => (
+              <MenuItem key={opt.id} value={opt.id}>
+                <Checkbox
+                  size="small"
+                  checked={statusFilter.includes(opt.id)}
+                />
+                <ListItemText primary={opt.label} />
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
 
         <FormControlLabel
           control={
@@ -536,7 +577,7 @@ export default function JobsPage() {
       {/* Data Grid or Empty State. Jobs come from converting an accepted quote
           (utils/quotesAccess#convertQuoteToJob) or directly from a customer PO
           (New Job from PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
-      {!loading && jobs.length === 0 ? (
+      {!loading && visibleJobs.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
             <WorkIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
@@ -544,11 +585,11 @@ export default function JobsPage() {
               No jobs found
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              {searchDebounced || statusFilter || overdueOnly || showClosed || customerId
+              {hasActiveFilters
                 ? 'No jobs match your filters.'
                 : 'Jobs come from converting an accepted quote, or directly from a customer PO.'}
             </Typography>
-            {!searchDebounced && !statusFilter && !overdueOnly && !showClosed && !customerId && (
+            {!hasActiveFilters && (
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
                 <Button
                   variant="contained"
@@ -584,7 +625,7 @@ export default function JobsPage() {
           >
             <AgGridReact<JobWithRelations>
               ref={gridRef}
-              rowData={jobs}
+              rowData={visibleJobs}
               columnDefs={columnDefs}
               theme={jiggedAgGridTheme}
               defaultColDef={{

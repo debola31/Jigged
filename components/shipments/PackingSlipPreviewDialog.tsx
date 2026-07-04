@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -10,6 +10,8 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import IconButton from '@mui/material/IconButton';
+import Typography from '@mui/material/Typography';
+import BlockIcon from '@mui/icons-material/Block';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import PrintIcon from '@mui/icons-material/Print';
@@ -22,12 +24,18 @@ import {
   packingSlipPdfFilename,
   type PackingSlipPdfContext,
 } from '@/utils/packingSlipPdf';
-import { getShipmentById } from '@/utils/shipmentsAccess';
+import { getShipmentById, voidShipment } from '@/utils/shipmentsAccess';
 
 export interface PackingSlipPreviewDialogProps {
   open: boolean;
   shipmentId: string | null;
   onClose: () => void;
+  /**
+   * Fired after the slip is voided from this dialog so the caller can re-pull
+   * the shipment list + job fulfillment status. When omitted, the void action
+   * is hidden (read-only reprint surfaces don't offer it).
+   */
+  onVoided?: () => void;
 }
 
 /**
@@ -40,12 +48,35 @@ export default function PackingSlipPreviewDialog({
   open,
   shipmentId,
   onClose,
+  onVoided,
 }: PackingSlipPreviewDialogProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [packingSlipNumber, setPackingSlipNumber] = useState<string>('');
+  const [voidedAt, setVoidedAt] = useState<string | null>(null);
+  const [confirmVoid, setConfirmVoid] = useState(false);
+  const [voiding, setVoiding] = useState(false);
+  const [voidError, setVoidError] = useState<string | null>(null);
   const docRef = useRef<jsPDF | null>(null);
   const filenameRef = useRef<string>('packing-slip.pdf');
+
+  const canVoid = !!onVoided && !!shipmentId && !voidedAt;
+
+  const handleVoidConfirm = useCallback(async () => {
+    if (!shipmentId) return;
+    setVoiding(true);
+    setVoidError(null);
+    try {
+      await voidShipment(shipmentId);
+      setConfirmVoid(false);
+      onVoided?.();
+      onClose();
+    } catch (err) {
+      setVoidError(err instanceof Error ? err.message : 'Failed to void shipment.');
+    } finally {
+      setVoiding(false);
+    }
+  }, [shipmentId, onVoided, onClose]);
 
   useEffect(() => {
     if (!open || !shipmentId) return;
@@ -56,6 +87,9 @@ export default function PackingSlipPreviewDialog({
     (async () => {
       setError(null);
       setPdfUrl(null);
+      setVoidedAt(null);
+      setConfirmVoid(false);
+      setVoidError(null);
       try {
         const supabase = getSupabase();
         const shipment = await getShipmentById(shipmentId);
@@ -83,6 +117,7 @@ export default function PackingSlipPreviewDialog({
         revoked = url;
         setPdfUrl(url);
         setPackingSlipNumber(shipment.packing_slip_number);
+        setVoidedAt(shipment.voided_at ?? null);
       } catch (err) {
         if (cancelled) return;
         console.error('PackingSlipPreviewDialog render failed:', err);
@@ -161,6 +196,20 @@ export default function PackingSlipPreviewDialog({
         )}
       </DialogContent>
       <DialogActions>
+        {canVoid && (
+          <Button
+            color="error"
+            startIcon={<BlockIcon />}
+            onClick={() => {
+              setVoidError(null);
+              setConfirmVoid(true);
+            }}
+            disabled={!pdfUrl}
+          >
+            Void
+          </Button>
+        )}
+        <Box sx={{ flex: 1 }} />
         <Button onClick={onClose}>Close</Button>
         <Button
           startIcon={<PrintIcon />}
@@ -178,6 +227,32 @@ export default function PackingSlipPreviewDialog({
           Download
         </Button>
       </DialogActions>
+
+      <Dialog open={confirmVoid} onClose={() => !voiding && setConfirmVoid(false)}>
+        <DialogTitle>Void {packingSlipNumber}?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: voidError ? 2 : 0 }}>
+            This reverses the shipped quantities on <strong>{packingSlipNumber}</strong> and
+            reopens the affected lines. The packing-slip number stays on record as voided — it
+            is not reused.
+          </Typography>
+          {voidError && <Alert severity="error">{voidError}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmVoid(false)} disabled={voiding}>
+            Keep slip
+          </Button>
+          <Button
+            onClick={handleVoidConfirm}
+            color="error"
+            variant="contained"
+            disabled={voiding}
+            startIcon={voiding ? <CircularProgress size={16} color="inherit" /> : <BlockIcon />}
+          >
+            {voiding ? 'Voiding…' : 'Void slip'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }

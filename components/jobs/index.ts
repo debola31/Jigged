@@ -5,7 +5,6 @@ export { default as OperationStatusChip } from "./OperationStatusChip";
 export { default as OperationCard } from "./OperationCard";
 export { default as OperationsPanel } from "./OperationsPanel";
 export { default as JobPartMaterialsCard } from "./JobPartMaterialsCard";
-export { default as CompleteOperationModal } from "./CompleteOperationModal";
 export { default as JobTravelerPreviewDialog } from "./JobTravelerPreviewDialog";
 export { default as JobBillingShippingCard } from "./JobBillingShippingCard";
 export { default as JobEditForm } from "./JobEditForm";

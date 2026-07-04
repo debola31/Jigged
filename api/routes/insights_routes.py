@@ -3,7 +3,6 @@ API routes for AI Insights & Charts feature.
 
 Endpoints:
 - POST /{company_id}/chat        - Submit natural language question
-- GET  /{company_id}/chat/history - Get last 20 chat queries
 
 Note: Saved insights CRUD (get/save/delete) is handled client-side
 via direct Supabase queries with RLS policies. Per-company alerts
@@ -24,8 +23,6 @@ from fastapi import APIRouter, HTTPException
 from supabase import Client, create_client
 
 from models.insights_models import (
-    ChatHistoryItem,
-    ChatHistoryResponse,
     ChatRequest,
     ChatResponse,
 )
@@ -46,27 +43,99 @@ def _get_supabase_service_role() -> Client:
     return create_client(url, key)
 
 
-def _check_chat_rate_limit(company_id: str) -> None:
+# Default per-company hourly cap, used when a company has no explicit override
+# in settings.ai_limits.chat_per_hour. A system admin can raise/lower it per
+# company from /admin.
+DEFAULT_CHAT_LIMIT_PER_HOUR = 20
+
+
+def _get_company_ai_settings(company_id: str) -> tuple[bool, int]:
+    """Read (ai_insights_enabled, chat_per_hour) from companies.settings.
+
+    ai_insights is opt-OUT — a GA feature with a per-tenant kill-switch: enabled
+    unless the company row explicitly stores settings.features.ai_insights =
+    false. The rate limit falls back to DEFAULT_CHAT_LIMIT_PER_HOUR when unset
+    or invalid.
+
+    Fails open — (True, default) — on a read error, matching the rate limiter's
+    allow-through-on-error stance so a transient DB blip never dark-launches the
+    GA feature off.
     """
-    Check if the company has exceeded the chat rate limit (20 queries/hour).
+    try:
+        supabase = _get_supabase_service_role()
+        resp = (
+            supabase.table("companies")
+            .select("settings")
+            .eq("id", company_id)
+            .single()
+            .execute()
+        )
+        settings = (resp.data or {}).get("settings") or {}
+    except Exception as e:
+        logger.warning(f"Failed to read company AI settings: {e}")
+        return True, DEFAULT_CHAT_LIMIT_PER_HOUR
+
+    features = settings.get("features") or {}
+    raw_enabled = features.get("ai_insights")
+    # Missing key → default on; explicit false (bool or legacy "false") → off.
+    enabled = raw_enabled is None or raw_enabled is True or raw_enabled == "true"
+
+    limits = settings.get("ai_limits") or {}
+    raw_limit = limits.get("chat_per_hour")
+    limit = (
+        int(raw_limit)
+        if isinstance(raw_limit, (int, float)) and int(raw_limit) > 0
+        else DEFAULT_CHAT_LIMIT_PER_HOUR
+    )
+    return enabled, limit
+
+
+def _seconds_until_window_frees(oldest_created_at, now: datetime) -> int:
+    """Seconds until the oldest in-window query ages past the 1-hour window.
+
+    Clamped to [1, 3600]; falls back to 3600 if the timestamp can't be parsed.
+    """
+    try:
+        # PostgREST returns ISO 8601; tolerate a trailing 'Z'.
+        oldest = datetime.fromisoformat(str(oldest_created_at).replace("Z", "+00:00"))
+        remaining = int((oldest + timedelta(hours=1) - now).total_seconds())
+    except (ValueError, TypeError):
+        return 3600
+    return max(1, min(remaining, 3600))
+
+
+def _check_chat_rate_limit(company_id: str, limit: int) -> None:
+    """
+    Enforce the company's chat rate limit (queries in the last hour).
+
+    On breach, raises 429 with a message reflecting the company's actual limit
+    and a Retry-After header set to the seconds until the oldest in-window query
+    ages out. A read error is non-fatal (allow the request through).
     """
     supabase = _get_supabase_service_role()
-    one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
 
     try:
         response = (
             supabase.table("ai_chat_queries")
-            .select("id", count="exact")
+            .select("created_at")
             .eq("company_id", company_id)
-            .gte("created_at", one_hour_ago)
+            .gte("created_at", one_hour_ago.isoformat())
+            .order("created_at", desc=False)
             .execute()
         )
 
-        count = response.count or 0
-        if count >= 20:
+        rows = response.data or []
+        if len(rows) >= limit:
+            retry_after = _seconds_until_window_frees(rows[0].get("created_at"), now)
             raise HTTPException(
                 status_code=429,
-                detail="Rate limit exceeded. Maximum 20 AI chat queries per hour per company.",
+                detail=(
+                    f"Rate limit exceeded. Maximum {limit} AI chat queries "
+                    f"per hour per company."
+                ),
+                headers={"Retry-After": str(retry_after)},
             )
     except HTTPException:
         raise
@@ -86,10 +155,16 @@ async def chat(company_id: str, request: ChatRequest):
     Submit a natural language question about company data.
     Uses AI tool-use to query metrics and generate a response.
 
-    Rate limited to 20 queries per company per hour.
+    Gated on the per-company ai_insights flag (403 when disabled) and rate
+    limited to the company's configured hourly cap.
     """
-    # Check rate limit
-    _check_chat_rate_limit(company_id)
+    ai_enabled, chat_limit = _get_company_ai_settings(company_id)
+    if not ai_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="AI Insights is disabled for this company.",
+        )
+    _check_chat_rate_limit(company_id, chat_limit)
 
     start_time = time.time()
 
@@ -141,7 +216,6 @@ async def chat(company_id: str, request: ChatRequest):
             supabase = _get_supabase_service_role()
             supabase.table("ai_chat_queries").insert({
                 "company_id": company_id,
-                "user_id": None,
                 "question": request.question,
                 "tool_calls": result.get("tool_calls", []),
                 "response": result["content"],
@@ -409,43 +483,3 @@ def _select_chart_type(config: dict | None, question: str = "") -> dict | None:
         chosen = "bar_horizontal" if (longest > 14 or n > 8) else "bar"
 
     return {**config, "chart_type": chosen}
-
-
-@router.get("/{company_id}/chat/history", response_model=ChatHistoryResponse)
-async def get_chat_history(company_id: str):
-    """
-    Get the last 20 chat queries for this company.
-    """
-    try:
-        supabase = _get_supabase_service_role()
-
-        response = (
-            supabase.table("ai_chat_queries")
-            .select("id, question, response, chart_config, created_at")
-            .eq("company_id", company_id)
-            .order("created_at", desc=True)
-            .limit(20)
-            .execute()
-        )
-
-        queries = []
-        for row in response.data or []:
-            queries.append(
-                ChatHistoryItem(
-                    id=row["id"],
-                    question=row["question"],
-                    response=row["response"],
-                    has_chart=row.get("chart_config") is not None,
-                    created_at=row["created_at"],
-                )
-            )
-
-        return ChatHistoryResponse(queries=queries)
-
-    except Exception as e:
-        logger.error(f"Error fetching chat history: {e}", exc_info=True)
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )

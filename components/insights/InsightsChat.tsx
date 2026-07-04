@@ -22,8 +22,6 @@ import {
 } from '@/utils/insightsAccess';
 import { saveInsight } from '@/utils/savedInsightsAccess';
 
-const MAX_SAVED = 5;
-
 const EXAMPLE_PROMPTS = [
   'What is my revenue trend over time?',
   'Who is my top customer by revenue?',
@@ -41,8 +39,6 @@ interface InsightsChatProps {
   companyId: string;
   /** Called when user saves an insight so InsightsSection can refresh */
   onInsightSaved?: () => void;
-  /** Current number of saved insights (for limit enforcement) */
-  savedCount?: number;
 }
 
 interface ChatResult {
@@ -55,7 +51,7 @@ interface ChatResult {
  * AskBar: Compact question input with inline response.
  * Latest response appears directly below with optional chart + save action.
  */
-export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0 }: InsightsChatProps) {
+export default function InsightsChat({ companyId, onInsightSaved }: InsightsChatProps) {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,10 +114,8 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
     }
   };
 
-  const atLimit = savedCount >= MAX_SAVED;
-
   const handleSave = async () => {
-    if (!result || saving || saved || atLimit) return;
+    if (!result || saving || saved) return;
 
     setSaving(true);
     try {
@@ -232,10 +226,10 @@ export default function InsightsChat({ companyId, onInsightSaved, savedCount = 0
                 size="small"
                 variant="outlined"
                 onClick={handleSave}
-                disabled={saving || atLimit}
+                disabled={saving}
                 startIcon={saving ? <CircularProgress size={14} /> : <BookmarkBorderIcon />}
               >
-                {atLimit ? 'Limit reached' : 'Save to dashboard'}
+                Save to dashboard
               </Button>
             </Box>
           )}

@@ -87,6 +87,9 @@ class CompanyListItem(BaseModel):
     # lib/featureFlags.ts KNOWN_FEATURES so the admin UI can render
     # toggles without hardcoding the list per call site.
     features: dict[str, bool] = {}
+    # Per-company AI chat rate limit (queries/hour), from
+    # companies.settings.ai_limits.chat_per_hour. Defaults to 20 when unset.
+    ai_chat_limit_per_hour: int = 20
 
 
 class CompanyFeaturesUpdateRequest(BaseModel):
@@ -96,8 +99,21 @@ class CompanyFeaturesUpdateRequest(BaseModel):
     Anything omitted is treated as false (replace-style, not patch-style)
     so the request is self-describing — the caller sends what they want
     on, the server stores exactly that under settings.features.
+
+    Optionally carries the per-company AI chat rate limit (queries/hour),
+    persisted to settings.ai_limits.chat_per_hour. Omitted → left unchanged.
     """
     features: dict[str, bool]
+    ai_chat_limit_per_hour: Optional[int] = None
+
+    @field_validator("ai_chat_limit_per_hour")
+    @classmethod
+    def validate_chat_limit(cls, v):
+        if v is None:
+            return v
+        if v < 1 or v > 1000:
+            raise ValueError("ai_chat_limit_per_hour must be between 1 and 1000")
+        return v
 
 
 class CompanyFeaturesUpdateResponse(BaseModel):

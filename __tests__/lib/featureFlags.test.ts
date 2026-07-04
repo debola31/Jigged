@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isAiInsightsEnabled,
   isInventoryLocationsEnabled,
   readCompanyFeatures,
   KNOWN_FEATURES,
@@ -31,5 +32,40 @@ describe('featureFlags: inventory_locations', () => {
 
   it('shipments is no longer a feature flag (now core / always-on)', () => {
     expect(KNOWN_FEATURES.map((f) => f.key)).not.toContain('shipments');
+  });
+});
+
+describe('featureFlags: ai_insights (opt-out / default-on)', () => {
+  it('is registered with defaultEnabled true (renders a toggle, defaults on)', () => {
+    const descriptor = KNOWN_FEATURES.find((f) => f.key === 'ai_insights');
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.defaultEnabled).toBe(true);
+  });
+
+  it('defaults ON when the company has no explicit value', () => {
+    // Missing key, missing features block, missing settings, and null/undefined
+    // company all read as enabled — this is a GA feature with a kill-switch.
+    expect(isAiInsightsEnabled({ settings: { features: {} } })).toBe(true);
+    expect(isAiInsightsEnabled({ settings: {} })).toBe(true);
+    expect(isAiInsightsEnabled(null)).toBe(true);
+    expect(isAiInsightsEnabled(undefined)).toBe(true);
+  });
+
+  it('stays ON for an explicit true (boolean or "true")', () => {
+    expect(isAiInsightsEnabled({ settings: { features: { ai_insights: true } } })).toBe(true);
+    expect(isAiInsightsEnabled({ settings: { features: { ai_insights: 'true' } } })).toBe(true);
+  });
+
+  it('turns OFF only when explicitly disabled', () => {
+    expect(isAiInsightsEnabled({ settings: { features: { ai_insights: false } } })).toBe(false);
+  });
+
+  it('readCompanyFeatures reflects the opt-out default without leaking to opt-in flags', () => {
+    const noneSet = readCompanyFeatures({ settings: { features: {} } });
+    expect(noneSet.ai_insights).toBe(true); // opt-out default on
+    expect(noneSet.inventory_locations).toBe(false); // opt-in default off, unaffected
+
+    const disabled = readCompanyFeatures({ settings: { features: { ai_insights: false } } });
+    expect(disabled.ai_insights).toBe(false);
   });
 });

@@ -74,11 +74,13 @@ export default function OperationCard({
     return new Date(dateStr).toLocaleString();
   };
 
-  const hasDetails =
-    operation.started_at ||
-    operation.completed_at ||
-    operation.notes ||
-    stepNotes.length > 0;
+  // Expandability is driven purely by whether there are notes to reveal — an
+  // admin completion note or operator step-notes. This is independent of
+  // completion status, so a pending operation with operator notes is expandable
+  // too (the office needs to see floor notes before an op is finished). The
+  // timestamps aren't a reason to expand: the completed time already shows
+  // inline on the collapsed row, and the started time is redundant with it.
+  const hasNotes = !!operation.notes || stepNotes.length > 0;
 
   return (
     <Box
@@ -187,7 +189,7 @@ export default function OperationCard({
         </Box>
 
         {/* Expand Button */}
-        {hasDetails && (
+        {hasNotes && (
           <IconButton
             size="small"
             onClick={() => setExpanded(!expanded)}
@@ -211,17 +213,7 @@ export default function OperationCard({
             mt: 0,
           }}
         >
-          {/* Started — Completed is already shown inline on the row. */}
-          {operation.started_at && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                Started
-              </Typography>
-              <Typography variant="body2">{formatDateTime(operation.started_at)}</Typography>
-            </Box>
-          )}
-
-          {/* Notes captured at completion (admin Complete modal). */}
+          {/* Admin note captured at completion (Complete modal). */}
           {operation.notes && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="caption" color="text.secondary" fontWeight={600}>

@@ -77,7 +77,7 @@ export default function MetricPickerModal({
       <DialogTitle>
         Choose Metrics
         <Typography variant="body2" color="text.secondary">
-          Select up to 3 metrics. Use the arrows to reorder. Overdue Jobs is always shown first.
+          Select up to 4 metrics. Use the arrows to reorder.
         </Typography>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0 }}>

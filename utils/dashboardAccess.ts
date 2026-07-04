@@ -57,23 +57,21 @@ export const AVAILABLE_METRICS: MetricDefinition[] = [
   { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
 ];
 
-// Overdue is always pinned in slot 1 (not user-configurable). The user's
-// picked metrics fill slots 2-4 — so the pinned list holds up to 3 keys.
-export const PINNED_METRIC_SLOTS = 3;
+// The user pins up to this many metrics; they render as the primary dashboard
+// cards (one page of the scorecard grid). Overdue Jobs is a normal pickable
+// metric — included in the defaults so it shows out of the box, but the user
+// can reorder or remove it like any other.
+export const PINNED_METRIC_SLOTS = 4;
 
 export const DEFAULT_PINNED_METRICS: MetricKey[] = [
+  'overdue_jobs',
   'open_quotes',
   'not_started_jobs',
   'in_progress_jobs',
 ];
 
-// Metrics the user is allowed to pin (Overdue is always pinned separately).
-export const PICKABLE_METRICS: MetricDefinition[] = AVAILABLE_METRICS.filter(
-  (m) => m.key !== 'overdue_jobs'
-);
-
-// The always-pinned alert-class metric.
-export const ALWAYS_PINNED_METRIC: MetricKey = 'overdue_jobs';
+// Metrics the user is allowed to pin — every available metric.
+export const PICKABLE_METRICS: MetricDefinition[] = AVAILABLE_METRICS;
 
 // Legacy key migration map
 const LEGACY_KEY_MAP: Record<string, MetricKey> = {
@@ -108,19 +106,33 @@ export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
   const prefs = data.preferences as Record<string, unknown> | null;
   const pinned = prefs?.dashboard_pinned_metrics;
   if (Array.isArray(pinned) && pinned.length > 0) {
-    // Migrate legacy keys
+    // Migrate legacy keys (rename / drop removed)
     const migrated = pinned
       .map((k: string) => LEGACY_KEY_MAP[k] || k)
       .filter((k: string) => !REMOVED_KEYS.includes(k))
       .filter((k: string, i: number, arr: string[]) => arr.indexOf(k) === i) as MetricKey[];
 
-    // Persist migration if keys changed
-    const changed = migrated.length !== pinned.length || migrated.some((k, i) => k !== pinned[i]);
-    if (changed) {
-      setPinnedMetricKeys(migrated).catch((err) => Sentry.captureException(err, { level: 'warning' }));
+    // One-time Overdue migration: Overdue Jobs used to be force-pinned outside
+    // the stored list, so pre-existing prefs never contain it. Now it's a normal
+    // selectable metric — fold it in once (front, capped at the slot count) so it
+    // stays visible on existing dashboards. Gated by a flag (stamped whenever
+    // prefs are saved, see setPinnedMetricKeys) so a later deliberate removal
+    // sticks instead of bouncing back on the next load.
+    const overdueFolded =
+      prefs?.dashboard_overdue_selectable_migrated !== true && !migrated.includes('overdue_jobs');
+    const withOverdue = overdueFolded
+      ? (['overdue_jobs', ...migrated].slice(0, PINNED_METRIC_SLOTS) as MetricKey[])
+      : migrated;
+
+    // Persist if legacy keys changed or we just folded Overdue in (the save also
+    // stamps the migration flag).
+    const changed =
+      withOverdue.length !== pinned.length || withOverdue.some((k, i) => k !== pinned[i]);
+    if (changed || overdueFolded) {
+      setPinnedMetricKeys(withOverdue).catch((err) => Sentry.captureException(err, { level: 'warning' }));
     }
 
-    return migrated.length > 0 ? migrated : DEFAULT_PINNED_METRICS;
+    return withOverdue.length > 0 ? withOverdue : DEFAULT_PINNED_METRICS;
   }
   return DEFAULT_PINNED_METRICS;
 }
@@ -141,7 +153,13 @@ export async function setPinnedMetricKeys(keys: MetricKey[]): Promise<void> {
     .maybeSingle();
 
   const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
-  const updatedPrefs = { ...currentPrefs, dashboard_pinned_metrics: keys };
+  const updatedPrefs = {
+    ...currentPrefs,
+    dashboard_pinned_metrics: keys,
+    // Any explicit save makes the user's list authoritative (including whether
+    // they kept Overdue), so stamp the one-time Overdue migration as done.
+    dashboard_overdue_selectable_migrated: true,
+  };
 
   await supabase
     .from('user_preferences')

@@ -42,6 +42,7 @@ import {
   deleteJob,
   bulkCancelJobs,
   createJobFromPurchaseOrder,
+  getAllJobs,
   getCustomersForSelect,
   getOverdueJobsCount,
   getReadyOperationsForJobs,
@@ -815,6 +816,44 @@ describe('jobsAccess', () => {
       await expect(
         updateJobDetails('j1', 'co-1', { due_date: '2026-07-01' }),
       ).rejects.toThrow(/don't have permission/);
+    });
+  });
+
+  describe('getAllJobs', () => {
+    const rows = [
+      { id: 'active-ns', production_status: 'not_started', fulfillment_status: 'unshipped' },
+      { id: 'active-ip', production_status: 'in_progress', fulfillment_status: 'partially_shipped' },
+      { id: 'ready', production_status: 'completed', fulfillment_status: 'unshipped' },
+      { id: 'done', production_status: 'completed', fulfillment_status: 'fully_shipped' },
+      { id: 'cancelled-unshipped', production_status: 'cancelled', fulfillment_status: 'unshipped' },
+    ];
+
+    it('hides closed jobs (done + cancelled) by default', async () => {
+      mockQueryBuilder.data = rows;
+      const result = await getAllJobs('co-1');
+      const ids = result.map((j) => j.id);
+      expect(ids).toEqual(['active-ns', 'active-ip', 'ready']);
+      // Behavior change: the cancelled-but-unshipped job is now hidden too,
+      // alongside the fully-shipped done job.
+      expect(ids).not.toContain('done');
+      expect(ids).not.toContain('cancelled-unshipped');
+    });
+
+    it('keeps closed jobs when excludeClosed is false (Show completed & cancelled)', async () => {
+      mockQueryBuilder.data = rows;
+      const result = await getAllJobs('co-1', { excludeClosed: false });
+      expect(result.map((j) => j.id)).toEqual(rows.map((r) => r.id));
+    });
+
+    it('applies production/fulfillment status filters server-side via .in()', async () => {
+      mockQueryBuilder.data = [];
+      await getAllJobs('co-1', {
+        productionStatus: ['completed'],
+        fulfillmentStatus: ['fully_shipped'],
+      });
+      expect(mockQueryBuilder.in).toHaveBeenCalledWith('production_status', ['completed']);
+      expect(mockQueryBuilder.in).toHaveBeenCalledWith('fulfillment_status', ['fully_shipped']);
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
     });
   });
 });

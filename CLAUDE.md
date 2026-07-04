@@ -488,6 +488,23 @@ pnpm install                                       # node deps for THIS worktree
 conda run -n jigged python -m pytest tests/unit/   # backend tests, jigged env
 ```
 
+**The local Supabase stack follows the _primary_ checkout's branch, not your
+worktree.** `supabase start` / `supabase db reset` replay the migrations on the
+branch checked out in the **primary** working tree (the first entry in
+`git worktree list`) — a linked worktree's un-merged migrations are **not** on
+the local stack. So when working from a worktree:
+
+- **No migration changes in your branch?** The local stack is a valid substrate
+  — run `pnpm dev`, unit tests, and E2E against it from the worktree normally.
+  This is why a UI/logic-only change can be fully verified locally from a
+  worktree (the schema it needs already exists).
+- **Your branch adds or edits migrations?** Verify them on the PR's Supabase
+  **preview branch**, which applies the migration to its own isolated DB —
+  that's the gate. Do **not** try to reproduce them on the local stack from a
+  worktree: checking the branch out in the primary tree or `db reset`-ing to
+  pick them up just confuses what the local stack represents (and mutates the
+  primary's checkout). Keep migration verification on the preview branch.
+
 ### E2E gotchas
 
 - **`csv-import` spec skips in CI** via `test.skip(!!process.env.CI)`.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -21,6 +22,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import EmailIcon from '@mui/icons-material/Email';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ToggleOnIcon from '@mui/icons-material/ToggleOn';
@@ -37,6 +39,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getSupabase } from '@/lib/supabase';
 import { KNOWN_FEATURES } from '@/lib/featureFlags';
+import { getUserCompanies } from '@/utils/companyAccess';
 
 interface CompanyListItem {
   id: string;
@@ -53,6 +56,9 @@ interface CompanyListItem {
 // Stable empty fallback so the filtered-companies memo doesn't recompute on
 // every render while the first load is in flight.
 const EMPTY_COMPANIES: CompanyListItem[] = [];
+
+// Stable empty fallback for the current admin's own-company membership set.
+const EMPTY_MEMBER_IDS: ReadonlySet<string> = new Set();
 
 const getAdminApiUrl = () => {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
@@ -75,6 +81,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export default function AdminCompaniesPage() {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -136,6 +143,24 @@ export default function AdminCompaniesPage() {
   );
   const companies = companiesData ?? EMPTY_COMPANIES;
 
+  // Companies the CURRENT admin is actually a member of (has a user_company_access
+  // row for). System admins are platform managers with no standing access to tenant
+  // data, so we only offer "Visit dashboard" for companies they can genuinely open —
+  // mirroring the dashboard AuthGuard's verifyCompanyAccess check. For every other
+  // company the link would bounce to no-access, so it's hidden.
+  const { data: memberIdsData } = useLoad<ReadonlySet<string>>(
+    async () => {
+      const supabase = getSupabase();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return EMPTY_MEMBER_IDS;
+      const mine = await getUserCompanies(user.id);
+      return new Set(mine.map((c) => c.company_id));
+    },
+    [],
+    { onError: (err) => console.error('Error loading admin membership set:', err) },
+  );
+  const memberCompanyIds = memberIdsData ?? EMPTY_MEMBER_IDS;
+
   // Filtered companies based on search
   const filteredCompanies = useMemo(() => {
     if (!search.trim()) return companies;
@@ -150,11 +175,14 @@ export default function AdminCompaniesPage() {
   }, [companies, search]);
 
   // --- Actions handlers ---
-  // Note: no "visit dashboard" action here. System admins are platform managers,
-  // not tenant members — they have no user_company_access row, so RLS (and the
-  // dashboard AuthGuard) correctly deny reads of a company's business data.
-  // Opening a tenant dashboard would just bounce to no-access, so this surface
-  // stays scoped to company management (rename, features, delete, create).
+
+  const handleVisitDashboard = useCallback(
+    (e: React.MouseEvent, company: CompanyListItem) => {
+      e.stopPropagation();
+      router.push(`/dashboard/${company.id}`);
+    },
+    [router]
+  );
 
   const handleEditOpen = useCallback((e: React.MouseEvent, company: CompanyListItem) => {
     e.stopPropagation();
@@ -392,7 +420,7 @@ export default function AdminCompaniesPage() {
       {
         colId: 'actions',
         headerName: '',
-        width: 140,
+        width: 170,
         sortable: false,
         resizable: false,
         pinned: 'right' as const,
@@ -401,6 +429,16 @@ export default function AdminCompaniesPage() {
           const company = params.data;
           return (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, height: '100%' }}>
+              {/* Only for companies this admin actually belongs to — otherwise the
+                  dashboard bounces to no-access (system admins have no standing
+                  access to tenant data). */}
+              {memberCompanyIds.has(company.id) && (
+                <Tooltip title="Visit dashboard">
+                  <IconButton size="small" onClick={(e) => handleVisitDashboard(e, company)}>
+                    <OpenInNewIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="Feature flags">
                 <IconButton size="small" onClick={(e) => handleFeaturesOpen(e, company)}>
                   <ToggleOnIcon fontSize="small" />
@@ -425,7 +463,7 @@ export default function AdminCompaniesPage() {
         },
       },
     ],
-    [handleEditOpen, handleDeleteOpen, handleFeaturesOpen]
+    [handleVisitDashboard, handleEditOpen, handleDeleteOpen, handleFeaturesOpen, memberCompanyIds]
   );
 
   // --- Create form handlers ---

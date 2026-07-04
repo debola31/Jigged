@@ -69,7 +69,10 @@ Deno.serve(async (req: Request) => {
 
     await sendEmail(apiKey, {
       from: 'Jigged <noreply@jigged.app>',
-      to: 'noreply@jigged.app',
+      // Notify a real, monitored inbox. Was noreply@jigged.app, which Resend
+      // suppresses (not a deliverable address). hello@ is an alias today, to
+      // become a shared feedback inbox later.
+      to: 'hello@jigged.app',
       subject: `Feedback: ${page_title} — ${companyName}`,
       text: [
         'New in-app feedback:',

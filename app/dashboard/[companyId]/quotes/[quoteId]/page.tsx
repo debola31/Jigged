@@ -26,11 +26,6 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Chip from '@mui/material/Chip';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
-import ListItemIcon from '@mui/material/ListItemIcon';
-import ListItemText from '@mui/material/ListItemText';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import {
   getQuoteWithRelations,
@@ -43,8 +38,6 @@ import { getJobQuantitiesForQuote } from '@/utils/jobsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
-import QuoteEmailDialog from '@/components/quotes/QuoteEmailDialog';
-import EmailIcon from '@mui/icons-material/Email';
 import {
   quoteToFormData,
   isQuoteExpired,
@@ -74,8 +67,6 @@ export default function QuoteDetailPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   // Current job_part quantities keyed by source quote line — populated only for
   // converted quotes so each line can reflect "now N on the job" when a job
   // quantity was edited after conversion. The quote keeps its quoted figures.
@@ -204,27 +195,6 @@ export default function QuoteDetailPage() {
     }
   };
 
-  const handleEmailQuote = async () => {
-    if (!quote) return;
-    setError(null);
-    setPreviewLoading(true);
-    try {
-      // Ensure the company is loaded so the email dialog can render the
-      // example message and generate the PDF for download. The dialog itself
-      // owns the To/CC entry, the mailto launch, and the PDF download.
-      const c = company ?? (await getCompany(companyId));
-      if (!c) {
-        throw new Error('Company info unavailable — cannot draft email.');
-      }
-      setCompany(c);
-      setEmailOpen(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open email draft');
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -340,10 +310,11 @@ export default function QuoteDetailPage() {
         >
           Back to Quotes
         </Button>
-        {/* One action row: the single primary action ("Convert to Job") plus an
-            overflow menu for the rest. Keeps the page to one line of actions and
-            uses labelled menu items (not bare icons) — better for the shop-floor
-            tablet / older-user audience than an icon row. */}
+        {/* One action row of standalone buttons following the design-system
+            hierarchy: Convert to Job is the primary (contained) action; Edit and
+            View PDF are secondary (outlined); Delete is a red icon button. Labelled
+            buttons (not a hidden icon menu) read better for the shop-floor tablet /
+            older-user audience. */}
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           {!convertedLocked && (
             <Button
@@ -356,75 +327,39 @@ export default function QuoteDetailPage() {
               Convert to Job
             </Button>
           )}
-          <Tooltip title="Quote actions">
-            <IconButton
-              aria-label="Quote actions"
-              onClick={(e) => setMenuAnchor(e.currentTarget)}
+          {isEditable && (
+            <Button
+              variant="outlined"
+              startIcon={<EditIcon />}
+              onClick={() => setEditMode(true)}
               disabled={actionLoading}
-              sx={{ minWidth: 48, minHeight: 48 }}
             >
-              {previewLoading ? <CircularProgress size={20} color="inherit" /> : <MoreVertIcon />}
-            </IconButton>
-          </Tooltip>
-          <Menu
-            anchorEl={menuAnchor}
-            open={Boolean(menuAnchor)}
-            onClose={() => setMenuAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              Edit
+            </Button>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={
+              previewLoading ? <CircularProgress size={18} color="inherit" /> : <VisibilityIcon />
+            }
+            onClick={handleOpenPreview}
+            disabled={actionLoading || previewLoading}
           >
-            {isEditable && (
-              <MenuItem
-                onClick={() => {
-                  setMenuAnchor(null);
-                  setEditMode(true);
-                }}
-                sx={{ minHeight: 48 }}
+            View PDF
+          </Button>
+          <Tooltip title="Delete quote">
+            <span>
+              <IconButton
+                color="error"
+                onClick={() => setDeleteDialogOpen(true)}
+                disabled={actionLoading}
+                aria-label="Delete quote"
+                sx={{ minWidth: 48, minHeight: 48 }}
               >
-                <ListItemIcon>
-                  <EditIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText>Edit</ListItemText>
-              </MenuItem>
-            )}
-            <MenuItem
-              onClick={() => {
-                setMenuAnchor(null);
-                handleOpenPreview();
-              }}
-              sx={{ minHeight: 48 }}
-            >
-              <ListItemIcon>
-                <VisibilityIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>View PDF</ListItemText>
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                setMenuAnchor(null);
-                handleEmailQuote();
-              }}
-              sx={{ minHeight: 48 }}
-            >
-              <ListItemIcon>
-                <EmailIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Email</ListItemText>
-            </MenuItem>
-            <Divider />
-            <MenuItem
-              onClick={() => {
-                setMenuAnchor(null);
-                setDeleteDialogOpen(true);
-              }}
-              sx={{ minHeight: 48, color: 'error.main' }}
-            >
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" sx={{ color: 'error.main' }} />
-              </ListItemIcon>
-              <ListItemText>Delete</ListItemText>
-            </MenuItem>
-          </Menu>
+                <DeleteIcon />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -672,8 +607,19 @@ export default function QuoteDetailPage() {
                         return rows.map((li, i) => (
                           <tr key={li.id}>
                             {i === 0 && (
-                              <td rowSpan={rows.length} style={{ fontWeight: 600 }}>
-                                {group.part_name}
+                              <td rowSpan={rows.length}>
+                                <MuiLink
+                                  component={Link}
+                                  href={`/dashboard/${companyId}/parts/${group.part_id}`}
+                                  sx={{
+                                    color: 'inherit',
+                                    fontWeight: 600,
+                                    textDecoration: 'none',
+                                    '&:hover': { textDecoration: 'underline' },
+                                  }}
+                                >
+                                  {group.part_name}
+                                </MuiLink>
                               </td>
                             )}
                             {i === 0 && (
@@ -776,20 +722,6 @@ export default function QuoteDetailPage() {
         <QuotePdfPreviewDialog
           open={previewOpen}
           onClose={() => setPreviewOpen(false)}
-          quote={quote}
-          company={company}
-          onEmail={() => {
-            setPreviewOpen(false);
-            handleEmailQuote();
-          }}
-        />
-      )}
-
-      {/* Email Quote Dialog — To/CC entry, example message, PDF download */}
-      {company && (
-        <QuoteEmailDialog
-          open={emailOpen}
-          onClose={() => setEmailOpen(false)}
           quote={quote}
           company={company}
         />

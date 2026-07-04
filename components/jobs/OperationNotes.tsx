@@ -16,8 +16,9 @@ const THUMB = 64;
 
 /**
  * Read-only display of the operator's step-tagged notes + photos for one
- * operation, shown when a completed operation is expanded on the job page.
- * The capture happens on the operator view; this surfaces it for the office.
+ * operation, shown when an operation is expanded on the job page (any status —
+ * a pending op with notes expands too). The capture happens on the operator
+ * view; this surfaces it for the office.
  */
 export default function OperationNotes({ notes }: { notes: JobNote[] }) {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});

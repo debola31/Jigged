@@ -17,8 +17,6 @@ import {
   type MetricValue,
   type MetricTimePeriod,
   AVAILABLE_METRICS,
-  ALWAYS_PINNED_METRIC,
-  PICKABLE_METRICS,
   PINNED_METRIC_SLOTS,
   getPinnedMetricKeys,
   setPinnedMetricKeys,
@@ -67,11 +65,11 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [page, setPage] = useState(0);
 
-  // Every key we need a value for — always includes overdue.
+  // Every key we need a value for — the user's pinned metrics first (in their
+  // chosen order), then the rest so the pager can page through them.
   const allKeys = useMemo<MetricKey[]>(() => {
-    const userPicked = pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC);
-    const unpicked = PICKABLE_METRICS.map((m) => m.key).filter((k) => !userPicked.includes(k));
-    return [ALWAYS_PINNED_METRIC, ...userPicked, ...unpicked];
+    const unpicked = AVAILABLE_METRICS.map((m) => m.key).filter((k) => !pinnedKeys.includes(k));
+    return [...pinnedKeys, ...unpicked];
   }, [pinnedKeys]);
 
   const pages = useMemo<MetricKey[][]>(() => {
@@ -204,9 +202,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
           sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
           onClick={() => setPickerOpen(true)}
         >
-          {pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC).length < PINNED_METRIC_SLOTS
-            ? '+ Add metric'
-            : 'Edit metrics'}
+          {pinnedKeys.length < PINNED_METRIC_SLOTS ? '+ Add metric' : 'Edit metrics'}
         </Typography>
         <Box sx={{ ml: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
           {multiplePages && (
@@ -267,7 +263,7 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       <MetricPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        currentKeys={pinnedKeys.filter((k) => k !== ALWAYS_PINNED_METRIC)}
+        currentKeys={pinnedKeys}
         onSave={handleSave}
       />
     </Box>

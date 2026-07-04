@@ -12,7 +12,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
-import EmailIcon from '@mui/icons-material/Email';
 
 import type { jsPDF } from 'jspdf';
 import type { QuoteWithRelations } from '@/types/quote';
@@ -24,9 +23,6 @@ interface QuotePdfPreviewDialogProps {
   onClose: () => void;
   quote: QuoteWithRelations;
   company: Company;
-  /** Optional: when present, render an "Email" button that closes the
-   *  preview and invokes this callback so the parent opens the email dialog. */
-  onEmail?: () => void;
 }
 
 export default function QuotePdfPreviewDialog({
@@ -34,7 +30,6 @@ export default function QuotePdfPreviewDialog({
   onClose,
   quote,
   company,
-  onEmail,
 }: QuotePdfPreviewDialogProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,18 +102,6 @@ export default function QuotePdfPreviewDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
-        {onEmail && (
-          <Button
-            startIcon={<EmailIcon />}
-            onClick={() => {
-              onClose();
-              onEmail();
-            }}
-            disabled={!pdfUrl}
-          >
-            Email
-          </Button>
-        )}
         <Button
           variant="contained"
           startIcon={<DownloadIcon />}

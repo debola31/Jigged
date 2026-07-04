@@ -100,8 +100,9 @@ export default function JobDetailPage() {
         console.warn('Job detail: per-part invoice summaries failed', err);
       }
       try {
-        // Operator step-tagged notes + photos, grouped by operation, so a completed
-        // operation's expand can show who noted what (and any pictures).
+        // Operator step-tagged notes + photos, grouped by operation, so an
+        // operation's expand can show who noted what (and any pictures) —
+        // regardless of completion status, so pending-op notes surface too.
         const allNotes = await getJobNotes(jobId, companyId);
         const byOp = new Map<string, JobNote[]>();
         for (const n of allNotes) {

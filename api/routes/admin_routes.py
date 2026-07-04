@@ -157,8 +157,20 @@ async def list_companies(request: Request):
                     break
 
             settings = company.get("settings") or {}
-            features_raw = settings.get("features") if isinstance(settings, dict) else {}
-            features = _normalize_features(features_raw)
+            settings = settings if isinstance(settings, dict) else {}
+            features = _normalize_features(settings.get("features"))
+            # ai_insights is opt-out (GA feature + kill-switch): report it ON
+            # for companies that never set it, so the admin toggle mirrors the
+            # effective state (see lib/featureFlags.ts defaultEnabled).
+            features.setdefault("ai_insights", True)
+
+            ai_limits = settings.get("ai_limits") or {}
+            raw_limit = ai_limits.get("chat_per_hour")
+            ai_chat_limit_per_hour = (
+                int(raw_limit)
+                if isinstance(raw_limit, (int, float)) and int(raw_limit) > 0
+                else 20
+            )
 
             companies.append(CompanyListItem(
                 id=company["id"],
@@ -169,6 +181,7 @@ async def list_companies(request: Request):
                 owner_email=owner_email,
                 member_count=member_count,
                 features=features,
+                ai_chat_limit_per_hour=ai_chat_limit_per_hour,
             ))
 
         return companies
@@ -468,6 +481,14 @@ async def update_company_features(
         # but future settings sub-keys may live here).
         new_settings = dict(current_settings)
         new_settings["features"] = {k: bool(v) for k, v in body.features.items()}
+
+        # Persist the per-company AI chat rate limit alongside the flags, under
+        # settings.ai_limits.chat_per_hour. Omitted → leave the existing value.
+        if body.ai_chat_limit_per_hour is not None:
+            new_settings["ai_limits"] = {
+                **(current_settings.get("ai_limits") or {}),
+                "chat_per_hour": int(body.ai_chat_limit_per_hour),
+            }
 
         result = (
             service_client.table("companies")

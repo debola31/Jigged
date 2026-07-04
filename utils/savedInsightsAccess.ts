@@ -30,7 +30,6 @@ export async function getSavedInsights(
 
 /**
  * Save a chart/insight to the user's dashboard.
- * Maximum 5 saved insights per company per user.
  * RLS policy validates user_id = auth.uid() on INSERT.
  */
 export async function saveInsight(
@@ -47,20 +46,6 @@ export async function saveInsight(
   } = await supabase.auth.getUser();
   if (!user) {
     throw new Error('Not authenticated');
-  }
-
-  // Check count of existing saved insights
-  const { count, error: countError } = await supabase
-    .from('saved_insights')
-    .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId);
-
-  if (countError) {
-    throw new Error(`Failed to check saved insights count: ${countError.message}`);
-  }
-
-  if ((count ?? 0) >= 5) {
-    throw new Error('Maximum 5 saved insights per company. Remove one to save another.');
   }
 
   const { data, error } = await supabase

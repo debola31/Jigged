@@ -31,18 +31,6 @@ export interface ChatResponse {
   tokens_used: number | null;
 }
 
-export interface ChatHistoryItem {
-  id: string;
-  question: string;
-  response: string;
-  has_chart: boolean;
-  created_at: string;
-}
-
-export interface ChatHistoryResponse {
-  queries: ChatHistoryItem[];
-}
-
 export interface SavedInsight {
   id: string;
   question: string;
@@ -94,45 +82,13 @@ export async function submitChatQuery(
   );
 
   if (!response.ok) {
+    // Surface the backend's message verbatim: it carries the company's real
+    // rate-limit number on 429 and the "AI Insights is disabled" text on 403.
     const errorData = await response.json().catch(() => ({}));
-
-    if (response.status === 429) {
-      throw new Error(
-        'Rate limit exceeded. Maximum 20 AI chat queries per hour. Please try again later.'
-      );
-    }
-
     throw new Error(
       errorData.detail || `Failed to submit chat query (${response.status})`
     );
   }
 
   return await response.json();
-}
-
-/**
- * Get the last 20 chat queries for this company.
- */
-export async function getChatHistory(
-  companyId: string
-): Promise<ChatHistoryItem[]> {
-  const headers = await getAuthHeaders();
-
-  const response = await fetch(
-    `${API_BASE_URL}/api/insights/${companyId}/chat/history`,
-    {
-      method: 'GET',
-      headers,
-    }
-  );
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Failed to fetch chat history (${response.status})`
-    );
-  }
-
-  const data: ChatHistoryResponse = await response.json();
-  return data.queries;
 }

@@ -47,7 +47,6 @@ export type Database = {
           response: string
           tokens_used: number | null
           tool_calls: Json
-          user_id: string | null
         }
         Insert: {
           chart_config?: Json | null
@@ -61,7 +60,6 @@ export type Database = {
           response: string
           tokens_used?: number | null
           tool_calls?: Json
-          user_id?: string | null
         }
         Update: {
           chart_config?: Json | null
@@ -75,7 +73,6 @@ export type Database = {
           response?: string
           tokens_used?: number | null
           tool_calls?: Json
-          user_id?: string | null
         }
         Relationships: [
           {

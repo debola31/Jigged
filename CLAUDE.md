@@ -308,6 +308,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ## Development Commands
 
+> **Backend Python runs in the `jigged` conda environment.** Always use it
+> (`conda run -n jigged <cmd>` or activate it) for `python index.py`, `pytest`,
+> and backend scripts — the system `python3` lacks the API deps. Never create
+> per-repo venvs.
+
 ```bash
 # Install dependencies
 pnpm install
@@ -315,8 +320,8 @@ pnpm install
 # Run frontend dev server
 pnpm dev
 
-# Run backend dev server (separate terminal)
-cd api && python index.py
+# Run backend dev server (separate terminal) — jigged conda env
+cd api && conda run -n jigged python index.py
 
 # Build for production
 pnpm build
@@ -469,6 +474,19 @@ They land gitignored in the worktree, so they're never committed. Note the
 local stack (above), so they're correct in any worktree without copying.
 (Claude can run `supabase status -o env`, and `supabase start` if the stack
 isn't up, to fetch them — they're local-only, not secrets.)
+
+**Node deps + Python env in a worktree.** `node_modules` is gitignored too, so
+a fresh worktree has none — run `pnpm install` **inside the worktree** (fast:
+pnpm hardlinks from its global store, so it's correct for that branch's exact
+deps and costs almost no extra disk). Do **not** symlink the primary's
+`node_modules` — it silently breaks when a branch's deps differ, and a stray
+`pnpm install` would mutate the primary. Backend Python uses the shared
+`jigged` conda env (`conda run -n jigged …`) — nothing to install per worktree.
+
+```bash
+pnpm install                                       # node deps for THIS worktree
+conda run -n jigged python -m pytest tests/unit/   # backend tests, jigged env
+```
 
 ### E2E gotchas
 

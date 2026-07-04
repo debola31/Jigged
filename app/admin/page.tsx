@@ -49,6 +49,7 @@ interface CompanyListItem {
   owner_email: string | null;
   member_count: number;
   features: Record<string, boolean>;
+  ai_chat_limit_per_hour: number;
 }
 
 // Stable empty fallback so the filtered-companies memo doesn't recompute on
@@ -108,6 +109,9 @@ export default function AdminCompaniesPage() {
   const [featuresOpen, setFeaturesOpen] = useState(false);
   const [featuresCompany, setFeaturesCompany] = useState<CompanyListItem | null>(null);
   const [featuresDraft, setFeaturesDraft] = useState<Record<string, boolean>>({});
+  // AI chat rate limit (queries/hour) for the company being edited — kept as a
+  // string so the number field can be cleared while typing without snapping to 0.
+  const [aiLimitDraft, setAiLimitDraft] = useState('20');
   const [featuresSaving, setFeaturesSaving] = useState(false);
   const [featuresError, setFeaturesError] = useState('');
 
@@ -222,6 +226,7 @@ export default function AdminCompaniesPage() {
       seeded[f.key] = Boolean(company.features?.[f.key]);
     }
     setFeaturesDraft(seeded);
+    setAiLimitDraft(String(company.ai_chat_limit_per_hour ?? 20));
     setFeaturesError('');
     setFeaturesOpen(true);
   }, []);
@@ -231,11 +236,21 @@ export default function AdminCompaniesPage() {
     setFeaturesOpen(false);
     setFeaturesCompany(null);
     setFeaturesDraft({});
+    setAiLimitDraft('20');
     setFeaturesError('');
   };
 
   const handleFeaturesSave = async () => {
     if (!featuresCompany) return;
+
+    // Validate the AI chat limit before hitting the API (mirrors the server's
+    // 1..1000 bound so the admin gets an inline error, not a 422).
+    const aiLimit = Number(aiLimitDraft);
+    if (!Number.isInteger(aiLimit) || aiLimit < 1 || aiLimit > 1000) {
+      setFeaturesError('Chat queries per hour must be a whole number between 1 and 1000.');
+      return;
+    }
+
     setFeaturesSaving(true);
     setFeaturesError('');
     try {
@@ -245,7 +260,10 @@ export default function AdminCompaniesPage() {
         {
           method: 'PATCH',
           headers,
-          body: JSON.stringify({ features: featuresDraft }),
+          body: JSON.stringify({
+            features: featuresDraft,
+            ai_chat_limit_per_hour: aiLimit,
+          }),
         },
       );
       if (!response.ok) {
@@ -260,6 +278,7 @@ export default function AdminCompaniesPage() {
       setFeaturesOpen(false);
       setFeaturesCompany(null);
       setFeaturesDraft({});
+      setAiLimitDraft('20');
       // Refetch the canonical list so this change — and any other admins'
       // concurrent changes — show up.
       fetchCompanies();
@@ -850,6 +869,18 @@ export default function AdminCompaniesPage() {
                   }
                   sx={{ alignItems: 'flex-start' }}
                 />
+                {f.key === 'ai_insights' && Boolean(featuresDraft[f.key]) && (
+                  <TextField
+                    label="Chat queries per hour"
+                    type="number"
+                    size="small"
+                    value={aiLimitDraft}
+                    onChange={(e) => setAiLimitDraft(e.target.value)}
+                    inputProps={{ min: 1, max: 1000, step: 1 }}
+                    helperText="Per-company AI chat rate limit (1–1000)."
+                    sx={{ mt: 1, ml: 6, width: 240 }}
+                  />
+                )}
               </Box>
             ))}
             {KNOWN_FEATURES.length === 0 && (

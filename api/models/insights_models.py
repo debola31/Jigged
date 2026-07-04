@@ -1,6 +1,5 @@
 """Pydantic models for AI Insights & Charts feature."""
 
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -24,19 +23,3 @@ class ChatResponse(BaseModel):
     )
     provider: str = Field(..., description="AI provider used (e.g. 'anthropic')")
     tokens_used: Optional[int] = Field(None, description="Total tokens consumed by the request")
-
-
-class ChatHistoryItem(BaseModel):
-    """A single item from chat history."""
-
-    id: str = Field(..., description="Unique chat query ID")
-    question: str = Field(..., description="The original question asked")
-    response: str = Field(..., description="The AI response text")
-    has_chart: bool = Field(False, description="Whether the response included a chart")
-    created_at: datetime = Field(..., description="When the query was made")
-
-
-class ChatHistoryResponse(BaseModel):
-    """Response containing chat history items."""
-
-    queries: list[ChatHistoryItem]

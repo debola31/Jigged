@@ -14,8 +14,6 @@ import {
 } from '@/utils/savedInsightsAccess';
 import type { SavedInsight } from '@/utils/insightsAccess';
 
-const MAX_SAVED = 5;
-
 // Stable empty fallback so derived data doesn't churn while the first load runs.
 const EMPTY_INSIGHTS: SavedInsight[] = [];
 
@@ -23,8 +21,6 @@ interface InsightsSectionProps {
   companyId: string;
   /** Incremented when a new insight is saved, to trigger refetch */
   savedVersion?: number;
-  /** Called with current saved count so parent can pass to InsightsChat */
-  onSavedCountChange?: (count: number) => void;
 }
 
 /**
@@ -35,7 +31,6 @@ interface InsightsSectionProps {
 export default function InsightsSection({
   companyId,
   savedVersion = 0,
-  onSavedCountChange,
 }: InsightsSectionProps) {
   const [error, setError] = useState<string | null>(null);
 
@@ -45,15 +40,11 @@ export default function InsightsSection({
     reload: fetchSavedInsights,
   } = useLoad(
     async () => {
-      // No company yet → nothing to fetch (and report a zero count so the
-      // parent's chat affordance stays in sync).
+      // No company yet → nothing to fetch.
       if (!companyId) {
-        onSavedCountChange?.(0);
         return [] as SavedInsight[];
       }
-      const saved = await getSavedInsights(companyId);
-      onSavedCountChange?.(saved.length);
-      return saved;
+      return await getSavedInsights(companyId);
     },
     [companyId, savedVersion],
     {
@@ -93,11 +84,6 @@ export default function InsightsSection({
           </Typography>
           <AutoAwesomeIcon sx={{ fontSize: 20, color: 'primary.main' }} />
         </Box>
-        {!loading && savedCount > 0 && (
-          <Typography variant="body2" color="text.secondary" sx={{ ml: 1.5 }}>
-            ({savedCount}/{MAX_SAVED})
-          </Typography>
-        )}
       </Box>
 
       {/* Error State */}

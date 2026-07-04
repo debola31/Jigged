@@ -1,6 +1,9 @@
 
 
 
+-- Baseline made preview-branch-portable: two Database Webhook triggers that
+-- called supabase_functions.http_request (a schema fresh preview branches lack)
+-- were removed — see the "(Removed for branch portability)" notes below.
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;

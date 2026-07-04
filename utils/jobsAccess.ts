@@ -28,7 +28,7 @@ import type {
   OperationUpdateResult,
   CurrentOperationInfo,
 } from '@/types/job';
-import { isJobDone } from '@/types/job';
+import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
@@ -157,12 +157,14 @@ export async function getAllJobs(
     offset += BATCH_SIZE;
   }
 
-  // FR-19 done-filter is applied client-side here so callers that don't pass
-  // explicit production/fulfillment filters still get the "hide done jobs"
-  // default. Callers that want to see done jobs pass excludeDone=false.
-  const excludeDone = filters.excludeDone ?? true;
-  if (excludeDone) {
-    allData = allData.filter((j) => !isJobDone(j));
+  // Hide "closed" jobs (done OR cancelled — see isJobClosed) client-side so
+  // callers that don't pass explicit status filters still get a clean active
+  // list by default. Callers that want closed jobs pass excludeClosed=false
+  // (the jobs list sets this from the "Show completed & cancelled" toggle or
+  // when a closed lifecycle stage is selected).
+  const excludeClosed = filters.excludeClosed ?? true;
+  if (excludeClosed) {
+    allData = allData.filter((j) => !isJobClosed(j));
   }
 
   // Attach per-row match_source for the search-result sub-text.

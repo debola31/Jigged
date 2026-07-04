@@ -414,6 +414,64 @@ async function ensureBomEdge(
   if (error) throw new Error(`bom insert failed: ${error.message}`);
 }
 
+interface JobStageSpec {
+  jobNumber: string;
+  productionStatus: 'not_started' | 'in_progress' | 'completed' | 'cancelled';
+  fulfillmentStatus: 'unshipped' | 'partially_shipped' | 'fully_shipped';
+}
+
+/**
+ * Find-or-create a job at a specific lifecycle stage for the jobs-list
+ * combined-Status spec. The list filters on the STORED production_status /
+ * fulfillment_status columns, so we set them directly on a single job_part
+ * (which the sync triggers roll up to the job) rather than going through the
+ * operation/shipment write paths. Verified that explicit statuses survive the
+ * triggers with no shipment/operation rows. Find key is (company, job_number)
+ * so re-runs are idempotent.
+ */
+async function ensureJobAtStage(
+  supabase: SupabaseClient,
+  companyId: string,
+  customerId: string,
+  partId: string,
+  spec: JobStageSpec,
+): Promise<void> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('job_number', spec.jobNumber)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`job lookup failed (${spec.jobNumber}): ${lookupErr.message}`);
+  if (existing) return;
+
+  const { data: job, error: jobErr } = await supabase
+    .from('jobs')
+    .insert({
+      company_id: companyId,
+      customer_id: customerId,
+      job_number: spec.jobNumber,
+      production_status: spec.productionStatus,
+      fulfillment_status: spec.fulfillmentStatus,
+    })
+    .select('id')
+    .single();
+  if (jobErr || !job) throw new Error(`job insert failed (${spec.jobNumber}): ${jobErr?.message}`);
+
+  const { error: partErr } = await supabase.from('job_parts').insert({
+    job_id: job.id,
+    company_id: companyId,
+    part_id: partId,
+    sequence: 1,
+    quantity: 1,
+    unit_price: 10,
+    total_price: 10,
+    production_status: spec.productionStatus,
+    fulfillment_status: spec.fulfillmentStatus,
+  });
+  if (partErr) throw new Error(`job_part insert failed (${spec.jobNumber}): ${partErr.message}`);
+}
+
 export default async function globalSetup(): Promise<void> {
   const env = readEnvOrExit();
   const supabase = makeAdminClient(env);
@@ -434,7 +492,7 @@ export default async function globalSetup(): Promise<void> {
     100,
   );
   await ensureWorkCenter(supabase, companyId, WC_EXTERNAL_NAME, 'external', vendorId, null);
-  await ensureCustomer(supabase, companyId);
+  const customerId = await ensureCustomer(supabase, companyId);
 
   const mfgPartId = await ensurePart(supabase, companyId, {
     part_name: PART_MFG_NAME,
@@ -485,6 +543,30 @@ export default async function globalSetup(): Promise<void> {
   // Fractional minimum-quantity tier on the length part (0.5 in) — only valid
   // once part_pricing_tiers.quantity is numeric. Seeds the fractional path.
   await ensurePricingTier(supabase, companyId, lengthPartId, 1, 0.5, 30);
+
+  // Jobs at distinct lifecycle stages for jobs-list-status.spec.ts. Shared
+  // "E2E-JS-" job-number prefix so the spec can isolate them by search from
+  // whatever jobs other specs create in the same shared company.
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+    jobNumber: 'E2E-JS-NOTSTARTED',
+    productionStatus: 'not_started',
+    fulfillmentStatus: 'unshipped',
+  });
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+    jobNumber: 'E2E-JS-READY',
+    productionStatus: 'completed',
+    fulfillmentStatus: 'unshipped',
+  });
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+    jobNumber: 'E2E-JS-DONE',
+    productionStatus: 'completed',
+    fulfillmentStatus: 'fully_shipped',
+  });
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+    jobNumber: 'E2E-JS-CANCELLED',
+    productionStatus: 'cancelled',
+    fulfillmentStatus: 'unshipped',
+  });
 
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
 }

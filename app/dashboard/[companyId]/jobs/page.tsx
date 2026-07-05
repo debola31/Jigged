@@ -107,6 +107,34 @@ const EMPTY_JOBS: JobWithRelations[] = [];
 // lifecycle stage; intercepted in the change handler to select-all/clear.
 const STATUS_ALL = '__all__';
 
+// Per-company persistence of the Status selection (device-local, Reminders-
+// style). Scoped by company so different shops keep their own default view.
+const statusStorageKey = (companyId: string) => `jigged.jobs.statusFilter.${companyId}`;
+
+function readStoredStatus(companyId: string): JobLifecycleStage[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(statusStorageKey(companyId));
+    if (raw == null) return null; // no stored preference (distinct from stored [])
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (s): s is JobLifecycleStage => typeof s === 'string' && s in JOB_LIFECYCLE_STAGE_CONFIG,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredStatus(companyId: string, stages: JobLifecycleStage[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(statusStorageKey(companyId), JSON.stringify(stages));
+  } catch {
+    // ignore quota / privacy-mode write failures — persistence is best-effort
+  }
+}
+
 export default function JobsPage() {
   const router = useRouter();
   const params = useParams();
@@ -131,6 +159,21 @@ export default function JobsPage() {
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<JobWithRelations>>(null);
+  // Apply the device-local saved Status selection once on mount. Done in an
+  // effect (not the useState initializer) so server and first client render
+  // agree — reading localStorage during SSR would hydration-mismatch. A URL
+  // ?status= deep-link always wins over the saved preference.
+  const statusHydrated = useRef(false);
+  useEffect(() => {
+    if (statusHydrated.current) return;
+    statusHydrated.current = true;
+    if (searchParams.get('status') != null) return; // explicit deep-link wins
+    const stored = readStoredStatus(companyId);
+    // Intentional mount-time sync from localStorage (unavailable during SSR),
+    // so it must be an effect rather than the useState initializer.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (stored) setStatusFilter(stored);
+  }, [companyId, searchParams]);
 
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -466,11 +509,11 @@ export default function JobsPage() {
       ? (value.split(',') as JobLifecycleStage[])
       : value;
     // The "All" row toggles select-all/clear rather than being a real stage.
-    if (next.includes(STATUS_ALL as JobLifecycleStage)) {
-      setStatusFilter(allSelected ? [] : allStages);
-    } else {
-      setStatusFilter(next);
-    }
+    const resolved = next.includes(STATUS_ALL as JobLifecycleStage)
+      ? (allSelected ? [] : allStages)
+      : next;
+    setStatusFilter(resolved);
+    writeStoredStatus(companyId, resolved); // persist the deliberate choice
     clearSelection();
   };
 

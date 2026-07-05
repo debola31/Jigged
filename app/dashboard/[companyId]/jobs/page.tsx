@@ -25,6 +25,7 @@ import Select, { type SelectChangeEvent } from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
 import OutlinedInput from '@mui/material/OutlinedInput';
+import Divider from '@mui/material/Divider';
 import Chip from '@mui/material/Chip';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -102,6 +103,10 @@ function parseStatusParam(v: string | null): JobLifecycleStage[] {
 // Stable empty fallback so derived data doesn't churn while the first load runs.
 const EMPTY_JOBS: JobWithRelations[] = [];
 
+// Sentinel value for the "All" row in the Status multi-select — not a real
+// lifecycle stage; intercepted in the change handler to select-all/clear.
+const STATUS_ALL = '__all__';
+
 export default function JobsPage() {
   const router = useRouter();
   const params = useParams();
@@ -165,9 +170,9 @@ export default function JobsPage() {
         customerId: customerId || undefined,
         search: searchDebounced,
         overdue: overdueOnly || undefined,
-        // Empty selection = no constraint (show everything). Otherwise hide
-        // closed jobs unless a closed stage is explicitly selected.
-        excludeClosed: statusFilter.length > 0 && !includesClosed,
+        // Hide closed jobs unless a closed stage is explicitly selected. (An
+        // empty selection shows no rows anyway — see visibleJobs.)
+        excludeClosed: !includesClosed,
       };
       return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
     },
@@ -189,11 +194,12 @@ export default function JobsPage() {
 
   // Narrow to the exact stages the user selected. Stages are derived from
   // (production_status, fulfillment_status), so we match on the same helper the
-  // Status column renders. Empty selection = no filter.
+  // Status column renders. Empty selection ("None") shows no rows — use the
+  // "All" row (or re-tick a stage) to bring jobs back.
   const visibleJobs = useMemo(
     () =>
       statusFilter.length === 0
-        ? jobs
+        ? EMPTY_JOBS
         : jobs.filter((j) => statusFilter.includes(getJobLifecycleStage(j))),
     [jobs, statusFilter],
   );
@@ -450,16 +456,34 @@ export default function JobsPage() {
     label: JOB_LIFECYCLE_STAGE_CONFIG[key].label,
   }));
 
+  const allStages = statusOptions.map((o) => o.id);
+  const allSelected = statusFilter.length === allStages.length;
+
   const handleStatusChange = (event: SelectChangeEvent<JobLifecycleStage[]>) => {
     const value = event.target.value;
     // MUI hands back a string for a single value; normalize to an array.
-    setStatusFilter(
-      (typeof value === 'string'
-        ? (value.split(',') as JobLifecycleStage[])
-        : value),
-    );
+    const next = typeof value === 'string'
+      ? (value.split(',') as JobLifecycleStage[])
+      : value;
+    // The "All" row toggles select-all/clear rather than being a real stage.
+    if (next.includes(STATUS_ALL as JobLifecycleStage)) {
+      setStatusFilter(allSelected ? [] : allStages);
+    } else {
+      setStatusFilter(next);
+    }
     clearSelection();
   };
+
+  // Concise trigger label: a count, not the full comma-joined list (which
+  // overflows the toolbar once the default four stages are selected).
+  const statusSummary =
+    statusFilter.length === 0
+      ? 'None'
+      : allSelected
+        ? 'All statuses'
+        : statusFilter.length === 1
+          ? JOB_LIFECYCLE_STAGE_CONFIG[statusFilter[0]].label
+          : `${statusFilter.length} statuses`;
 
   return (
     <Box>
@@ -495,22 +519,31 @@ export default function JobsPage() {
           }}
         />
 
-        <FormControl size="small" sx={{ minWidth: 240, maxWidth: 360 }}>
-          <InputLabel id="jobs-status-filter-label">Status</InputLabel>
+        <FormControl size="small" sx={{ width: 200 }}>
+          <InputLabel id="jobs-status-filter-label" shrink>
+            Status
+          </InputLabel>
           <Select
             labelId="jobs-status-filter-label"
             multiple
+            displayEmpty
             value={statusFilter}
             onChange={handleStatusChange}
-            input={<OutlinedInput label="Status" />}
-            renderValue={(selected) =>
-              selected.length === 0
-                ? 'Any'
-                : selected
-                    .map((s) => JOB_LIFECYCLE_STAGE_CONFIG[s].label)
-                    .join(', ')
-            }
+            input={<OutlinedInput notched label="Status" />}
+            renderValue={() => statusSummary}
           >
+            <MenuItem value={STATUS_ALL}>
+              <Checkbox
+                size="small"
+                checked={allSelected}
+                indeterminate={statusFilter.length > 0 && !allSelected}
+              />
+              <ListItemText
+                primary="All"
+                primaryTypographyProps={{ fontWeight: 600 }}
+              />
+            </MenuItem>
+            <Divider sx={{ my: 0.5 }} />
             {statusOptions.map((opt) => (
               <MenuItem key={opt.id} value={opt.id}>
                 <Checkbox

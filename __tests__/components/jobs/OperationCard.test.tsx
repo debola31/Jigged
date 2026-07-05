@@ -68,10 +68,11 @@ const renderCard = (operation: JobOperation, stepNotes: JobNote[] = []) =>
   );
 
 describe('OperationCard — always-expandable + note count', () => {
-  it('always renders the expand control, showing a "0" badge when there are no notes', () => {
+  it('always renders the expand control, with no count shown when there are no notes', () => {
     renderCard(op(), []);
     expect(screen.getByTestId('operation-expand')).toBeInTheDocument();
-    expect(screen.getByTestId('operation-note-count')).toHaveTextContent('0');
+    // A bare "0" reads as a stray number, so note-less rows show only the chevron.
+    expect(screen.queryByTestId('operation-note-count')).not.toBeInTheDocument();
   });
 
   it('counts operator step-notes', () => {

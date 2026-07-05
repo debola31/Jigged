@@ -5,7 +5,6 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Badge from '@mui/material/Badge';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -15,6 +14,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
@@ -75,13 +75,14 @@ export default function OperationCard({
     return new Date(dateStr).toLocaleString();
   };
 
-  // The expand affordance is ALWAYS shown so an operation never looks like it
-  // lacks the feature just because an icon is conditionally hidden; the badge
-  // communicates how much there is to reveal. A "note" is the admin completion
-  // note (0 or 1) plus each operator step-note. This is independent of
-  // completion status — a pending operation with floor notes is expandable too.
-  // Timestamps aren't counted: the completed time already shows inline on the
-  // collapsed row.
+  // The expand chevron is ALWAYS shown so an operation never looks like it
+  // lacks the feature. When notes exist, a note icon + count sits inside the
+  // button to say how much there is to reveal; at zero we show only the
+  // chevron (a bare "0" reads as a meaningless stray number). A "note" is the
+  // admin completion note (0 or 1) plus each operator step-note. This is
+  // independent of completion status — a pending operation with floor notes is
+  // expandable too. Timestamps aren't counted: the completed time already
+  // shows inline on the collapsed row.
   const noteCount = (operation.notes ? 1 : 0) + stepNotes.length;
 
   return (
@@ -190,24 +191,34 @@ export default function OperationCard({
           )}
         </Box>
 
-        {/* Expand Button — always shown; the badge carries the note count
-            (including 0) so the affordance never looks absent. */}
-        <Badge
-          badgeContent={noteCount}
-          showZero
-          color="default"
-          data-testid="operation-note-count"
-        >
+        {/* Expand toggle — the chevron is always shown so the affordance never
+            looks absent. When notes exist, a note icon + count sits inside the
+            button (tooltip spells it out); at zero we show only the chevron,
+            keeping note-less rows clean and scannable for ops that have notes. */}
+        <Tooltip title={noteCount > 0 ? `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}>
           <IconButton
             size="small"
             onClick={() => setExpanded(!expanded)}
-            sx={{ color: 'text.secondary' }}
+            sx={{ color: 'text.secondary', borderRadius: 1, gap: 0.5 }}
             data-testid="operation-expand"
             aria-label={`${expanded ? 'Collapse' : 'Expand'} operation details (${noteCount} ${noteCount === 1 ? 'note' : 'notes'})`}
           >
+            {noteCount > 0 && (
+              <>
+                <ChatBubbleOutlineIcon sx={{ fontSize: 16 }} />
+                <Typography
+                  variant="caption"
+                  component="span"
+                  sx={{ lineHeight: 1, fontWeight: 600 }}
+                  data-testid="operation-note-count"
+                >
+                  {noteCount}
+                </Typography>
+              </>
+            )}
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
-        </Badge>
+        </Tooltip>
       </Box>
 
       {/* Expanded Details */}

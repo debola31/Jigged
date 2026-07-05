@@ -366,7 +366,7 @@ export interface CompanyMember {
 export const DEFAULT_QUOTE_LEAD_DAYS = 14;
 export const DEFAULT_QUOTE_VALIDITY_DAYS = 10;
 
-function defaultExpirationDate(): string {
+export function defaultExpirationDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + DEFAULT_QUOTE_VALIDITY_DAYS);
   return d.toISOString().slice(0, 10);
@@ -466,16 +466,25 @@ export function calculateTotalPrice(quantity: number, unitPrice: number | null):
 }
 
 /**
+ * True when an expiration date is strictly before today (local midnight).
+ * A null date is never past. Shared by isQuoteExpired (read path) and
+ * updateQuote (save path) so the displayed status and the persisted status
+ * use identical date math and can't drift.
+ */
+export function isExpirationDatePast(expirationDate: string | null): boolean {
+  if (!expirationDate) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(expirationDate) < today;
+}
+
+/**
  * True when a quote has already expired (by status OR by date).
  * We compute from both so that the badge is correct even if the
  * lazy-expire sweep hasn't run yet.
  */
 export function isQuoteExpired(quote: Pick<Quote, 'status' | 'expiration_date'>): boolean {
-  if (quote.status === 'expired') return true;
-  if (!quote.expiration_date) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return new Date(quote.expiration_date) < today;
+  return quote.status === 'expired' || isExpirationDatePast(quote.expiration_date);
 }
 
 /**

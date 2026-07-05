@@ -42,6 +42,7 @@ import {
   quoteToFormData,
   isQuoteExpired,
   daysUntilExpiration,
+  defaultExpirationDate,
   formatLeadTime,
 } from '@/types/quote';
 import type { QuoteLineItem } from '@/types/quote';
@@ -213,7 +214,10 @@ export default function QuoteDetailPage() {
 
   const expired = isQuoteExpired(quote);
   const convertedLocked = !!quote.converted_at;
-  const isEditable = !convertedLocked && quote.status === 'active';
+  // Converting is the only hard lock. Expired quotes stay editable — saving the
+  // edit form with a today-or-later expiration date reactivates them (see the
+  // edit-mode block below and updateQuote's status recompute).
+  const isEditable = !convertedLocked;
   const daysLeft = daysUntilExpiration(quote.expiration_date);
   const linkedJobs = quote.jobs ?? [];
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
@@ -279,14 +283,31 @@ export default function QuoteDetailPage() {
       await fetchQuote();
     };
 
+    // Opening an expired quote for edit pre-fills a fresh future expiration date
+    // so the default action (save without touching the date) reactivates it.
+    // The field stays editable if the user wants a different date; saving a
+    // still-past date leaves it expired (updateQuote derives status from it).
+    const initialData = quoteToFormData(quote);
+    if (expired) {
+      initialData.expiration_date = defaultExpirationDate();
+    }
+
     return (
-      <QuoteForm
-        mode="edit"
-        initialData={quoteToFormData(quote)}
-        quoteId={quote.id}
-        onCancel={() => setEditMode(false)}
-        onSave={handleSaveSuccess}
-      />
+      <Box>
+        {expired && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            This quote is expired. It has a new expiration date — save to
+            reactivate it, or pick a different future date.
+          </Alert>
+        )}
+        <QuoteForm
+          mode="edit"
+          initialData={initialData}
+          quoteId={quote.id}
+          onCancel={() => setEditMode(false)}
+          onSave={handleSaveSuccess}
+        />
+      </Box>
     );
   }
 
@@ -538,13 +559,9 @@ export default function QuoteDetailPage() {
                     Update prices to current
                   </Button>
                 ) : (
-                  <Tooltip
-                    title={
-                      convertedLocked
-                        ? 'This quote is converted — update prices on the job instead.'
-                        : 'This quote is expired and read-only.'
-                    }
-                  >
+                  // Only reachable for converted quotes now — expired quotes are
+                  // editable, so they hit the enabled button above.
+                  <Tooltip title="This quote is converted — update prices on the job instead.">
                     <span>
                       <Button color="inherit" size="small" disabled>
                         Update prices to current

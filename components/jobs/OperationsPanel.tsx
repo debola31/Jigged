@@ -13,12 +13,10 @@ import Alert from '@mui/material/Alert';
 import type { Job, JobOperation, ProductionStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
 import {
-  startJobOperation,
   completeJobOperation,
   undoJobOperation,
 } from '@/utils/jobsAccess';
 import OperationCard from './OperationCard';
-import CompleteOperationModal from './CompleteOperationModal';
 
 interface OperationsPanelProps {
   job: Job;
@@ -43,8 +41,6 @@ export default function OperationsPanel({
   notesByOperation,
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
-  const [completeModalOpen, setCompleteModalOpen] = useState(false);
-  const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
     message: '',
@@ -54,22 +50,6 @@ export default function OperationsPanel({
   // Calculate progress
   const completedCount = operations.filter((op) => op.status === 'completed').length;
   const progressPercent = operations.length > 0 ? (completedCount / operations.length) * 100 : 0;
-
-  // Check if any operation is in progress
-  const hasInProgressOperation = operations.some((op) => op.status === 'in_progress');
-
-  // The "next" pending op is the lowest-sequence pending op with no earlier
-  // unfinished predecessor — only it should expose a Start button.
-  const nextReadyOperationId = (() => {
-    const sorted = [...operations].sort((a, b) => a.sequence - b.sequence);
-    for (const op of sorted) {
-      if (op.status === 'completed') continue;
-      // First non-completed op in sequence is the next eligible — if it's
-      // pending, it's the one that can start.
-      return op.status === 'pending' ? op.id : null;
-    }
-    return null;
-  })();
 
   // Production and fulfillment are independent lifecycles (PRD §0/§7) —
   // a fully-shipped job can still have outstanding work that operators
@@ -106,34 +86,12 @@ export default function OperationsPanel({
     }
   };
 
-  const handleStart = async (operationId: string) => {
+  // One click marks the op complete — no Start step, no notes prompt. Mirrors
+  // the operator view's single MARK COMPLETE action.
+  const handleComplete = async (operationId: string) => {
     setLoading(true);
     try {
-      const result = await startJobOperation(operationId, job.id);
-      handleStatusChanges(
-        result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
-        result.jobStatusChanged ? result.newJobProductionStatus : undefined,
-      );
-      onOperationUpdate();
-    } catch (err) {
-      showSnackbar(err instanceof Error ? err.message : 'Failed to start operation', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCompleteClick = (operationId: string) => {
-    setSelectedOperationId(operationId);
-    setCompleteModalOpen(true);
-  };
-
-  const handleCompleteConfirm = async (data: { notes?: string }) => {
-    if (!selectedOperationId) return;
-
-    setLoading(true);
-    setCompleteModalOpen(false);
-    try {
-      const result = await completeJobOperation(selectedOperationId, job.id, data);
+      const result = await completeJobOperation(operationId, job.id);
       if (result.jobStatusChanged || result.jobPartStatusChanged) {
         handleStatusChanges(
           result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
@@ -147,7 +105,6 @@ export default function OperationsPanel({
       showSnackbar(err instanceof Error ? err.message : 'Failed to complete operation', 'error');
     } finally {
       setLoading(false);
-      setSelectedOperationId(null);
     }
   };
 
@@ -163,11 +120,6 @@ export default function OperationsPanel({
       setLoading(false);
     }
   };
-
-  // Get selected operation for modals
-  const selectedOperation = selectedOperationId
-    ? operations.find((op) => op.id === selectedOperationId) ?? null
-    : null;
 
   if (operations.length === 0) {
     return null;
@@ -218,30 +170,15 @@ export default function OperationsPanel({
               <OperationCard
                 key={operation.id}
                 operation={operation}
-                hasInProgressOperation={hasInProgressOperation}
-                isNextReady={operation.id === nextReadyOperationId}
                 disabled={isDisabled}
                 stepNotes={notesByOperation?.get(operation.id)}
-                onStart={handleStart}
-                onComplete={handleCompleteClick}
+                onComplete={handleComplete}
                 onUndo={handleUndo}
               />
             ))}
           </Box>
         </CardContent>
       </Card>
-
-      {/* Complete Modal */}
-      <CompleteOperationModal
-        open={completeModalOpen}
-        operation={selectedOperation}
-        onClose={() => {
-          setCompleteModalOpen(false);
-          setSelectedOperationId(null);
-        }}
-        onConfirm={handleCompleteConfirm}
-        loading={loading}
-      />
 
       {/* Snackbar for notifications */}
       <Snackbar

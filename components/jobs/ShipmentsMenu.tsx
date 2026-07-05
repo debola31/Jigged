@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -9,29 +9,21 @@ import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import AddIcon from '@mui/icons-material/Add';
-import BlockIcon from '@mui/icons-material/Block';
 
-import { getShipmentsForJob, voidShipment } from '@/utils/shipmentsAccess';
+import { getShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { ShipmentWithRelations } from '@/types/shipment';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 
 const EMPTY: ShipmentWithRelations[] = [];
 
 /**
- * Toolbar dropdown consolidating view (open the packing slip) + void + create
- * for shipments, mirroring InvoicesMenu. Replaces the old Fulfillment section's
- * ShipmentHistoryCard so all shipment actions live at the top of the job page.
+ * Toolbar dropdown consolidating view (open the packing slip) + create for
+ * shipments, mirroring InvoicesMenu. Voiding lives inside the packing-slip
+ * preview (opened from a row), next to Print/Download — so a destructive action
+ * is only reachable once the slip is actually on screen.
  */
 export default function ShipmentsMenu({
   jobId,
@@ -51,9 +43,6 @@ export default function ShipmentsMenu({
 }) {
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [voidTarget, setVoidTarget] = useState<ShipmentWithRelations | null>(null);
-  const [voiding, setVoiding] = useState(false);
-  const [voidError, setVoidError] = useState<string | null>(null);
 
   const { data, reload } = useLoad(
     async () => {
@@ -67,22 +56,6 @@ export default function ShipmentsMenu({
     { onError: (err) => console.warn('ShipmentsMenu load failed', err) },
   );
   const shipments = data ?? EMPTY;
-
-  const handleVoidConfirm = useCallback(async () => {
-    if (!voidTarget) return;
-    setVoiding(true);
-    setVoidError(null);
-    try {
-      await voidShipment(voidTarget.id);
-      setVoidTarget(null);
-      await reload();
-      onVoided?.();
-    } catch (err) {
-      setVoidError(err instanceof Error ? err.message : 'Failed to void shipment.');
-    } finally {
-      setVoiding(false);
-    }
-  }, [voidTarget, reload, onVoided]);
 
   return (
     <>
@@ -122,24 +95,6 @@ export default function ShipmentsMenu({
                 }
                 secondary={formatDate(s.ship_date)}
               />
-              {!s.voided_at && (
-                <Tooltip title="Void packing slip">
-                  <IconButton
-                    edge="end"
-                    size="small"
-                    color="error"
-                    sx={{ ml: 3 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setVoidError(null);
-                      setVoidTarget(s);
-                      setAnchor(null);
-                    }}
-                  >
-                    <BlockIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              )}
             </MenuItem>
           ))
         )}
@@ -161,33 +116,11 @@ export default function ShipmentsMenu({
         open={!!previewId}
         shipmentId={previewId}
         onClose={() => setPreviewId(null)}
+        onVoided={() => {
+          reload();
+          onVoided?.();
+        }}
       />
-
-      <Dialog open={!!voidTarget} onClose={() => !voiding && setVoidTarget(null)}>
-        <DialogTitle>Void {voidTarget?.packing_slip_number}?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: voidError ? 2 : 0 }}>
-            This reverses the shipped quantities on{' '}
-            <strong>{voidTarget?.packing_slip_number}</strong> and reopens the affected lines.
-            The packing-slip number stays on record as voided — it is not reused.
-          </Typography>
-          {voidError && <Alert severity="error">{voidError}</Alert>}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setVoidTarget(null)} disabled={voiding}>
-            Keep slip
-          </Button>
-          <Button
-            onClick={handleVoidConfirm}
-            color="error"
-            variant="contained"
-            disabled={voiding}
-            startIcon={voiding ? <CircularProgress size={16} color="inherit" /> : <BlockIcon />}
-          >
-            {voiding ? 'Voiding…' : 'Void slip'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </>
   );
 }

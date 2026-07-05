@@ -7,7 +7,6 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckIcon from '@mui/icons-material/Check';
 import UndoIcon from '@mui/icons-material/Undo';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -24,12 +23,9 @@ import OperationNotes from './OperationNotes';
 
 interface OperationCardProps {
   operation: JobOperation;
-  hasInProgressOperation: boolean;
-  isNextReady: boolean;
   disabled?: boolean;
   /** Operator step-tagged notes + photos for this operation (from the activity feed). */
   stepNotes?: JobNote[];
-  onStart: (operationId: string) => void;
   onComplete: (operationId: string) => void;
   onUndo: (operationId: string) => void;
 }
@@ -52,11 +48,8 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
 
 export default function OperationCard({
   operation,
-  hasInProgressOperation,
-  isNextReady,
   disabled = false,
   stepNotes = [],
-  onStart,
   onComplete,
   onUndo,
 }: OperationCardProps) {
@@ -65,9 +58,9 @@ export default function OperationCard({
   const status = operation.status as OperationStatus;
   const styles = STATUS_STYLES[status];
 
-  // Determine available actions based on status and context
-  const canStart = status === 'pending' && !hasInProgressOperation && isNextReady;
-  const canComplete = status === 'in_progress';
+  // One-click completion: any not-done op shows Complete (no separate Start
+  // step), and a completed op shows Undo. Mirrors the operator view.
+  const canComplete = status !== 'completed';
   const canUndo = status === 'completed';
 
   const formatDateTime = (dateStr: string | null): string => {
@@ -134,27 +127,6 @@ export default function OperationCard({
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-          {canStart && (
-            <Tooltip title="Start Operation">
-              <span>
-                <IconButton
-                  size="small"
-                  color="primary"
-                  onClick={() => onStart(operation.id)}
-                  disabled={disabled}
-                  sx={{
-                    bgcolor: 'primary.main',
-                    color: 'white',
-                    '&:hover': { bgcolor: 'primary.dark' },
-                    '&.Mui-disabled': { bgcolor: 'action.disabledBackground' },
-                  }}
-                >
-                  <PlayArrowIcon fontSize="small" />
-                </IconButton>
-              </span>
-            </Tooltip>
-          )}
-
           {canComplete && (
             <Tooltip title="Complete Operation">
               <span>

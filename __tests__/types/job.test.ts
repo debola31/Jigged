@@ -3,6 +3,7 @@ import {
   getJobLifecycleStage,
   isJobClosed,
   isJobDone,
+  isJobOverdue,
   JOB_LIFECYCLE_STAGE_CONFIG,
   STAGE_TO_JOB_FILTERS,
   type JobLifecycleStage,
@@ -143,5 +144,57 @@ describe('STAGE_TO_JOB_FILTERS', () => {
       productionStatus: ['cancelled'],
       showClosed: true,
     });
+  });
+});
+
+describe('isJobOverdue', () => {
+  // `due_date` is a bare YYYY-MM-DD parsed at LOCAL midnight, so build the
+  // fixtures relative to the machine's today to stay deterministic anywhere.
+  function localDateOffset(days: number): string {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const pastDue = localDateOffset(-2);
+  const futureDue = localDateOffset(2);
+
+  it('is overdue when past due and production is still active + unshipped', () => {
+    expect(
+      isJobOverdue({ due_date: pastDue, production_status: 'not_started', fulfillment_status: 'unshipped' }),
+    ).toBe(true);
+    expect(
+      isJobOverdue({ due_date: pastDue, production_status: 'in_progress', fulfillment_status: 'partially_shipped' }),
+    ).toBe(true);
+  });
+
+  it('is NOT overdue once production is completed, even if unshipped (the reported fix)', () => {
+    expect(
+      isJobOverdue({ due_date: pastDue, production_status: 'completed', fulfillment_status: 'unshipped' }),
+    ).toBe(false);
+  });
+
+  it('is NOT overdue once production is cancelled, even if unshipped', () => {
+    expect(
+      isJobOverdue({ due_date: pastDue, production_status: 'cancelled', fulfillment_status: 'unshipped' }),
+    ).toBe(false);
+  });
+
+  it('is NOT overdue once fully shipped, even while production is still active', () => {
+    expect(
+      isJobOverdue({ due_date: pastDue, production_status: 'in_progress', fulfillment_status: 'fully_shipped' }),
+    ).toBe(false);
+  });
+
+  it('is NOT overdue when the due date is in the future or absent', () => {
+    expect(
+      isJobOverdue({ due_date: futureDue, production_status: 'in_progress', fulfillment_status: 'unshipped' }),
+    ).toBe(false);
+    expect(
+      isJobOverdue({ due_date: null, production_status: 'in_progress', fulfillment_status: 'unshipped' }),
+    ).toBe(false);
   });
 });

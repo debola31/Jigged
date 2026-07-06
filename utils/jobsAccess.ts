@@ -134,16 +134,17 @@ export async function getAllJobs(
       query = query.or(`job_number.ilike.%${sanitized}%`);
     }
     if (filters.overdue) {
-      // Overdue: due_date past AND not the FR-18 "done" state. Done is
-      // production IN (completed, cancelled) AND fulfillment = fully_shipped.
-      // Encode by excluding rows that satisfy both halves; we approximate
-      // server-side with the fulfillment half and let isJobOverdue refine
-      // client-side. Uses local-date today (see todayLocalISODate) so the
-      // server agrees with the client's isJobOverdue check.
+      // Overdue: due_date in the past AND production still active
+      // (not_started/in_progress) AND not fully shipped. Completing or
+      // cancelling a job — or fully shipping it — clears overdue. This is the
+      // exact server-side equivalent of the client isJobOverdue predicate
+      // (local-date today via todayLocalISODate), so no client refinement is
+      // needed.
       query = query
         .not('due_date', 'is', null)
         .lt('due_date', todayLocalISODate())
-        .not('fulfillment_status', 'eq', 'fully_shipped');
+        .not('fulfillment_status', 'eq', 'fully_shipped')
+        .in('production_status', ['not_started', 'in_progress']);
     }
 
     const { data, error } = await query;
@@ -1448,70 +1449,6 @@ export async function getCustomersForSelect(
   }
 
   return data || [];
-}
-
-// ============== Overdue ==============
-
-/**
- * Count jobs that are past their due date and not yet at the FR-18 done
- * state. Done = production_status IN (completed, cancelled) AND
- * fulfillment_status = fully_shipped. Server-side we approximate by
- * excluding the fulfillment half (fully_shipped) — cancelled jobs whose
- * fulfillment isn't fully_shipped are still "live" from the customer's
- * perspective and remain overdue if past due_date.
- */
-export async function getOverdueJobsCount(companyId: string): Promise<number> {
-  const supabase = getSupabase();
-
-  const { count, error } = await supabase
-    .from('jobs')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .not('due_date', 'is', null)
-    .lt('due_date', todayLocalISODate())
-    .not('fulfillment_status', 'eq', 'fully_shipped')
-    .not('production_status', 'eq', 'cancelled');
-
-  if (error) {
-    console.error('Error fetching overdue jobs count:', error);
-    throw error;
-  }
-
-  return count || 0;
-}
-
-/**
- * Fetch overdue jobs for dashboard/list use. Same server-side
- * approximation as getOverdueJobsCount; callers that need the exact
- * FR-18 predicate refine client-side via isJobOverdue.
- */
-export async function getOverdueJobs(
-  companyId: string,
-  limit: number = 50,
-): Promise<JobWithRelations[]> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('jobs')
-    .select(`
-      *,
-      customers!left(id, name),
-      job_parts(id, sequence, parts(id, part_name))
-    `)
-    .eq('company_id', companyId)
-    .not('due_date', 'is', null)
-    .lt('due_date', todayLocalISODate())
-    .not('fulfillment_status', 'eq', 'fully_shipped')
-    .not('production_status', 'eq', 'cancelled')
-    .order('due_date', { ascending: true })
-    .limit(limit);
-
-  if (error) {
-    console.error('Error fetching overdue jobs:', error);
-    throw error;
-  }
-
-  return (data || []) as unknown as JobWithRelations[];
 }
 
 // ============== Current Operation Batch Query ==============

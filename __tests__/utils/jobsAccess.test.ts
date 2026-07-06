@@ -44,7 +44,6 @@ import {
   createJobFromPurchaseOrder,
   getAllJobs,
   getCustomersForSelect,
-  getOverdueJobsCount,
   getReadyOperationsForJobs,
   reopenJob,
   searchJobsByIdentifier,
@@ -211,25 +210,6 @@ describe('jobsAccess', () => {
       mockQueryBuilder.data = null;
       const customers = await getCustomersForSelect('co-1');
       expect(customers).toEqual([]);
-    });
-  });
-
-  describe('getOverdueJobsCount', () => {
-    it('uses count: exact head:true with company + due_date + status filters', async () => {
-      mockQueryBuilder.count = 4;
-      const count = await getOverdueJobsCount('co-1');
-      expect(count).toBe(4);
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('due_date', 'is', null);
-      expect(mockQueryBuilder.lt).toHaveBeenCalledWith('due_date', expect.any(String));
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('fulfillment_status', 'eq', 'fully_shipped');
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('production_status', 'eq', 'cancelled');
-    });
-
-    it('returns 0 when supabase returns null count', async () => {
-      mockQueryBuilder.count = null;
-      const count = await getOverdueJobsCount('co-1');
-      expect(count).toBe(0);
     });
   });
 

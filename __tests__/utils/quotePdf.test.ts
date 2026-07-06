@@ -426,7 +426,7 @@ describe('generateQuotePdf', () => {
     expect(rendered).toContain('Jane Smith');
   });
 
-  it('renders the ACCEPTANCE block with reply-with-a-PO copy and NO signature/date lines', async () => {
+  it('no longer renders an ACCEPTANCE block (acceptance is by returning a PO)', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
@@ -434,18 +434,14 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    expect(rendered).toContain('ACCEPTANCE');
-    // Acceptance is now by returning a PO — the wet-signature ruled lines are gone.
-    expect(rendered).not.toContain('Signature');
-    expect(rendered).not.toContain('PO #');
-    expect(rendered).not.toContain('Date');
-    // The acceptance sentence is wrapped via splitTextToSize; assert its input.
+    expect(rendered).not.toContain('ACCEPTANCE');
+    // The old acceptance sentence (wrapped via splitTextToSize) is gone too.
     const splitInputs = docInstance.splitTextToSize.mock.calls.map((c: unknown[]) => c[0]);
     expect(
       splitInputs.some(
         (t: unknown) => typeof t === 'string' && t.includes('purchase order referencing quote'),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('renders a "Prepared by" line (not a CREATED BY column) when the creator is known', async () => {
@@ -462,9 +458,11 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    // "Created by" is no longer a top column — it's a "Prepared by" footer line.
+    // "Created by" is no longer a top column — it's a "Prepared by" footer line
+    // that replaced the old "Generated <date> · <company>" footer text.
     expect(rendered).not.toContain('CREATED BY');
     expect(rendered).toContain('Prepared by Sam T · sam@example.com');
+    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
   });
 
   it('omits the "Prepared by" line when there is no creator on the quote', async () => {

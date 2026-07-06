@@ -157,8 +157,13 @@ export function isJobOverdue(
   job: Pick<Job, 'due_date' | 'production_status' | 'fulfillment_status'>,
 ): boolean {
   if (!job.due_date) return false;
-  if (isJobDone(job)) return false;
-  if (job.production_status === 'cancelled') return false;
+  // Not overdue once production has ended (completed or cancelled) or the job
+  // is fully shipped — a delivered or closed-out job can't be late. Keyed off
+  // production_status directly (not isJobDone, which additionally requires full
+  // shipment) so a completed-but-unshipped job also clears. Mirrors the
+  // server-side overdue filters in jobsAccess/dashboardAccess.
+  if (job.production_status === 'completed' || job.production_status === 'cancelled') return false;
+  if (job.fulfillment_status === 'fully_shipped') return false;
   const [y, m, d] = job.due_date.split('-').map((n) => parseInt(n, 10));
   if (!y || !m || !d) return false;
   const dueLocal = new Date(y, m - 1, d);
@@ -170,8 +175,7 @@ export function isJobOverdue(
 /**
  * FR-18 "done" predicate. A job is done when production has ended
  * (completed or cancelled) AND every part is fully shipped. Used by the
- * jobs-list default filter (hide done), the dashboard active-jobs count,
- * and the overdue check above.
+ * jobs-list default filter (hide done) and the dashboard active-jobs count.
  */
 export function isJobDone(
   job: Pick<Job, 'production_status' | 'fulfillment_status'>,

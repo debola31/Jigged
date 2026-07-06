@@ -39,12 +39,12 @@ vi.mock('@/utils/jobAttachmentsAccess', () => ({
 }));
 
 import {
+  applyOverdueJobsFilter,
   deleteJob,
   bulkCancelJobs,
   createJobFromPurchaseOrder,
   getAllJobs,
   getCustomersForSelect,
-  getOverdueJobsCount,
   getReadyOperationsForJobs,
   reopenJob,
   searchJobsByIdentifier,
@@ -214,22 +214,22 @@ describe('jobsAccess', () => {
     });
   });
 
-  describe('getOverdueJobsCount', () => {
-    it('uses count: exact head:true with company + due_date + status filters', async () => {
-      mockQueryBuilder.count = 4;
-      const count = await getOverdueJobsCount('co-1');
-      expect(count).toBe(4);
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('due_date', 'is', null);
-      expect(mockQueryBuilder.lt).toHaveBeenCalledWith('due_date', expect.any(String));
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('fulfillment_status', 'eq', 'fully_shipped');
-      expect(mockQueryBuilder.not).toHaveBeenCalledWith('production_status', 'eq', 'cancelled');
-    });
+  describe('applyOverdueJobsFilter', () => {
+    it('applies the canonical overdue clauses and returns the same builder', () => {
+      const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+      ['not', 'lt', 'in'].forEach((m) => {
+        builder[m] = vi.fn().mockImplementation(() => builder);
+      });
 
-    it('returns 0 when supabase returns null count', async () => {
-      mockQueryBuilder.count = null;
-      const count = await getOverdueJobsCount('co-1');
-      expect(count).toBe(0);
+      const result = applyOverdueJobsFilter(builder);
+
+      expect(result).toBe(builder);
+      // Past due (local date), production active, not fully shipped — the single
+      // server-side definition shared by the list filter and dashboard count.
+      expect(builder.not).toHaveBeenNthCalledWith(1, 'due_date', 'is', null);
+      expect(builder.lt).toHaveBeenCalledWith('due_date', expect.any(String));
+      expect(builder.not).toHaveBeenNthCalledWith(2, 'fulfillment_status', 'eq', 'fully_shipped');
+      expect(builder.in).toHaveBeenCalledWith('production_status', ['not_started', 'in_progress']);
     });
   });
 

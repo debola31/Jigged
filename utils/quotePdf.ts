@@ -393,48 +393,16 @@ export async function generateQuotePdf(
     cursorY += 20;
   }
 
-  // ---------- Acceptance block (compact) ----------
-  // Acceptance is by returning a purchase order — no wet signature/date lines.
-  const acceptanceHeight = 56;
-  const footerReserve = 50;
-
-  if (cursorY + acceptanceHeight > pageHeight - MARGIN - footerReserve) {
-    doc.addPage();
-    cursorY = MARGIN;
-  } else {
-    cursorY += 10;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text('ACCEPTANCE', MARGIN, cursorY);
-  cursorY += 14;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(60);
-  const acceptCopy =
-    `To accept, reply to this quote with a purchase order referencing quote ${quote.quote_number ?? ''}.`.trim();
-  const wrappedCopy = doc.splitTextToSize(acceptCopy, pageWidth - MARGIN * 2);
-  doc.text(wrappedCopy, MARGIN, cursorY);
-  cursorY += wrappedCopy.length * 12 + 12;
-
-  // Prepared by — relocated from the old top "CREATED BY" column.
+  // ---------- Footer (every page) ----------
+  // The company name and quote dates already sit in the header, so the footer
+  // carries the preparer credit (relocated from the old top "CREATED BY"
+  // column) on the left and the page number on the right. The left side is
+  // blank when the quote has no known creator.
   const preparedName = quote.created_by_member?.name ?? null;
   const preparedEmail = quote.created_by_member?.email ?? null;
-  if (preparedName || preparedEmail) {
-    const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text(`Prepared by ${preparedText}`, MARGIN, cursorY);
-    cursorY += 12;
-  }
+  const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
+  const footerLeft = preparedText ? `Prepared by ${preparedText}` : '';
 
-  // ---------- Footer (every page) ----------
-  // "Prepared by" now lives in the acceptance block, so the footer is
-  // generated-on/page-of only.
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
@@ -446,11 +414,9 @@ export async function generateQuotePdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
-    doc.text(
-      `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
-      MARGIN,
-      footerY,
-    );
+    if (footerLeft) {
+      doc.text(footerLeft, MARGIN, footerY);
+    }
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

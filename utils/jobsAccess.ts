@@ -65,6 +65,32 @@ function todayLocalISODate(): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * The single server-side definition of "overdue" for a jobs query: due date set
+ * and in the past (local date, via todayLocalISODate), production still active
+ * (not_started or in_progress), and not fully shipped. Shared by the jobs-list
+ * "overdue only" filter (getAllJobs) and the dashboard overdue-count metric so
+ * the two SQL queries can't drift — including agreeing on the day boundary
+ * (local date, not a UTC timestamp). The client-side mirror, applied per-row for
+ * the overdue icon/badge, is isJobOverdue() in types/job.ts.
+ *
+ * Typed structurally (method syntax) so it accepts both the untyped and typed
+ * Supabase filter builders and returns the same builder for further chaining.
+ */
+export function applyOverdueJobsFilter<
+  Q extends {
+    not(column: string, operator: string, value: unknown): Q;
+    lt(column: string, value: unknown): Q;
+    in(column: string, values: readonly unknown[]): Q;
+  },
+>(query: Q): Q {
+  return query
+    .not('due_date', 'is', null)
+    .lt('due_date', todayLocalISODate())
+    .not('fulfillment_status', 'eq', 'fully_shipped')
+    .in('production_status', ['not_started', 'in_progress']);
+}
+
 // ============== Read Queries ==============
 
 /**
@@ -134,17 +160,9 @@ export async function getAllJobs(
       query = query.or(`job_number.ilike.%${sanitized}%`);
     }
     if (filters.overdue) {
-      // Overdue: due_date in the past AND production still active
-      // (not_started/in_progress) AND not fully shipped. Completing or
-      // cancelling a job — or fully shipping it — clears overdue. This is the
-      // exact server-side equivalent of the client isJobOverdue predicate
-      // (local-date today via todayLocalISODate), so no client refinement is
-      // needed.
-      query = query
-        .not('due_date', 'is', null)
-        .lt('due_date', todayLocalISODate())
-        .not('fulfillment_status', 'eq', 'fully_shipped')
-        .in('production_status', ['not_started', 'in_progress']);
+      // Single source of truth for the overdue predicate — see
+      // applyOverdueJobsFilter (mirrors client isJobOverdue + dashboard count).
+      query = applyOverdueJobsFilter(query);
     }
 
     const { data, error } = await query;

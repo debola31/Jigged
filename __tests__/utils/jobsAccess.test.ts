@@ -39,6 +39,7 @@ vi.mock('@/utils/jobAttachmentsAccess', () => ({
 }));
 
 import {
+  applyOverdueJobsFilter,
   deleteJob,
   bulkCancelJobs,
   createJobFromPurchaseOrder,
@@ -210,6 +211,25 @@ describe('jobsAccess', () => {
       mockQueryBuilder.data = null;
       const customers = await getCustomersForSelect('co-1');
       expect(customers).toEqual([]);
+    });
+  });
+
+  describe('applyOverdueJobsFilter', () => {
+    it('applies the canonical overdue clauses and returns the same builder', () => {
+      const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+      ['not', 'lt', 'in'].forEach((m) => {
+        builder[m] = vi.fn().mockImplementation(() => builder);
+      });
+
+      const result = applyOverdueJobsFilter(builder);
+
+      expect(result).toBe(builder);
+      // Past due (local date), production active, not fully shipped — the single
+      // server-side definition shared by the list filter and dashboard count.
+      expect(builder.not).toHaveBeenNthCalledWith(1, 'due_date', 'is', null);
+      expect(builder.lt).toHaveBeenCalledWith('due_date', expect.any(String));
+      expect(builder.not).toHaveBeenNthCalledWith(2, 'fulfillment_status', 'eq', 'fully_shipped');
+      expect(builder.in).toHaveBeenCalledWith('production_status', ['not_started', 'in_progress']);
     });
   });
 

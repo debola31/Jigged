@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/nextjs';
 // Typed Supabase client (typed-client rollout). Aliased so the 8 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { applyOverdueJobsFilter } from '@/utils/jobsAccess';
 
 // ============== Types ==============
 
@@ -339,15 +340,16 @@ async function getCompletedJobsInRange(
 
 async function getOverdueJobs(companyId: string): Promise<number> {
   const supabase = getSupabase();
-  const now = new Date().toISOString();
 
-  const { count, error } = await supabase
-    .from('jobs')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .in('production_status', ['not_started', 'in_progress'])
-    .not('fulfillment_status', 'eq', 'fully_shipped')
-    .lt('due_date', now);
+  // Overdue predicate is defined once in applyOverdueJobsFilter (shared with the
+  // jobs-list filter), so this count agrees with the list and the row badges —
+  // including on the day boundary (local date, not a UTC timestamp).
+  const { count, error } = await applyOverdueJobsFilter(
+    supabase
+      .from('jobs')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', companyId),
+  );
 
   if (error) throw error;
   return count || 0;

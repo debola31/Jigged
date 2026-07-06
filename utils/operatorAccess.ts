@@ -677,6 +677,9 @@ export async function getStationOperationTypes(
     .from('work_centers')
     .select('id, name')
     .eq('company_id', companyId)
+    // Operators only run internal stations; external/vendor work centers are
+    // handled through the routing/job workflow, not picked at the station.
+    .eq('kind', 'internal')
     .order('name');
 
   if (error) throw new Error(error.message);

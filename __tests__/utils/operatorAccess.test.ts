@@ -56,6 +56,20 @@ describe('getAllStationsOperatorJobs', () => {
     });
     expect(result).toEqual([]);
   });
+
+  it('throws (surfaces the error) when the readiness RPC fails, instead of returning []', async () => {
+    // Regression guard: a swallowed RPC error used to read as "no work" to
+    // operators (the jobs.status column bug). It must propagate so the jobs
+    // page can show it in an Alert rather than a bare "No jobs available".
+    mockSupabase.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'column j.status does not exist' },
+    });
+
+    await expect(
+      getAllStationsOperatorJobs('c1', [{ id: 'wc1', name: 'Lathe' }]),
+    ).rejects.toThrow(/column j\.status does not exist/);
+  });
 });
 
 describe('getJobNotes', () => {

@@ -201,8 +201,12 @@ async function getReadyOperationsForStation(
   });
 
   if (error) {
-    console.error('Error fetching ready operations for station:', error);
-    return [];
+    // Surface the failure instead of swallowing it into an empty list — a
+    // swallowed RPC error is exactly how the jobs.status column bug read as
+    // "no jobs" to operators rather than a visible error. Both callers
+    // (getOperatorJobs / getAllStationsOperatorJobs) run inside the jobs page's
+    // try/catch, which shows this message in an Alert.
+    throw new Error(`Failed to load ready operations for station: ${error.message}`);
   }
 
   return (data || []) as ReadyRow[];

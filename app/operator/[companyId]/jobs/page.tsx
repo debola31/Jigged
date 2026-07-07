@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -13,8 +13,6 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import IconButton from '@mui/material/IconButton';
 import { getOperatorJobs, getAllStationsOperatorJobs } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
@@ -43,27 +41,6 @@ export default function OperatorJobsPage() {
   const [plantJobs, setPlantJobs] = useState<OperatorPlantJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const loadJobs = useCallback(async () => {
-    if (lens === 'station' && !stationId) {
-      setJobs([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      if (lens === 'plant') {
-        setPlantJobs(await getAllStationsOperatorJobs(companyId, stations));
-      } else {
-        setJobs(await getOperatorJobs(companyId, stationId as string));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load jobs');
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId, stationId, lens, stations]);
 
   useEffect(() => {
     // Re-run on lens / station / stations change. Cancellation guards against a
@@ -194,32 +171,24 @@ export default function OperatorJobsPage() {
 
   return (
     <Box>
-      {/* Header: lens toggle + refresh */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          mb: 2,
-          gap: 1,
-        }}
-      >
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={lens}
-          onChange={(_e, value) => {
-            if (value) setLens(value as Lens);
-          }}
-          aria-label="Job list scope"
-        >
-          <ToggleButton value="station">My Station</ToggleButton>
-          <ToggleButton value="plant">All Stations</ToggleButton>
-        </ToggleButtonGroup>
-        <IconButton onClick={loadJobs} disabled={loading} aria-label="Refresh">
-          <RefreshIcon />
-        </IconButton>
-      </Box>
+      {/* Lens toggle (My Station / All Stations) — hidden on the station picker,
+          where there's no selected station to scope by yet. */}
+      {!showStationSelector && (
+        <Box sx={{ mb: 2 }}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={lens}
+            onChange={(_e, value) => {
+              if (value) setLens(value as Lens);
+            }}
+            aria-label="Job list scope"
+          >
+            <ToggleButton value="station">My Station</ToggleButton>
+            <ToggleButton value="plant">All Stations</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

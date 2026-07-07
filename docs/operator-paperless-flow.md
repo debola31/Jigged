@@ -103,8 +103,9 @@ scrap/defect discovery framing, and the stale-doc fix list.
   work is warned, not blocked.
 - A row links to `…/jobs/{job_id}/parts/{job_part_id}` and deep-links straight to the ready
   `…/operations/{operation_id}` when known (`jobs/page.tsx:87`).
-- **Returns an empty list when no station is selected** (`getOperatorJobs` short-circuits) —
-  i.e. there is **no "all stations / whole plant" mode** today.
+- **The My Station lens returns an empty list when no station is selected** (`getOperatorJobs`
+  short-circuits). The whole-plant **"All Stations"** lens (shipped — see §7) is the mode that
+  covers "no single station," e.g. a roaming operator or lead.
 
 ### Action & capture
 - Operation action page: **Mark Complete** + **Undo**, append-only **notes + photo/video**
@@ -195,9 +196,11 @@ An operation is **pending → completed** (single tap; `completed_by`/`completed
 meaningfully or is vestigial under complete-only; if vestigial, simplify to pending/completed.
 
 ### 5.3 Freshness: manual refresh
-**Decided:** manual refresh (the dispatch list already has a refresh control); **no
-WebSockets / live push** for now. It's simpler and probably sufficient. Revisit only if we
-validate a concrete need (e.g. two operators colliding on the same step often enough to matter).
+**Decided:** manual refresh via **browser reload / pull-to-refresh**; **no WebSockets / live
+push** for now. (The in-app refresh button on the dispatch list was removed to declutter the
+operator UI — reloading the page is equivalent and one less control to explain.) It's simpler and
+probably sufficient. Revisit only if we validate a concrete need (e.g. two operators colliding on
+the same step often enough to matter).
 
 ### 5.4 Scrap / defect / quality flagging — **discovery needed**
 Nothing exists today, and we haven't designed it. This needs real discovery before building.
@@ -253,32 +256,30 @@ placard flow onto the floor and make the queue path *win* over paper.
 
 ---
 
-## 7. Whole-plant view (proposed)
+## 7. Whole-plant view ("All Stations") — shipped
 
 **Why:** the one clear missing capability and your explicit "sign into the plant" ask. Serves the
 roaming operator (station idle → find work elsewhere), the working lead (floor-wide status), and
 the "where is job #123?" lookup — without walking the floor (the Andon/visibility pattern).
 
-**Proposed shape:**
-- A lens toggle on the operator jobs page: **My Station** (default) ↔ **All stations**.
-- "All stations" lists every ready/in-progress (job, part, operation) across the company,
-  **grouped by station**, sorted by due date (urgent first). Reuse the dispatch row UI.
-- Implementation seam: a variant of `get_ready_operations_for_station` that omits the
-  `work_center_id` filter (or a sibling RPC) returning all ready operations company-wide; the
-  jobs page already short-circuits to empty without a station, so this is an additive mode.
+**Shipped shape:**
+- A lens toggle on the operator jobs page: **My Station** (default) ↔ **All Stations**
+  (`app/operator/[companyId]/jobs/page.tsx`). The toggle is **hidden on the station-picker
+  screen** — it only appears once a station is selected and there's a list to scope.
+- "All Stations" lists every ready/in-progress (job, part, operation) across the company,
+  **grouped by station**, reusing the dispatch row card.
+- Implementation: rather than a filter-less variant RPC, `getAllStationsOperatorJobs`
+  (`utils/operatorAccess.ts`) fans out the **same** per-station `get_ready_operations_for_station`
+  RPC once per station in parallel and tags each row with its station — one source of truth for
+  "ready," no duplicated readiness logic.
 
-**Open questions (answer from the journey before building):**
-- Is it **read-only visibility**, or can an operator **act** (Mark Complete) directly from it?
-  (Acting from it weakens the station-guard intent — `prd.md` §4.3 — so maybe tapping a row at a
-  *different* station still routes through the station-switch guard.)
-- Default lens: always My Station, or remember the operator's last choice?
-- Does it **complement** station mode (recommended) or could it **replace** per-station entirely?
-- Owner/office already have job lists in `/dashboard` — is the operator whole-plant view distinct
-  from (lighter than) the office jobs list, or should it reuse it?
-
-**Recommendation:** complement, don't replace. Default to My Station; offer All-stations as a
-toggle aimed at "find work / floor visibility," routing any *action* through the existing
-station-switch guard.
+**How the open questions resolved:**
+- **Read-only or act?** Operators can act. Tapping a row at a *different* station routes through
+  the operation page's station-switch guard (`prd.md` §4.3), so the station-guard intent holds.
+- **Default lens:** always My Station.
+- **Complement or replace?** Complements — both lenses coexist; per-station stays the default.
+- **Distinct from the office list?** Yes — it's the lighter operator dispatch card, not the
+  `/dashboard` office jobs table.
 
 ---
 

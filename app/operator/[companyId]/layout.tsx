@@ -14,7 +14,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
-import LogoutIcon from '@mui/icons-material/Logout';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
@@ -23,7 +22,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
-import { OperatorStationProvider, useStationContext, clearStoredStation } from '@/components/operator/OperatorStationContext';
+import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import { OperatorChromeProvider, useOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
@@ -111,15 +110,6 @@ export default function OperatorLayout({
     else setNavValue('jobs');
   }, [pathname]);
 
-  const handleLogout = async () => {
-    // Explicit logout clears the persisted station (device hand-off / end of
-    // shift). Passive tab eviction does NOT — localStorage survives that, which
-    // is the whole point of the persistence change.
-    clearStoredStation();
-    await supabase.auth.signOut();
-    router.push(`/operator/${companyId}/login`);
-  };
-
   const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
@@ -170,7 +160,6 @@ export default function OperatorLayout({
           companyId={companyId}
           navValue={navValue}
           onNavChange={handleNavChange}
-          onLogout={handleLogout}
         >
           {children}
         </OperatorShell>
@@ -187,14 +176,12 @@ function OperatorShell({
   companyId,
   navValue,
   onNavChange,
-  onLogout,
   children,
 }: {
   userRole: string;
   companyId: string;
   navValue: string;
   onNavChange: (event: React.SyntheticEvent, newValue: string) => void;
-  onLogout: () => void;
   children: React.ReactNode;
 }) {
   const { stationId, stationName, stations, setStation } = useStationContext();
@@ -296,20 +283,8 @@ function OperatorShell({
             )}
           </Box>
 
-          {/* Right: page action icons (Files, Previous notes) + dashboard
-              (non-operators) + logout. */}
-          {chrome.actions?.map((action) => (
-            <IconButton
-              key={action.key}
-              color="inherit"
-              size="small"
-              aria-label={action.label}
-              onClick={action.onClick}
-              sx={{ ml: 0.5 }}
-            >
-              {action.icon}
-            </IconButton>
-          ))}
+          {/* Right: dashboard shortcut for non-operators (admins/leads viewing
+              the operator view). Logout lives on the Profile tab, not here. */}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"
@@ -321,15 +296,6 @@ function OperatorShell({
               <DashboardIcon fontSize="small" />
             </IconButton>
           )}
-          <IconButton
-            color="inherit"
-            onClick={onLogout}
-            aria-label="logout"
-            size="small"
-            sx={{ ml: 0.5 }}
-          >
-            <LogoutIcon fontSize="small" />
-          </IconButton>
         </Toolbar>
 
         {/* Station Selector Menu */}

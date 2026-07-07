@@ -6,31 +6,18 @@ import type { DependencyList, ReactNode } from 'react';
 /**
  * Header chrome for the operator shell.
  *
- * Each operator page declares, from its own render, what the fixed AppBar should
- * show for it: a contextual back target (or none, on the back-less "home" roots
- * where the JIG logo shows instead) and an optional right-side cluster of
- * job-context action icons (Files, Previous notes). `OperatorShell` is
- * presentational — it renders whatever the current page registered.
+ * Each operator page declares, from its own render, the contextual back target
+ * for the fixed AppBar (or none, on the back-less "home" roots where the JIG
+ * logo shows instead). `OperatorShell` is presentational — it renders whatever
+ * the current page registered.
  *
  * Why a context and not "compute back from the pathname": pages already know
  * their exact parent (the operation page literally computes `travelerHref`), and
  * a QR deep-link into a page has no in-app history for `router.back()` to use.
- * The action icons also need page-owned handlers — they open sheets whose
- * open-state the page owns — which only the page can supply.
  */
-export interface OperatorChromeAction {
-  key: 'files' | 'history';
-  icon: ReactNode;
-  /** aria-label / tooltip for the icon button. */
-  label: string;
-  onClick: () => void;
-}
-
 export interface OperatorChromeConfig {
   /** Back target for the header. Omit/null on back-less roots (logo shows). */
   back?: { href: string; label?: string } | null;
-  /** Right-cluster action icons for the current page. */
-  actions?: OperatorChromeAction[];
 }
 
 interface OperatorChromeContextValue {

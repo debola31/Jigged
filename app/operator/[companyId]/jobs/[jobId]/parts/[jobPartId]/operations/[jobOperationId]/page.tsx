@@ -15,8 +15,6 @@ import Alert from '@mui/material/Alert';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import HistoryIcon from '@mui/icons-material/History';
 import {
   getOperatorOperationDetail,
   getCurrentOperator,
@@ -27,8 +25,7 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
-import PartFilesSheet from '@/components/operator/PartFilesSheet';
-import PartNotesSheet from '@/components/operator/PartNotesSheet';
+import PartReferenceRow from '@/components/operator/PartReferenceRow';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
@@ -62,32 +59,10 @@ export default function OperatorOperationActionPage() {
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filesOpen, setFilesOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
 
-  // Header chrome: back → the traveler, plus Files (drawings / 3D models) and
-  // Previous notes actions. Registered so the shell's fixed AppBar renders them
-  // (no in-content back button needed).
-  useSetOperatorChrome(
-    {
-      back: { href: travelerHref, label: 'Back to traveler' },
-      actions: [
-        {
-          key: 'files',
-          icon: <FolderOpenIcon fontSize="small" />,
-          label: 'Files',
-          onClick: () => setFilesOpen(true),
-        },
-        {
-          key: 'history',
-          icon: <HistoryIcon fontSize="small" />,
-          label: 'Previous notes',
-          onClick: () => setNotesOpen(true),
-        },
-      ],
-    },
-    [travelerHref],
-  );
+  // Header back → the traveler for this part. (Files + Previous notes live in an
+  // in-content reference row below the job card, not the header.)
+  useSetOperatorChrome({ back: { href: travelerHref, label: 'Back to traveler' } }, [travelerHref]);
 
   useEffect(() => {
     async function loadOperator() {
@@ -296,6 +271,14 @@ export default function OperatorOperationActionPage() {
         </CardContent>
       </Card>
 
+      <PartReferenceRow
+        companyId={companyId}
+        partId={job.part_id}
+        partName={job.part_name}
+        excludeJobId={jobId}
+        jobOperationId={jobOperationId}
+      />
+
       {isCompleted ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Alert severity="success">This step is complete.</Alert>
@@ -376,25 +359,6 @@ export default function OperatorOperationActionPage() {
         />
       </Box>
 
-      {filesOpen && (
-        <PartFilesSheet
-          open
-          onClose={() => setFilesOpen(false)}
-          partId={job.part_id}
-          partName={job.part_name}
-        />
-      )}
-      {notesOpen && (
-        <PartNotesSheet
-          open
-          onClose={() => setNotesOpen(false)}
-          partId={job.part_id}
-          companyId={companyId}
-          excludeJobId={jobId}
-          jobOperationId={jobOperationId}
-          partName={job.part_name}
-        />
-      )}
     </Box>
   );
 }

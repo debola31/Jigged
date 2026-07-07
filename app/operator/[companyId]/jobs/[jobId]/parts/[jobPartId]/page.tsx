@@ -13,8 +13,6 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import LayersIcon from '@mui/icons-material/Layers';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import HistoryIcon from '@mui/icons-material/History';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
@@ -22,8 +20,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
-import PartFilesSheet from '@/components/operator/PartFilesSheet';
-import PartNotesSheet from '@/components/operator/PartNotesSheet';
+import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import type { JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -64,32 +61,10 @@ export default function OperatorJobTravelerPage() {
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
-  const [filesOpen, setFilesOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
 
-  // Header chrome: back → the station jobs list, plus a Files action (the part's
-  // drawings / 3D models). The "All N parts" lateral jump for multi-part jobs
-  // stays in-content below.
-  useSetOperatorChrome(
-    {
-      back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' },
-      actions: [
-        {
-          key: 'files',
-          icon: <FolderOpenIcon fontSize="small" />,
-          label: 'Files',
-          onClick: () => setFilesOpen(true),
-        },
-        {
-          key: 'history',
-          icon: <HistoryIcon fontSize="small" />,
-          label: 'Previous notes',
-          onClick: () => setNotesOpen(true),
-        },
-      ],
-    },
-    [companyId],
-  );
+  // Header back → the station jobs list. (Files + Previous notes live in an
+  // in-content reference row; the "All N parts" jump stays in-content too.)
+  useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
 
   const { data: traveler, loading } = useLoad(
     async () => {
@@ -216,6 +191,13 @@ export default function OperatorJobTravelerPage() {
         </CardContent>
       </Card>
 
+      <PartReferenceRow
+        companyId={companyId}
+        partId={traveler.part_id}
+        partName={traveler.part_name}
+        excludeJobId={traveler.job_id}
+      />
+
       {/* Job feed (read-only here) — notes + photos for the whole job, captured
           per step on the operation pages. Bumped up top: operators use it a lot. */}
       <Box sx={{ mb: 3 }}>
@@ -272,24 +254,6 @@ export default function OperatorJobTravelerPage() {
         })}
       </Box>
 
-      {filesOpen && (
-        <PartFilesSheet
-          open
-          onClose={() => setFilesOpen(false)}
-          partId={traveler.part_id}
-          partName={traveler.part_name}
-        />
-      )}
-      {notesOpen && (
-        <PartNotesSheet
-          open
-          onClose={() => setNotesOpen(false)}
-          partId={traveler.part_id}
-          companyId={companyId}
-          excludeJobId={traveler.job_id}
-          partName={traveler.part_name}
-        />
-      )}
     </Box>
   );
 }

@@ -16,6 +16,7 @@ import FeedbackDialog from '@/components/feedback/FeedbackDialog';
 import { getCurrentOperator } from '@/utils/operatorAccess';
 import { getCompany } from '@/utils/companyAccess';
 import { getSupabase } from '@/lib/supabase';
+import { clearStoredStation } from '@/components/operator/OperatorStationContext';
 
 /**
  * Operator Profile Page.
@@ -77,9 +78,9 @@ export default function OperatorProfilePage() {
   }, [companyId]);
 
   const handleLogout = async () => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('jigged_operator_station');
-    }
+    // Clears the persisted station (localStorage) on explicit logout — same store
+    // OperatorStationContext uses; sessionStorage is no longer the station's home.
+    clearStoredStation();
     const supabase = getSupabase();
     await supabase.auth.signOut();
     router.push(`/operator/${companyId}/login`);

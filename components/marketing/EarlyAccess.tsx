@@ -4,45 +4,39 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Section from './Section';
 import Reveal from './Reveal';
-import EmailCapture from './EmailCapture';
-import { FINAL_CTA } from '@/lib/constants/marketing';
-import { DISPLAY_FONT } from './marketingStyles';
+import { EARLY_ACCESS } from '@/lib/constants/marketing';
+import { gradientTextSx, DISPLAY_FONT } from './marketingStyles';
 
-export default function FinalCTA() {
+/** Honest "pricing" beat — no invented tiers, just the early-access reality. */
+export default function EarlyAccess() {
   return (
-    <Section maxWidth="md">
+    <Section surface="raised" maxWidth="md" size="minor">
       <Reveal>
         <Box sx={{ textAlign: 'center' }}>
           <Typography
             component="h2"
             sx={{
+              ...gradientTextSx,
               fontFamily: DISPLAY_FONT,
               fontWeight: 600,
-              fontSize: 'clamp(2.25rem, 5vw, 3.75rem)',
-              lineHeight: 1.02,
+              fontSize: 'clamp(2rem, 4.2vw, 3.1rem)',
               letterSpacing: '-0.03em',
-              mb: 2.5,
+              mb: 2,
             }}
           >
-            {FINAL_CTA.heading}
+            {EARLY_ACCESS.heading}
           </Typography>
           <Typography
             sx={{
               color: 'rgba(255, 255, 255, 0.78)',
-              mb: 4,
-              maxWidth: 560,
-              mx: 'auto',
               fontSize: { xs: '1.05rem', md: '1.2rem' },
               lineHeight: 1.6,
+              maxWidth: 560,
+              mx: 'auto',
             }}
           >
-            {FINAL_CTA.subhead}
+            {EARLY_ACCESS.body}
           </Typography>
-
-          {/* Single bottom conversion — the email capture (opens the full request-access modal). */}
-          <Box sx={{ maxWidth: 520, mx: 'auto' }}>
-            <EmailCapture source="landing_footer_cta" />
-          </Box>
         </Box>
       </Reveal>
     </Section>

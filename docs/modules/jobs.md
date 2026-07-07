@@ -20,19 +20,26 @@ The Jobs module tracks production work through the shop. A **Job** is the projec
 
 ## Job Status Workflow
 
+A job tracks **three independent status axes** (each stored on both `jobs` and `job_parts`, derived from the parts by DB trigger — see Data Model):
+
+- **`production_status`** — `not_started → in_progress → completed`, plus `cancelled` from any non-terminal state.
+- **`fulfillment_status`** — `unshipped → partially_shipped → fully_shipped` (advances as shipment records are created).
+- **`invoicing_status`** — `uninvoiced → partially_invoiced → fully_invoiced` (advances as invoices are created).
+
 ```javascript
-NOT_STARTED ──► IN_PROGRESS ──► COMPLETED ──► SHIPPED
-     │              │
-     └──────────────┴──────► CANCELLED
+production_status:  NOT_STARTED ──► IN_PROGRESS ──► COMPLETED
+                         │               │
+                         └───────────────┴──────► CANCELLED
 ```
 
-**Status Definitions:**
+**Production status definitions:**
 
 - **Not Started** - Job created, no operations have begun
-- **In Progress** - Work has begun on the shop floor
-- **Completed** - All work finished, ready to ship
-- **Shipped** - Job shipped to customer
-- **Cancelled** - Job cancelled (can happen from any status)
+- **In Progress** - Work has begun on the shop floor (first operation completed)
+- **Completed** - All operations finished
+- **Cancelled** - Job cancelled (can happen from any non-terminal state)
+
+"Shipped" and "Invoiced" are **not** production states — they live on the fulfillment and invoicing axes above. A completed job can be simultaneously `partially_shipped` and `partially_invoiced`.
 
 ### Overdue (derived)
 
@@ -68,7 +75,9 @@ Overdue surfaces as:
 | job_number | Text | Yes | Mirrors source quote (`Q-0141` → `J-0141`); set explicitly by `convertQuoteToJob`. No manual creation, no auto-numbering trigger |
 | quote_id | UUID (FK) | No | Source quote when the job came from one; **null** for jobs created directly from a PO |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| status | Text | Yes | Aggregate status (`not_started` / `in_progress` / `completed` / `shipped` / `cancelled`) — DERIVED from `job_parts.status` via the `compute_job_status()` function and the `trigger_sync_job_status_from_parts_*` triggers |
+| production_status | Text | Yes | `not_started` / `in_progress` / `completed` / `cancelled` — DERIVED from `job_parts.production_status` via `compute_job_production_status()` and the sync triggers; never written directly by the dashboard |
+| fulfillment_status | Text | Yes | `unshipped` / `partially_shipped` / `fully_shipped` — DERIVED from the parts via `compute_job_fulfillment_status()` as shipment records are created |
+| invoicing_status | Text | Yes | `uninvoiced` / `partially_invoiced` / `fully_invoiced` (default `uninvoiced`) — DERIVED from the parts via `compute_job_invoicing_status()` as invoices are created |
 | due_date | Date | No | Date the job is due to ship |
 | lead_time_days | Integer | No | Lead time in days, typically copied from the source quote |
 | started_at | Timestamp | No | First time any part on the job moved to in_progress |
@@ -86,7 +95,7 @@ Overdue surfaces as:
 | sequence | Integer | Yes | Display order within the job |
 | quantity | Numeric | Yes | Order qty — copied from the quote line at creation, then **editable** (see "Editing order quantity" below). Fractional allowed. |
 | unit_price / total_price | Numeric(12,4) | No | Agreed price per unit and line total — the single source of price for invoicing and revenue. Re-derived on a quantity edit. |
-| status | Text | Yes | Per-part status — same enum as `jobs.status`, but owned at this level. Updates here trigger an aggregate refresh on `jobs.status` |
+| production_status / fulfillment_status / invoicing_status | Text | Yes | Per-part status on each axis — the source of truth. Updates here trigger an aggregate refresh of the matching column on `jobs` via DB trigger |
 | current_operation_sequence | Integer | No | Cursor pointing at the next operation to start |
 | started_at / completed_at / shipped_at | Timestamps | No | Per-part lifecycle timestamps |
 
@@ -202,13 +211,14 @@ Both paths store the agreed price on each `job_part` (`unit_price` / `total_pric
 
 **Actions (based on aggregate status):**
 
-| Current Status | Available Actions |
+| Current production status | Available actions |
 |---|---|
-| Not Started | Cancel Job (cancels every part) |
-| In Progress | Cancel Job |
-| Completed | Mark Shipped, Cancel Job |
-| Shipped | (read only) |
-| Cancelled | (read only) |
+| Not Started | Edit; Cancel Job (cancels every part); Delete (only if no shipments/invoices) |
+| In Progress | Edit; Cancel Job; Delete (only if no shipments/invoices) |
+| Completed | Edit; Create shipment; Create invoice; Cancel Job |
+| Cancelled | Reopen (re-derives status from operations); Delete (only if no shipments/invoices) |
+
+There is no "Mark Shipped" / "Start Job" / "Mark Complete" button — shipping is the side effect of creating a shipment record (which advances `fulfillment_status`).
 
 Status transitions for `not_started → in_progress → completed` are NOT manual on the dashboard — they emerge from operator activity on individual `job_parts`, then aggregate up via the trigger. Manual "Start Job" / "Mark Complete" buttons were removed.
 
@@ -234,68 +244,78 @@ Status transitions for `not_started → in_progress → completed` are NOT manua
 
 ## Status Transition Rules
 
+`production_status` is **derived**, never set by a dashboard button. Transitions emerge from operator activity on operations and aggregate up via DB trigger:
+
 | From | To | Trigger | Auto-set |
 |---|---|---|---|
-| Not Started | In Progress | User clicks "Start Job" (or first operation starts) | started_at = now |
-| Not Started | Cancelled | User clicks "Cancel Job" | - |
-| In Progress | Complete | User clicks "Mark Complete" (or all operations done) | completed_at = now |
-| In Progress | Cancelled | User clicks "Cancel Job" | - |
-| Complete | Shipped | User clicks "Mark Shipped" | shipped_at = now |
-| Complete | In Progress | User clicks "Reopen" | completed_at = null |
+| Not Started | In Progress | First operation on any part is marked complete | started_at = now |
+| In Progress | Completed | Last operation across all parts completed/skipped | completed_at = now |
+| any non-terminal | Cancelled | Admin clicks "Cancel Job" (cancels every part) | - |
+| Cancelled | (re-derived) | Admin clicks "Reopen" — each part's status recomputed from its operations | - |
+
+Fulfillment (`unshipped → … → fully_shipped`) advances as shipment records are created; invoicing (`uninvoiced → … → fully_invoiced`) advances as invoices are created. Neither is a production transition.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Can view paginated list of jobs
+Each bullet is a Given/When/Then scenario carrying a **verification clause** — a pointer to the test that proves it (`*verified by <file> > 'test name'*`), a manual procedure, or an explicit `automation-pending` tag. Every editable entity has at least one `edit → save → reload → persists` bullet; where no E2E reloads after that save yet, the write path cites its unit test and the reload assertion is tagged `automation-pending` (tracked by #367). Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on [issue #343](https://github.com/debola31/Jigged/issues/343).
 
-- [ ] Can search jobs by number, customer, part
+**List, search & filter**
 
-- [ ] Can filter by status
+- [ ] **Given** a company with more jobs than fit one page, **when** a user opens the jobs list, **then** jobs render 25-per-page with Job #, Customer, Parts, Current Op, Status, Due, and Created columns — *column data exercised by `e2e/quote-to-job.spec.ts > 'Quote to Job workflow' > 'create quote and convert to job'`; pagination automation-pending*.
+- [ ] **Given** the jobs list, **when** a user searches by job number, customer name, customer PO, part number, or packing-slip number, **then** matching jobs are returned and a blank query is a no-op — *verified by `__tests__/utils/jobsAccess.test.ts > 'searchJobsByIdentifier' > 'passes the trimmed query to the RPC and returns its rows'` AND `__tests__/utils/jobsAccess.test.ts > 'searchJobsByIdentifier' > 'short-circuits on empty/whitespace queries'`*.
+- [ ] **Given** the jobs list with no explicit status filter, **when** it loads, **then** closed jobs (completed/shipped + cancelled) are hidden by default until their stages are selected — *verified by `__tests__/utils/jobsAccess.test.ts > 'getAllJobs' > 'hides closed jobs (done + cancelled) by default'` AND `e2e/jobs-list-status.spec.ts > 'Jobs list — combined status filter' > 'simplified toolbar hides closed jobs by default and selecting their stages reveals them'`*.
+- [ ] **Given** the jobs list, **when** a user picks stages in the combined Status multi-select, **then** only jobs in those production/fulfillment stages show — *verified by `e2e/jobs-list-status.spec.ts > 'Jobs list — combined status filter' > 'narrows to a single stage via the combined Status multi-select'` AND `__tests__/utils/jobsAccess.test.ts > 'getAllJobs' > 'applies production/fulfillment status filters server-side via .in()'`*.
+- [ ] **Given** a job whose `due_date` is past and which is not completed, shipped, or cancelled, **when** the list and the dashboard overdue count are computed, **then** the same canonical filter flags it overdue — *verified by `__tests__/utils/jobsAccess.test.ts > 'applyOverdueJobsFilter' > 'applies the canonical overdue clauses and returns the same builder'`*.
 
-- [ ] Can filter by customer
+**Job creation — two paths, no manual create**
 
-- [ ] Can sort by created date and other fields in table
+- [ ] **Given** an accepted quote whose parts all have routings, **when** a user converts it, **then** one job is created (`Q-NNNN → J-NNNN`) with one `job_part` per (part, selected quantity) and cloned routing operations — *verified by `e2e/quote-to-job.spec.ts > 'Quote to Job workflow' > 'create quote and convert to job'` AND `e2e/fractional-quote-to-job.spec.ts > 'Fractional quote to job workflow' > 'quote a fractional quantity of a length-measured part and convert to job'`*.
+- [ ] **Given** a customer PO with no prior quote, **when** a user completes "Accept Purchase Order" with a customer, PO #, and ≥1 existing part (each a positive quantity and non-negative price, no duplicates), **then** a job is created with `quote_id` null and a job number drawn from the shared per-company order counter — *verified by `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'requires a customer PO (no silent NULL) and writes nothing'`, `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'requires a customer'`, `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'requires at least one line'`, `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'rejects a non-positive or non-integer quantity'`, `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'rejects a negative unit price'`, and `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'rejects duplicate parts before any write'`*.
+- [ ] **Given** a PO line whose part has no routing, **when** the user tries to accept, **then** creation fails fast before any insert (existing-parts-only gate) — *verified by `__tests__/utils/jobsAccess.test.ts > 'createJobFromPurchaseOrder' > 'fails fast when a part has no routing (existing-parts-only gate)'`*.
+- [ ] **Given** the app, **when** a user looks for a "new blank job" route, **then** none exists — jobs come only from Convert-to-Job or New Job from PO — *manual: no `/jobs/new` route under `app/dashboard/[companyId]/jobs/`*.
 
-- [ ] Can create new job directly
+**Status model — three derived axes**
 
-- [ ] Job number auto-generates (J-0001 format)
+The `jobs` and `job_parts` tables each carry three independent status columns — `production_status`, `fulfillment_status`, and `invoicing_status` (confirmed in `supabase/schema.prod.sql`). Job-level values are **derived from the parts by DB triggers**; the access layer never writes them directly. (There is no single `jobs.status` column.)
 
-- [ ] Can view job detail with all information
+- [ ] **Given** a job with parts, **when** a part's `production_status` changes, **then** `jobs.production_status` is recomputed by `compute_job_production_status()` via trigger and is never set from the dashboard — *manual: `compute_job_production_status` in `supabase/schema.prod.sql`; trigger-cascade E2E automation-pending*.
+- [ ] **Given** a not-started job, **when** the first operation on any part is marked complete, **then** the job auto-progresses to `in_progress` — there is no manual "Start Job" — *automation-pending*.
+- [ ] **Given** an in-progress job, **when** the last operation across all parts is completed or skipped, **then** the job auto-progresses to `completed` — there is no manual "Mark Complete" — *automation-pending*.
+- [ ] **Given** a job with shipped quantities, **when** shipment records are created, **then** `fulfillment_status` advances (`unshipped → partially_shipped → fully_shipped`) as a side effect — there is no "Mark Shipped" production transition (see divergence report) — *automation-pending*.
+- [ ] **Given** a job with shipped-but-unbilled quantity, **when** an invoice is created, **then** `invoicing_status` advances and the invoice is listed — *verified by `e2e/job-invoicing.spec.ts > 'Job invoicing (QuickBooks)' > 'creates an invoice for the shipped quantity and lists it'`*.
 
-- [ ] Can start a not started job (moves to in_progress)
+**Editing a job (edit → save → reload → persists)**
 
-- [ ] Can update progress (completed/scrapped quantities)
+- [ ] **Given** an existing job, **when** an admin edits a part's order quantity and saves, **then** reloading shows the new quantity and a 4dp-recomputed line total, keeping the agreed unit price by default — *write path verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'keeps the agreed unit price by default and recomputes the total; never writes fulfillment_status'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'rounds the line total to 4 decimal places (matching numeric(12,4))'`; reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** a quantity edit that crosses a price break, **when** the user opts into the re-resolved price, **then** the new tier price applies; **when** they don't, the agreed price is kept — *verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'applies the quantity-break price when the caller opts in and the tier crosses'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'keeps the agreed price across a tier when the caller does NOT opt in'`*.
+- [ ] **Given** an existing job, **when** an admin edits a part's unit price and saves, **then** reloading shows the new price and recomputed total (zero allowed) — *write path verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartPrice' > 'recomputes the total at the new price; never writes fulfillment_status'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartPrice' > 'allows a zero (no-charge) price'`; reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** an existing job, **when** an admin edits the customer PO number or due date and saves, **then** reloading shows the new values and unspecified fields are untouched (`""` clears to null) — *write path verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobDetails' > 'patches only the provided header fields; empty string clears to null'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobDetails' > 'omits keys that were not provided'`; reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** an existing job, **when** an admin changes the billing address, shipping address, or contact and saves, **then** reloading shows the new links, with `""` translated to null and unspecified FKs left alone — *write path verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobAddressContact' > 'writes the three FKs scoped to job + company, translating "" to null'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobAddressContact' > 'omits keys left undefined so a partial update does not clobber other FKs'`; reload-persistence E2E automation-pending (#367)*.
 
-- [ ] Can mark in_progress job as complete
+**Edit guardrails**
 
-- [ ] Can mark complete job as shipped
+- [ ] **Given** a part with shipped or invoiced quantity, **when** a user tries to reduce the order below that floor, **then** it is blocked — *verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'blocks reducing below the already-shipped quantity'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'blocks reducing below the already-invoiced quantity'`*.
+- [ ] **Given** an invoiced part, **when** a user increases its order quantity, **then** it is allowed (bill the delta on a new invoice) — *verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'allows INCREASING quantity even after the part is invoiced (the 10 -> 15 case)'`*.
+- [ ] **Given** a part with any invoiced quantity, **when** a user tries to change its unit price, **then** it is locked; an un-invoiced part on the same job is still repriceable — *verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartPrice' > 'locks the price once ANY quantity of the part is invoiced'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartPrice' > 'still allows repricing a part with no invoiced quantity on a partially-invoiced job'`*.
+- [ ] **Given** a cancelled part, **when** a user tries to edit its quantity or price, **then** it is refused — *verified by `__tests__/utils/jobsAccess.test.ts > 'updateJobPartQuantity' > 'refuses to edit a cancelled part'` AND `__tests__/utils/jobsAccess.test.ts > 'updateJobPartPrice' > 'refuses to edit a cancelled part'`*.
 
-- [ ] Can cancel a job (cancels every job_part)
+**Operations**
 
-- [ ] `jobs.status` aggregates from `job_parts.status` via the database trigger — never manually set on the dashboard
+- [ ] **Given** a job part with a ready operation, **when** it is marked complete, **then** the next-sequence operation becomes ready and the Current Op column updates — *automation-pending (`completeJobOperation`)*.
+- [ ] **Given** a completed operation, **when** a user taps Undo, **then** it returns to pending — *automation-pending (`undoJobOperation`)*.
+- [ ] **Given** a job, **when** the list computes its Current Op, **then** it shows the in-progress op if any, else the lowest-sequence ready pending op, "Done" for completed/shipped, and "--" for cancelled — *verified by `__tests__/utils/jobsAccess.test.ts > 'getReadyOperationsForJobs' > 'maps RPC rows into a Map<job_id, CurrentOperationInfo>'` AND `__tests__/utils/jobsAccess.test.ts > 'getReadyOperationsForJobs' > 'returns an empty Map when RPC errors (defensive — dashboard tile should not crash)'`*.
 
-- [ ] Jobs created from quotes show link back to quote
+**Cancel, reopen, delete**
 
-- [ ] Job number mirrors the source quote (`Q-NNNN → J-NNNN`)
+- [ ] **Given** a job, **when** an admin cancels it with a reason, **then** every `job_part` is set cancelled — *verified by `__tests__/utils/jobsAccess.test.ts > 'bulkCancelJobs' > 'filters out non-string ids and marks job_parts cancelled by job_id'`; single-job cancel-reason capture automation-pending*.
+- [ ] **Given** a cancelled job, **when** an admin reopens it, **then** each part's status is re-derived from its operations (bypassing the cancelled skip) — *verified by `__tests__/utils/jobsAccess.test.ts > 'reopenJob' > 'recomputes each part status from its operations (bypassing the cancelled-skip)'`*.
+- [ ] **Given** a job with no shipments and no invoices, **when** an admin deletes it, **then** it is removed regardless of production status; **given** shipment or invoice records exist, **then** the delete is rejected and nothing is removed — *verified by `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'deletes a job with no shipments or invoice, scoped to company_id (any status)'`, `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'rejects when the job has shipment records and never deletes'`, and `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'rejects when the job has been invoiced and never deletes'`*.
 
-- [ ] Every part on the source quote produces exactly one `job_part`
+**Attachments**
 
-- [ ] Each `job_part` requires its part to have a routing — convert-to-job aborts before any insert if any part is missing one
-
-- [ ] No manual "create job" UI exists
-
-- [ ] Customer and part selection are independent (not cascading)
-
-- [ ] Quote-to-job conversion requires the part to have a routing; blocked with link to create one if missing
-
-- [ ] Jobs list shows "Current Op" column with sequence-aware next operation
-
-- [ ] Current Op column shows in-progress operation name when one is active
-
-- [ ] Current Op column shows the next ready (lowest-sequence pending) operation when no op is in progress
-
-- [ ] Current Op column shows "Done" for completed/shipped jobs and "--" for cancelled jobs
+- [ ] **Given** a job, **when** an admin uploads, views inline, or deletes a PO PDF, **then** the change persists across reload — *automation-pending (`utils/jobAttachmentsAccess.ts` + `components/jobs/JobAttachmentsCard.tsx`)*.
 
 ---
 

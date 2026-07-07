@@ -19,10 +19,12 @@ import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
-import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import { OperatorStationProvider, useStationContext, clearStoredStation } from '@/components/operator/OperatorStationContext';
+import { OperatorChromeProvider, useOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
@@ -110,9 +112,10 @@ export default function OperatorLayout({
   }, [pathname]);
 
   const handleLogout = async () => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('jigged_operator_station');
-    }
+    // Explicit logout clears the persisted station (device hand-off / end of
+    // shift). Passive tab eviction does NOT — localStorage survives that, which
+    // is the whole point of the persistence change.
+    clearStoredStation();
     await supabase.auth.signOut();
     router.push(`/operator/${companyId}/login`);
   };
@@ -161,15 +164,17 @@ export default function OperatorLayout({
 
   return (
     <OperatorStationProvider>
-      <OperatorShell
-        userRole={userRole}
-        companyId={companyId}
-        navValue={navValue}
-        onNavChange={handleNavChange}
-        onLogout={handleLogout}
-      >
-        {children}
-      </OperatorShell>
+      <OperatorChromeProvider>
+        <OperatorShell
+          userRole={userRole}
+          companyId={companyId}
+          navValue={navValue}
+          onNavChange={handleNavChange}
+          onLogout={handleLogout}
+        >
+          {children}
+        </OperatorShell>
+      </OperatorChromeProvider>
     </OperatorStationProvider>
   );
 }
@@ -193,6 +198,7 @@ function OperatorShell({
   children: React.ReactNode;
 }) {
   const { stationId, stationName, stations, setStation } = useStationContext();
+  const chrome = useOperatorChrome();
   const { features } = useCompanyFeatures();
   const pathname = usePathname();
   const router = useRouter();
@@ -236,50 +242,74 @@ function OperatorShell({
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         }}
       >
-        <Toolbar
-          sx={{
-            minHeight: '48px !important',
-            px: 2,
-          }}
-        >
-          {/* Left: Jigged icon + station selector */}
-          <JiggedIcon size={20} />
-          {stationId && (
-            <Box
-              onClick={handleStationMenuOpen}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                ml: 1,
-                minHeight: 48,
-                overflow: 'hidden',
-                maxWidth: 'calc(100vw - 140px)',
-                borderRadius: 1,
-                px: 0.75,
-                '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
+        <Toolbar sx={{ minHeight: '48px !important', px: 1 }}>
+          {/* Left: back on detail pages, JIG logo on back-less roots. */}
+          {chrome.back ? (
+            <IconButton
+              color="inherit"
+              size="small"
+              aria-label={chrome.back.label ?? 'Back'}
+              onClick={() => {
+                if (chrome.back) router.push(chrome.back.href);
               }}
             >
-              <Typography
-                variant="body1"
-                component="span"
-                sx={{
-                  color: '#D4872A',
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {stationName || 'Select Station'}
-              </Typography>
-              <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
-            </Box>
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+          ) : (
+            <JiggedIcon size={20} />
           )}
 
-          <Box sx={{ flex: 1 }} />
+          {/* Center: station name + dropdown, centered between the clusters (the
+              iOS "title" slot). Kept in a stable spot so it doesn't jump as the
+              operator navigates; truncates rather than colliding with the icons. */}
+          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0, px: 1 }}>
+            {stationId && (
+              <Box
+                onClick={handleStationMenuOpen}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  minHeight: 48,
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  borderRadius: 1,
+                  px: 0.75,
+                  '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
+                }}
+              >
+                <Typography
+                  variant="body1"
+                  component="span"
+                  sx={{
+                    color: '#D4872A',
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {stationName || 'Select Station'}
+                </Typography>
+                <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
+              </Box>
+            )}
+          </Box>
 
-          {/* Right: action icons */}
+          {/* Right: page action icons (Files, Previous notes) + dashboard
+              (non-operators) + logout. */}
+          {chrome.actions?.map((action) => (
+            <IconButton
+              key={action.key}
+              color="inherit"
+              size="small"
+              aria-label={action.label}
+              onClick={action.onClick}
+              sx={{ ml: 0.5 }}
+            >
+              {action.icon}
+            </IconButton>
+          ))}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"

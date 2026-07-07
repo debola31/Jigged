@@ -6,14 +6,58 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { getStationOperationTypes, getStationName } from '@/utils/operatorAccess';
 import type { Station } from '@/types/operator';
 
-const SESSION_STORAGE_KEY = 'jigged_operator_station';
+// The operator's selected station is a device-local "where am I right now"
+// default. We persist it in localStorage (NOT sessionStorage) so it survives a
+// backgrounded-tab eviction / browser restart — the shop-floor reality that had
+// operators landing on a job with the station picker stacked underneath it every
+// morning. A QR deep-link (?station=) always overrides the stored value.
+const STORAGE_KEY = 'jigged_operator_station';
+
+// localStorage access can throw (Safari private mode throws on setItem; access
+// can be blocked entirely). A fallback station default must never white-screen
+// the whole operator app, so every access is guarded and degrades to in-memory.
+function readStoredStation(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredStation(id: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, id);
+  } catch {
+    /* storage unavailable — keep the value in memory only */
+  }
+}
+
+/** Clear the persisted station (used on explicit logout). */
+export function clearStoredStation(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 interface StationContextValue {
   stationId: string | null;
   stationName: string | null;
   stations: Station[];
   setStation: (id: string) => void;
+  /** Station-name / stations-list resolution (drives the picker spinner). */
   loading: boolean;
+  /**
+   * True until the URL param + stored station have been read exactly once.
+   * Consumers must wait for this before deciding "no station is selected", or a
+   * returning operator flashes the station picker for one paint before the
+   * stored station hydrates.
+   */
+  initializing: boolean;
 }
 
 const StationContext = createContext<StationContextValue>({
@@ -22,6 +66,7 @@ const StationContext = createContext<StationContextValue>({
   stations: [],
   setStation: () => {},
   loading: true,
+  initializing: true,
 });
 
 export function useStationContext() {
@@ -37,22 +82,24 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
   const [stationName, setStationName] = useState<string | null>(null);
   const [stations, setStations] = useState<Station[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(true);
 
-  // Initialize station from URL param or sessionStorage
+  // Seed the station from the URL param (QR scan) or the stored default, exactly
+  // once on mount. Running once — not on every searchParams change — is
+  // deliberate: a QR deep-link is always a fresh mount, and re-running on
+  // unrelated param changes could re-seed a stale station. `initializing` flips
+  // false here so consumers know the "no station" decision is now trustworthy.
   useEffect(() => {
     const urlStation = searchParams.get('station');
-    const storedStation = typeof window !== 'undefined'
-      ? sessionStorage.getItem(SESSION_STORAGE_KEY)
-      : null;
-
-    const initialStation = urlStation || storedStation;
+    const initialStation = urlStation || readStoredStation();
     if (initialStation) {
       setStationId(initialStation);
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(SESSION_STORAGE_KEY, initialStation);
-      }
+      writeStoredStation(initialStation);
     }
-  }, [searchParams]);
+    setInitializing(false);
+    // Run once on mount — see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch all stations for the company
   useEffect(() => {
@@ -98,14 +145,12 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
 
   const setStation = useCallback((id: string) => {
     setStationId(id);
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, id);
-    }
+    writeStoredStation(id);
   }, []);
 
   return (
     <StationContext.Provider
-      value={{ stationId, stationName, stations, setStation, loading }}
+      value={{ stationId, stationName, stations, setStation, loading, initializing }}
     >
       {children}
     </StationContext.Provider>

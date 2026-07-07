@@ -35,7 +35,7 @@ import type {
   JobTravelerOperation,
   JobNote,
   JobNoteMedia,
-  PreviousRun,
+  PartPreviousNote,
 } from '@/types/operator';
 
 // Operator type from user_company_access. role and created_at are
@@ -1036,26 +1036,66 @@ export async function addJobNote(
   return mapJobNoteRow(data as unknown as JobNoteRow);
 }
 
+/** Resolve a step's identity (routing op id + name) for cross-run matching. */
+async function getStepIdentity(
+  jobOperationId: string,
+): Promise<{ routing_operation_id: string | null; operation_name: string } | null> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from('job_operations')
+    .select('routing_operation_id, operation_name')
+    .eq('id', jobOperationId)
+    .single();
+  return (data as { routing_operation_id: string | null; operation_name: string } | null) ?? null;
+}
+
 /**
- * "Last time we ran this part" guidance: the most recent COMPLETED prior run of
- * the same part (excluding the current job), with that run's feed (notes +
- * photos) for the operator to reference — e.g. the setup photo from last time.
+ * The job_operation ids within `jobId` that are the SAME step as `identity` —
+ * matched by routing_operation_id, falling back to operation_name when either
+ * side lacks a routing id. Used to scope prior-run notes to "this step".
+ */
+async function matchingStepOperationIds(
+  jobId: string,
+  identity: { routing_operation_id: string | null; operation_name: string },
+): Promise<Set<string>> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from('job_operations')
+    .select('id, routing_operation_id, operation_name')
+    .eq('job_id', jobId);
+  type OpRow = { id: string; routing_operation_id: string | null; operation_name: string };
+  return new Set(
+    ((data ?? []) as OpRow[])
+      .filter((op) =>
+        identity.routing_operation_id && op.routing_operation_id
+          ? op.routing_operation_id === identity.routing_operation_id
+          : op.operation_name === identity.operation_name,
+      )
+      .map((op) => op.id),
+  );
+}
+
+/**
+ * Notes from PRIOR completed runs of a part, flattened newest-first — the
+ * operator's "previous notes for this part" guidance (accumulated setup tips,
+ * gotchas, photos), NOT a list of past jobs. Each note keeps its source
+ * job_number for a light reference.
  *
  * Part-centric (keyed on part_id), never operator-comparative — no time metrics.
- * When `jobOperationId` is given, the returned notes are filtered to the SAME
- * step across runs (matched by routing_operation_id, falling back to
- * operation_name), so the operation page can show "last time, this step".
- * Returns null when there's no prior completed run.
+ * When `jobOperationId` is given, notes are filtered to the SAME step across runs
+ * (matched by routing_operation_id, falling back to operation_name) for the
+ * sheet's "this step" filter. Capped at the most recent `maxRuns` completed runs
+ * (default 10) to bound the per-run note fetches. Empty array when none.
  */
-export async function getPreviousRunForPart(
+export async function getPartPreviousNotes(
   partId: string,
   companyId: string,
-  opts?: { excludeJobId?: string; jobOperationId?: string },
-): Promise<PreviousRun | null> {
+  opts?: { excludeJobId?: string; jobOperationId?: string; maxRuns?: number },
+): Promise<PartPreviousNote[]> {
   const supabase = getSupabase();
 
   // Completed prior runs of this part (job_parts carries part-level completion
-  // + company_id). Low volume per part, so pick the newest in JS.
+  // + company_id). Low volume per part, so sort/cap in JS.
   const { data, error } = await supabase
     .from('job_parts')
     .select('job_id, completed_at, jobs!inner(id, job_number)')
@@ -1063,57 +1103,36 @@ export async function getPreviousRunForPart(
     .eq('company_id', companyId)
     .eq('production_status', 'completed');
 
-  if (error || !data) return null;
+  if (error || !data) return [];
 
   type PriorRow = {
     job_id: string;
     completed_at: string | null;
     jobs: { id: string; job_number: string } | { id: string; job_number: string }[] | null;
   };
-  const rows = (data as unknown as PriorRow[]).filter(
-    (r) => r.job_id !== opts?.excludeJobId,
+  const rows = (data as unknown as PriorRow[])
+    .filter((r) => r.job_id !== opts?.excludeJobId)
+    // Newest completed first (nulls last), then cap the number of runs scanned.
+    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
+    .slice(0, opts?.maxRuns ?? 10);
+  if (rows.length === 0) return [];
+
+  // Resolve the current step's identity once for the optional "this step" filter.
+  const stepIdentity = opts?.jobOperationId ? await getStepIdentity(opts.jobOperationId) : null;
+
+  const perRun = await Promise.all(
+    rows.map(async (row): Promise<PartPreviousNote[]> => {
+      const priorJob = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs;
+      if (!priorJob) return [];
+      let notes = await getJobNotes(row.job_id, companyId);
+      if (stepIdentity) {
+        const matchIds = await matchingStepOperationIds(row.job_id, stepIdentity);
+        notes = notes.filter((n) => n.job_operation_id && matchIds.has(n.job_operation_id));
+      }
+      return notes.map((n) => ({ ...n, job_number: priorJob.job_number }));
+    }),
   );
-  if (rows.length === 0) return null;
 
-  // Newest completed first (nulls last).
-  rows.sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
-  const prior = rows[0];
-  const priorJob = Array.isArray(prior.jobs) ? prior.jobs[0] : prior.jobs;
-  if (!priorJob) return null;
-
-  let notes = await getJobNotes(prior.job_id, companyId);
-
-  // Per-step filtering: match the same operation across runs.
-  if (opts?.jobOperationId) {
-    const { data: curOp } = await supabase
-      .from('job_operations')
-      .select('routing_operation_id, operation_name')
-      .eq('id', opts.jobOperationId)
-      .single();
-
-    const { data: priorOps } = await supabase
-      .from('job_operations')
-      .select('id, routing_operation_id, operation_name')
-      .eq('job_id', prior.job_id);
-
-    type OpRow = { id: string; routing_operation_id: string | null; operation_name: string };
-    const cur = curOp as { routing_operation_id: string | null; operation_name: string } | null;
-    const matchIds = new Set(
-      ((priorOps ?? []) as OpRow[])
-        .filter((op) =>
-          cur?.routing_operation_id && op.routing_operation_id
-            ? op.routing_operation_id === cur.routing_operation_id
-            : op.operation_name === cur?.operation_name,
-        )
-        .map((op) => op.id),
-    );
-    notes = notes.filter((n) => n.job_operation_id && matchIds.has(n.job_operation_id));
-  }
-
-  return {
-    jobId: priorJob.id,
-    jobNumber: priorJob.job_number,
-    completedAt: prior.completed_at,
-    notes,
-  };
+  // Flatten across runs, newest note first.
+  return perRun.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

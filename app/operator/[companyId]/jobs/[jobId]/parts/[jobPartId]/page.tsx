@@ -12,16 +12,18 @@ import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LayersIcon from '@mui/icons-material/Layers';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import HistoryIcon from '@mui/icons-material/History';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
-import PreviousRunCard from '@/components/operator/PreviousRunCard';
+import PartFilesSheet from '@/components/operator/PartFilesSheet';
+import PartNotesSheet from '@/components/operator/PartNotesSheet';
 import type { JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -62,6 +64,32 @@ export default function OperatorJobTravelerPage() {
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  // Header chrome: back → the station jobs list, plus a Files action (the part's
+  // drawings / 3D models). The "All N parts" lateral jump for multi-part jobs
+  // stays in-content below.
+  useSetOperatorChrome(
+    {
+      back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' },
+      actions: [
+        {
+          key: 'files',
+          icon: <FolderOpenIcon fontSize="small" />,
+          label: 'Files',
+          onClick: () => setFilesOpen(true),
+        },
+        {
+          key: 'history',
+          icon: <HistoryIcon fontSize="small" />,
+          label: 'Previous notes',
+          onClick: () => setNotesOpen(true),
+        },
+      ],
+    },
+    [companyId],
+  );
 
   const { data: traveler, loading } = useLoad(
     async () => {
@@ -108,17 +136,11 @@ export default function OperatorJobTravelerPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      {/* Back to the station jobs list, plus an "all parts" jump for multi-part
-          jobs. Single-part jobs have job_part_count = 1, so the link is hidden
-          (their hub would just redirect back here). */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <IconButton
-          onClick={() => router.push(`/operator/${companyId}/jobs`)}
-          aria-label="Back to jobs"
-        >
-          <ArrowBackIcon />
-        </IconButton>
-        {traveler.job_part_count > 1 && (
+      {/* Multi-part jobs get an "all parts" lateral jump. (Back to the jobs list
+          lives in the header now.) Single-part jobs have job_part_count = 1, so
+          this is hidden — their hub would just redirect back here. */}
+      {traveler.job_part_count > 1 && (
+        <Box sx={{ mb: 2 }}>
           <Button
             size="small"
             startIcon={<LayersIcon />}
@@ -126,8 +148,8 @@ export default function OperatorJobTravelerPage() {
           >
             All {traveler.job_part_count} parts
           </Button>
-        )}
-      </Box>
+        </Box>
+      )}
 
       {/* Header — mirrors the printed traveler's job block */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
@@ -200,16 +222,6 @@ export default function OperatorJobTravelerPage() {
         <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
       </Box>
 
-      {/* Guidance: how this part went last time (collapsed; part-centric). */}
-      <Box sx={{ mb: 3 }}>
-        <PreviousRunCard
-          partId={traveler.part_id}
-          companyId={companyId}
-          excludeJobId={traveler.job_id}
-          title="Last time we ran this part"
-        />
-      </Box>
-
       {/* Operations / steps — tap one to action it */}
       <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>
         Operations
@@ -259,6 +271,25 @@ export default function OperatorJobTravelerPage() {
           );
         })}
       </Box>
+
+      {filesOpen && (
+        <PartFilesSheet
+          open
+          onClose={() => setFilesOpen(false)}
+          partId={traveler.part_id}
+          partName={traveler.part_name}
+        />
+      )}
+      {notesOpen && (
+        <PartNotesSheet
+          open
+          onClose={() => setNotesOpen(false)}
+          partId={traveler.part_id}
+          companyId={companyId}
+          excludeJobId={traveler.job_id}
+          partName={traveler.part_name}
+        />
+      )}
     </Box>
   );
 }

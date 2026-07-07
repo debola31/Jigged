@@ -13,8 +13,6 @@ import Stack from '@mui/material/Stack';
 import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import IconButton from '@mui/material/IconButton';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -24,6 +22,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
 import { resolveScan } from '@/utils/inventoryLocationsAccess';
 import { getCurrentOperator } from '@/utils/operatorAccess';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { LocationContent } from '@/types/inventoryLocations';
 import OperatorLocationActionModal, {
@@ -76,10 +75,19 @@ export default function OperatorBinViewPage() {
   const path = scan?.path ?? [];
   const parent = path.length > 1 ? path[path.length - 2] : null;
 
-  const goBack = () => {
-    if (parent) router.push(`/operator/${companyId}/inventory/locations/${parent.id}`);
-    else router.push(`/operator/${companyId}/inventory`);
-  };
+  // Header back drills UP the location tree (to the parent bin, or the inventory
+  // root at the top level). Re-registers as the parent resolves from the scan.
+  useSetOperatorChrome(
+    {
+      back: {
+        href: parent
+          ? `/operator/${companyId}/inventory/locations/${parent.id}`
+          : `/operator/${companyId}/inventory`,
+        label: 'Back',
+      },
+    },
+    [companyId, parent?.id],
+  );
 
   const modalUnit = modal?.part.primary_unit || 'ea';
   const unitOptions = useMemo(
@@ -98,9 +106,6 @@ export default function OperatorBinViewPage() {
   if (error || !node) {
     return (
       <Box>
-        <IconButton onClick={() => router.push(`/operator/${companyId}/inventory`)} aria-label="Back" sx={{ mb: 2 }}>
-          <ArrowBackIcon />
-        </IconButton>
         <Alert severity="error">{error ?? 'Location not found.'}</Alert>
       </Box>
     );
@@ -111,24 +116,19 @@ export default function OperatorBinViewPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      {/* Header: back + name + full path */}
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 3 }}>
-        <IconButton onClick={goBack} aria-label="Back" sx={{ mt: 0.5 }}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            <Typography variant="h5" sx={{ fontWeight: 700 }}>
-              {node.name}
-            </Typography>
-            {node.code && <Chip size="small" label={node.code} variant="outlined" />}
-          </Stack>
-          {path.length > 1 && (
-            <Typography variant="body2" color="text.secondary">
-              {path.map((p) => p.name).join(' › ')}
-            </Typography>
-          )}
-        </Box>
+      {/* Header: name + full path (back lives in the app header now). */}
+      <Box sx={{ minWidth: 0, mb: 3 }}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>
+            {node.name}
+          </Typography>
+          {node.code && <Chip size="small" label={node.code} variant="outlined" />}
+        </Stack>
+        {path.length > 1 && (
+          <Typography variant="body2" color="text.secondary">
+            {path.map((p) => p.name).join(' › ')}
+          </Typography>
+        )}
       </Box>
 
       {/* Sub-locations: drill down */}

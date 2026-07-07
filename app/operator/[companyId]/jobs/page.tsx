@@ -34,7 +34,7 @@ export default function OperatorJobsPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
-  const { stationId, stations } = useStationContext();
+  const { stationId, stations, initializing } = useStationContext();
 
   const [lens, setLens] = useState<Lens>('station');
   const [jobs, setJobs] = useState<OperatorJob[]>([]);
@@ -168,6 +168,17 @@ export default function OperatorJobsPage() {
   );
 
   const showStationSelector = lens === 'station' && !stationId;
+
+  // Wait for the station context to hydrate its stored default before deciding
+  // whether to prompt for a station — avoids a one-paint picker flash for a
+  // returning operator whose station is about to load from localStorage.
+  if (initializing) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '40vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box>

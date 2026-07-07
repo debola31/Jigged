@@ -214,17 +214,14 @@ export interface JobNote {
 }
 
 /**
- * A prior completed run of the same part, used as operator guidance ("last time
- * we ran this part"). Part-centric, never operator-comparative. `notes` are that
- * run's feed entries (with media); when fetched for a specific step they're
- * filtered to that step's matching operation.
+ * One note from a PRIOR completed run of a part, flattened across runs for the
+ * operator's "previous notes for this part" view (accumulated shop wisdom, not a
+ * list of past jobs). Extends the job-feed note with the source run's job number
+ * so a tip can be traced back to where it came from.
  */
-export interface PreviousRun {
-  jobId: string;
-  jobNumber: string;
-  /** When the part finished on that run; null if not recorded. */
-  completedAt: string | null;
-  notes: JobNote[];
+export interface PartPreviousNote extends JobNote {
+  /** The prior run's job number (e.g. "J-0002"), a light source reference. */
+  job_number: string;
 }
 
 // ============================================================================

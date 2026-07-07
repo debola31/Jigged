@@ -12,10 +12,9 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartsOverview } from '@/utils/operatorAccess';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import type { JobPartsOverview, JobPartSummary } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -40,6 +39,10 @@ export default function OperatorJobPartsHubPage() {
   const [overview, setOverview] = useState<JobPartsOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Header back → the station jobs list. Registered on mount so it's present
+  // even for the brief single-part case before this hub redirects to the traveler.
+  useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,14 +102,6 @@ export default function OperatorJobPartsHubPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      <IconButton
-        onClick={() => router.push(`/operator/${companyId}/jobs`)}
-        sx={{ mb: 2 }}
-        aria-label="Back to jobs"
-      >
-        <ArrowBackIcon />
-      </IconButton>
-
       {/* Job header */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
         <CardContent>

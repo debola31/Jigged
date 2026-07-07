@@ -12,10 +12,11 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import HistoryIcon from '@mui/icons-material/History';
 import {
   getOperatorOperationDetail,
   getCurrentOperator,
@@ -23,9 +24,11 @@ import {
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
-import PreviousRunCard from '@/components/operator/PreviousRunCard';
+import PartFilesSheet from '@/components/operator/PartFilesSheet';
+import PartNotesSheet from '@/components/operator/PartNotesSheet';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
@@ -54,11 +57,37 @@ export default function OperatorOperationActionPage() {
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
-  const { stationId, stationName, setStation } = useStationContext();
+  const { stationId, stationName, setStation, initializing } = useStationContext();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  // Header chrome: back → the traveler, plus Files (drawings / 3D models) and
+  // Previous notes actions. Registered so the shell's fixed AppBar renders them
+  // (no in-content back button needed).
+  useSetOperatorChrome(
+    {
+      back: { href: travelerHref, label: 'Back to traveler' },
+      actions: [
+        {
+          key: 'files',
+          icon: <FolderOpenIcon fontSize="small" />,
+          label: 'Files',
+          onClick: () => setFilesOpen(true),
+        },
+        {
+          key: 'history',
+          icon: <HistoryIcon fontSize="small" />,
+          label: 'Previous notes',
+          onClick: () => setNotesOpen(true),
+        },
+      ],
+    },
+    [travelerHref],
+  );
 
   useEffect(() => {
     async function loadOperator() {
@@ -132,7 +161,10 @@ export default function OperatorOperationActionPage() {
     return 'default';
   };
 
-  if (loading) {
+  // Wait for BOTH the job fetch and the station context's one-time init before
+  // deciding what to render — otherwise the "no station" branch can flash for an
+  // operator who actually has a stored station.
+  if (loading || initializing) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
         <CircularProgress />
@@ -148,11 +180,19 @@ export default function OperatorOperationActionPage() {
     );
   }
 
+  // No station selected yet — show ONLY a focused picker, never stacked beneath
+  // the job card. Reaching this with a job loaded means neither the QR (?station=)
+  // nor the stored default supplied a station — e.g. a returning operator whose
+  // tab was evicted overnight. Gated on `initializing` above so it can't flash
+  // for an operator who does have a stored station.
+  if (!isCompleted && !stationId) {
+    return <StationSelector subtitle="Select your station to complete this step." />;
+  }
+
   // Station guard: a step whose work center differs from the operator's selected
   // station is the likely signature of a wrong QR scan. (Can't catch a mis-scan
   // between two steps sharing one work center — the on-screen step name + Undo
   // are the backstop there.)
-  const needsStation = !isCompleted && !stationId;
   const stationMismatch =
     !isCompleted &&
     !!stationId &&
@@ -161,10 +201,6 @@ export default function OperatorOperationActionPage() {
 
   return (
     <Box>
-      <IconButton onClick={() => router.push(travelerHref)} sx={{ mb: 2 }} aria-label="Back to traveler">
-        <ArrowBackIcon />
-      </IconButton>
-
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -260,17 +296,6 @@ export default function OperatorOperationActionPage() {
         </CardContent>
       </Card>
 
-      {/* Setup guidance: how THIS step went on the last run of this part. */}
-      <Box sx={{ mb: 3 }}>
-        <PreviousRunCard
-          partId={job.part_id}
-          companyId={companyId}
-          excludeJobId={jobId}
-          jobOperationId={jobOperationId}
-          title="Last time, this step"
-        />
-      </Box>
-
       {isCompleted ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Alert severity="success">This step is complete.</Alert>
@@ -286,8 +311,6 @@ export default function OperatorOperationActionPage() {
             {actionLoading ? <CircularProgress size={24} /> : 'UNDO COMPLETION'}
           </Button>
         </Box>
-      ) : needsStation ? (
-        <StationSelector subtitle="Select your station to complete this step." />
       ) : stationMismatch ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Alert severity="warning">
@@ -352,6 +375,26 @@ export default function OperatorOperationActionPage() {
           }}
         />
       </Box>
+
+      {filesOpen && (
+        <PartFilesSheet
+          open
+          onClose={() => setFilesOpen(false)}
+          partId={job.part_id}
+          partName={job.part_name}
+        />
+      )}
+      {notesOpen && (
+        <PartNotesSheet
+          open
+          onClose={() => setNotesOpen(false)}
+          partId={job.part_id}
+          companyId={companyId}
+          excludeJobId={jobId}
+          jobOperationId={jobOperationId}
+          partName={job.part_name}
+        />
+      )}
     </Box>
   );
 }

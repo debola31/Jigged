@@ -505,6 +505,20 @@ begin
   values ('22222222-2222-2222-2222-222222222222', p_job, '23000000-0000-0000-0000-000000000001', p_body, p_type, now() - (p_days||' days')::interval);
 end $$;
 
+-- Step-tagged operator note: ties a note to a specific operation (by sequence)
+-- on the job's part, so the operator "Previous notes" view surfaces it for later
+-- runs of the same part and can filter to "this step". Author is an operator's
+-- user_company_access id (operators write these on the floor).
+create function pg_temp.add_op_note(p_job uuid, p_seq int, p_author uuid, p_body text, p_days int)
+returns void language plpgsql as $$
+declare v_jp uuid; v_op uuid;
+begin
+  select id into v_jp from public.job_parts where job_id = p_job order by sequence limit 1;
+  select id into v_op from public.job_operations where job_part_id = v_jp and sequence = p_seq limit 1;
+  insert into public.job_notes (company_id, job_id, author_id, job_part_id, job_operation_id, body, note_type, created_at)
+  values ('22222222-2222-2222-2222-222222222222', p_job, p_author, v_jp, v_op, p_body, 'user', now() - (p_days||' days')::interval);
+end $$;
+
 create function pg_temp.add_invoice(p_job uuid, p_quote uuid, p_doc text, p_days int)
 returns void language plpgsql as $$
 begin
@@ -554,6 +568,12 @@ begin
   perform pg_temp.add_invoice(j, q, '1001', 147);
   perform pg_temp.add_note(j, 'First article approved by customer QA. Released full lot.', 'user', 165);
   perform pg_temp.add_note(j, 'Lot complete, packed and shipped via UPS.', 'user', 148);
+  -- Step-tagged operator notes (Diego = Assembly, Priya = Inspection) so a later
+  -- pump job's operator sees "Previous notes" for this part, scoped to the step.
+  perform pg_temp.add_op_note(j, 10, '23000000-0000-0000-0000-000000000005',
+    'Press the bearings in with the arbor fixture — seat fully before pinning or the shaft binds.', 160);
+  perform pg_temp.add_op_note(j, 20, '23000000-0000-0000-0000-000000000006',
+    'Final inspection: seal-face flatness within 0.0005 TIR. Clean lot, no rework.', 152);
 end $$;
 
 -- ── Standalone quotes (active + expired) to exercise the quotes list ──────────
@@ -612,6 +632,8 @@ do $$ declare q uuid; j uuid; begin
   perform pg_temp.ship_job(j, '50000000-0000-0000-0000-000000000003', 1, 88);
   perform pg_temp.add_invoice(j, q, '1002', 86);
   perform pg_temp.add_note(j, 'Anodize batch returned from ProFinish, within spec.', 'user', 96);
+  perform pg_temp.add_op_note(j, 10, '23000000-0000-0000-0000-000000000005',
+    'Manifold: indicate the fixture to 0.001 before the first bore — the pattern walks otherwise.', 100);
 end $$;
 
 -- ── Scenario 3: Cascade — actuator x20 — in_progress → partial ship ───────────

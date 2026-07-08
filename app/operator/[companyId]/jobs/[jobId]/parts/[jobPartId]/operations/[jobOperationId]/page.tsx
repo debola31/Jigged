@@ -53,7 +53,7 @@ export default function OperatorOperationActionPage() {
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
-  const { stationId, stationName, setStation, initializing } = useStationContext();
+  const { stationId, stationName, initializing } = useStationContext();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -116,15 +116,6 @@ export default function OperatorOperationActionPage() {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  // The operator confirms they are at this step's station, then completes in the
-  // same tap. setStation persists the choice so later scans match too.
-  const handleSwitchAndComplete = async () => {
-    if (job?.operation_work_center_id) {
-      setStation(job.operation_work_center_id);
-    }
-    await handleComplete();
   };
 
   const isCompleted = job?.operation_status === 'completed';
@@ -304,47 +295,36 @@ export default function OperatorOperationActionPage() {
             )}
           </Box>
         </Button>
-      ) : stationMismatch ? (
-        // This step's work center isn't the operator's selected station — with
-        // login + station-select (not blind QR scans), that usually just means
-        // they opened another station's job. Warn (in warning colour) and state
-        // the consequence — completing switches their station — but keep the
-        // action a normal MARK COMPLETE. Backing out is the header's back arrow.
+      ) : (
+        // Not completed. A station mismatch (this step's work center ≠ the
+        // operator's selected station) only WARNS — completion doesn't need or
+        // record the station (completeOperation keys off the operation id), so
+        // the action stays a plain MARK COMPLETE and we don't silently switch
+        // their station. They change it from the header if they've actually moved.
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
-            <WarningAmberIcon fontSize="small" sx={{ mt: 0.25, flexShrink: 0 }} />
-            <Typography variant="body2" color="inherit">
-              You&apos;re at <strong>{stationName || 'another station'}</strong>, but this step runs
-              at <strong>{job.operation_work_center_name || 'another station'}</strong> — completing
-              it switches your station there.
-            </Typography>
-          </Box>
+          {stationMismatch && (
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
+              <WarningAmberIcon fontSize="small" sx={{ mt: 0.25, flexShrink: 0 }} />
+              <Typography variant="body2" color="inherit">
+                You&apos;re at <strong>{stationName || 'another station'}</strong>, but this step runs
+                at <strong>{job.operation_work_center_name || 'another station'}</strong> — complete
+                only if it&apos;s yours.
+              </Typography>
+            </Box>
+          )}
           <Button
             fullWidth
             variant="contained"
             size="large"
             color="primary"
             startIcon={<CheckCircleIcon />}
-            onClick={handleSwitchAndComplete}
+            onClick={handleComplete}
             disabled={actionLoading}
             sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
           >
             {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
           </Button>
         </Box>
-      ) : (
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          color="primary"
-          startIcon={<CheckCircleIcon />}
-          onClick={handleComplete}
-          disabled={actionLoading}
-          sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
-        >
-          {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
-        </Button>
       )}
 
       {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read

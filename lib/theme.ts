@@ -50,7 +50,13 @@ const jiggedTheme = createTheme({
     },
     background: {
       default: '#111439',   // Deep Indigo (per design system spec)
-      paper: 'rgba(26, 31, 74, 0.55)',  // Semi-transparent for substantial cards
+      // Cards are DEEP indigo glass panels, not lighter ones. On the lit steel-indigo
+      // canvas (AppAmbientBackdrop) a pale surface goes washed-out/muddy; a deeper,
+      // slightly translucent panel reads as substantial (frosted blur lets the lit canvas
+      // glow through faintly) and is sealed by a crisp light hairline (below). Deeper =
+      // safer too: white text on this sits ~13:1. This is the glass-on-lit-canvas model,
+      // matching the richer look the shop pages had.
+      paper: 'rgba(32, 38, 82, 0.78)',
     },
     text: {
       primary: '#ffffff',
@@ -136,10 +142,16 @@ const jiggedTheme = createTheme({
       },
       styleOverrides: {
         root: {
-          backgroundColor: 'rgba(26, 31, 74, 0.55)',  // Semi-transparent for substantial cards
+          // A DEEP indigo glass panel over the lit canvas — a lighter fill here just looks
+          // washed-out. Slightly translucent so the frosted blur carries a hint of the lit
+          // canvas; the crisp hairline (below) does the edge definition, not a lightness
+          // step. Deep + mostly opaque = the text's contrast floor (~13:1).
+          backgroundColor: 'rgba(32, 38, 82, 0.78)',
           backdropFilter: 'blur(15px)',               // Frosted glass effect
           WebkitBackdropFilter: 'blur(15px)',         // Safari support
-          border: '1px solid rgba(255, 255, 255, 0.15)',
+          // Brighter hairline: on the dark canvas a 0.18 border nearly vanished; 0.28 white
+          // gives cards a crisp defined edge that seals the panel against the lit canvas.
+          border: '1px solid rgba(255, 255, 255, 0.28)',
           // boxShadow handled by elevation prop
           transition: 'transform 0.2s ease, box-shadow 0.2s ease',
           '&:hover': {

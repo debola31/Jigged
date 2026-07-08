@@ -432,16 +432,15 @@ begin
       i := i + 1;
       if p_status = 'completed' then
         update public.job_operations set status='completed',
-          started_at = now() - ((p_anchor + (n - i + 1)*2)||' days')::interval,
           completed_at = now() - ((p_anchor + (n - i + 1)*2 - 1)||' days')::interval,
           completed_by = '11111111-1111-1111-1111-111111111111' where id = op.id;
       elsif p_status = 'in_progress' then
         if i = 1 then
           update public.job_operations set status='completed',
-            started_at = now() - ((p_anchor+3)||' days')::interval, completed_at = now() - ((p_anchor+2)||' days')::interval,
+            completed_at = now() - ((p_anchor+2)||' days')::interval,
             completed_by='11111111-1111-1111-1111-111111111111' where id = op.id;
         elsif i = 2 then
-          update public.job_operations set status='in_progress', started_at = now() - ((p_anchor+1)||' days')::interval where id = op.id;
+          update public.job_operations set status='in_progress' where id = op.id;
         end if;
       end if;
     end loop;

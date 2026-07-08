@@ -1000,7 +1000,6 @@ export type Database = {
       }
       job_operations: {
         Row: {
-          assigned_to: string | null
           completed_at: string | null
           completed_by: string | null
           created_at: string | null
@@ -1014,13 +1013,11 @@ export type Database = {
           operation_name: string
           routing_operation_id: string | null
           sequence: number
-          started_at: string | null
           status: string
           updated_at: string | null
           work_center_id: string | null
         }
         Insert: {
-          assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
           created_at?: string | null
@@ -1034,13 +1031,11 @@ export type Database = {
           operation_name: string
           routing_operation_id?: string | null
           sequence: number
-          started_at?: string | null
           status?: string
           updated_at?: string | null
           work_center_id?: string | null
         }
         Update: {
-          assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
           created_at?: string | null
@@ -1054,7 +1049,6 @@ export type Database = {
           operation_name?: string
           routing_operation_id?: string | null
           sequence?: number
-          started_at?: string | null
           status?: string
           updated_at?: string | null
           work_center_id?: string | null

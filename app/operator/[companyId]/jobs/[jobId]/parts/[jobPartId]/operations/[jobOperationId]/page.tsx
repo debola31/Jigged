@@ -17,7 +17,7 @@ import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
   getOperatorOperationDetail,
-  getCurrentOperator,
+  getCurrentMember,
   completeOperation,
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
@@ -65,7 +65,7 @@ export default function OperatorOperationActionPage() {
 
   useEffect(() => {
     async function loadOperator() {
-      const operator = await getCurrentOperator(companyId);
+      const operator = await getCurrentMember(companyId);
       if (operator) setCurrentOperatorId(operator.id);
     }
     loadOperator();

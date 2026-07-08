@@ -21,7 +21,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
 import { resolveScan } from '@/utils/inventoryLocationsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { LocationContent } from '@/types/inventoryLocations';
@@ -59,7 +59,7 @@ export default function OperatorBinViewPage() {
   // Operator id stamps the ledger; best-effort, never blocks the view.
   useEffect(() => {
     let cancelled = false;
-    getCurrentOperator(companyId)
+    getCurrentMember(companyId)
       .then((op) => {
         if (!cancelled) setOperatorId(op?.id ?? null);
       })

@@ -1368,18 +1368,10 @@ export async function completeJobOperation(
   const { data: { user } } = await supabase.auth.getUser();
   const now = new Date().toISOString();
 
-  // Preserve an existing start stamp; back-fill it if the op was never started.
-  const { data: existing } = await supabase
-    .from('job_operations')
-    .select('started_at')
-    .eq('id', operationId)
-    .single();
-
   const updateData: JobOperationUpdate = {
     status: 'completed',
     completed_at: now,
     completed_by: user?.id || null,
-    started_at: existing?.started_at ?? now,
     updated_at: now,
   };
   if (data.notes !== undefined) updateData.notes = data.notes;
@@ -1424,7 +1416,6 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
     .from('job_operations')
     .update({
       status: 'pending',
-      started_at: null,
       completed_at: null,
       completed_by: null,
       updated_at: new Date().toISOString(),

@@ -13,7 +13,7 @@ import Snackbar from '@mui/material/Snackbar';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import FeedbackDialog from '@/components/feedback/FeedbackDialog';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { getCompany } from '@/utils/companyAccess';
 import { getSupabase } from '@/lib/supabase';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
@@ -53,7 +53,7 @@ export default function OperatorProfilePage() {
         }
 
         // Get operator info
-        const operator = await getCurrentOperator(companyId);
+        const operator = await getCurrentMember(companyId);
         if (!operator) {
           setError('Operator not found');
           setLoading(false);

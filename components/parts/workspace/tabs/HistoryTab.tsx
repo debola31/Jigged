@@ -29,7 +29,7 @@ import {
   deletePartNote,
   type PartActivityEvent,
 } from '@/utils/partsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
 
 interface HistoryTabProps {
@@ -107,7 +107,7 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
 
   useEffect(() => {
     let cancelled = false;
-    getCurrentOperator(companyId)
+    getCurrentMember(companyId)
       .then((op) => {
         if (!cancelled) setOperator(op);
       })

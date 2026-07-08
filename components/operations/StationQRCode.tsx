@@ -11,7 +11,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { jsPDF } from 'jspdf';
 
 interface StationQRCodeProps {
-  operationTypeId: string;
+  workCenterId: string;
   operationName: string;
   operationCode?: string | null;
   companyId: string;
@@ -20,7 +20,7 @@ interface StationQRCodeProps {
 }
 
 export default function StationQRCode({
-  operationTypeId,
+  workCenterId,
   operationName,
   operationCode,
   companyId,
@@ -30,7 +30,7 @@ export default function StationQRCode({
   const qrRef = useRef<HTMLDivElement>(null);
 
   // Generate the station URL that operators will scan
-  const stationUrl = `${window.location.origin}/operator/${companyId}/login?station=${operationTypeId}`;
+  const stationUrl = `${window.location.origin}/operator/${companyId}/login?station=${workCenterId}`;
 
   const getQRCanvas = useCallback((): HTMLCanvasElement | null => {
     if (!qrRef.current) return null;

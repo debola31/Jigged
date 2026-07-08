@@ -5,8 +5,10 @@
  * supabase.auth.signInWithPassword(). Most operations now use direct
  * Supabase client calls with RLS policies.
  *
- * NOTE: Operators are stored in user_company_access with role='operator'.
- * The legacy 'operators' table is deprecated.
+ * NOTE: There is no dedicated "operators" table. Shop-floor users are
+ * user_company_access rows with role='operator', but admins/users are company
+ * members too and can act in the operator view just the same (see
+ * getCurrentMember — deliberately not role-filtered).
  *
  * Multi-part jobs (refactor): a job carries N child job_parts, and ALL
  * operator-facing work is keyed on `job_part_id`. The operator-jobs list at
@@ -18,12 +20,6 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
-import type { Database } from '@/types/database';
-
-// Update payload type for user_company_access. Used where the patch
-// object is built conditionally and would otherwise be inferred as
-// Record<string, unknown>, which the typed .update(...) rejects.
-type UserCompanyAccessUpdate = Database['public']['Tables']['user_company_access']['Update'];
 import type {
   OperatorJob,
   OperatorPlantJob,
@@ -38,93 +34,18 @@ import type {
   PartPreviousNote,
 } from '@/types/operator';
 
-// Operator type from user_company_access. role and created_at are
-// nullable in the DB schema (text DEFAULT 'operator'; timestamptz
-// DEFAULT now()) but never null at read time because of the defaults.
-// Mirroring the DB shape here keeps the typed select returns happy
-// without papering the gap with per-site casts.
-interface OperatorAccess {
-  id: string;
-  user_id: string;
-  company_id: string;
-  role: string | null;
-  name: string | null;
-  created_at: string | null;
-}
-
 // ============================================================================
-// ADMIN OPERATOR CRUD (uses user_company_access)
+// CURRENT USER (the signed-in company member — ANY role)
 // ============================================================================
 
-export async function listOperators(companyId: string): Promise<OperatorAccess[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .select('id, company_id, user_id, name, role, created_at')
-    .eq('company_id', companyId)
-    .eq('role', 'operator')
-    .order('name');
-
-  if (error) throw new Error(error.message);
-  return data || [];
-}
-
-export async function getOperator(operatorId: string): Promise<OperatorAccess> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .select('id, company_id, user_id, name, role, created_at')
-    .eq('id', operatorId)
-    .eq('role', 'operator')
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-export async function updateOperator(
-  operatorId: string,
-  request: { name?: string }
-): Promise<OperatorAccess> {
-  const supabase = getSupabase();
-
-  const updates: UserCompanyAccessUpdate = {};
-  if (request.name !== undefined) updates.name = request.name;
-
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .update(updates)
-    .eq('id', operatorId)
-    .select('id, company_id, user_id, name, role, created_at')
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-export async function deleteOperator(operatorId: string): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('user_company_access')
-    .delete()
-    .eq('id', operatorId);
-
-  if (error) {
-    console.error('Error deleting operator:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
-        entity: 'operator',
-        fallback: 'Failed to remove operator.',
-      }),
-    );
-  }
-}
-
-// ============================================================================
-// OPERATOR SESSION HELPERS
-// ============================================================================
-
-export async function getCurrentOperator(companyId: string): Promise<{
+/**
+ * The signed-in user's user_company_access row for this company — used wherever
+ * we need the acting member's account id (job-note author, operation completer,
+ * activity attribution). Intentionally NOT role-filtered: operators, users, and
+ * admins are all company members, and every one of them can act in the operator
+ * view. (There is no separate "operators" table — that legacy table is gone.)
+ */
+export async function getCurrentMember(companyId: string): Promise<{
   id: string;
   name: string | null;
   user_id: string;
@@ -134,14 +55,14 @@ export async function getCurrentOperator(companyId: string): Promise<{
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
-  const { data: operatorAccess } = await supabase
+  const { data: member } = await supabase
     .from('user_company_access')
     .select('id, name, user_id')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
 
-  return operatorAccess;
+  return member;
 }
 
 // ============================================================================
@@ -222,15 +143,15 @@ async function getReadyOperationsForStation(
  */
 export async function getOperatorJobs(
   companyId: string,
-  operationTypeId?: string,
+  workCenterId?: string,
 ): Promise<OperatorJob[]> {
-  if (!operationTypeId) {
+  if (!workCenterId) {
     // No station selected — the station-scoped list needs a station. The
     // whole-plant view is getAllStationsOperatorJobs() instead.
     return [];
   }
 
-  const readyRows = await getReadyOperationsForStation(companyId, operationTypeId);
+  const readyRows = await getReadyOperationsForStation(companyId, workCenterId);
   return buildOperatorJobs(readyRows);
 }
 
@@ -543,7 +464,7 @@ export async function completeOperation(
 
   const { data: op, error: opError } = await supabase
     .from('job_operations')
-    .select('id, job_id, job_part_id, started_at')
+    .select('id, job_id, job_part_id')
     .eq('id', jobOperationId)
     .single();
   if (opError || !op) throw new Error('Operation not found.');
@@ -560,7 +481,6 @@ export async function completeOperation(
       status: 'completed',
       completed_at: now,
       completed_by: user?.id ?? null,
-      started_at: op.started_at ?? now,
     })
     .eq('id', jobOperationId);
 
@@ -982,7 +902,7 @@ export async function getJobNotes(
 
 /**
  * Append a note to the job feed. `authorId` is the author's user_company_access
- * id (from getCurrentOperator); RLS requires it to match the caller's access row.
+ * id (from getCurrentMember); RLS requires it to match the caller's access row.
  *
  * `opts.jobOperationId` is the optional step tag. The operation page always
  * passes it (with `jobPartId`) so operator captures are step-scoped; the

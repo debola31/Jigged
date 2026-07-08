@@ -5,19 +5,9 @@
  * Operators authenticate the same way as admin users, but access
  * a dedicated operator interface.
  *
- * NOTE: Operator records are now stored in user_company_access with role='operator'.
- * The legacy 'operators' table is deprecated.
+ * NOTE: There is no dedicated "operators" table. Shop-floor users are
+ * user_company_access rows with role='operator'; admins/users are members too.
  */
-
-/**
- * Response from the operator creation API.
- */
-export interface OperatorCreateResponse {
-  success: boolean;
-  message?: string;
-  operator_id?: string;
-  user_id?: string;
-}
 
 // ============================================================================
 // JOB TYPES

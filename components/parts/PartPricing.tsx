@@ -40,7 +40,7 @@ import {
 } from '@/utils/partPricingTiersAccess';
 import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
 import { addPartPricingNote } from '@/utils/partsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   type MarkupRate,
   summarizeBreakpoints,
@@ -269,7 +269,7 @@ export default function PartPricing({
       // Auto-log the change as a 'pricing' note (audit trail in the Notes feed).
       // Non-fatal: a note-write failure must never block the pricing save.
       try {
-        const operator = await getCurrentOperator(companyId);
+        const operator = await getCurrentMember(companyId);
         if (operator) {
           const summary = payload
             .map((t) => `@${t.quantity} → ${t.markup_percent ?? '—'}%`)

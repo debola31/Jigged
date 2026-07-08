@@ -1562,7 +1562,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
 
 /**
  * Append a part note. `authorId` is the author's user_company_access id (from
- * getCurrentOperator); RLS requires it to match the caller's access row.
+ * getCurrentMember); RLS requires it to match the caller's access row.
  * `noteType` defaults to 'user' (manual note); pass 'pricing' for auto-logged
  * pricing-change entries (see addPartPricingNote).
  */

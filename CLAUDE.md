@@ -123,6 +123,21 @@ Use the schema files for "what does column X look like today" lookups without sp
 
 ---
 
+### Minimize unnecessary approval prompts (shell command hygiene)
+
+Claude Code's permission allowlist matches on command **names/prefixes**, not on arbitrary code payloads. Two command shapes defeat the allowlist and force a manual approval even when every tool involved is already allowed — avoid them:
+
+1. **Inline-code execution** — `python3 -c "…"`, `python -c`, `node -e "…"`, `psql … -c "<SQL>"`, `agent-browser eval`. These hand the shell an arbitrary code/query payload, which the permission system **always** confirms by design; no allow rule generalizes across payloads (each dialog only offers to allow that one exact snippet). Don't reach for them for routine work:
+   - To inspect a file, use the `Read` tool, or `jq`/`grep`/`cat` — not `python3 -c "import json…"`.
+   - **Never re-validate a file right after `Edit`/`Write`** — the tool already confirmed the write succeeded. That redundant `python3 -c` JSON check is the most common self-inflicted prompt.
+   - For DB reads, prefer `psql "postgresql://…" -f <file.sql>` (a committed query file) over an inline `-c "<SQL>"`; keep any inline query to a single standalone command you accept will prompt once.
+
+2. **Compound commands** — chaining with `&&`, `;`, `|`, or heredocs. Approval requires **every** segment to match an allow rule, so one un-allowable segment (e.g. an inline `eval`) forces the whole block to prompt — including the innocent `cd`/`echo` in front. Prefer single-purpose commands; never bury an inline-code step inside a chain.
+
+Plain allowlisted single commands (`grep`, `cat`, `ls`, `find`, `awk`, `curl`, `git …`, `pnpm …`, `psql … -f`, etc.) run without prompting. Working in a **git worktree has no effect** on this — prompts are about command *shape*, not location.
+
+---
+
 ## Design System: Jigged Manufacturing Data Platform (Material-UI)
 
 > **Source of Truth:** `lib/theme.ts` contains all design values with inline documentation.

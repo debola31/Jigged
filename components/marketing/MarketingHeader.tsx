@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
@@ -11,10 +12,14 @@ import ListItemText from '@mui/material/ListItemText';
 import MenuIcon from '@mui/icons-material/Menu';
 import MuiLink from '@mui/material/Link';
 import JiggedLogo from '@/components/branding/JiggedLogo';
+import { gradientButtonSx } from './marketingStyles';
 
 const navItems = [
-  { label: 'Log In', href: '/login' },
+  { label: 'How it works', href: '#how-it-works' },
+  { label: 'Log in', href: '/login' },
 ];
+
+const CTA = { label: 'Request access', href: '/invite/early-access' };
 
 export default function MarketingHeader() {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -31,14 +36,14 @@ export default function MarketingHeader() {
           alignItems: 'center',
           justifyContent: 'space-between',
           px: { xs: 2, md: 4 },
-          py: 1.5,
-          bgcolor: 'rgba(26, 31, 74, 0.55)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          py: 0.75,
+          minHeight: 52,
+          bgcolor: 'rgba(17, 20, 57, 0.6)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.09)',
         }}
       >
-        {/* Logo */}
         <MuiLink
           component={Link}
           href="/"
@@ -48,14 +53,8 @@ export default function MarketingHeader() {
           <JiggedLogo size="small" variant="dark" />
         </MuiLink>
 
-        {/* Desktop Nav */}
-        <Box
-          sx={{
-            display: { xs: 'none', sm: 'flex' },
-            alignItems: 'center',
-            gap: 2,
-          }}
-        >
+        {/* Desktop nav */}
+        <Box sx={{ display: { xs: 'none', sm: 'flex' }, alignItems: 'center', gap: 3 }}>
           {navItems.map((item) => (
             <MuiLink
               key={item.label}
@@ -72,18 +71,28 @@ export default function MarketingHeader() {
               {item.label}
             </MuiLink>
           ))}
+          <Button
+            component={Link}
+            href={CTA.href}
+            variant="contained"
+            size="small"
+            sx={{ px: 2.25, ...gradientButtonSx }}
+          >
+            {CTA.label}
+          </Button>
         </Box>
 
-        {/* Mobile Hamburger */}
+        {/* Mobile hamburger */}
         <IconButton
           onClick={() => setDrawerOpen(true)}
           sx={{ display: { xs: 'flex', sm: 'none' }, color: 'white' }}
+          aria-label="Open menu"
         >
           <MenuIcon />
         </IconButton>
       </Box>
 
-      {/* Mobile Drawer */}
+      {/* Mobile drawer */}
       <Drawer
         anchor="right"
         open={drawerOpen}
@@ -91,14 +100,14 @@ export default function MarketingHeader() {
         slotProps={{
           paper: {
             sx: {
-              width: 240,
+              width: 260,
               bgcolor: 'rgba(17, 20, 57, 0.98)',
               backdropFilter: 'blur(20px)',
             },
           },
         }}
       >
-        <List sx={{ pt: 4, px: 1 }}>
+        <List sx={{ pt: 4, px: 1.5 }}>
           {navItems.map((item) => (
             <ListItemButton
               key={item.label}
@@ -110,6 +119,16 @@ export default function MarketingHeader() {
               <ListItemText primary={item.label} />
             </ListItemButton>
           ))}
+          <Button
+            component={Link}
+            href={CTA.href}
+            onClick={() => setDrawerOpen(false)}
+            variant="contained"
+            fullWidth
+            sx={{ mt: 2, py: 1.15, ...gradientButtonSx }}
+          >
+            {CTA.label}
+          </Button>
         </List>
       </Drawer>
     </>

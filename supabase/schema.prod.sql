@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-03T05:29:30Z
+-- Generated: 2026-07-08T21:26:03Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS "public"."ai_chat_queries"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "user_id" uuid,
     "question" text NOT NULL,
     "tool_calls" jsonb NOT NULL DEFAULT '[]'::jsonb,
     "response" text NOT NULL,
@@ -2283,9 +2282,6 @@ CREATE POLICY "Users can upload files to their company folder"
 ALTER TABLE "public"."ai_chat_queries"
     ADD CONSTRAINT "ai_chat_queries_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."ai_chat_queries"
-    ADD CONSTRAINT "ai_chat_queries_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
-
 ALTER TABLE "public"."ai_config"
     ADD CONSTRAINT "ai_config_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -4522,7 +4518,7 @@ BEGIN
     WITH eligible_jobs AS (
         SELECT j.id, j.job_number FROM jobs j
         WHERE j.company_id = p_company_id
-          AND j.status IN ('not_started', 'in_progress')
+          AND j.production_status IN ('not_started', 'in_progress')  -- was j.status (nonexistent column)
     ),
     station_ops AS (
         SELECT jo.id, jo.job_id, jo.job_part_id, jo.operation_name, jo.status, jo.sequence, ej.job_number
@@ -5941,6 +5937,9 @@ CREATE TRIGGER customer_contacts_updated_at BEFORE UPDATE ON public.customer_con
 DROP TRIGGER IF EXISTS "customers_updated_at" ON "public"."customers";
 CREATE TRIGGER customers_updated_at BEFORE UPDATE ON public.customers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "feedback" ON "public"."feedback";
+CREATE TRIGGER feedback AFTER INSERT ON public.feedback FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://mayuquvexmqjvwkfasxg.supabase.co/functions/v1/notify-feedback', 'POST', '{"Content-type":"application/json"}', '{}', '5000');
+
 DROP TRIGGER IF EXISTS "enforce_transaction_notes_only_update" ON "public"."inventory_transactions";
 CREATE TRIGGER enforce_transaction_notes_only_update BEFORE UPDATE ON public.inventory_transactions FOR EACH ROW EXECUTE FUNCTION restrict_transaction_update_to_notes();
 
@@ -6214,9 +6213,6 @@ COMMENT ON COLUMN "public"."ai_chat_queries"."id"
 
 COMMENT ON COLUMN "public"."ai_chat_queries"."company_id"
     IS 'FK to companies. Isolates chat history per tenant.';
-
-COMMENT ON COLUMN "public"."ai_chat_queries"."user_id"
-    IS 'FK to auth.users. The user who asked the question. Nullable for system-generated queries.';
 
 COMMENT ON COLUMN "public"."ai_chat_queries"."question"
     IS 'The natural-language question the user asked the AI assistant.';

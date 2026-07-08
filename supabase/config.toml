@@ -1,5 +1,8 @@
 # For detailed configuration reference documentation, visit:
 # https://supabase.com/docs/guides/local-development/cli/config
+# NOTE: this comment exists only to place a change under supabase/ so the Supabase
+# Branching integration opens a preview branch for a migration-free PR (it ignores PRs
+# with no supabase/-dir changes). No functional config change. Safe to remove later.
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
 project_id = "Jigged"

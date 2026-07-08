@@ -66,6 +66,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     // GA feature with a kill-switch: enabled unless explicitly turned off.
     defaultEnabled: true,
   },
+  {
+    key: 'data_health_report',
+    label: 'Data Health Report',
+    description:
+      'Read-only onboarding aid: upload legacy ERP CSV exports to get an advisory data-health / import-readiness report (record counts, duplicates, orphan references, gaps) plus a best-effort source-ERP guess. Never writes any data. Opt-in per tenant while onboarding.',
+  },
 ] as const;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];
@@ -106,6 +112,16 @@ export function isInventoryLocationsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
   return readFeatureFlag(company, 'inventory_locations');
+}
+
+/**
+ * Data Health report is opt-IN: off unless the company row explicitly sets
+ * settings.features.data_health_report = true (enabled per tenant while onboarding).
+ */
+export function isDataHealthReportEnabled(
+  company: Pick<Company, 'settings'> | null | undefined,
+): boolean {
+  return readFeatureFlag(company, 'data_health_report');
 }
 
 /**

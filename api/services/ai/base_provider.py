@@ -15,6 +15,42 @@ class MappingSuggestion(BaseModel):
     reasoning: str
 
 
+class ErpDetectionResult(BaseModel):
+    """AI guess at the source ERP. Same 0.0-1.0 confidence contract as MappingSuggestion."""
+
+    source: str = "unknown"
+    display_name: str = "Unknown"
+    confidence: float = 0.0
+    matched_headers: list[dict] = []  # {"header": str, "signal": str}
+    evidence: str = ""
+    alternatives: list[dict] = []  # {"source": str, "confidence": float}
+
+
+class FileStructure(BaseModel):
+    """AI classification of one uploaded file: entity type + raw->canonical column roles."""
+
+    filename: str
+    entity_type: str = "unknown"
+    entity_confidence: float = 0.0
+    column_roles: dict[str, str] = {}  # canonical_field -> raw_header
+
+
+class StructureResult(BaseModel):
+    """Combined structure + source analysis of an uploaded bundle."""
+
+    erp: ErpDetectionResult = ErpDetectionResult()
+    files: list[FileStructure] = []
+
+
+class HealthNarrativeResult(BaseModel):
+    """Plain-text narrative + guidance, grounded in the deterministic findings."""
+
+    summary: str = ""
+    recommendations: list[str] = []
+    gotchas: list[dict] = []  # {"title","detail","recommended_action"} — informative, unverified
+    available: bool = True  # False -> narrative generation failed; UI shows raw findings only
+
+
 class AIProvider(ABC):
     """Abstract base class for AI providers."""
 
@@ -43,5 +79,38 @@ class AIProvider(ABC):
 
         Returns:
             List of MappingSuggestion objects with confidence scores
+        """
+        pass
+
+    @abstractmethod
+    async def analyze_structure(
+        self,
+        files: list[dict],
+        entity_schemas: dict[str, dict],
+        erp_catalog: list[dict],
+    ) -> StructureResult:
+        """Classify each uploaded file (entity type + raw->canonical column_roles) and
+        detect the likely source ERP in a single call.
+
+        Args:
+            files: [{"filename", "headers": [str], "column_samples": {header: sample}}]
+            entity_schemas: {entity_name: schema_dict} — the canonical fields to map onto
+            erp_catalog: [{"source","display_name","header_hint"}] — prompt grounding only
+
+        Returns:
+            StructureResult (should degrade to unknown rather than raise on a bad response).
+        """
+        pass
+
+    @abstractmethod
+    async def generate_health_narrative(
+        self,
+        erp: dict,
+        findings: list[dict],
+        file_summaries: list[dict],
+    ) -> HealthNarrativeResult:
+        """Write a plain-text data-health narrative grounded STRICTLY in the given
+        deterministic findings (no invented numbers). Returns available=False on failure
+        so the caller can show raw findings instead of fabricated prose.
         """
         pass

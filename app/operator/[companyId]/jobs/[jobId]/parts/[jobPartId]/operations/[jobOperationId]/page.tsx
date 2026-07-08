@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -12,7 +12,6 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
 import {
@@ -46,7 +45,6 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  */
 export default function OperatorOperationActionPage() {
   const params = useParams();
-  const router = useRouter();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
@@ -306,12 +304,23 @@ export default function OperatorOperationActionPage() {
           </Box>
         </Button>
       ) : stationMismatch ? (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Alert severity="warning">
-            This step runs at <strong>{job.operation_work_center_name || 'another station'}</strong>.
-            You&apos;re at <strong>{stationName || 'a different station'}</strong> — did you scan the
-            wrong code?
-          </Alert>
+        // This step's work center isn't the operator's selected station. With
+        // login + station-select (not blind QR scans), that usually just means
+        // they opened another station's job — so state it plainly and offer a
+        // one-tap switch-and-complete for legit cross-station work. Backing out
+        // is the header's back arrow, so there's no separate button here.
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
+            This step runs at{' '}
+            <Box component="strong" sx={{ color: 'text.primary' }}>
+              {job.operation_work_center_name || 'another station'}
+            </Box>{' '}
+            — not your station (
+            <Box component="strong" sx={{ color: 'text.primary' }}>
+              {stationName || '—'}
+            </Box>
+            ).
+          </Typography>
           <Button
             fullWidth
             variant="contained"
@@ -327,17 +336,6 @@ export default function OperatorOperationActionPage() {
             ) : (
               `Switch to ${job.operation_work_center_name || 'this station'} & complete`
             )}
-          </Button>
-          <Button
-            variant="outlined"
-            size="large"
-            color="inherit"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => router.push(travelerHref)}
-            disabled={actionLoading}
-            sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
-          >
-            Not my step — back to traveler
           </Button>
         </Box>
       ) : (

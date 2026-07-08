@@ -21,6 +21,7 @@ import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
+import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
@@ -226,6 +227,11 @@ function OperatorShell({
         bgcolor: 'background.default',
       }}
     >
+      {/* Same lit gradient canvas as the dashboard shell, for a consistent app look.
+          The fixed AppBar/BottomNav (high z-index) and the main content (z-index 1 below)
+          sit above it. */}
+      <AppAmbientBackdrop />
+
       {/* Top App Bar */}
       <AppBar
         position="fixed"
@@ -332,6 +338,8 @@ function OperatorShell({
       <Box
         component="main"
         sx={{
+          position: 'relative',
+          zIndex: 1, // above the fixed ambient backdrop
           flex: 1,
           mt: '48px', // Single-row AppBar height
           mb: navVisible ? '56px' : 0, // BottomNavigation height

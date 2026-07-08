@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import { Sidebar, Header } from '@/components/layout';
+import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
 import { PageTitleProvider } from '@/components/layout/PageTitleProvider';
 import { AuthGuard } from '@/components/auth';
 import DemoModeProvider from '@/components/providers/DemoModeProvider';
@@ -31,13 +32,17 @@ export default function DashboardLayout({
     <AuthGuard companyId={companyId} requireCompany>
       <DemoModeProvider>
         <PageTitleProvider>
-        <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-          <Sidebar isMobile={isMobile} open={drawerOpen} onClose={closeDrawer} onFeedbackClick={feedback.openDialog} />
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', ml: { xs: 0, md: '240px' }, minWidth: 0 }}>
-            <Header isMobile={isMobile} onMenuClick={openDrawer} />
-            <DemoModeBanner />
-            <Box component="main" sx={{ flex: 1, p: { xs: 2, md: 3 }, overflow: 'auto' }}>
-              {children}
+        <Box sx={{ position: 'relative', minHeight: '100vh' }}>
+          {/* Ambient shop-floor backdrop — sits behind the workspace, above the theme base */}
+          <AppAmbientBackdrop />
+          <Box sx={{ position: 'relative', zIndex: 1, display: 'flex', minHeight: '100vh' }}>
+            <Sidebar isMobile={isMobile} open={drawerOpen} onClose={closeDrawer} onFeedbackClick={feedback.openDialog} />
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', ml: { xs: 0, md: '240px' }, minWidth: 0 }}>
+              <Header isMobile={isMobile} onMenuClick={openDrawer} />
+              <DemoModeBanner />
+              <Box component="main" sx={{ flex: 1, p: { xs: 2, md: 3 }, overflow: 'auto' }}>
+                {children}
+              </Box>
             </Box>
           </Box>
         </Box>

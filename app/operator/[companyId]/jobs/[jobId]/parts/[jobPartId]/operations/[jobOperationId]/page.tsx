@@ -229,8 +229,7 @@ export default function OperatorOperationActionPage() {
                 p: 1.5,
                 borderRadius: 1,
                 bgcolor: 'rgba(255, 255, 255, 0.04)',
-                borderLeft: '3px solid',
-                borderColor: 'primary.main',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
               <Typography variant="caption" color="text.secondary" display="block">

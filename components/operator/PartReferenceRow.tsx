@@ -48,20 +48,22 @@ export default function PartReferenceRow({
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+      {/* Both outlined so they read as one family (per the design system —
+          grouped actions share a variant). Files leads via bolder weight + a
+          count, not by being the only one with a border. */}
       <Button
-        variant={hasFiles ? 'contained' : 'outlined'}
-        color={hasFiles ? 'primary' : 'inherit'}
+        variant="outlined"
         startIcon={<FolderOpenIcon />}
         onClick={() => setFilesOpen(true)}
-        sx={{ minHeight: 48, fontWeight: 600 }}
+        sx={{ minHeight: 48, fontWeight: 700 }}
       >
         {hasFiles ? `Files · ${fileCount}` : 'Files'}
       </Button>
       <Button
-        variant="text"
+        variant="outlined"
         startIcon={<HistoryIcon />}
         onClick={() => setNotesOpen(true)}
-        sx={{ minHeight: 48, color: 'text.secondary' }}
+        sx={{ minHeight: 48 }}
       >
         Previous notes
       </Button>

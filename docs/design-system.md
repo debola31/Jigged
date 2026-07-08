@@ -212,6 +212,30 @@ text: {
 },
 ```
 
+**Grouped secondary actions share one variant.** When buttons sit together as a
+set (e.g. a reference row), give them the *same* variant so they read as a family
+— don't put an `outlined` button next to a `text` one. Rank within the set by
+order, weight, an icon, or a count — not by giving one a border and the other none.
+
+### Callouts & insets (no decorative accent borders)
+
+Define a callout / inset (instructions, notes, highlighted rows) with a **subtle
+full border** (white ~8%) and/or a neutral translucent background — the same
+"subtle white border defines edges" treatment cards use. **Do not** use a
+decorative colored side-accent border (e.g. a 3px `primary.main` left stripe): it
+reads as generic, templated web styling and cuts against the "substantial, not
+playful — industrial" principle. Reserve a colored border for a *semantic* signal
+(e.g. a red edge on an alert state), never as decoration.
+
+```tsx
+// ✅ neutral inset
+<Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'rgba(255,255,255,0.04)',
+           border: '1px solid rgba(255,255,255,0.08)' }}>…</Box>
+
+// ❌ decorative colored side-accent
+<Box sx={{ borderLeft: '3px solid', borderColor: 'primary.main' }}>…</Box>
+```
+
 ### Text Fields
 
 ```javascript

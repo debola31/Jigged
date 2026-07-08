@@ -12,7 +12,6 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
@@ -23,9 +22,10 @@ import {
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
-import PreviousRunCard from '@/components/operator/PreviousRunCard';
+import PartReferenceRow from '@/components/operator/PartReferenceRow';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
@@ -54,11 +54,15 @@ export default function OperatorOperationActionPage() {
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
-  const { stationId, stationName, setStation } = useStationContext();
+  const { stationId, stationName, setStation, initializing } = useStationContext();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Header back → the traveler for this part. (Files + Previous notes live in an
+  // in-content reference row below the job card, not the header.)
+  useSetOperatorChrome({ back: { href: travelerHref, label: 'Back to traveler' } }, [travelerHref]);
 
   useEffect(() => {
     async function loadOperator() {
@@ -132,7 +136,10 @@ export default function OperatorOperationActionPage() {
     return 'default';
   };
 
-  if (loading) {
+  // Wait for BOTH the job fetch and the station context's one-time init before
+  // deciding what to render — otherwise the "no station" branch can flash for an
+  // operator who actually has a stored station.
+  if (loading || initializing) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
         <CircularProgress />
@@ -148,11 +155,19 @@ export default function OperatorOperationActionPage() {
     );
   }
 
+  // No station selected yet — show ONLY a focused picker, never stacked beneath
+  // the job card. Reaching this with a job loaded means neither the QR (?station=)
+  // nor the stored default supplied a station — e.g. a returning operator whose
+  // tab was evicted overnight. Gated on `initializing` above so it can't flash
+  // for an operator who does have a stored station.
+  if (!isCompleted && !stationId) {
+    return <StationSelector subtitle="Select your station to complete this step." />;
+  }
+
   // Station guard: a step whose work center differs from the operator's selected
   // station is the likely signature of a wrong QR scan. (Can't catch a mis-scan
   // between two steps sharing one work center — the on-screen step name + Undo
   // are the backstop there.)
-  const needsStation = !isCompleted && !stationId;
   const stationMismatch =
     !isCompleted &&
     !!stationId &&
@@ -161,10 +176,6 @@ export default function OperatorOperationActionPage() {
 
   return (
     <Box>
-      <IconButton onClick={() => router.push(travelerHref)} sx={{ mb: 2 }} aria-label="Back to traveler">
-        <ArrowBackIcon />
-      </IconButton>
-
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -218,8 +229,7 @@ export default function OperatorOperationActionPage() {
                 p: 1.5,
                 borderRadius: 1,
                 bgcolor: 'rgba(255, 255, 255, 0.04)',
-                borderLeft: '3px solid',
-                borderColor: 'primary.main',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
               }}
             >
               <Typography variant="caption" color="text.secondary" display="block">
@@ -260,34 +270,41 @@ export default function OperatorOperationActionPage() {
         </CardContent>
       </Card>
 
-      {/* Setup guidance: how THIS step went on the last run of this part. */}
-      <Box sx={{ mb: 3 }}>
-        <PreviousRunCard
-          partId={job.part_id}
-          companyId={companyId}
-          excludeJobId={jobId}
-          jobOperationId={jobOperationId}
-          title="Last time, this step"
-        />
-      </Box>
+      <PartReferenceRow
+        companyId={companyId}
+        partId={job.part_id}
+        partName={job.part_name}
+        excludeJobId={jobId}
+        jobOperationId={jobOperationId}
+      />
 
       {isCompleted ? (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Alert severity="success">This step is complete.</Alert>
-          <Button
-            variant="outlined"
-            size="large"
-            color="inherit"
-            startIcon={<UndoIcon />}
-            onClick={handleRevert}
-            disabled={actionLoading}
-            sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
-          >
-            {actionLoading ? <CircularProgress size={24} /> : 'UNDO COMPLETION'}
-          </Button>
-        </Box>
-      ) : needsStation ? (
-        <StationSelector subtitle="Select your station to complete this step." />
+        // The completed state IS the undo control — one element shows the status
+        // (green check + "complete") and doubles as the button that reverts it,
+        // instead of a separate success banner above a big UNDO button.
+        <Button
+          fullWidth
+          variant="outlined"
+          size="large"
+          onClick={handleRevert}
+          disabled={actionLoading}
+          aria-label="This step is complete — tap to undo"
+          sx={{ minHeight: 56 }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}>
+            <CheckCircleIcon color="success" />
+            <Box component="span" sx={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: '1.05rem' }}>
+              This step is complete
+            </Box>
+            {actionLoading ? (
+              <CircularProgress size={18} />
+            ) : (
+              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: 0.8, fontWeight: 500 }}>
+                <UndoIcon fontSize="small" /> Undo
+              </Box>
+            )}
+          </Box>
+        </Button>
       ) : stationMismatch ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Alert severity="warning">
@@ -352,6 +369,7 @@ export default function OperatorOperationActionPage() {
           }}
         />
       </Box>
+
     </Box>
   );
 }

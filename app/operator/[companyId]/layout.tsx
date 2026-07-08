@@ -14,15 +14,16 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
-import LogoutIcon from '@mui/icons-material/Logout';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import { OperatorChromeProvider, useOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
@@ -109,14 +110,6 @@ export default function OperatorLayout({
     else setNavValue('jobs');
   }, [pathname]);
 
-  const handleLogout = async () => {
-    if (typeof window !== 'undefined') {
-      sessionStorage.removeItem('jigged_operator_station');
-    }
-    await supabase.auth.signOut();
-    router.push(`/operator/${companyId}/login`);
-  };
-
   const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
@@ -161,15 +154,16 @@ export default function OperatorLayout({
 
   return (
     <OperatorStationProvider>
-      <OperatorShell
-        userRole={userRole}
-        companyId={companyId}
-        navValue={navValue}
-        onNavChange={handleNavChange}
-        onLogout={handleLogout}
-      >
-        {children}
-      </OperatorShell>
+      <OperatorChromeProvider>
+        <OperatorShell
+          userRole={userRole}
+          companyId={companyId}
+          navValue={navValue}
+          onNavChange={handleNavChange}
+        >
+          {children}
+        </OperatorShell>
+      </OperatorChromeProvider>
     </OperatorStationProvider>
   );
 }
@@ -182,17 +176,16 @@ function OperatorShell({
   companyId,
   navValue,
   onNavChange,
-  onLogout,
   children,
 }: {
   userRole: string;
   companyId: string;
   navValue: string;
   onNavChange: (event: React.SyntheticEvent, newValue: string) => void;
-  onLogout: () => void;
   children: React.ReactNode;
 }) {
   const { stationId, stationName, stations, setStation } = useStationContext();
+  const chrome = useOperatorChrome();
   const { features } = useCompanyFeatures();
   const pathname = usePathname();
   const router = useRouter();
@@ -236,50 +229,62 @@ function OperatorShell({
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         }}
       >
-        <Toolbar
-          sx={{
-            minHeight: '48px !important',
-            px: 2,
-          }}
-        >
-          {/* Left: Jigged icon + station selector */}
-          <JiggedIcon size={20} />
-          {stationId && (
-            <Box
-              onClick={handleStationMenuOpen}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                ml: 1,
-                minHeight: 48,
-                overflow: 'hidden',
-                maxWidth: 'calc(100vw - 140px)',
-                borderRadius: 1,
-                px: 0.75,
-                '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
+        <Toolbar sx={{ minHeight: '48px !important', px: 1 }}>
+          {/* Left: back on detail pages, JIG logo on back-less roots. */}
+          {chrome.back ? (
+            <IconButton
+              color="inherit"
+              size="small"
+              aria-label={chrome.back.label ?? 'Back'}
+              onClick={() => {
+                if (chrome.back) router.push(chrome.back.href);
               }}
             >
-              <Typography
-                variant="body1"
-                component="span"
-                sx={{
-                  color: '#D4872A',
-                  fontWeight: 600,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {stationName || 'Select Station'}
-              </Typography>
-              <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
-            </Box>
+              <ArrowBackIcon fontSize="small" />
+            </IconButton>
+          ) : (
+            <JiggedIcon size={20} />
           )}
 
-          <Box sx={{ flex: 1 }} />
+          {/* Center: station name + dropdown, centered between the clusters (the
+              iOS "title" slot). Kept in a stable spot so it doesn't jump as the
+              operator navigates; truncates rather than colliding with the icons. */}
+          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0, px: 1 }}>
+            {stationId && (
+              <Box
+                onClick={handleStationMenuOpen}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  minHeight: 48,
+                  maxWidth: '100%',
+                  overflow: 'hidden',
+                  borderRadius: 1,
+                  px: 0.75,
+                  '&:hover': { bgcolor: 'rgba(212, 135, 42, 0.08)' },
+                }}
+              >
+                <Typography
+                  variant="body1"
+                  component="span"
+                  sx={{
+                    color: '#D4872A',
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {stationName || 'Select Station'}
+                </Typography>
+                <ArrowDropDownIcon sx={{ color: '#D4872A', fontSize: 20, ml: 0.25, flexShrink: 0 }} />
+              </Box>
+            )}
+          </Box>
 
-          {/* Right: action icons */}
+          {/* Right: dashboard shortcut for non-operators (admins/leads viewing
+              the operator view). Logout lives on the Profile tab, not here. */}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"
@@ -291,15 +296,6 @@ function OperatorShell({
               <DashboardIcon fontSize="small" />
             </IconButton>
           )}
-          <IconButton
-            color="inherit"
-            onClick={onLogout}
-            aria-label="logout"
-            size="small"
-            sx={{ ml: 0.5 }}
-          >
-            <LogoutIcon fontSize="small" />
-          </IconButton>
         </Toolbar>
 
         {/* Station Selector Menu */}

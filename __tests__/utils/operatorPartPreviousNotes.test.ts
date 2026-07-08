@@ -53,7 +53,7 @@ vi.mock('@/lib/supabaseErrors', () => ({
   friendlyErrorMessage: (_e: unknown, o?: { fallback?: string }) => o?.fallback ?? 'error',
 }));
 
-import { getPreviousRunForPart } from '@/utils/operatorAccess';
+import { getPartPreviousNotes } from '@/utils/operatorAccess';
 
 function note(over: Record<string, unknown>) {
   return {
@@ -78,35 +78,32 @@ beforeEach(() => {
   delete DATA.error;
 });
 
-describe('getPreviousRunForPart', () => {
-  it('returns the newest completed prior run, excluding the current job', async () => {
+describe('getPartPreviousNotes', () => {
+  it('returns prior-run notes tagged with the source job number, excluding the current job', async () => {
     DATA.jobParts = [
-      { job_id: 'jOld', completed_at: '2026-06-01T00:00:00Z', jobs: { id: 'jOld', job_number: 'J-OLD' } },
       { job_id: 'jNew', completed_at: '2026-06-10T00:00:00Z', jobs: { id: 'jNew', job_number: 'J-NEW' } },
       { job_id: 'jCur', completed_at: '2026-06-15T00:00:00Z', jobs: { id: 'jCur', job_number: 'J-CUR' } },
     ];
     DATA.notes = [note({ id: 'n1', body: 'setup notes' })];
 
-    const run = await getPreviousRunForPart('part-1', 'c1', { excludeJobId: 'jCur' });
+    const notes = await getPartPreviousNotes('part-1', 'c1', { excludeJobId: 'jCur' });
 
-    expect(run).not.toBeNull();
-    expect(run!.jobId).toBe('jNew'); // newest non-excluded
-    expect(run!.jobNumber).toBe('J-NEW');
-    expect(run!.notes).toHaveLength(1);
-    expect(run!.notes[0].body).toBe('setup notes');
+    // Only the non-excluded run is fetched; each note carries its source job number.
+    expect(notes).toHaveLength(1);
+    expect(notes[0].body).toBe('setup notes');
+    expect(notes[0].job_number).toBe('J-NEW');
   });
 
-  it('returns null when the only completed run is the current job', async () => {
+  it('returns [] when the only completed run is the current job', async () => {
     DATA.jobParts = [
       { job_id: 'jCur', completed_at: '2026-06-15T00:00:00Z', jobs: { id: 'jCur', job_number: 'J-CUR' } },
     ];
-    const run = await getPreviousRunForPart('part-1', 'c1', { excludeJobId: 'jCur' });
-    expect(run).toBeNull();
+    expect(await getPartPreviousNotes('part-1', 'c1', { excludeJobId: 'jCur' })).toEqual([]);
   });
 
-  it('returns null when there are no completed prior runs', async () => {
+  it('returns [] when there are no completed prior runs', async () => {
     DATA.jobParts = [];
-    expect(await getPreviousRunForPart('part-1', 'c1', {})).toBeNull();
+    expect(await getPartPreviousNotes('part-1', 'c1', {})).toEqual([]);
   });
 
   it('filters notes to the same step across runs via routing_operation_id', async () => {
@@ -124,17 +121,17 @@ describe('getPreviousRunForPart', () => {
       note({ id: 'n3', job_operation_id: null, body: 'general' }),
     ];
 
-    const run = await getPreviousRunForPart('part-1', 'c1', {
+    const notes = await getPartPreviousNotes('part-1', 'c1', {
       excludeJobId: 'jCur',
       jobOperationId: 'opCur',
     });
 
-    expect(run!.notes).toHaveLength(1);
-    expect(run!.notes[0].body).toBe('this step');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].body).toBe('this step');
   });
 
-  it('returns null when the job_parts query errors', async () => {
+  it('returns [] when the job_parts query errors', async () => {
     DATA.error = { message: 'boom' };
-    expect(await getPreviousRunForPart('part-1', 'c1', {})).toBeNull();
+    expect(await getPartPreviousNotes('part-1', 'c1', {})).toEqual([]);
   });
 });

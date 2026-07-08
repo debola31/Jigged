@@ -12,16 +12,15 @@ import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
-import IconButton from '@mui/material/IconButton';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import LayersIcon from '@mui/icons-material/Layers';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
+import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
-import PreviousRunCard from '@/components/operator/PreviousRunCard';
+import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import type { JobTravelerOperation } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -62,6 +61,10 @@ export default function OperatorJobTravelerPage() {
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
+
+  // Header back → the station jobs list. (Files + Previous notes live in an
+  // in-content reference row; the "All N parts" jump stays in-content too.)
+  useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
 
   const { data: traveler, loading } = useLoad(
     async () => {
@@ -108,17 +111,11 @@ export default function OperatorJobTravelerPage() {
 
   return (
     <Box sx={{ pb: 4 }}>
-      {/* Back to the station jobs list, plus an "all parts" jump for multi-part
-          jobs. Single-part jobs have job_part_count = 1, so the link is hidden
-          (their hub would just redirect back here). */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-        <IconButton
-          onClick={() => router.push(`/operator/${companyId}/jobs`)}
-          aria-label="Back to jobs"
-        >
-          <ArrowBackIcon />
-        </IconButton>
-        {traveler.job_part_count > 1 && (
+      {/* Multi-part jobs get an "all parts" lateral jump. (Back to the jobs list
+          lives in the header now.) Single-part jobs have job_part_count = 1, so
+          this is hidden — their hub would just redirect back here. */}
+      {traveler.job_part_count > 1 && (
+        <Box sx={{ mb: 2 }}>
           <Button
             size="small"
             startIcon={<LayersIcon />}
@@ -126,8 +123,8 @@ export default function OperatorJobTravelerPage() {
           >
             All {traveler.job_part_count} parts
           </Button>
-        )}
-      </Box>
+        </Box>
+      )}
 
       {/* Header — mirrors the printed traveler's job block */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
@@ -194,20 +191,17 @@ export default function OperatorJobTravelerPage() {
         </CardContent>
       </Card>
 
+      <PartReferenceRow
+        companyId={companyId}
+        partId={traveler.part_id}
+        partName={traveler.part_name}
+        excludeJobId={traveler.job_id}
+      />
+
       {/* Job feed (read-only here) — notes + photos for the whole job, captured
           per step on the operation pages. Bumped up top: operators use it a lot. */}
       <Box sx={{ mb: 3 }}>
         <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
-      </Box>
-
-      {/* Guidance: how this part went last time (collapsed; part-centric). */}
-      <Box sx={{ mb: 3 }}>
-        <PreviousRunCard
-          partId={traveler.part_id}
-          companyId={companyId}
-          excludeJobId={traveler.job_id}
-          title="Last time we ran this part"
-        />
       </Box>
 
       {/* Operations / steps — tap one to action it */}
@@ -259,6 +253,7 @@ export default function OperatorJobTravelerPage() {
           );
         })}
       </Box>
+
     </Box>
   );
 }

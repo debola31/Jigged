@@ -164,6 +164,24 @@ export async function listPartAttachments(partId: string): Promise<PartAttachmen
   return ((data ?? []) as unknown as AttachmentRow[]).map(rowToAttachment);
 }
 
+/**
+ * Count a part's attachments (head-only, no rows) — powers the operator's Files
+ * affordance count so a drawing/CAD that's needed to do the job can't be missed.
+ * Returns 0 on error rather than throwing (the count is a hint, not load-bearing).
+ */
+export async function countPartAttachments(partId: string): Promise<number> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from('part_attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('part_id', partId);
+  if (error) {
+    console.error('Error counting part attachments:', error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 /** A fresh, time-limited URL for inline preview / download. */
 export function getPartAttachmentUrl(storagePath: string): Promise<string> {
   return getSignedUrl(storagePath, ATTACHMENT_URL_EXPIRY_SECONDS);

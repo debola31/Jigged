@@ -47,6 +47,12 @@ export const eyebrowSx = {
 export const DISPLAY_FONT =
   'var(--font-space-grotesk), var(--font-dm-sans), sans-serif';
 
+// Small labels/eyebrows use a SOLID legible color, never the gradient — a left-to-right
+// gradient sweeps through its steel stop (≈4.3:1) and fails small-text contrast. This
+// bright steel clears 8:1 on the dark indigo background. Gradient text is reserved for
+// large display type only (hero headline, big numerals, section headings).
+export const EYEBROW_COLOR = '#7FB3E0';
+
 // Faint isometric/blueprint grid — the editorial motif, echoing the wireframe hero.
 export const blueprintGridSx = {
   backgroundImage: `

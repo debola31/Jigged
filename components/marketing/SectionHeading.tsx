@@ -2,7 +2,7 @@
 
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import { eyebrowSx, gradientTextSx, DISPLAY_FONT } from './marketingStyles';
+import { eyebrowSx, DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
 
 /**
  * Editorial section heading: a large index numeral + eyebrow, then an oversized
@@ -45,7 +45,7 @@ export default function SectionHeading({
           <Typography
             component="span"
             sx={{
-              ...gradientTextSx,
+              color: EYEBROW_COLOR,
               fontFamily: DISPLAY_FONT,
               fontWeight: 600,
               fontSize: '1.1rem',

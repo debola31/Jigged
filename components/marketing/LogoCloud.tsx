@@ -38,7 +38,7 @@ export default function LogoCloud() {
                 letterSpacing: '0.12em',
                 fontSize: '0.72rem',
                 fontWeight: 600,
-                color: 'rgba(255, 255, 255, 0.45)',
+                color: 'rgba(255, 255, 255, 0.62)',
                 textAlign: 'center',
                 flexShrink: 0,
               }}

@@ -78,15 +78,28 @@ export const FEATURES: Feature[] = [
     image: '/screenshots/feature-inventory.png',
     alt: 'Jigged inventory transaction converting feet to inches when removing stock',
   },
-  {
-    key: 'operators',
-    headline: 'A shop-floor view operators will actually use',
-    description:
-      'Operators scan the QR on the traveler, see their step, and tap once to mark it complete. No training manual. No timer to babysit.',
-    image: ['/screenshots/feature-operator-complete.png'],
-    alt: 'Jigged operator view on a phone with a single mark-complete action',
-  },
 ];
+
+// The operator/shop-floor experience gets its own two-phone showcase (ShopFloorShowcase)
+// rather than a row in FEATURES, so it can carry bullet points and two device shots.
+// Kept paperless-experience-focused; the notes/photos knowledge angle is KnowledgeCapture.
+export const SHOP_FLOOR = {
+  eyebrow: 'On the shop floor',
+  heading: 'Built for the person at the machine',
+  subhead:
+    'Operators work from a tablet at their station — no paper travelers, no hunting for the latest revision.',
+  points: [
+    'Scan the QR on the traveler and land on the exact job and step.',
+    'The current drawing and work instructions, right there at the machine.',
+    'One tap to mark a step complete — no timers, no training.',
+    'Runs on any tablet or phone. Nothing to install.',
+  ],
+  images: [
+    '/screenshots/feature-operator-queue.png',
+    '/screenshots/feature-operator-step.png',
+  ],
+  alt: 'The Jigged operator view on a phone — the station job queue and a job step with one-tap mark complete',
+};
 
 export const KNOWLEDGE = {
   eyebrow: 'Knowledge capture',

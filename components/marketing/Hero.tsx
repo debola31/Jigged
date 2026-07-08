@@ -9,9 +9,9 @@ import Reveal from './Reveal';
 import { HERO } from '@/lib/constants/marketing';
 import {
   gradientButtonSx,
-  gradientTextSx,
   eyebrowSx,
   DISPLAY_FONT,
+  EYEBROW_COLOR,
 } from './marketingStyles';
 
 export default function Hero() {
@@ -73,7 +73,7 @@ export default function Hero() {
           {/* Copy */}
           <Reveal distance={28} sx={{ flex: { md: '0 0 52%' }, width: '100%' }}>
             <Box sx={{ textAlign: { xs: 'center', md: 'left' } }}>
-              <Typography sx={{ ...eyebrowSx, ...gradientTextSx, mb: 3 }}>
+              <Typography sx={{ ...eyebrowSx, color: EYEBROW_COLOR, mb: 3 }}>
                 {HERO.eyebrow}
               </Typography>
               <Typography

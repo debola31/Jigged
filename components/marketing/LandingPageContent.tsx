@@ -8,6 +8,7 @@ import Hero from './Hero';
 import LogoCloud from './LogoCloud';
 import PainPoints from './PainPoints';
 import Features from './Features';
+import ShopFloorShowcase from './ShopFloorShowcase';
 import KnowledgeCapture from './KnowledgeCapture';
 import HowItWorks from './HowItWorks';
 import EarlyAccess from './EarlyAccess';
@@ -37,6 +38,7 @@ export default function LandingPageContent() {
       <LogoCloud />
       <PainPoints />
       <Features />
+      <ShopFloorShowcase />
       <KnowledgeCapture />
       <HowItWorks />
       <EarlyAccess />

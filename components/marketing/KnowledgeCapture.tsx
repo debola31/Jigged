@@ -6,7 +6,7 @@ import Section from './Section';
 import Reveal from './Reveal';
 import DeviceFrame from './DeviceFrame';
 import { KNOWLEDGE } from '@/lib/constants/marketing';
-import { eyebrowSx, gradientTextSx, DISPLAY_FONT } from './marketingStyles';
+import { eyebrowSx, DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
 
 export default function KnowledgeCapture() {
   return (
@@ -22,7 +22,7 @@ export default function KnowledgeCapture() {
         {/* Copy — the emotional core, set large */}
         <Reveal distance={28} sx={{ flex: { md: '0 0 52%' }, width: '100%' }}>
           <Box>
-            <Typography sx={{ ...eyebrowSx, ...gradientTextSx, mb: 3 }}>
+            <Typography sx={{ ...eyebrowSx, color: EYEBROW_COLOR, mb: 3 }}>
               {KNOWLEDGE.eyebrow}
             </Typography>
             <Typography

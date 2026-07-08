@@ -14,6 +14,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
   getOperatorOperationDetail,
   getCurrentOperator,
@@ -304,23 +305,20 @@ export default function OperatorOperationActionPage() {
           </Box>
         </Button>
       ) : stationMismatch ? (
-        // This step's work center isn't the operator's selected station. With
+        // This step's work center isn't the operator's selected station — with
         // login + station-select (not blind QR scans), that usually just means
-        // they opened another station's job — so state it plainly and offer a
-        // one-tap switch-and-complete for legit cross-station work. Backing out
-        // is the header's back arrow, so there's no separate button here.
+        // they opened another station's job. Warn (in warning colour) and state
+        // the consequence — completing switches their station — but keep the
+        // action a normal MARK COMPLETE. Backing out is the header's back arrow.
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
-            This step runs at{' '}
-            <Box component="strong" sx={{ color: 'text.primary' }}>
-              {job.operation_work_center_name || 'another station'}
-            </Box>{' '}
-            — not your station (
-            <Box component="strong" sx={{ color: 'text.primary' }}>
-              {stationName || '—'}
-            </Box>
-            ).
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
+            <WarningAmberIcon fontSize="small" sx={{ mt: 0.25, flexShrink: 0 }} />
+            <Typography variant="body2" color="inherit">
+              You&apos;re at <strong>{stationName || 'another station'}</strong>, but this step runs
+              at <strong>{job.operation_work_center_name || 'another station'}</strong> — completing
+              it switches your station there.
+            </Typography>
+          </Box>
           <Button
             fullWidth
             variant="contained"
@@ -329,13 +327,9 @@ export default function OperatorOperationActionPage() {
             startIcon={<CheckCircleIcon />}
             onClick={handleSwitchAndComplete}
             disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
+            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
           >
-            {actionLoading ? (
-              <CircularProgress size={24} />
-            ) : (
-              `Switch to ${job.operation_work_center_name || 'this station'} & complete`
-            )}
+            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
           </Button>
         </Box>
       ) : (

@@ -10,7 +10,7 @@ Detailed specifications for each Jigged module.
 | [Parts](parts.md) | Part catalog with revisions | Must Have |
 | [Quotes](quotes.md) | Quote creation and approval | Must Have |
 | [Jobs](jobs.md) | Job/work order tracking | Must Have |
-| [Operations](operations.md) | Operation types and resources | Must Have |
+| Operations | Folded into [Work Centers](work-centers.md) | — |
 | [Dashboard](dashboard.md) | Admin dashboard views | Must Have |
 | [Routings](routings.md) | Job routing definitions | Should Have |
 | [Inventory](inventory.md) | Inventory tracking | Should Have |

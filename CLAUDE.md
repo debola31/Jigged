@@ -555,7 +555,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Quotes](docs/modules/quotes.md)
 - [Jobs](docs/modules/jobs.md)
 - [Invoicing](docs/modules/invoicing.md)
-- [Operations](docs/modules/operations.md)
+- [Work Centers](docs/modules/work-centers.md) (formerly Operations)
 - [Dashboard](docs/modules/dashboard.md)
 - [Routings](docs/modules/routings.md)
 - [Inventory](docs/modules/inventory.md)

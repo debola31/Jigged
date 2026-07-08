@@ -6,9 +6,9 @@ The Parts module manages the catalog of products/parts that a company manufactur
 
 A part owns three layers of information that drive quoting:
 
-1. **Routing** — operations and materials that define how the part is made (see [Routings](routings.md)).
-2. **Cost breakdown** — labor + setup + materials, derived live from the routing. The Cost Breakdown card on the part detail page reloads automatically every time the routing auto-saves; there is no Recalculate button.
-3. **Pricing** — quantity break-points (e.g., 1, 2, 4 pieces) each with their own markup %. Markup % is the source of truth on a tier; unit price is always derived as `base_cost × (1 + markup/100)`. Typing a unit price directly back-calculates the markup. Tiers persist on the part; quotes snapshot tiers as immutable line items.
+1. **Routing** — the linear sequence of operations that defines how the part is made (see [Routings](routings.md)). Materials consumed are a separate layer: the part **BOM** (`parts_bom`, edited by `PartBomPanel`), no longer attached to the routing.
+2. **Cost breakdown** — labor + setup + materials, derived live from the routing + BOM. It renders as a summary at the top of the Pricing card (there is no standalone "Cost Breakdown" card) and reloads automatically every time the routing/BOM auto-saves; there is no Recalculate button.
+3. **Pricing** — quantity break-points (e.g., 1, 2, 4 pieces) each with their own markup %. Markup % is the source of truth on a tier; unit price is always *derived* as `base_cost × (1 + markup/100)` and is not stored. Typing a unit price directly back-calculates the markup. Tiers persist on the part (markup % only); quotes snapshot the resolved tier prices as immutable line items.
 
 This three-layer split mirrors how real shops already think: cost the part once, set quantity break-points once, then point quotes at the tiers that apply to a given customer conversation.
 
@@ -16,7 +16,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 
 **Dependencies:** None (parts are independent company-wide entities)
 
-**Database Tables:** `parts`, `part_pricing_tiers`
+**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, `part_notes`, and `markup_rates` (named markup rates linked via `parts.markup_rate_id`)
 
 ---
 
@@ -26,15 +26,15 @@ This three-layer split mirrors how real shops already think: cost the part once,
 |---|---|---|
 | Owner/Admin | View a list of all parts | I can see our product catalog |
 | Owner/Admin | Search parts by part name or description | I can quickly find a specific part |
-| Owner/Admin | Create a new part and assign it to a category | I can quote and track new products with default markups |
+| Owner/Admin | Create a new part (made in-house or bought) | I can quote and track new products |
 | Owner/Admin | Edit part information | I can update descriptions or other details |
 | Owner/Admin | Delete a part | I can remove parts we no longer manufacture |
 | Owner/Admin | Bulk import parts from CSV | I can migrate from my legacy system |
 | Owner/Admin | Create or edit a routing from the part detail page | I can define the manufacturing process for a part |
-| Owner/Admin | See a cost breakdown for a part (labor + setup + materials, with previews at qty 1 and qty 10) | I can sanity-check the routing economics without leaving the part |
+| Owner/Admin | See a cost breakdown for a part (run labor + one-time setup + materials, summarized on the Pricing card) | I can sanity-check the routing economics without leaving the part |
 | Salesperson | Add multiple quantity tiers (e.g. 1, 2, 4) to a part, each with its own markup % | I can quote price breaks the customer asked for |
 | Salesperson | Type a unit price directly on a tier | The markup back-calculates automatically; I don't have to do the math |
-| Salesperson | Copy pricing from another part | I can reuse the same markup curve across similar parts without retyping |
+| Salesperson | Apply a named markup rate to a part (or to many parts at once) | I can reuse the same markup curve across similar parts without retyping |
 | Salesperson | See cost breakdown and tier prices update live as I edit the routing | I trust the numbers without clicking a refresh button |
 | Salesperson | Adjust a price for a single quote (one-off concession) | I can cut a deal without changing the part's standing prices |
 
@@ -50,16 +50,25 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | company_id | UUID (FK) | Yes | Link to company (multi-tenant isolation) |
 | part_name | Text | Yes | Part number (e.g., "AE36589E-RT") |
 | description | Text | No | What the part is (e.g., "Recess Tool Bit") |
+| source | Text | Yes | `made` \| `bought` (CHECK, default `made`). Made parts get a routing + BOM; bought parts get procurement tiers |
+| is_stocked | Boolean | Yes | Whether the part carries on-hand inventory (default false) |
+| primary_unit | Text | Yes | Stocking/costing unit. NOT NULL via the `parts_requires_unit` CHECK |
+| quantity | Numeric | Yes | On-hand count (default 0); only ever changed through `inventory_transactions`, never the part form |
+| reorder_point | Numeric | No | Low-stock threshold |
+| preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
+| markup_rate_id | UUID (FK) | No | Link to a named `markup_rates` row; null = Custom tiers. `ON DELETE SET NULL` |
+| legacy_id | Text | No | Import cross-reference; unique per company when set |
+| is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company.
+**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. `(company_id, legacy_id)` is also unique when `legacy_id` is set.
 
-**Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`) and were replaced by the **Copy pricing from another part** action. New tier markups are blank by default and the user types them.
+**Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`); their role — a reusable default markup — is now filled by **named markup rates** (`parts.markup_rate_id` → `markup_rates`), which can be applied per part or in bulk from the list.
 
 ### Part Pricing Tiers (`part_pricing_tiers`)
 
-Quantity price break-points that live on the part. One row per tier; selected tiers are snapshotted into `quote_line_items` at quote creation. Setup amortizes into `base_cost_per_unit` at the tier's quantity.
+Quantity price break-points that live on the part. One row per tier; selected tiers are snapshotted into `quote_line_items` at quote creation. Only tier metadata is stored — `quantity` (the break) and `markup_percent` (the source of truth). Base cost and unit price are **not columns**; they are recomputed live on every read (`getTiersWithComputedPrices` / `calculateTierPricing`) so the stored data can never drift from the routing + BOM.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -67,20 +76,20 @@ Quantity price break-points that live on the part. One row per tier; selected ti
 | part_id | UUID (FK) | Yes | Part the tier belongs to (cascade delete) |
 | company_id | UUID (FK) | Yes | Multi-tenant isolation |
 | sequence | Integer | Yes | Display order within the part (10, 20, 30...) |
-| quantity | Integer | Yes | Tier quantity, must be > 0 |
-| base_cost_per_unit | Decimal(12,4) | No | Cache of `run_labor + materials + (total_setup / qty)` against the current routing |
-| markup_percent | Decimal(5,2) | No | **Source of truth.** User-typed markup % for this tier |
-| unit_price | Decimal(12,4) | No | Always derived: `base_cost × (1 + markup/100)`. Typing a unit price back-calculates markup before save |
+| quantity | Numeric | Yes | Tier quantity, must be > 0. Decimal-capable (up to 4 dp) so parts sold by length/weight/volume can set a fractional break |
+| markup_percent | Numeric(10,6) | No | **Source of truth.** User-typed markup % for this tier |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(part_id, sequence)`
+> **Dropped columns:** `base_cost_per_unit` and `unit_price` were removed (migration `20260514`). Both are now derived at read time, never persisted — see `PartPricing.tsx` and `replaceTiersForPart`.
+
+**Unique Constraint:** `part_pricing_tiers_unique_seq` on `(part_id, sequence)`
 
 **Single-direction data flow:**
 
 - `markup_percent` is the source of truth.
-- `unit_price` is always recomputed against the current routing. Routing change → unit prices drift to reflect the new cost basis. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#per-quote-price-overrides)).
-- Typing in the unit-price input is shorthand for "compute the markup % that would yield this price"; the editor back-calculates and stores the markup, then keeps `unit_price` in lockstep.
+- `unit_price` is always recomputed against the current cost basis (routing + BOM for made parts; procurement tiers for bought parts). Cost change → unit prices drift to reflect it. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#per-quote-price-overrides)).
+- Typing in the unit-price input is shorthand for "compute the markup % that would yield this price"; the editor back-calculates and stores the markup as the source of truth (there is no stored `unit_price` to keep in lockstep).
 
 ### File Attachments (`part_attachments`)
 
@@ -120,82 +129,83 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 **Features:**
 
-- Table showing: Part Name, Description, Category, Cost (from routing if available)
+- AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
 
 - Search box (searches part name and description)
 
-- "+ New Part" button
+- **Source** filter (All / Made / Bought) and **Completeness** filter (All / Complete / Incomplete), both applied client-side
 
-- Click row to view/edit
+- "**Add Part**" button and an "**Import**" button
+
+- Bulk actions when rows are selected: **Set markup (N)** (apply a named markup rate), **Delete (N)**, and Export CSV
+
+- Click row to open the part workspace (`/parts/{id}`)
 
 - Pagination (25 per page)
 
 **Empty State:**
 
-"No parts yet. Create your first part or import from CSV."
+"No parts yet. Add your first part — made in-house or bought from a vendor." (with Import CSV + Add Part actions). A filtered-but-empty grid shows "No parts match these filters." instead.
 
-### 2. Part Create/Edit
+### 2. Part Create
 
-**Route:** `/dashboard/{companyId}/parts/new` or `/dashboard/{companyId}/parts/{id}/edit`
+**Route:** `/dashboard/{companyId}/parts/new` (there is **no** `/parts/{id}/edit` route — editing happens in place on the detail workspace)
 
-**Form Sections:**
+`/parts/new` renders the same `PartWorkspace` as the detail page, in **create mode**: the identity fields render directly on the page (the create view *is* the saved view), so there is no separate create modal.
 
-▸ **Basic Information**
+▸ **Identity fields (`PartIdentitySection`)**
 
 - Part Name (required, unique within the company)
 - Description
-
-That's it for the metadata form. Routing, cost breakdown, and pricing all live on the part **detail** page (auto-saving as you edit) — there's no separate "Routing" or "Pricing" form.
+- Source (Made / Bought), Primary unit (required), and stocking options
 
 **Actions:**
 
-- Save → Returns to list
-- Cancel → Returns to list without saving
-- Delete (edit mode only) → Confirmation dialog
+- **Create part** → inserts the row and redirects into the live `/parts/{id}` page (preserving quote-return + list-origin context). Cost breakdown, pricing, routing, BOM, and files are all edited there.
+- Cancel / Back → returns to the list.
 
-### 3. Part Detail
+### 3. Part Detail (workspace)
 
 **Route:** `/dashboard/{companyId}/parts/{id}`
 
-Read-only view showing:
+An **editable, maturity-adaptive workspace** (`PartWorkspace`) — not a read-only view. There is no "Edit" mode and no Edit button; identity fields auto-save on blur (`updatePart`). Tabs are URL-addressable via `?tab=`:
 
-- All part fields
+- **Workspace** (default) — how the part is made and priced (identity, cost/pricing, routing, BOM).
+- **Inventory** — shown only when the part is stocked; stock level + transactions.
+- **Usage** — jobs and quotes that reference this part.
+- **Files** — engineering attachments (`?tab=files`, always visible).
+- **Activity** — the part Notes + transaction feed (its slug stays `history` for back-compat).
 
-- Related quotes (future)
-
-- Related jobs (future)
-
-- Edit button
+A sticky header shows the part name and a completeness/priceability chip. Delete lives in the header and is disabled when quotes/jobs/BOM parents reference the part.
 
 ▸ **Inline Routing Editor (`PartRoutingPanel`)**
 
-The part detail page embeds the routing editor directly — there's no separate page to navigate to. The panel shows Operations and Materials side-by-side with auto-save: each modal save, reorder click, or delete persists immediately and a "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't yet have one. See `docs/modules/routings.md` for the full editor behavior.
+The Workspace tab embeds the routing editor directly — there's no separate page to navigate to. The panel shows the linear list of **Operations** (materials are a separate **Materials/BOM** panel — `PartBomPanel`) with auto-save: each modal save, reorder click, or delete persists immediately via `saveRoutingWithOperations`, and a "Saving…" / "All changes saved" indicator appears in the panel header. The first add implicitly creates the routing record if the part doesn't yet have one. See `docs/modules/routings.md` for the full editor behavior.
 
-▸ **Cost Breakdown Card (`PartCostBreakdown`)**
+▸ **Cost build-up + Pricing (`PartPricing`)**
 
-A read-only summary that pulls live cost from the routing via `calculateRoutingCost(partId)`:
+Cost breakdown and pricing are a **single card** (`PartPricing`) — there are no separate `PartCostBreakdown` / `PartPricingTiers` components. The cost build-up is a summary above the tier table, pulling live cost from the routing + BOM via `calculateRoutingCost(partId)`:
 
-- Operations table: run min/unit, setup min, rate, run $/unit, setup $ (one-time).
-- Materials table: per-unit qty, unit, cost/unit, line/unit.
-- Build-up: run labor / unit, one-time setup, materials / unit, **unit cost @ qty 1** (full setup), **unit cost @ qty 10** (setup ÷ 10). The two preview rows make setup amortization visible without committing to a tier yet.
-- Surfaces routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) inline so data quality issues catch the salesperson's eye before quoting.
+- Cost summary rows: **run labor / unit**, **setup (one-time)** (amortized across tier qty), **materials / unit**. (There are no per-operation / per-material tables and no `@ qty 1` / `@ qty 10` preview rows.)
+- Surfaces routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) inline — a missing-material warning links to the offending BOM child — so data quality issues catch the salesperson's eye before quoting.
 
-▸ **Pricing Card (`PartPricingTiers`)**
+The tier table (`part_pricing_tiers`) has three modes:
 
-Interactive editor for `part_pricing_tiers`. One row per tier with: Qty, Base / unit, Markup %, Unit price, Line total, and a delete icon. Header buttons:
+- **Custom** — editable rows with Qty, Base / unit (derived, read-only), Markup %, Unit price, and a delete icon; header **Add tier** button.
+- **Rate-linked** — read-only display of the linked markup rate's breakpoints, with **Customize pricing** (switch to Custom) and **Edit the rate** actions.
+- **Empty** — a choose-how-to-price prompt (pick a markup rate, or set custom tiers).
 
-- **+ Add tier** — appends a blank row.
-- **Copy from another part** — opens a part picker; on confirm, copies the source part's tiers (qty + markup) onto this part. Unit prices are recomputed against this part's own routing.
+> **Markup rates are owned by [Markup Rates](markup-rates.md).** This section only covers how a part *consumes* a rate (link, view rate-linked breakpoints, fork to Custom). For how named rates are defined, edited centrally, set as the company default, and bulk-applied — including the auto-apply-on-create behavior — see that module doc.
 
 Editing model — markup % is the source of truth:
 
-- Editing **quantity** recomputes `base_cost_per_unit` (setup amortization changes); `unit_price` follows from the current markup.
-- Editing **markup %** recomputes `unit_price` directly.
+- Editing **quantity** recomputes the displayed base cost (setup amortization changes); unit price follows from the current markup.
+- Editing **markup %** recomputes the displayed unit price directly.
 - Editing **unit price** back-calculates the markup % and stores it as the new source of truth. There is no lock concept; subsequent routing changes still propagate.
 
-**Auto-save**: every edit triggers a debounced save (~600ms after the last keystroke) via `replaceTiersForPart(companyId, partId, tiers)`. A "Saving… / All changes saved" indicator next to the card title mirrors the routing panel's pattern.
+**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button with an "Unsaved changes" hint — mirroring the bought-part Cost card. Saving a rate-linked part forks it to Custom. Each save also auto-logs a `pricing` note to the Activity feed.
 
-**Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's `base_cost_per_unit` and `unit_price` against the new cost basis.
+**Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing/BOM panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's displayed base cost and unit price against the new cost basis.
 
 ▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
 
@@ -240,7 +250,7 @@ A part's cost flows in four layers:
 3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items).
 4. **Job part** — created at quote→job conversion by copying the quote line's `(quantity, unit_price, total_price)`. Unlike the quote line, `job_parts.quantity` is **editable** post-conversion (with fulfillment guardrails) and `total_price` is re-derived as `quantity × unit_price` at edit time. Invoicing and revenue read the `job_part`, not the quote snapshot — so the job part is the post-conversion source of truth. See [Jobs Module — Editing order quantity](jobs.md).
 
-**Bought parts** have no routing, so their base cost comes from the part's **procurement tiers** (the Cost card) via `compute_part_cost_at_qty` instead of `calculateRoutingCost`. The shared resolver `getTiersWithComputedPrices` falls back to that procurement cost when a part has no routing/BOM, so a bought part's pricing tiers still resolve a sell price = `procurement_cost(qty) × (1 + markup/100)`. A made part with no routing yet shows "No cost data" in the cost breakdown card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a routing exists).
+**Bought parts** have no routing, so their base cost comes from the part's **procurement tiers** (the Cost card) via `compute_part_cost_at_qty` instead of `calculateRoutingCost`. The shared resolver `getTiersWithComputedPrices` falls back to that procurement cost when a part has no routing/BOM, so a bought part's pricing tiers still resolve a sell price = `procurement_cost(qty) × (1 + markup/100)`. A made part with no routing/BOM yet shows an "Add operations or materials to calculate pricing" empty state in the Pricing card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a cost basis exists).
 
 ---
 
@@ -284,72 +294,79 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 ## Acceptance Criteria
 
-### Core CRUD
+Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit → save → reload → persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #334.
 
-- [ ] Can view paginated list of parts
-- [ ] Can search parts by number or description
-- [ ] Can create new part (basic info only — name + description)
-- [ ] Can edit existing part
-- [ ] Parts without routings show "No cost data" indicator on the cost breakdown card
-- [ ] Can delete a part (hard delete with confirmation)
-- [ ] Part name is unique within company
-- [ ] Part detail page shows routing panel + cost breakdown + pricing card
-- [ ] Form shows validation errors inline
+**List, search & filter**
 
-### Cost Breakdown Card
+- [ ] **Given** the Parts list, **when** it loads, **then** every company part (made + bought, stocked or not) shows in a paginated AG Grid with Part Name / Description / Source / Updated columns — *verified by `__tests__/utils/partsAccess.test.ts > 'getAllParts' > 'returns parts for a company with routing data'`; grid rendering + pagination E2E automation-pending (`getAllParts`)*.
+- [ ] **Given** a search term, **when** it is typed into "Search parts…", **then** the list filters by part name or description — *verified by `__tests__/utils/partsAccess.test.ts > 'getAllParts' > 'applies search filter correctly'` AND end-to-end by `e2e/parts-and-routing.spec.ts > 'Parts and Routing workflow' > 'create part, add routing with operations, verify cost'`*.
+- [ ] **Given** the Source filter, **when** "Made" or "Bought" is selected, **then** only parts with that `source` remain (applied client-side after the fetch) — *manual: Source dropdown on `app/dashboard/[companyId]/parts/page.tsx`*.
+- [ ] **Given** a part that is not yet priceable, **when** the list renders, **then** an inline ⚠ "incomplete — needs setup" marker appears next to its name and the Completeness filter can isolate it — *verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — bought parts (no routing/BOM)' > 'leaves unit_price null when the base cost cannot resolve (no procurement tier)'` (drives the priceability set); marker/filter render automation-pending (`getPriceablePartIds`)*.
 
-- [ ] Operations table renders one row per routing op with run/setup/rate/$ columns
-- [ ] Materials table renders one row per routing material with qty/unit/cost columns
-- [ ] Summary shows run labor / unit, one-time setup, materials / unit
-- [ ] Preview rows show unit cost at qty 1 and qty 10 (illustrating setup amortization)
-- [ ] Routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) surface inline
-- [ ] **Live updates**: editing the routing immediately reloads the breakdown — no Recalculate button
+**Create (part row)**
 
-### Pricing Card
+- [ ] **Given** the "Add Part" button, **when** clicked, **then** it opens `/parts/new` (the workspace in create mode — there is no create modal) — *verified by `e2e/parts-and-routing.spec.ts > 'Parts and Routing workflow' > 'create part, add routing with operations, verify cost'` (end-to-end)*.
+- [ ] **Given** the create form with an empty name, **when** the user submits, **then** creation is blocked with an inline error — *verified by `__tests__/components/parts/PartIdentitySection.test.tsx > 'PartIdentitySection' > 'create mode' > 'requires a part name (submitting empty shows an error, no create)'`*.
+- [ ] **Given** a name that already exists in the company, **when** the user submits, **then** the duplicate is rejected — *verified by `__tests__/components/parts/PartIdentitySection.test.tsx > 'PartIdentitySection' > 'create mode' > 'blocks a duplicate part name'` AND write-path guard `__tests__/utils/partsAccess.test.ts > 'checkPartNameExists' > 'returns true when part name exists'`*.
+- [ ] **Given** a valid name + unit, **when** the user clicks "Create part", **then** the row is inserted and the app redirects into the live `/parts/{id}` page — *verified by `__tests__/components/parts/PartIdentitySection.test.tsx > 'PartIdentitySection' > 'create mode' > 'creates the part and calls onCreated on success'` AND `__tests__/utils/partsAccess.test.ts > 'createPart' > 'inserts part and returns data'`; redirect end-to-end by `e2e/parts-and-routing.spec.ts > 'Parts and Routing workflow' > 'create part, add routing with operations, verify cost'`*.
 
-- [ ] Can add a new tier — markup field is blank by default
-- [ ] Tier base cost recomputes when quantity changes
-- [ ] Editing markup recomputes unit price live
-- [ ] Editing unit price back-calculates and stores markup % (markup is the source of truth)
-- [ ] **Live updates**: routing edits propagate to every tier's `base_cost_per_unit` and `unit_price` automatically (within ~600ms of routing save)
-- [ ] **Auto-save**: every edit persists with a "Saving… / All changes saved" indicator; no Save button
-- [ ] **Copy from another part**: opens a part picker; on confirm, source qty + markup are copied; unit prices recompute against this part's routing; subsequent edits to the source do not affect the copy
-- [ ] Tiers belonging to a part are deleted when the part is deleted (cascade)
+**Edit — identity (edit → save → reload → persists)**
 
-### File Attachments
+- [ ] **Given** an existing part, **when** the user edits an identity field (name/description/etc.) and blurs, **then** it auto-saves via `updatePart` and reloading shows the change — *write path verified by `__tests__/components/parts/PartIdentitySection.test.tsx > 'PartIdentitySection' > 'existing mode' > 'auto-saves an edited field on blur via updatePart'` AND `__tests__/utils/partsAccess.test.ts > 'updatePart' > 'updates part and returns data'`; reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** the part detail page, **when** it renders in existing mode, **then** it is an editable workspace (no read-only view, no "Edit" button) with fields pre-filled — *verified by `__tests__/components/parts/PartIdentitySection.test.tsx > 'PartIdentitySection' > 'existing mode' > 'pre-fills from the part and has no Create button'`*.
 
-- [ ] Files tab is always visible on the part workspace (`?tab=files`)
-- [ ] Can upload one or more `.pdf`/`.step`/`.stp`/`.dwg` files; each appears in the list with a kind chip, size, and uploader
-- [ ] Uploading a `.png` (or other disallowed type) is rejected with a clear message and nothing is stored
-- [ ] Uploading a PDF over 25 MB (or a STEP/DWG over 100 MB) is rejected with a size message
-- [ ] Opening a PDF renders it inline in the viewer modal
-- [ ] Opening a STEP file renders a rotatable 3D model in the viewer modal; a parse/load failure shows an error with a download fallback
-- [ ] Opening a DWG downloads it (no in-browser preview)
-- [ ] Download is available for every attachment kind
-- [ ] The delete affordance is shown only to the uploader or a company admin
-- [ ] Deleting an attachment removes both the metadata row and the stored file
-- [ ] Deleting a part removes its attachment rows (cascade) and best-effort removes the stored files
-- [ ] After creating a part, the user can immediately add files (the Files tab works on the live detail page)
+**Edit — pricing tiers (edit → save → reload → persists)**
 
-### AI-Powered Import
+- [ ] **Given** a made part in Custom mode, **when** the user adds/edits tier quantity + markup % and clicks **Save pricing**, **then** the tiers persist (markup % is the stored source of truth; `unit_price`/`base_cost_per_unit` are recomputed live, not stored) and reloading shows them — *write path verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — made parts (routing/BOM) unchanged' > 'prices made parts from the routing breakdown and never calls compute_part_cost_at_qty'`; explicit-Save (not auto-save) + reload E2E automation-pending (`replaceTiersForPart`)*.
+- [ ] **Given** the Pricing card, **when** the user types a unit price, **then** the markup % is back-calculated from the live base cost and stored as the source of truth — *automation-pending (`handleUnitPriceChange` in `PartPricing.tsx` / `calculateMarkupFromUnitPrice`)*.
+- [ ] **Given** the routing changes, **when** the part page bumps `refreshKey`, **then** every tier's displayed base cost and unit price recompute against the new cost basis — *automation-pending (`PartPricing` `refreshKey` reload / `calculateTierPricing`)*.
+- [ ] **Given** a bought part with a procurement tier, **when** a tier is priced, **then** its sell price resolves as `procurement_cost(qty) × (1 + markup/100)` through the shared resolver — *verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — bought parts (no routing/BOM)' > 'prices a bought part as procurement cost × markup (the $55.74 case)'`*.
+- [ ] **Given** a part deletion, **when** the part row is removed, **then** its `part_pricing_tiers` rows are removed by cascade — *manual: `part_pricing_tiers.part_id` FK ON DELETE CASCADE in `supabase/schema.prod.sql`*.
 
-- [ ] Can upload CSV file and see preview
+**Markup-rate consumption (part side)**
 
-- [ ] AI analyzes CSV and suggests column mappings
+> Rate mechanics — defining rates, the company default, and the bulk "Set markup" apply flow — are covered in [Markup Rates](markup-rates.md); only the part-side interactions are listed here.
 
-- [ ] Confidence scores displayed with color coding
+- [ ] **Given** a new part, **when** it is created, **then** the company's default markup rate is auto-applied so it starts with a pricing tier rather than a blank markup (intended onboarding behavior; non-fatal if the company has no default rate or the default has no breakpoints) — *automation-pending (`createPart` → `applyDefaultRateToPart`)*.
+- [ ] **Given** a rate-linked part, **when** the user picks "Customize pricing", **then** the part flips to Custom (`markup_rate_id` cleared) with the rate's values as the editable starting point — *automation-pending (`setPartMarkupRate` / `PartPricing.handleSwitchToCustom`)*.
 
-- [ ] Detects duplicate part names within company
+**Cost build-up (inside the Pricing card)**
 
-- [ ] Can skip conflicts and import valid rows
+- [ ] **Given** a made part with a routing, **when** the Pricing card renders, **then** it shows run labor / unit, one-time setup, and materials / unit summary rows above the tier table — *manual: `PartPricing.tsx` `SummaryRow`s off `calculateRoutingCost`*.
+- [ ] **Given** a routing with data-quality gaps, **when** the card renders, **then** warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) surface inline, linking to the offending BOM child where applicable — *manual: `breakdown.warnings` block in `PartPricing.tsx`*.
+- [ ] **Given** a made part with no routing/BOM yet, **when** the card renders, **then** it shows an "Add operations or materials to calculate pricing" empty state rather than a fabricated $0 — *manual: no-breakdown branch in `PartPricing.tsx`*.
 
-- [ ] Shows import results: imported, skipped, orphaned
+**Bought-part Cost card (`PartProcurementPricingPanel`)**
+
+- [ ] **Given** a bought part whose selected vendor has no cost tier, **when** the Cost card renders, **then** it shows one empty red starter row + a red prompt, with Save disabled until edited — *verified by `__tests__/components/parts/PartProcurementPricingPanel.test.tsx > 'PartProcurementPricingPanel — explicit save + red no-cost state' > 'shows the red no-cost prompt + an empty starter row, with Save disabled until edited'`*.
+- [ ] **Given** a typed cost tier, **when** the user clicks **Save costs**, **then** it persists on the button (not on blur) and fires `onSaved` so the "Needs cost" chip clears without a reload — *verified by `__tests__/components/parts/PartProcurementPricingPanel.test.tsx > 'PartProcurementPricingPanel — explicit save + red no-cost state' > 'saves a typed tier via the Save button (not on blur) and fires onSaved'`*.
+
+**Delete (part row)**
+
+- [ ] **Given** a part with no quote/job/BOM-parent references, **when** the user confirms Delete, **then** the part is hard-deleted — *verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'deletes part by ID'`*.
+- [ ] **Given** a part referenced by quotes/jobs/BOM parents, **when** deletion is attempted, **then** it is refused with a friendly FK message (and the UI disables the Delete button up-front) — *verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'throws user-friendly error on FK constraint violation'`*.
+- [ ] **Given** several parts selected, **when** the user confirms bulk delete, **then** all deletable rows are removed and referenced ones are refused — *verified by `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'deletes multiple parts by IDs'` AND `> 'bulkDeleteParts' > 'throws user-friendly error on FK constraint violation'`*.
+
+**File attachments (edit → save → reload → persists)**
+
+- [ ] **Given** the always-visible Files tab (`?tab=files`), **when** the user uploads one or more `.pdf`/`.step`/`.stp`/`.dwg` files, **then** each is stored with its computed kind + uploader and appears in the newest-first list with a kind chip — *write path verified by `__tests__/utils/partAttachmentsAccess.test.ts > 'uploadPartAttachment' > 'uploads, inserts the computed kind + operator uploaded_by, and returns the mapped row'`; list render by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'lists attachments with kind chips'`*.
+- [ ] **Given** a disallowed type (e.g. `.png`), **when** it is selected, **then** it is rejected with a clear message and nothing is stored — *verified by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'surfaces a validation error and does not upload a rejected file'` AND `__tests__/utils/partAttachmentsAccess.test.ts > 'validatePartAttachmentFile' > 'rejects a disallowed extension'`*.
+- [ ] **Given** an over-cap file, **when** it is selected, **then** a PDF over 25 MB or a STEP/DWG over 100 MB is rejected with a size message — *verified by `__tests__/utils/partAttachmentsAccess.test.ts > 'validatePartAttachmentFile' > 'rejects a PDF over the 25 MB cap'` AND `> 'validatePartAttachmentFile' > 'rejects a STEP over the 100 MB cap'` AND `> 'validatePartAttachmentFile' > 'allows a STEP up to 100 MB (above the PDF cap)'`*.
+- [ ] **Given** a PDF row, **when** "Open" is clicked, **then** it renders inline in the viewer modal off a fresh signed URL — *verified by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'opens a PDF inline in the viewer modal'` AND `__tests__/components/parts/workspace/tabs/AttachmentViewerModal.test.tsx > 'AttachmentViewerModal — parent key-remount fetches a fresh URL per attachment' > 'refetches the signed URL for a DIFFERENT attachment on key change (no stale URL/loading)'`*.
+- [ ] **Given** a STEP row, **when** "Open" is clicked, **then** it opens in the in-app 3D viewer — *verified by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'opens a STEP file in the 3D viewer'`*.
+- [ ] **Given** a DWG row, **when** "Open" is clicked, **then** it downloads instead of opening a viewer (no in-browser DWG render) — *verified by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'downloads a DWG instead of opening the viewer'`*.
+- [ ] **Given** any attachment, **when** the user is the uploader or a company admin, **then** the delete affordance shows (and is hidden otherwise) — *verified by `__tests__/components/parts/FilesTab.test.tsx > 'FilesTab' > 'shows the delete affordance only on rows the user uploaded (non-admin)'` AND `> 'FilesTab' > 'shows delete on every row for an admin'`*.
+- [ ] **Given** a delete, **when** confirmed, **then** the metadata row is removed first and only then the stored file (and a row-delete failure leaves the file intact) — *verified by `__tests__/utils/partAttachmentsAccess.test.ts > 'deletePartAttachment' > 'deletes the row first, then the file (row-first)'` AND `> 'deletePartAttachment' > 'throws and does NOT delete the file when the row delete fails'`*.
+
+**AI-powered import**
+
+- [ ] **Given** a CSV, **when** it is uploaded, **then** the AI suggests column mappings, duplicates within the company are detected, valid rows import, and a results summary is shown — *verified by `e2e/csv-import.spec.ts > 'CSV Import workflow' > 'import parts from CSV file'` (end-to-end; local-only, `test.skip` under CI — needs the FastAPI backend for AI column analysis)*.
 
 ---
 
 ## Delete Behavior
 
-A part can be deleted only when no quote line items or jobs reference it. The delete dialog surfaces the related-record counts; if any exist, the Delete button is disabled. Pricing tiers are removed by cascade when the part is deleted.
+A part can be deleted only when no quote line items, jobs, or other parts' BOMs reference it (a part used as a BOM child is RESTRICTed). The delete dialog surfaces the related-record counts (quotes / jobs / BOM parents); if any exist, the Delete button is disabled. Pricing tiers are removed by cascade when the part is deleted.
 
 Attachment metadata rows cascade with the part, but the stored files do not — so `deletePart` captures the attachment storage paths first, deletes the part row, and only then best-effort removes the files. (Capture-then-clean, not clean-then-delete: a part blocked by FK references must keep its files when the delete is refused.)
 

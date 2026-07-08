@@ -21,7 +21,7 @@ See [modules/](modules/) for detailed specifications:
 - [Quotes](modules/quotes.md)
 - [Jobs](modules/jobs.md)
 - [Routings](modules/routings.md)
-- [Work Centers](modules/work-centers.md) — supersedes the older [Operations](modules/operations.md) module
+- [Work Centers](modules/work-centers.md) — unifies internal + external operations (supersedes the old Operations module)
 - [Vendors](modules/vendors.md)
 - [Inventory](modules/inventory.md)
 - [Shipments](modules/shipments.md) — feature-flagged per tenant

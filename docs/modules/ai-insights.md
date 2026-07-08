@@ -47,7 +47,7 @@ The AI chat uses a **text-to-SQL** approach: the AI generates SQL queries agains
 **Safety layers (defense in depth):**
 1. **SQL validation** — SELECT-only, forbidden keywords, table allowlist, `$1` placeholder required for company_id
 2. **Parameterized company_id** — AI writes `company_id = $1`, backend binds actual UUID (no string interpolation)
-3. **Table allowlist** — Only 17 business tables. Auth/system/AI tables blocked.
+3. **Table allowlist** — Only 20 business tables. Auth/system/AI tables blocked.
 4. **Read-only Postgres role** — `jigged_ai_readonly` with SELECT-only grants on allowed tables
 5. **Statement timeout** — 5 seconds via asyncpg connection config
 6. **Row limit** — 200 rows max, enforced programmatically
@@ -64,7 +64,7 @@ The dashboard page is user-driven: the ask bar is the only way to generate insig
        |
        v
 2. FastAPI backend constructs prompt with:
-   - Database schema context (17 tables, columns, types, relationships)
+   - Database schema context (20 tables, columns, types, relationships)
    - execute_sql tool definition
    - Chart formatting guidelines
        |
@@ -229,7 +229,7 @@ Logs chat interactions for analytics, debugging, and cost tracking.
 
 ### Table: `saved_insights`
 
-User-pinned chart cards on the dashboard (max 5 per user per company).
+User-pinned chart cards on the dashboard. Scoped **per user within a company** — the RLS policies (`Users can read/insert/delete own saved insights`) filter by `user_id = auth.uid()`, so each user sees only their own pinned cards. There is **no saved-insight limit** — save proceeds unconditionally (no cap in the DB, access layer, or UI).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -271,7 +271,7 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 |  |  "Revenue is up 12% this week..."                    | |
 |  +-----------------------------------------------------+ |
 +-----------------------------------------------------------+
-|  Your Charts (3/5)                                        |
+|  Your Charts                                              |
 |                                                           |
 |  +------------------------+ +------------------------+    |
 |  | Revenue trend       [x] | | Top customer        [x] |  |
@@ -300,9 +300,9 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 
 **Pinned Metrics (PinnedMetrics component):**
 - Flat KPI strip at top of dashboard (no card wrappers)
-- 1-4 customizable metrics selected via MetricPickerModal
+- Up to 4 pinned metrics (one page) selected via MetricPickerModal; the six available metrics page through 4 at a time via a pager
 - Available metrics: open_quotes, not_started_jobs, in_progress_jobs, revenue, completed_jobs, overdue_jobs
-- Persisted to localStorage per user
+- Persisted per user to `user_preferences.preferences.dashboard_pinned_metrics` (Supabase); the Today / This Week period toggle persists to `preferences.dashboard_metric_periods`
 - "+ Add metric" / "Edit metrics" text link below
 
 **Ask Bar (InsightsChat component):**
@@ -310,16 +310,15 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 - Pre-canned example prompt chips below the input (click to submit)
 - Response appears inline: AI text + optional chart in a Card
 - Save button only shown when response includes a chart (`chart_config` is not null)
-- Save icon saves to "Your Charts" grid (max 5)
-- Save disabled at 5/5 with tooltip: "Remove a chart below to save new ones"
+- Save icon saves to "Your Charts" grid (no saved-insight limit — save always proceeds)
 - "Saved" text feedback shown after successful save; card auto-dismisses after 1.5s
 - Rotating loading messages while AI processes ("Querying your data...", "Analyzing results...", "Building your answer..." — cycles every 2 seconds)
 - Single Q&A per interaction (no conversation history for MVP)
 - Error state: inline Alert with error message
 
 **Your Charts grid (InsightsSection component):**
-- Shows only user-saved insight cards
-- "Your Charts (N/5)" header with count indicator
+- Shows only user-saved insight cards (the current user's own — RLS-scoped by `auth.uid()`)
+- "Your Charts" header (no count indicator; there is no saved-insight cap)
 - 2-column responsive grid (1-column on mobile)
 - Each card: title (question) + chart + AI summary + x remove button
 - Empty state: dashed border box with message
@@ -386,37 +385,7 @@ Submit a natural language question. The AI generates SQL to query the database a
 }
 ```
 
-### `GET /api/insights/{company_id}/chat/history`
-
-Returns the user's recent chat queries (last 20).
-
-**Response:**
-
-```json
-{
-  "queries": [
-    {
-      "id": "uuid",
-      "question": "What's my most profitable customer?",
-      "response": "Your most profitable customer is...",
-      "has_chart": true,
-      "created_at": "2026-03-02T10:45:00Z"
-    }
-  ]
-}
-```
-
-### `POST /api/insights/{company_id}/saved`
-
-Save a chart response to the user's dashboard. Requires `chart_config` to be present.
-
-### `GET /api/insights/{company_id}/saved`
-
-List user's saved insights for this company.
-
-### `DELETE /api/insights/{company_id}/saved/{insight_id}`
-
-Delete a saved insight. Verifies ownership.
+`POST /{company_id}/chat` is the **only** FastAPI insights route. **Chat is stateless today** — each request is a single, independent Q&A with no persisted conversation. There is no `chat/history` endpoint (none is defined in `api/routes/insights_routes.py`, and no frontend caller requests one); `ai_chat_queries` logs turns for analytics/cost only, it is not read back as chat history. Saved-insights CRUD is **not** a backend route either — it runs client-side against the RLS-scoped `saved_insights` table via `utils/savedInsightsAccess.ts` (`saveInsight` / `getSavedInsights` / `deleteSavedInsight`), consistent with the Supabase-first architecture rule. If multi-turn history is added later (Phase 1), it would be scoped **per user within a company** — mirroring the `saved_insights` `user_id + auth.uid()` RLS model.
 
 ---
 
@@ -451,7 +420,7 @@ if count.count >= 20:
 ```
 api/
 +-- routes/
-|   +-- insights_routes.py          # Chat endpoints (submit + history)
+|   +-- insights_routes.py          # Chat endpoint (POST /{company_id}/chat) — submit only; no history route
 +-- services/
 |   +-- ai/
 |   |   +-- base_provider.py        # chat_with_tools() abstract method
@@ -464,7 +433,7 @@ api/
 |   +-- insights_models.py          # Pydantic chat request/response schemas
 +-- tools/
     +-- metric_tools.py             # METRIC_TOOLS (schemas) + CHAT_TOOLS (execute_sql only)
-    +-- schema_context.py           # Database schema string for AI system prompt (17 tables)
+    +-- schema_context.py           # Database schema string for AI system prompt (20 tables)
     +-- sql_validator.py            # SQL validation before execution
     +-- sql_executor.py             # asyncpg connection pool + parameterized query execution
 ```
@@ -486,7 +455,7 @@ utils/
 +-- insightsAccess.ts              # Chat API helpers
 +-- alertsAccess.ts                # Client-side at-risk jobs + inventory alerts (AlertBadge)
 +-- savedInsightsAccess.ts         # Saved insights CRUD via Supabase (RLS scoped)
-+-- dashboardAccess.ts             # Metric values + pinned metric keys (localStorage)
++-- dashboardAccess.ts             # Metric values + pinned metric keys (user_preferences)
 ```
 
 ---
@@ -521,7 +490,7 @@ AI_READONLY_DATABASE_URL=postgresql://jigged_ai_readonly:your_password@db.xxx.su
 The chat system prompt includes:
 
 1. **Role description** — Business analyst for a precision manufacturing shop
-2. **Database schema** — All 17 tables with column names, types, enum values, foreign key relationships, and important notes (imported from `schema_context.py`)
+2. **Database schema** — All 20 tables with column names, types, enum values, foreign key relationships, and important notes (imported from `schema_context.py`)
 3. **SQL guidelines** — Use `$1` for company_id, join patterns for tables without company_id
 4. **Example queries** — 4 common patterns for reference
 5. **Response guidelines** — Text-first: a one-line prose answer by default, with a chart_config only when there are >=3 points and a chart helps. Plain prose only — no markdown tables, bold, or other markdown (the UI renders plain text). Highlight actionable insights
@@ -531,7 +500,7 @@ You are a business analyst for a small precision manufacturing shop.
 You answer questions by querying the company's PostgreSQL database using the
 execute_sql tool.
 
-[Full database schema with 17 tables, columns, types, relationships]
+[Full database schema with 20 tables, columns, types, relationships]
 
 Guidelines:
 - Always use execute_sql to get real data. Never make up numbers.
@@ -559,7 +528,7 @@ Guidelines:
 - [x] MetricPickerModal for metric selection
 - [x] Ask bar on dashboard with example prompt chips (InsightsChat)
 - [x] Inline AI response with optional chart + save button (chart responses only)
-- [x] Saved insights CRUD: save (max 5), list, delete
+- [x] Saved insights CRUD: save (no cap), list, delete — per user within a company (RLS `auth.uid()`)
 - [x] "Your Charts" grid showing only user-saved insights
 - [x] Empty state with message
 - [x] Loading states with rotating messages for all components
@@ -573,7 +542,7 @@ Guidelines:
 
 - [x] Header alert badge for at-risk jobs and low inventory (AlertBadge popover) — Supabase-first, no AI
 - [ ] Additional chart types (scatter, heatmap for schedule visualization)
-- [ ] Multi-turn conversation history in chat
+- [ ] Multi-turn conversation history in chat (would be scoped per user within a company, mirroring `saved_insights` — chat is stateless today)
 - [ ] Predefined tools for complex business logic queries (based on user behavior)
 - [ ] OpenAI and Gemini `chat_with_tools()` implementations
 - [ ] Export charts as PNG images
@@ -609,8 +578,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 - All API endpoints require authenticated JWT with `owner`, `admin`, or `user` role
 - `company_id` in URL must match a company the user has access to
 - Chat question must be non-empty and under 500 characters
-- Chat rate limit: 20 queries per company per hour (configurable)
-- Insight cache is per-company, per-type (UNIQUE constraint)
+- Chat rate limit: 20 queries per company per hour (default; per-company override via `settings.ai_limits.chat_per_hour`)
 - AI-generated SQL validated before execution (see SQL Validation Rules)
 - SQL executed via read-only role with parameterized company_id
 
@@ -634,54 +602,69 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 
 ## Acceptance Criteria
 
-### Pinned Metrics
+Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #336.
 
-- [ ] KPI strip renders at top of dashboard with 1-4 user-selected metrics
-- [ ] MetricPickerModal allows selecting/deselecting metrics (max 4)
-- [ ] Metric selection persisted to localStorage
-- [ ] Values fetched from backend on load
-- [ ] "+ Add metric" / "Edit metrics" link visible below strip
+Because every AI call in this module must be user-initiated (repo rule: no on-mount AI), the chat ACs are all phrased off an explicit gesture — a Send click, an Enter keypress, or an example-chip click — never a render/mount.
 
-### Ask Bar (InsightsChat)
+**Pinned Metrics (edit -> save -> reload -> persists)**
 
-- [ ] Text input accepts natural language questions
-- [ ] Pre-canned example chips submit on click (not just populate)
-- [ ] AI response includes text and optional chart, displayed inline
-- [ ] Save button only visible when response includes a chart
-- [ ] Save icon saves response to "Your Charts" grid (max 5 per company)
-- [ ] Save disabled at 5/5 with tooltip: "Remove a chart below to save new ones"
-- [ ] "Saved" text feedback shown after successful save
-- [ ] Rotating loading messages shown during AI processing
-- [ ] Rate limit enforced: 20 queries/company/hour
-- [ ] Rate limit exceeded shows clear error message
-- [ ] Chat queries logged to `ai_chat_queries` table
+- [ ] **Given** the dashboard, **when** `PinnedMetrics` mounts, **then** it renders one page of up to 4 metric scorecards from the user's stored selection (defaults include Overdue Jobs when nothing is stored) — *read-path/default verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'returns defaults (which include Overdue) when no prefs are stored'`*.
+- [ ] **Given** a user editing their pinned metrics in `MetricPickerModal` and saving, **when** the selection is persisted, **then** it is written to `user_preferences.preferences.dashboard_pinned_metrics` (Supabase upsert keyed on `user_id`) so a reload restores it — *write-path persistence verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'persists the folded list AND stamps the migration flag'` (asserts the upsert payload); modal-driven `setPinnedMetricKeys` reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** the metric picker reopened with the same `currentKeys` after adding a metric in-modal without saving, **when** it re-renders, **then** the unsaved addition is dropped and the selection re-seeds from `currentKeys` — *verified by `__tests__/components/dashboard/MetricPickerModal.test.tsx > 'MetricPickerModal — reopen re-seeds selection from currentKeys' > 'drops an in-modal-added metric when reopened with the SAME currentKeys (no stale selection)'`*.
+- [ ] **Given** stored legacy metric keys (e.g. `weekly_revenue`, `active_jobs`), **when** `getPinnedMetricKeys` reads them, **then** they are migrated to current keys and the Overdue metric is folded in once — *verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'still migrates legacy keys while folding Overdue in'`*.
+- [ ] **Given** a user who deliberately removed Overdue Jobs (migration flag set), **when** metrics reload, **then** Overdue is NOT re-added — *verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'does NOT re-add Overdue once the migration flag is set (deliberate removal sticks)'`*.
+- [ ] **Given** the Today / This Week period toggle, **when** a user switches period, **then** the choice persists to `user_preferences.preferences.dashboard_metric_periods` and re-fetches time-aware metric values — *automation-pending (`setMetricTimePeriod` / `getPinnedMetricValues`)*.
 
-### Your Charts Grid (InsightsSection)
+**Ask Bar (InsightsChat) — chat is user-initiated only**
 
-- [ ] Shows only user-saved insight cards (no pre-built static charts)
-- [ ] "Your Charts (N/5)" header with count indicator
-- [ ] Responsive: 2-column on desktop, 1-column on mobile
-- [ ] Each card: question as title + chart + AI summary + x remove button
-- [ ] Empty state: dashed border box with message
-- [ ] Charts use MUI theme colors (no hardcoded values)
+- [ ] **Given** the ask bar, **when** a user types a question and clicks Send (or presses Enter), **then** exactly one `POST /api/insights/{companyId}/chat` fires and the response (text + optional chart) renders inline — no chat call happens on mount — *manual: type a question, click Send; confirm a single network call to `/api/insights/{id}/chat` in `components/insights/InsightsChat.tsx` (`submitChatQuery`)*.
+- [ ] **Given** an example-prompt chip, **when** the user clicks it, **then** that prompt is submitted immediately (not merely populated into the input) — *manual: click a chip; `handleChipClick` calls `handleSubmit(prompt)` in `components/insights/InsightsChat.tsx`*.
+- [ ] **Given** a chat response that includes a validated `chart_config`, **when** it renders, **then** a "Save to dashboard" button appears; **given** a text-only response, **then** no save button is shown — *manual: the save button is gated on `result.chart_config` in `components/insights/InsightsChat.tsx`*.
+- [ ] **Given** an inline chart response, **when** the user clicks "Save to dashboard", **then** it is inserted into `saved_insights` and "Saved to dashboard" feedback shows before the inline card auto-dismisses (~1.5s) — *write path automation-pending (`saveInsight` in `utils/savedInsightsAccess.ts`); reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** an AI request in flight, **when** it is processing, **then** rotating loading messages ("Querying your data..." → "Analyzing results..." → "Building your answer...") cycle every 2s — *manual: rotation driven by the `loading` interval in `components/insights/InsightsChat.tsx`*.
+- [ ] **Given** a submitted question, **when** the backend answers, **then** the interaction (question, tool_calls, response, chart_config, provider/model/tokens) is logged to `ai_chat_queries` — *manual: insert in the `chat` handler of `api/routes/insights_routes.py`*.
+- [ ] **Given** a company at its hourly cap, **when** another chat query arrives, **then** the backend returns 429 with the company's actual limit in the message and a `Retry-After` header, and the frontend surfaces that message — *backend verified by `api/tests/unit/test_insights_rate_limit.py > 'TestCheckChatRateLimit' > 'test_at_limit_raises_429_with_retry_after'`; under-limit pass verified by `api/tests/unit/test_insights_rate_limit.py > 'TestCheckChatRateLimit' > 'test_under_limit_passes'`*.
 
-### Security
+**Your Charts grid (InsightsSection) — saved-insight create/delete**
 
-- [ ] All endpoints verify user role (owner/admin/user only)
-- [ ] All queries scoped to `company_id` via parameterized `$1` placeholder
-- [ ] SQL validated before execution: SELECT-only, table allowlist, no forbidden keywords
-- [ ] SQL executed via read-only Postgres role (`jigged_ai_readonly`)
-- [ ] Statement timeout (5s) and row limit (200) enforced
-- [ ] Operator role cannot access any insights endpoints
-- [ ] RLS policies on `ai_chat_queries`
+- [ ] **Given** the "Your Charts" section, **when** the user has saved insights, **then** it renders only user-saved cards in a 2-column (desktop) / 1-column (mobile) grid, each showing the question as title + chart + AI summary + × remove — *manual: `getSavedInsights` + `InsightCard` mapping in `components/dashboard/InsightsSection.tsx` (no pre-built static cards)*.
+- [ ] **Given** a saved insight card, **when** the user clicks × remove, **then** the row is deleted from `saved_insights` and the grid re-pulls from that single source — *write path automation-pending (`deleteSavedInsight` in `utils/savedInsightsAccess.ts`); reload-persistence E2E automation-pending (#367)*.
+- [ ] **Given** no saved insights, **when** the section renders, **then** a dashed-border empty state reads "Ask a question above and save the answer to build your dashboard." — *manual: empty branch in `components/dashboard/InsightsSection.tsx`*.
+- [ ] **Given** a chart config whose declared `x_key`/`y_key` are missing from the rows, **when** `InsightChart` renders it, **then** it fails loud with "No chartable data" instead of blank labels/zero bars — *verified by `__tests__/components/insights/InsightChart.test.tsx > 'InsightChart' > 'fails loud (no blank chart) when x_key/y_key are missing from the rows'`*.
+- [ ] **Given** an empty-data chart config, **when** `InsightChart` renders, **then** it shows "No data available for chart" (never a blank chart) — *verified by `__tests__/components/insights/InsightChart.test.tsx > 'InsightChart' > 'shows an empty state when there is no data'`*.
+- [ ] **Given** a valid nominal config, **when** it renders, **then** a chart is drawn with no fallback text, using MUI theme colors — *verified by `__tests__/components/insights/InsightChart.test.tsx > 'InsightChart' > 'renders the chart (no fallback text) for a valid config'`*.
 
-### AI Provider Integration
+**Chart decisioning (constrained renderer — backend)**
 
-- [ ] `chat_with_tools()` method added to `AIProvider` base class
-- [ ] Claude provider implements `chat_with_tools()` with `execute_sql` tool dispatch
-- [ ] `get_provider()` supports `'insights_chat'` feature type
-- [ ] Per-company provider configuration works via `ai_config` table
-- [ ] Default fallback to Anthropic/Claude when no config exists
+- [ ] **Given** a model-proposed chart over degenerate data (single point, single category, all-equal, all-zero, or a dominant 2-point pair), **when** the backend validates it, **then** the chart is dropped and the prose answer is kept — never a blank card — *verified by `api/tests/unit/test_chart_config.py > 'TestValidateChartConfig' > 'test_single_point_downgraded'` AND `api/tests/unit/test_chart_config.py > 'TestValidateChartConfig' > 'test_single_dominant_two_points_downgraded'`*.
+- [ ] **Given** a valid multi-category config, **when** validated, **then** it is kept — *verified by `api/tests/unit/test_chart_config.py > 'TestValidateChartConfig' > 'test_valid_multi_category_kept'`*.
+- [ ] **Given** a kept config with a temporal x-axis, **when** the chart type is selected, **then** it becomes an area chart deterministically (overriding the model's choice) — *verified by `api/tests/unit/test_chart_config.py > 'TestSelectChartType' > 'test_temporal_x_becomes_area'`*.
+- [ ] **Given** a kept config with long nominal labels, **when** the chart type is selected, **then** it becomes a horizontal bar; short labels become a vertical bar — *verified by `api/tests/unit/test_chart_config.py > 'TestSelectChartType' > 'test_long_labels_become_horizontal'` AND `api/tests/unit/test_chart_config.py > 'TestSelectChartType' > 'test_nominal_short_labels_become_bar'`*.
+- [ ] **Given** the full chat pipeline on the "top customer" incident data, **when** it runs, **then** the chart is downgraded and inline bold markdown is stripped from the answer — *verified by `api/tests/unit/test_chart_config.py > 'TestChatPipelineComposition' > 'test_top_customer_incident_downgrades_and_strips_bold'`*.
+- [ ] **Given** an AI answer containing markdown tables/bold/code, **when** it is cleaned for the plain-text UI, **then** tables flatten to `cell — cell`, bold unwraps, and part numbers like `PART_101` survive — *verified by `api/tests/unit/test_chat_formatting.py > 'TestFlattenMarkdownTables' > 'test_markdown_table_flattened'` AND `api/tests/unit/test_chat_formatting.py > 'TestStripInlineMarkdown' > 'test_part_numbers_and_multiplication_preserved'`*.
+
+**Security & SQL safety**
+
+- [ ] **Given** an AI-generated statement, **when** it is validated, **then** only `SELECT`/`WITH` is accepted and mutation keywords (`INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/`TRUNCATE`) are rejected — *verified by `api/tests/unit/test_sql_validator.py > 'TestBasicValidation' > 'test_simple_select_accepted'` AND `api/tests/unit/test_sql_validator.py > 'TestForbiddenStatements' > 'test_mutation_keywords_rejected'`*.
+- [ ] **Given** a query missing the `$1` company placeholder, **when** validated, **then** it is rejected; a query with `$1` present is accepted — *verified by `api/tests/unit/test_sql_validator.py > 'TestCompanyIdPlaceholder' > 'test_missing_placeholder_rejected'` AND `api/tests/unit/test_sql_validator.py > 'TestCompanyIdPlaceholder' > 'test_placeholder_present_accepted'`*.
+- [ ] **Given** a query referencing a table outside the allowlist (or a sensitive auth/AI table, in any join form), **when** validated, **then** it is rejected — *verified by `api/tests/unit/test_sql_validator.py > 'TestTableAllowlist' > 'test_system_table_rejected'` AND `api/tests/unit/test_sql_validator.py > 'TestSensitiveTableDenylist' > 'test_sensitive_table_in_comma_join_rejected'`*.
+- [ ] **Given** a validated query, **when** it executes via the read-only `jigged_ai_readonly` connection, **then** the row limit (200) is enforced — *verified by `api/tests/integration/test_sql_executor.py > 'TestQueryExecution' > 'test_row_limit_enforced'`*.
+- [ ] **Given** a query that fails validation at execution time, **when** run through the executor, **then** it returns a structured error rather than touching the DB — *verified by `api/tests/integration/test_sql_executor.py > 'TestQueryExecution' > 'test_validation_failure_returns_error'`*.
+- [ ] **Given** a full chat turn where the model requests a SQL query, **when** the pipeline runs, **then** the query executes and its result flows back into the answer with `execute_sql` recorded in `tool_calls` — *verified by `api/tests/integration/test_insights_chat.py > 'TestChatPipeline' > 'test_full_chat_with_sql_tool'`*.
+- [ ] **Given** a SQL error mid-turn, **when** the model sees it as a tool result, **then** it recovers gracefully within the iteration budget — *verified by `api/tests/integration/test_insights_chat.py > 'TestChatPipeline' > 'test_chat_recovers_from_sql_error'`*.
+- [ ] **Given** RLS on `saved_insights` and `ai_chat_queries`, **when** a user reads/writes, **then** they are scoped to their own rows / their company — *manual: `ENABLE ROW LEVEL SECURITY` + the "own saved insights" / "own company chat history" policies in `supabase/schema.prod.sql`*.
+
+**AI provider gating & config**
+
+- [ ] **Given** a company with no explicit AI settings, **when** the chat endpoint reads its config, **then** AI Insights defaults ON (opt-out) with the default hourly limit — *verified by `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_defaults_when_settings_null'` AND `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_opt_out_default_on_when_key_absent'`*.
+- [ ] **Given** a company with `settings.features.ai_insights = false`, **when** a chat query arrives, **then** the endpoint is disabled (403) — *disable-flag verified by `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_explicit_false_disables'`*.
+- [ ] **Given** a company with `settings.ai_limits.chat_per_hour` set, **when** the limit is read, **then** the custom value is used; an invalid value falls back to the default — *verified by `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_custom_limit_read'` AND `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_invalid_limit_falls_back'`*.
+- [ ] **Given** a transient error reading company AI settings, **when** the endpoint evaluates the gate, **then** it fails open (enabled, default limit) so a DB blip never dark-launches the feature off — *verified by `api/tests/unit/test_insights_rate_limit.py > 'TestGetCompanyAiSettings' > 'test_fails_open_on_read_error'`*.
+
+**Saved-insight limit & scoping (owner-resolved: no cap, per-user)**
+
+- [ ] **Given** a user who already has several saved insights, **when** they pin another chart, **then** the save proceeds unconditionally — there is **no cap** (no `(N/5)` count header, no 5/5 disable, no DB unique/check constraint); `saveInsight` inserts every time — *automation-pending; shipped path is the unconditional insert in `utils/savedInsightsAccess.ts` (`saveInsight`), with no count/disable gate in `components/insights/InsightsChat.tsx` or `components/dashboard/InsightsSection.tsx`*.
+- [ ] **Given** two users in the same company, **when** each saves insights and reloads "Your Charts", **then** each sees only their own pinned cards (per-user within the company) — `getSavedInsights` filters by `company_id` and the `saved_insights` RLS `SELECT` policy narrows to `user_id = auth.uid()` — *automation-pending; scoping enforced by `getSavedInsights` in `utils/savedInsightsAccess.ts` + the "Users can read own saved insights" policy (`user_id = auth.uid()`) in `supabase/schema.prod.sql`*.
 
 ---
 
@@ -689,7 +672,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 
 | # | Question | Status |
 |---|---|---|
-| 1 | Should insight cards be configurable per user or per company? | **Resolved: Per company for MVP.** Phase 1 adds per-user customization. |
+| 1 | Should insight cards be configurable per user or per company? | **Resolved: Per user within a company.** `saved_insights` is scoped by `user_id` with RLS `auth.uid()` policies — each user builds and sees only their own pinned cards (not a company-shared set). |
 | 2 | Should chat support follow-up questions (multi-turn)? | **Resolved: No for MVP.** Single Q&A per interaction. Phase 1 adds multi-turn. |
 | 3 | What happens when a company has very little data? | **Resolved:** Empty state messaging per card. Minimum thresholds: revenue trend needs 2+ weeks of shipped jobs, conversion rate needs 5+ quotes. |
 | 4 | Should insights be available in Demo Mode? | **Resolved: Yes.** Demo Mode uses a hidden demo company with its own `company_id`. All insight queries naturally scope to the active company — no special filtering needed. See [Demo Mode PRD](./demo-mode.md). |

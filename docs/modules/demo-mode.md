@@ -67,16 +67,34 @@ The hidden demo company approach leverages RLS (`company_id` filtering) which is
 
 ### 3.1 Demo Data Included
 
-| Entity | Count | Details |
-|--------|-------|---------|
-| Customers | 3 | Acme Manufacturing, Ajax Industries, Precision Corp |
-| Parts | 6 | With pricing tiers across customers |
-| Operation Types | 8 | With labor rates |
-| Routings | 3 | With nodes and edges |
-| Quotes | 5 | pending_approval, accepted statuses |
-| Jobs | 4 | Pending, in_progress, completed statuses |
-| Job Operations | 10+ | Across the 4 jobs |
-| Inventory Items | 8 | With quantities and units |
+The demo dataset is whatever `seed_demo_data()` inserts from the active
+`demo_data_templates` row (see §4.3 for the shape it reads). Grounded in the
+live seeder (`supabase/schema.prod.sql`, `seed_demo_data`), a demo company can
+contain these entity types — the exact counts depend on the template JSON, which
+is authored in prod and **not** committed to the repo:
+
+| Entity | Seeded from | Notes |
+|--------|-------------|-------|
+| Vendors (+ vendor contacts) | `vendors` (each with `contacts`) | Suppliers for bought parts / external work |
+| Work centers | `work_centers` | `kind` = internal or external; external ones link a `vendor_ref` |
+| Parts (+ procurement tiers) | `parts` (bought parts with a `cost_per_unit` emit a NULL-vendor `part_procurement_tiers` row) | `source` = made or bought |
+| BOM links | `parts_bom` (`parent_ref` → `child_ref`) | Multi-level bills of material |
+| Routings (+ operations) | `routings` with a linear `operations` array → `routing_operations` (`work_center_ref` per step) | Linear list, **no** nodes/edges |
+| Customers | `customers` | — |
+| Quotes (+ line items) | `quotes` with a `line_items` array → `quote_line_items` | — |
+| Jobs (+ job parts) | `jobs` with a `parts` array → `job_parts`; a step's `routing_ref` fans out into job-part operations | Operations are generated from the routing, not listed in the template |
+
+The seeder does **not** insert `inventory_items` (there is no such table in the
+template path), and there are no `operation_types` or routing nodes/edges —
+those were superseded by `work_centers` and the linear `routing_operations`.
+
+> **Planned (see #550):** the intended direction is to source demo-company data
+> from `supabase/seed.sql` — the same graph the tests seed — differing only by
+> company name, and to **delete** `scripts/sync_demo_template.py` (and the
+> uncommitted, prod-authored template row it copies). A committed demo seed plus
+> demo-mode tests are a known gap; this is a plan, not shipped behavior. Until
+> then, a fresh local/preview stack has **no** active template, so
+> `create_demo_company` there would fail (no active template) — see §4.2/§10.
 
 ### 3.2 Demo Mode Behavior
 
@@ -186,53 +204,82 @@ CREATE POLICY "All authenticated users can read active templates"
 
 ### 4.3 `template_data` JSONB Schema
 
-Template-local `_ref` IDs are mapped to real UUIDs during seeding:
+Template-local `_ref` IDs are mapped to real UUIDs during seeding, and any
+`*_ref` field resolves against a `_ref` inserted earlier in the same run
+(`v_ref_map`). The arrays below are exactly the ones `seed_demo_data()` iterates
+(`supabase/schema.prod.sql`), in FK-dependency order: `vendors` → `work_centers`
+→ `parts` → `parts_bom` → `routings` → `customers` → `quotes` → `jobs`. The
+example is illustrative (one row per array); real counts come from the live
+template.
 
 ```jsonb
 {
-  "version": 1,
-  "schema_version": "2026-03-04",
-  "customers": [
+  "vendors": [
     {
-      "_ref": "cust-1",
-      "name": "Acme Manufacturing",
-      "contact_name": "Bob Smith",
-      "contact_email": "bob@acme.example.com",
-      "contact_phone": "555-0101",
-      "city": "Chicago",
-      "state": "IL",
-      "country": "USA"
+      "_ref": "vend-1", "name": "Metro Metals",
+      "city": "Chicago", "state": "IL", "country": "USA",
+      "contacts": [
+        { "name": "Dana Ruiz", "role": "sales", "email": "dana@metro.example.com", "is_primary": true }
+      ]
     }
   ],
-  "operation_types": [
-    { "_ref": "op-1", "name": "CNC Milling", "labor_rate": 85.00 }
+  "work_centers": [
+    { "_ref": "wc-1", "name": "CNC Milling", "kind": "internal", "labor_rate": 85.00 },
+    { "_ref": "wc-2", "name": "Anodizing", "kind": "external", "vendor_ref": "vend-1" }
   ],
   "parts": [
-    { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "customer_ref": "cust-1", "pricing": [{"quantity": 1, "unit_price": 150.00}] }
+    { "_ref": "part-1", "part_name": "ACM-001", "description": "Precision Bracket", "source": "made", "primary_unit": "each" },
+    { "_ref": "part-2", "part_name": "RAW-6061", "description": "6061 Bar Stock", "source": "bought", "is_stocked": true, "quantity": 240, "cost_per_unit": 3.50 }
+  ],
+  "parts_bom": [
+    { "parent_ref": "part-1", "child_ref": "part-2", "quantity": 1.5, "unit": "inches", "sequence": 10 }
   ],
   "routings": [
     {
       "_ref": "routing-1", "name": "Bracket Standard Routing", "part_ref": "part-1",
-      "nodes": [{ "_ref": "node-1", "operation_type_ref": "op-1", "run_time_per_unit": 0.5, "instructions": "Mill to spec" }],
-      "edges": [{ "source_ref": "node-1", "target_ref": "node-2" }]
+      "operations": [
+        { "work_center_ref": "wc-1", "sequence": 10, "setup_minutes": 15, "cycle_minutes_per_unit": 0.5, "instructions": "Mill to spec" }
+      ]
     }
   ],
-  "inventory_items": [
-    { "_ref": "inv-1", "name": "6061 Aluminum Bar Stock", "primary_unit": "inches", "quantity": 240, "cost_per_unit": 3.50 }
+  "customers": [
+    {
+      "_ref": "cust-1", "name": "Acme Manufacturing",
+      "contact_name": "Bob Smith", "contact_email": "bob@acme.example.com", "contact_phone": "555-0101",
+      "city": "Chicago", "state": "IL", "country": "USA"
+    }
   ],
   "quotes": [
-    { "_ref": "quote-1", "quote_number": "Q-DEMO-001", "customer_ref": "cust-1", "part_ref": "part-1", "routing_ref": "routing-1", "quantity": 50, "unit_price": 130.00, "total_price": 6500.00, "status": "accepted" }
+    {
+      "_ref": "quote-1", "customer_ref": "cust-1", "status": "active", "lead_time_days": 14,
+      "line_items": [
+        { "part_ref": "part-1", "sequence": 10, "quantity": 50, "unit_price": 130.00, "total_price": 6500.00 }
+      ]
+    }
   ],
   "jobs": [
     {
-      "_ref": "job-1", "job_number": "J-DEMO-001", "customer_ref": "cust-1", "part_ref": "part-1", "quote_ref": "quote-1", "routing_ref": "routing-1", "status": "in_progress",
-      "operations": [
-        { "_ref": "jop-1", "sequence": 1, "operation_name": "CNC Milling", "operation_type_ref": "op-1", "estimated_run_hours_per_unit": 0.5, "quantity_completed": 20, "status": "in_progress" }
+      "_ref": "job-1", "job_number": "J-DEMO-001", "customer_ref": "cust-1", "quote_ref": "quote-1", "status": "in_progress",
+      "parts": [
+        { "part_ref": "part-1", "sequence": 10, "quantity": 50, "status": "in_progress", "routing_ref": "routing-1" }
       ]
     }
   ]
 }
 ```
+
+Notes on the shape: work centers carry a `kind` (`internal`/`external`) and
+external ones reference a `vendor_ref`; a bought part with a `cost_per_unit`
+produces a NULL-vendor `part_procurement_tiers` row; a job part's optional
+`routing_ref` generates its operations via
+`create_job_part_operations_from_routing` (operations are **not** listed in the
+template). There is no `inventory_items` array, no `operation_types`, and no
+routing `nodes`/`edges`.
+
+> **Planned (see #550):** this hand-authored template is slated for removal —
+> demo data would instead come from `supabase/seed.sql` (differing only by
+> company name), so this JSONB schema and the `template_data` column would be
+> retired along with `scripts/sync_demo_template.py`. Not yet shipped.
 
 ### 4.4 RLS Considerations
 
@@ -306,7 +353,7 @@ Extracted helper that seeds a company with demo data from the active template. U
 CREATE OR REPLACE FUNCTION seed_demo_data(
     p_company_id UUID,
     p_user_id UUID,
-    p_template_name VARCHAR DEFAULT 'default'
+    p_template_name TEXT DEFAULT 'default'
 ) RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -315,15 +362,14 @@ AS $$
 -- Reads active template from demo_data_templates
 -- Iterates each entity array, mapping _ref keys to real UUIDs via v_ref_map
 -- Insert order (respects FK dependencies):
---   customers → operation_types → parts →
---   inventory_items → routings (+ nodes + edges) →
---   quotes → jobs (+ job_operations)
--- Post-pass: links quotes.converted_to_job_id (circular FK)
+--   vendors (+ contacts) → work_centers → parts (+ procurement tiers) →
+--   parts_bom → routings (+ linear routing_operations) →
+--   customers → quotes (+ quote_line_items) → jobs (+ job_parts)
 -- Supports temporal fields: created_at, started_at, completed_at, shipped_at
 $$;
 ```
 
-> **Implementation:** See `supabase/migrations/20260305100000_demo_mode_transform.sql` section 10 for the full function body (~200 lines). The seeding logic is adapted from the battle-tested `_populate_demo_company()` function, updated for the current schema (no `parts.customer_id`, no `quotes.routing_id`, no `jobs.routing_id`).
+> **Implementation:** See `supabase/migrations/20260527151536_baseline.sql` (and the authoritative body in `supabase/schema.prod.sql`) for the full `seed_demo_data` function. Routings are a **linear** list — `routing_nodes`/`routing_edges` were renamed to a single `routing_operations` table, and `operation_types` became `work_centers` (with a `kind` distinguishing internal vs external). The seeder does **not** populate `inventory_items`.
 
 ### 5.2 `create_demo_company()`
 
@@ -409,21 +455,31 @@ BEGIN
         RAISE EXCEPTION 'No demo company exists for company: %', p_source_company_id;
     END IF;
 
-    -- Delete all data in demo company (reverse FK order)
+    -- Delete all data in demo company (FK-respecting order). job_materials /
+    -- job_operations live under jobs (not company-scoped), so pivot through jobs;
+    -- parts_bom / parts_unit_conversions pivot through parts.
     DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
+    DELETE FROM job_materials WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
+    DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
+    DELETE FROM job_parts WHERE company_id = v_demo_company_id;
     DELETE FROM jobs WHERE company_id = v_demo_company_id;
-    -- (job_parts, job_operations, job_materials cascade-deleted via jobs)
+    DELETE FROM quote_line_items WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_materials WHERE company_id = v_demo_company_id;
+    DELETE FROM quote_operations WHERE company_id = v_demo_company_id;
     DELETE FROM quotes WHERE company_id = v_demo_company_id;
-    DELETE FROM routing_edges WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
-    DELETE FROM routing_nodes WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
+    DELETE FROM routing_operations
+        WHERE routing_id IN (SELECT id FROM routings WHERE company_id = v_demo_company_id);
     DELETE FROM routings WHERE company_id = v_demo_company_id;
+    DELETE FROM parts_bom
+        WHERE parent_part_id IN (SELECT id FROM parts WHERE company_id = v_demo_company_id);
+    DELETE FROM part_pricing_tiers WHERE company_id = v_demo_company_id;
+    DELETE FROM parts_unit_conversions
+        WHERE part_id IN (SELECT id FROM parts WHERE company_id = v_demo_company_id);
     DELETE FROM parts WHERE company_id = v_demo_company_id;
-    DELETE FROM inventory_items WHERE company_id = v_demo_company_id;
-    DELETE FROM operation_types WHERE company_id = v_demo_company_id;
+    DELETE FROM work_centers WHERE company_id = v_demo_company_id;
+    DELETE FROM vendors WHERE company_id = v_demo_company_id;
     DELETE FROM customers WHERE company_id = v_demo_company_id;
-
-    -- Delete AI data for demo company
     DELETE FROM ai_chat_queries WHERE company_id = v_demo_company_id;
 
     -- Re-seed from template
@@ -447,8 +503,8 @@ SET search_path = public
 AS $$
 BEGIN
     -- Add any missing access entries (new team members since demo was created)
-    INSERT INTO user_company_access (user_id, company_id, role)
-    SELECT uca.user_id, p_demo_company_id, uca.role
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT uca.user_id, p_demo_company_id, uca.role, uca.name
     FROM user_company_access uca
     WHERE uca.company_id = p_source_company_id
       AND NOT EXISTS (
@@ -468,7 +524,7 @@ END;
 $$;
 ```
 
-Called by the API when entering demo mode. Keeps roles in sync without triggers.
+Called from the client (`syncDemoAccess` → `rpc('sync_demo_access')`) when re-entering demo mode. Keeps roles in sync without triggers. Like `create_demo_company`, the lazy-sync path copies both `role` **and** `name` when adding a missing member; the follow-up `UPDATE` re-syncs only changed roles.
 
 ---
 
@@ -482,7 +538,7 @@ User signs up ("Join the Beta")
     → User lands on dashboard (empty)
     → Onboarding card: "Want to see what Jigged looks like with real data?"
     → [Enter Demo Mode] button
-    → POST /api/demo/create
+    → createDemoCompany() → rpc('create_demo_company')
     → Demo company created, seeded, access mirrored
     → App navigates to /dashboard/[demoCompanyId]/...
     → Demo Mode banner appears, header shows company name + DEMO badge
@@ -497,8 +553,8 @@ User signs up ("Join the Beta")
 ```
 User navigates to Settings → Demo Mode section
     → [Enter Demo Mode] button
-    → If first time: POST /api/demo/create (loading spinner)
-    → If demo exists: Sync access, navigate immediately
+    → If first time: createDemoCompany() → rpc('create_demo_company') (loading spinner)
+    → If demo exists: syncDemoAccess(), navigate immediately
     → App navigates to /dashboard/[demoCompanyId]/...
     → Demo Mode banner appears on every page
 ```
@@ -519,7 +575,7 @@ User clicks "Reset Demo" (from banner or Settings)
     → Confirmation dialog: "This will restore the demo to its original state. Any changes you made in demo mode will be lost."
     → User confirms
     → Loading spinner
-    → POST /api/demo/reset
+    → resetDemoCompany() → rpc('reset_demo_company')
     → All demo data wiped and re-seeded
     → User stays in demo mode with fresh data
     → Success toast: "Demo reset to original state"
@@ -531,22 +587,20 @@ User clicks "Reset Demo" (from banner or Settings)
 
 ### 7.1 Settings: Demo Mode Section
 
-Demo mode controls live on the Settings page (`/dashboard/[companyId]/settings/demo`).
+Demo mode controls live in a card on the main Settings page (`/dashboard/[companyId]/settings`) — there is no separate `settings/demo` route. The card is gated behind `AdminGuard`.
 
 ```
-Demo Mode
+Demo Mode   [Active | Available | Not set up]   (status Chip)
 ─────────────────────────────────
-Status: Active / Not set up
-
-[Enter Demo Mode]          (if no demo exists — creates + enters)
+[Set Up Demo Mode]         (if no demo exists — creates + enters)
 [Enter Demo Mode]          (if demo exists, currently in real company)
 [Back to My Company]       (if currently in demo mode)
-[Reset Demo]               (restores to original state)
+[Reset Demo]               (if a demo exists — restores to original state)
 ```
 
-- "Enter Demo Mode" calls `POST /api/demo/create` (first time) or navigates directly (subsequent)
-- "Back to My Company" navigates back to the real company
-- "Reset Demo" calls `POST /api/demo/reset` (confirmation dialog first)
+- "Set Up Demo Mode" / "Enter Demo Mode" calls `enterDemoMode()` → `createDemoCompany()` (first time) or navigates directly (subsequent)
+- "Back to My Company" calls `exitDemoMode()` — navigates back to the real company
+- "Reset Demo" calls `resetDemo()` → `resetDemoCompany()` (confirmation dialog first)
 
 ### 7.2 Demo Mode Banner
 
@@ -628,13 +682,16 @@ The trickiest UX detail — mode switching is URL navigation:
 
 ```tsx
 const enterDemoMode = async () => {
-  if (!demoCompanyId) {
-    // First time — create demo company
-    const { demo_company_id } = await fetch('/api/demo/create', { method: 'POST', ... });
-    setDemoCompanyId(demo_company_id);
+  let targetDemoId = demoCompanyId;
+  if (!targetDemoId) {
+    // First time — create demo company via RPC (no HTTP endpoint)
+    targetDemoId = await createDemoCompany(realCompanyId, user.id); // rpc('create_demo_company')
+    setDemoCompanyId(targetDemoId);
+  } else {
+    await syncDemoAccess(realCompanyId, targetDemoId); // rpc('sync_demo_access')
   }
   // Navigate to demo company, preserving current page
-  const currentPath = pathname.replace(realCompanyId, demoCompanyId);
+  const currentPath = pathname.replace(realCompanyId, targetDemoId);
   router.push(currentPath);
 };
 
@@ -658,51 +715,29 @@ Demo companies must be hidden from non-demo-mode contexts:
 
 ---
 
-## 9. API Endpoints
+## 9. Access Layer (Supabase-first — no FastAPI routes)
 
-All endpoints are FastAPI routes. Use the Supabase service role client for database operations.
+There are **no** `/api/demo/*` FastAPI endpoints. Per the repo's Supabase-first architecture (CLAUDE.md), demo mode is driven entirely from the client through `utils/demoAccess.ts`, which calls Postgres RPCs (`SECURITY DEFINER`, `auth.uid()`-guarded) directly via the typed Supabase client. The service-role backend is not involved; the only backend reference to demo is `api/routes/admin_routes.py` filtering `is_demo = FALSE` out of the admin company list.
 
-### 9.1 `POST /api/demo/create`
+### 9.1 `getDemoStatus(companyId)` — `utils/demoAccess.ts`
 
-Creates a demo company for the user's real company.
+Reads demo status client-side (no HTTP call). SELECTs `companies` for the id; if the row is `is_demo`, reverse-looks-up the source company by `demo_company_id`. Returns `{ isDemoCompany, hasDemoCompany, demoCompanyId, sourceCompanyId, sourceCompanyName }`.
 
-- **Auth:** Supabase JWT (must be owner or admin of the company)
-- **Body:** `{ company_id: string }`
-- **Logic:**
-  1. Verify caller is owner/admin of company
-  2. Check if demo already exists (`demo_company_id`)
-  3. If exists: sync access, return `{ demo_company_id, already_existed: true }`
-  4. If not: call `create_demo_company(company_id, user_id)`
-  5. Return `{ demo_company_id, already_existed: false }`
+### 9.2 `createDemoCompany(sourceCompanyId, userId)` — `rpc('create_demo_company')`
 
-### 9.2 `POST /api/demo/reset`
+Idempotent create + seed. Returns the demo company id (existing id if one already exists). Wrapped by `DemoModeProvider.enterDemoMode`.
 
-Resets the demo company to its original template state.
+### 9.3 `resetDemoCompany(sourceCompanyId, userId)` — `rpc('reset_demo_company')`
 
-- **Auth:** Supabase JWT (must be owner or admin of the source company)
-- **Body:** `{ company_id: string }` (the real company ID)
-- **Logic:**
-  1. Verify caller is owner/admin
-  2. Call `reset_demo_company(company_id, user_id)`
-  3. Return `{ success: true }`
+Wipes all demo data and re-seeds from the active template. Wrapped by `DemoModeProvider.resetDemo`.
 
-### 9.3 `GET /api/demo/status`
+### 9.4 `syncDemoAccess(sourceCompanyId, demoCompanyId)` — `rpc('sync_demo_access')`
 
-Returns the demo mode status for a company.
+Adds missing team-member access and updates changed roles on the demo company. Called on re-entry (existing demo) by `enterDemoMode`.
 
-- **Auth:** Supabase JWT (must have access to the company)
-- **Query:** `?company_id=X`
-- **Returns:** `{ has_demo: boolean, demo_company_id: string | null }`
+### 9.5 Template Management (System Admin)
 
-### 9.4 Template Management (System Admin)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/demo/templates` | List all templates |
-| `POST` | `/api/demo/templates` | Create new template |
-| `PUT` | `/api/demo/templates/{id}/activate` | Set template as active |
-
-All require system admin auth.
+There is no template-management UI or API. The active `demo_data_templates` row is authored directly in SQL and propagated between environments by `scripts/sync_demo_template.py` (copies the active row prod → staging). RLS (`is_system_admin(auth.uid())`) governs who may write the table.
 
 ---
 
@@ -714,7 +749,17 @@ Templates are authored and maintained via direct JSON editing, not through a UI.
 
 #### Authoring Process
 
-1. **Initial creation:** Write the template JSONB in a seed file (`scripts/seed-demo-template.sql`). This file contains the full `INSERT INTO demo_data_templates` statement with the JSONB payload.
+> ⚠ **Current state + Planned (see #550).** Today there is no committed
+> `scripts/seed-demo-template.sql` and no `demo_data_templates` row in
+> `supabase/seed.sql`, so a fresh local/preview stack has **no active template**
+> and `create_demo_company` there raises "No active demo template found". The
+> only template tooling is `scripts/sync_demo_template.py`, which copies the
+> active row prod → staging. **Planned (#550):** replace this hand-authored
+> template with data sourced from `supabase/seed.sql` (differing only by company
+> name) and delete `scripts/sync_demo_template.py`; a committed demo seed is a
+> known gap, not yet shipped.
+
+1. **Initial creation:** Author the template JSONB and `INSERT INTO demo_data_templates`. (Historically this lived in a `scripts/seed-demo-template.sql` seed file; today the active row is authored in prod and propagated with `scripts/sync_demo_template.py` — see the note above.)
 
 2. **Validation:** Before inserting, validate the template against these rules:
    - All `_ref` values are unique across the entire template
@@ -751,6 +796,16 @@ The template management API endpoints (section 9.4) exist for programmatic acces
 
 ## 11. Testing Strategy
 
+> ⚠ **Aspirational — none of the tests below are implemented yet.** As of this
+> audit, `__tests__/`, `e2e/`, and `api/tests/` contain **no** demo-mode tests;
+> the only demo reference in the suite is an `is_demo: false` mock inside
+> `__tests__/utils/companyAccess.test.ts`. See the module's §12 Acceptance
+> Criteria for the current verification state (mostly automation-pending). The
+> tables below describe the intended coverage. **Planned (#550):** once demo
+> data is sourced from `supabase/seed.sql`, preview branches can exercise demo
+> mode, unblocking the `create_demo_company`/`reset_demo_company` integration
+> tests listed here.
+
 ### Unit Tests
 
 | Test | Description |
@@ -785,24 +840,56 @@ The template management API endpoints (section 9.4) exist for programmatic acces
 
 ## 12. Acceptance Criteria
 
-- [ ] `companies.demo_company_id` column exists
-- [ ] `companies.is_demo` column exists
-- [ ] `demo_data_templates` table exists with RLS policies
-- [ ] `system_admins` table and `is_system_admin()` function exist
-- [ ] `create_demo_company()` creates and seeds a demo company
-- [ ] `reset_demo_company()` wipes and re-seeds demo data
-- [ ] `sync_demo_access()` mirrors access entries on demo entry
-- [ ] Settings page shows demo mode controls (Enter/Exit/Reset)
-- [ ] Demo Mode banner appears on every page in demo mode
-- [ ] Header shows real company name + DEMO badge in demo mode
-- [ ] Full CRUD works in demo mode (standard company behavior)
-- [ ] Company selector hides demo companies (`is_demo = TRUE`)
-- [ ] Login redirect never targets a demo company
-- [ ] Onboarding card offers "Enter Demo Mode" on first visit
-- [ ] Entering demo mode preserves current page context
-- [ ] Exiting demo mode preserves current page context
-- [ ] Template versioning handles schema evolution gracefully
-- [ ] Demo data does not count toward usage limits or billing
+Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #337.
+
+> Note: the demo module ships with **no** unit/integration/E2E tests of its own — the client mutations are RPC wrappers in `utils/demoAccess.ts` and the RPC bodies live in `supabase/schema.prod.sql`. The only citable tests belong to the shared login-redirect path in `__tests__/utils/companyAccess.test.ts`. Everything else is automation-pending with the responsible function/RPC named.
+
+**Schema & platform foundation**
+
+- [ ] **Given** the `companies` table, **when** its columns are inspected, **then** `demo_company_id` (FK → companies, ON DELETE SET NULL) and `is_demo` (boolean, default false) both exist — *manual: `supabase/schema.prod.sql` lines 21–22 + `companies_demo_company_id_fkey`*.
+- [ ] **Given** the platform-admin infrastructure, **when** the schema is inspected, **then** `demo_data_templates` (with system-admin-manage + read-active RLS), `system_admins` (with read/insert RLS), and the `SECURITY DEFINER` `is_system_admin()` helper all exist — *manual: `supabase/schema.prod.sql` (`demo_data_templates`, `system_admins`, `is_system_admin`)*.
+
+**Enter demo mode (create -> seed -> navigate)**
+
+- [ ] **Given** a real company with no demo yet, **when** the admin clicks "Set Up Demo Mode" in Settings, **then** `create_demo_company()` creates a `is_demo = TRUE` company named "<Real> - Demo", mirrors every `user_company_access` row (role + name), seeds it from the active template, and the app navigates to `/dashboard/[demoCompanyId]/…` — *automation-pending (`createDemoCompany` → `rpc('create_demo_company')`)*.
+- [ ] **Given** a company that already has a demo, **when** the admin re-enters demo mode, **then** no new company is created (idempotent early-return) and `sync_demo_access()` adds any missing team members / updates changed roles before navigating — *automation-pending (`syncDemoAccess` → `rpc('sync_demo_access')`)*.
+- [ ] **Given** the app in real mode, **when** demo mode is entered from `/parts`, **then** the destination path is `/dashboard/[demoCompanyId]/parts` (page context preserved via `pathname.replace(realCompanyId, demoCompanyId)`) — *automation-pending (`DemoModeProvider.enterDemoMode`)*.
+- [ ] **Given** demo mode is active, **when** any dashboard page renders, **then** the Header shows the real company name plus a "DEMO" warning Chip and the info banner appears below the header on every page — *automation-pending (`Header.tsx` `isDemoMode` Chip + `DemoModeBanner` in `app/dashboard/[companyId]/layout.tsx`)*.
+
+**Full CRUD in demo (edit -> save -> reload -> persists)**
+
+- [ ] **Given** demo mode is active, **when** the user creates/edits/deletes any record (customer, part, quote, job, routing, inventory), **then** it behaves exactly like a real company — the write scopes to the demo `company_id` via RLS and, on reload, the change persists (it is a real row in the demo company) — *automation-pending: demo mode reuses the standard per-module access layer; no demo-specific write path exists.*
+- [ ] **Given** a demo record the user edited (e.g. changed a job's order quantity in demo mode), **when** the demo is **not** reset and the user re-enters demo mode later, **then** the edit is still present — *automation-pending: persistence is standard company behavior; there is no demo write layer to unit-test.*
+
+**Reset demo (wipe -> re-seed)**
+
+- [ ] **Given** a demo company with user edits, **when** the admin confirms "Reset Demo", **then** `reset_demo_company()` deletes all demo data in FK order (jobs/quotes/routings/parts/work_centers/vendors/customers + their children) and re-seeds from the active template, keeping the demo company row and access entries — *automation-pending (`resetDemoCompany` → `rpc('reset_demo_company')`)*.
+- [ ] **Given** the reset finished, **when** the demo pages reload, **then** the user's prior edits are gone and the template dataset is back (verified by the `resetKey` remount in `DemoModeProvider`) — *reload-persistence E2E automation-pending (#367); write path automation-pending (`reset_demo_company`)*.
+- [ ] **Given** a source company with no demo, **when** `reset_demo_company()` is called, **then** it raises "No demo company exists for company: …" — *automation-pending (`reset_demo_company`)*.
+
+**Exit demo mode**
+
+- [ ] **Given** demo mode is active on `/jobs`, **when** the user clicks "Back to My Company", **then** the app navigates to `/dashboard/[realCompanyId]/jobs`, the banner disappears, and real data is shown — *automation-pending (`DemoModeProvider.exitDemoMode`)*.
+
+**Isolation, selector & login redirect**
+
+- [ ] **Given** a user with a real company + a demo company, **when** the company selector lists their companies, **then** the demo company is filtered out (`getUserCompanies` drops rows where `companies.is_demo`) — *automation-pending (`getUserCompanies` demo filter is untested; the underlying multi-company listing is exercised by `__tests__/utils/companyAccess.test.ts > 'companyAccess utilities' > 'getUserCompanies' > 'returns companies user has access to'`)*.
+- [ ] **Given** a user whose last-visited company was a demo, **when** they log in, **then** `getPostLoginRoute` never targets it — `setLastCompany` refuses to persist a demo company as `last_company_id`, and an inaccessible/absent last company falls back to the selector — *fallback path verified by `__tests__/utils/companyAccess.test.ts > 'companyAccess utilities' > 'getPostLoginRoute' > 'returns /select-company when last company is no longer accessible'`; the `is_demo` guard in `setLastCompany` is itself automation-pending*.
+- [ ] **Given** a valid (real) last company, **when** a multi-company user logs in, **then** they land on that company's dashboard — *verified by `__tests__/utils/companyAccess.test.ts > 'companyAccess utilities' > 'getPostLoginRoute' > 'returns dashboard for multi-company user with valid last company'`*.
+- [ ] **Given** billing/usage-limit queries, **when** they count companies or data, **then** demo companies are excluded (`WHERE is_demo = FALSE`), as the admin company list already does — *manual: `api/routes/admin_routes.py` filters `.eq("is_demo", False)`; no billing/limits feature exists yet to test.*
+
+**Onboarding & operator**
+
+- [ ] **Given** a brand-new empty company with no demo, **when** the dashboard loads and the onboarding card has not been dismissed, **then** the "Welcome to Jigged!" card offers "Enter Demo Mode" / "Skip, I'll start fresh"; dismissing it writes `jigged_onboarding_dismissed[companyId]` to localStorage and it does not reappear — *automation-pending (`OnboardingCard`)*.
+- [ ] **Given** an operator with mirrored demo access, **when** they enter demo mode, **then** they see the demo jobs/operations with no special toggle (roles are mirrored at create + lazy-synced) — *automation-pending (`sync_demo_access`)*.
+
+**Template versioning**
+
+- [ ] **Given** a template missing newly-added optional fields, **when** `seed_demo_data()` runs, **then** it loads successfully using `COALESCE` defaults (backward-compatible across schema evolution) — *automation-pending (`seed_demo_data`)*.
+
+**No manual create route**
+
+- [ ] **Given** the app, **when** a user looks for a demo "create" HTTP endpoint or a `settings/demo` page, **then** none exists — the only entry points are the Settings demo card and the onboarding card, both calling `demoAccess.ts` RPC wrappers — *manual: no `/api/demo/*` route in `api/`, no `app/dashboard/[companyId]/settings/demo/` directory*.
 
 ---
 
@@ -839,7 +926,7 @@ The template management API endpoints (section 9.4) exist for programmatic acces
 
 ## 16. Supersedes
 
-This PRD supersedes both the [Demo Company](./demo-company.md) PRD and the [Sample Data](./sample-data.md) PRD.
+This PRD supersedes the [Demo Company](./demo-company.md) PRD and the earlier Sample Data PRD (since removed).
 
 **Lineage:**
 

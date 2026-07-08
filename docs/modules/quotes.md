@@ -89,7 +89,7 @@ The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_
 | lead_time_days | Integer | No | **Normalized** calendar days, derived from `lead_time_value`/`lead_time_unit` on save; copied to `jobs.lead_time_days` on conversion |
 | lead_time_value | Integer | No | Lead time as the user states it (the number; unit in `lead_time_unit`) |
 | lead_time_unit | Text | No | `business_days` \| `calendar_days` \| `weeks` (default `business_days`) |
-| payment_terms | Text | No | Payment terms shown on the quote (preset or custom free text), e.g. `Net 30`, `2/10 Net 30` |
+| payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Net 30`, `2/10 Net 30`. Required at the form level — every quote carries payment terms |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
 | status_changed_at | Timestamp | No | When `status` last changed |
@@ -112,7 +112,7 @@ One row per **(part, quantity)** on a quote. Created at quote creation by resolv
 | part_id | UUID (FK) | Yes | Snapshot of the part this line item priced |
 | source_tier_id | UUID (FK) | No | Soft reference to the originating `part_pricing_tiers` row (set null if the tier is later deleted) |
 | sequence | Integer | Yes | Display/print order (10, 20, 30 …) |
-| quantity | Integer | Yes | Quoted order quantity, > 0 (need not match a tier breakpoint) |
+| quantity | Numeric | Yes | Quoted order quantity, > 0 (need not match a tier breakpoint). **Fractional** — supports parts sold by the dozen, ounce, pound, or length, so it is not restricted to whole numbers |
 | unit_price | Decimal(12,4) | Yes | Snapshotted unit price (matches tier or the user's quote-form override) |
 | total_price | Decimal(12,4) | No | `quantity × unit_price` |
 | markup_percent | Decimal(5,2) | No | Snapshotted markup at creation time |
@@ -205,7 +205,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Lead time — a whole-number **value** plus a **unit** dropdown (Business days / Calendar days / Weeks; defaults to business days). Required. Normalized to a calendar-day count (`lead_time_days`) on save so quote→job conversion is unaffected.
 - Expiration date (defaults to today + 10 days)
-- Payment terms — a combobox of common presets (Net 15, Net 30, 2/10 Net 30, Net 45/60/90, Due on Receipt, COD, 50% Deposit / Balance Net 30) that also accepts custom free text (e.g. "Net 30, 1% late charge"). Optional.
+- Payment terms — a combobox of common presets (Net 15, Net 30, 2/10 Net 30, Net 45/60/90, Due on Receipt, COD, 50% Deposit / Balance Net 30) that also accepts custom free text (e.g. "Net 30, 1% late charge"). Required — the form blocks submission until a preset or custom value is entered.
 
 **Actions:**
 
@@ -216,7 +216,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - At least one part block is required; each block must have a part selected.
 - A part may appear in only one block (its quantities go in that block's rows).
-- Every quantity row must be a whole number > 0; quantities must be unique within a part.
+- Every quantity row must be a number > 0 (fractional allowed, for parts sold by the dozen / weight / length); quantities must be unique within a part.
 - Each non-override row must resolve to a priced tier, or use a custom price.
 - Lead time is required: a whole-number value (with unit) that normalizes to 0 – 3,650 days.
 
@@ -242,22 +242,22 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
   - A custom-price line shows a "custom" chip next to its unit price.
 - The old standalone **"Pricing tiers (reference)"** section was removed — the quantity rows are the price-break display now.
 
-**Actions — one row only:** a single **primary "Convert to Job"** button plus an
-**overflow (`⋮`) menu** holding the rest (Edit, View PDF, Email, Delete). This
-keeps the page to one line of actions and uses labelled menu items rather than a
-row of bare icons — better for the shop-floor tablet / older-user audience
+**Actions — one row of standalone buttons (no overflow menu):** a contained
+**primary "Convert to Job"**, an outlined **Edit**, an outlined **View PDF**, and a
+red **Delete** icon button, laid out on a single row. Labelled buttons (rather than
+a hidden `⋮` icon menu) read better for the shop-floor tablet / older-user audience
 ([NN/G](https://www.nngroup.com/articles/icon-usability/) on icon ambiguity).
-`Back to Quotes` stays top-left. Availability by status:
+`Back to Quotes` stays top-left. Availability is gated purely by `converted_at`:
 
-| Current State | Primary | Overflow menu |
-|---|---|---|
-| Active, not converted | Convert to Job | Edit, View PDF, Email, Delete |
-| Active, converted | — (no primary) | View PDF, Email, Delete (line items are frozen) |
-| Expired | Convert with warning | Edit, View PDF, Email, Delete |
+| Current State | Buttons shown |
+|---|---|
+| Active or Expired, not converted | Convert to Job, Edit, View PDF, Delete |
+| Converted | View PDF, Delete (Convert and Edit hidden — line items are frozen) |
 
-**View PDF** and **Email** live in the overflow menu (Email opens the
-[Email dialog](#emailing-a-quote)); both are available in every status. See
-[Printing Quotes](#printing-quotes) below.
+Expired quotes still show **Convert to Job**; the expired-price warning surfaces in
+the Convert modal rather than gating the button. **View PDF** is always available;
+see [Printing Quotes](#printing-quotes) below. (Email was descoped — there is no
+Email action on the detail page.)
 
 ### 4. Convert to Job Modal
 
@@ -379,15 +379,15 @@ To streamline the quoting workflow, users can create new customers and parts dir
 
 ### Acceptance Criteria (Quick Create)
 
-- [ ] "+ New Customer" button visible next to customer dropdown
-- [ ] Quick Create Customer modal opens with required fields
-- [ ] New customer auto-selected after creation
-- [ ] "+ New Part" button visible inside a part block
-- [ ] Quick Create Part modal asks for name + description only
-- [ ] New part auto-selected in the part block after creation
-- [ ] Block warns "no pricing tiers yet" until the user adds tiers on the part detail page
-- [ ] Validation errors display inline in modals
-- [ ] Success toast shown after creation
+- [ ] "+ New Customer" button visible next to customer dropdown — *(automation-pending)*
+- [ ] Quick Create Customer modal opens with required fields — *(automation-pending)*
+- [ ] New customer auto-selected after creation — *(automation-pending)*
+- [ ] "+ New Part" button visible inside a part block — *(automation-pending)*
+- [ ] Quick Create Part modal asks for name + description only — *(automation-pending)*
+- [ ] New part auto-selected in the part block after creation — *(automation-pending)*
+- [ ] Block warns "no pricing tiers yet" until the user adds tiers on the part detail page — *(automation-pending)*
+- [ ] Validation errors display inline in modals — *(automation-pending)*
+- [ ] Success toast shown after creation — *(automation-pending)*
 
 ---
 
@@ -514,56 +514,56 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 ### Core Functionality
 
-- [ ] Can view paginated list of quotes
+- [ ] Can view paginated list of quotes — *(automation-pending)*
 
-- [ ] Can search quotes by number
+- [ ] Can search quotes by number — *(automation-pending)*
 
-- [ ] Can filter by status (active / expired)
+- [ ] Can filter by status (active / expired) — *(automation-pending)*
 
-- [ ] Can filter by customer
+- [ ] Can filter by customer — *(automation-pending)*
 
-- [ ] Can create a quote with one or more parts; each part contributes one or more quantity rows (each a snapshotted line item)
+- [ ] Can create a quote with one or more parts; each part contributes one or more quantity rows (each a snapshotted line item) — *(automation-pending)*
 
-- [ ] Form blocks submission until every part block has a part selected and at least one valid quantity row (quantities unique within a part)
+- [ ] Form blocks submission until every part block has a part selected and at least one valid quantity row (quantities unique within a part) — *(automation-pending)*
 
-- [ ] Quote header is editable (customer, lead time value + unit, payment terms, expiration), and all persist across reload. Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default
+- [ ] Quote header is editable (customer, lead time value + unit, payment terms, expiration), and all persist across reload. Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default — *(automation-pending)*
 
-- [ ] List page has no Total column (totals live on the detail page / PDF for firm quotes)
+- [ ] List page has no Total column (totals live on the detail page / PDF for firm quotes) — *(automation-pending)*
 
-- [ ] List page Jobs column shows links to every job spawned from the quote
+- [ ] List page Jobs column shows links to every job spawned from the quote — *(automation-pending)*
 
-- [ ] Cost breakdown view groups operations + materials + tier prices per distinct part on the quote
+- [ ] Cost breakdown view groups operations + materials + tier prices per distinct part on the quote — *(automation-pending)*
 
-- [ ] `override` chip shown on tiers whose unit price was locked manually
+- [ ] `override` chip shown on tiers whose unit price was locked manually — *(automation-pending)*
 
-- [ ] Quote number auto-generates (Q-0001 format)
+- [ ] Quote number auto-generates (Q-0001 format) — *(automation-pending)*
 
-- [ ] Setup-only operations (run = 0, setup > 0) appear in the cost breakdown with `run_cost = 0` and a non-zero setup cost (regression test for #224)
+- [ ] Setup-only operations (run = 0, setup > 0) appear in the cost breakdown with `run_cost = 0` and a non-zero setup cost (regression test for #224) — *(automation-pending)*
 
 ### Convert to Job
 
-- [ ] Modal groups the quote's lines by part; a multi-quantity part shows a radio per quoted quantity
+- [ ] Modal groups the quote's lines by part; a multi-quantity part shows a radio per quoted quantity — *(automation-pending)*
 
-- [ ] A single-quantity part is auto-included (no radio to pick)
+- [ ] A single-quantity part is auto-included (no radio to pick) — *(automation-pending)*
 
-- [ ] Convert button stays disabled until every multi-quantity part has a quantity selected
+- [ ] Convert button stays disabled until every multi-quantity part has a quantity selected — *(automation-pending)*
 
-- [ ] Convert button stays disabled until a Customer PO is entered; `convertQuoteToJob` rejects an empty/missing PO ("Customer PO is required to convert a quote to a job.")
+- [ ] Convert button stays disabled until a Customer PO is entered; `convertQuoteToJob` rejects an empty/missing PO ("Customer PO is required to convert a quote to a job.") — *(automation-pending)*
 
-- [ ] `convertQuoteToJob` rejects a set that resolves to more than one line for any part (options-quote guard)
+- [ ] `convertQuoteToJob` rejects a set that resolves to more than one line for any part (options-quote guard) — *(automation-pending)*
 
-- [ ] Conversion creates ONE job with one `job_part` per selected line, each with `source_quote_line_item_id` set
+- [ ] Conversion creates ONE job with one `job_part` per selected line, each with `source_quote_line_item_id` set — *(automation-pending)*
 
-- [ ] Quote sets `converted_at` (status unchanged) and keeps all line items; detail page shows the linked job banner
+- [ ] Quote sets `converted_at` (status unchanged) and keeps all line items; detail page shows the linked job banner — *(automation-pending)*
 
 ### Per-part price override
 
-- [ ] Each part block exposes a single "✏ Use custom price" toggle (one per part, not per quantity)
-- [ ] Expanding the editor shows a Custom unit price input that applies to every quantity of the part (markup % is no longer a quote-form input)
-- [ ] When a custom price is set, the block shows a green "adjusted for this quote" chip
-- [ ] Every resulting `quote_line_items` row for the part carries `is_quote_override = true` and the typed unit price
-- [ ] The cost-breakdown view renders a green "✏ adjusted for this quote" chip on overridden line items
-- [ ] The part's tier is unchanged
+- [ ] Each part block exposes a single "✏ Use custom price" toggle (one per part, not per quantity) — *(automation-pending)*
+- [ ] Expanding the editor shows a Custom unit price input that applies to every quantity of the part (markup % is no longer a quote-form input) — *(automation-pending)*
+- [ ] When a custom price is set, the block shows a green "adjusted for this quote" chip — *(automation-pending)*
+- [ ] Every resulting `quote_line_items` row for the part carries `is_quote_override = true` and the typed unit price — *(automation-pending)*
+- [ ] The cost-breakdown view renders a green "✏ adjusted for this quote" chip on overridden line items — *(automation-pending)*
+- [ ] The part's tier is unchanged — *(automation-pending)*
 
 ### Edit policy (line-item reconcile, frozen pricing, drift)
 
@@ -571,7 +571,7 @@ This section is the authoritative spec for editing an existing quote. It superse
 
 **Pricing basis snapshot (the data shape this all depends on)**
 
-- [ ] On create and on add-line, a `quote_line_items` row stores the **pricing basis** (the relevant tier breaks, the markup %, and the rates) that produced its `unit_price` — *verified by `__tests__/utils/quotesAccess.test.ts > 'createQuote snapshots pricing basis'` AND the basis column visible in `supabase/schema.staging.sql` after the schema migration ships*.
+- [ ] On create and on add-line, a `quote_line_items` row stores the **pricing basis** (the relevant tier breaks, the markup %, and the rates) that produced its `unit_price` — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'buildPricingBasisSnapshot' > 'captures only priced tiers and records the resolved tier'` AND the `pricing_basis_snapshot jsonb` column present on `quote_line_items` in `supabase/schema.prod.sql`; createQuote's snapshot-write path automation-pending (`createQuote`)*.
 - [ ] The pricing basis is stored as a structured snapshot, not only the resolved `unit_price` — *verified by the migration adding a `pricing_basis_snapshot jsonb` (or similarly-named) column to `quote_line_items`*.
 
 **Existing-quote handling (Option C — locked)**
@@ -581,33 +581,33 @@ Rows that existed before the basis-snapshot migration are flagged `basis_unknown
 Option A (backfill the basis column from current tiers at the original quantity) is **explicitly dropped**. It would fabricate a pricing history that never existed — the Contour data loaded from Tangle has no basis and would get a false-history snapshot written into it, and the system would then report "no drift" on quotes that genuinely drifted. That violates the [no-silent-fallbacks engineering principle in CLAUDE.md](../../CLAUDE.md#no-silent-runtime-fallbacks-for-data-at-rest-issues). Option B (basis-unknown with no chip) is the silent-degradation variant of C and is also rejected.
 
 - [ ] Pre-snapshot rows are marked `basis_unknown = true` and render a "basis unknown" chip in the edit form — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'basis-unknown chip renders on pre-snapshot lines'`*.
-- [ ] On a `basis_unknown` line, drift detection compares the resolved `unit_price` to the current tier price (degraded signal) — *verified by `__tests__/utils/quotesAccess.test.ts > 'basis-unknown line uses resolved-vs-current drift comparison'`*.
+- [ ] On a `basis_unknown` line, drift detection compares the resolved `unit_price` to the current tier price (degraded signal) — *verified by `__tests__/utils/quotesAccess.test.ts > 'detectQuoteLineDrift' > 'basis-unknown rows use degraded comparison and surface when current resolved price differs'` AND `__tests__/utils/quotePricingResolver.test.ts > 'isDriftedDegraded — basis_unknown rows' > 'flags drift when current resolved price differs from stored unit_price'`*.
 
 **Reconcile on save**
 
-- [ ] Opening an existing quote, adding a part, saving, reloading the page shows the new line persisted — *verified by `e2e/quote-edit.spec.ts > 'add part persists across reload'`*.
-- [ ] Opening an existing quote, removing a part, saving, reloading shows the line gone — *verified by `e2e/quote-edit.spec.ts > 'remove part persists across reload'`*.
-- [ ] Opening an existing quote, editing a line's quantity, saving, reloading shows the new quantity and a `unit_price` computed against the line's SNAPSHOTTED basis curve (not current tiers) — *verified by `e2e/quote-edit.spec.ts > 'quantity change persists and honors snapshotted basis'`*.
-- [ ] `updateQuote()` reconciles `quote_line_items` (insert new, update edited, delete removed), mirroring `createQuote()`'s pattern — *verified by `__tests__/utils/quotesAccess.test.ts > 'updateQuote reconciles line items on edit'`*.
+- [ ] Opening an existing quote, adding a part, saving, reloading the page shows the new line persisted — *verified by `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'add part, edit qty, remove part — all three persist across reload'`*.
+- [ ] Opening an existing quote, removing a part, saving, reloading shows the line gone — *verified by `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'add part, edit qty, remove part — all three persist across reload'`*.
+- [ ] Opening an existing quote, editing a line's quantity, saving, reloading shows the new quantity and a `unit_price` computed against the line's SNAPSHOTTED basis curve (not current tiers) — *reload persistence verified by `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'add part, edit qty, remove part — all three persist across reload'`; snapshotted-basis recompute verified by `__tests__/utils/quotePricingResolver.test.ts > 'resolveTierFromSnapshot — quantity change honors snapshotted basis' > 'quantity change honors snapshotted basis'`*.
+- [ ] `updateQuote()` reconciles `quote_line_items` (insert new, update edited, delete removed), mirroring `createQuote()`'s pattern — *verified by `__tests__/utils/quotesAccess.test.ts > 'updateQuote — reconcile (Issue #324 / #317 policy)' > 'reconciles line items on edit — insert new, update qty, delete removed'`*.
 
 **Frozen-by-default pricing**
 
-- [ ] Editing only header fields (customer, lead time, expiration) and saving leaves every line's `unit_price` exactly as it was, and reloading confirms this — *verified by `e2e/quote-edit.spec.ts > 'header-only edit leaves every unit_price unchanged after reload'` AND `__tests__/utils/quotesAccess.test.ts > 'header-only edit leaves all unit prices unchanged'`*.
-- [ ] Quantity changes recompute via `resolveTier()` against the snapshotted basis — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'resolves against arbitrary tier set'` AND `__tests__/utils/quotesAccess.test.ts > 'quantity change recomputes against snapshotted basis, not current tiers'`*.
-- [ ] Lines with `is_quote_override = true` are never repriced under any circumstance (header edit, qty change, drift control, anything) — *verified by `__tests__/utils/quotesAccess.test.ts > 'override line stays frozen even on quantity change'` AND `e2e/quote-edit.spec.ts > 'override line stays frozen across edit and reload'`*.
+- [ ] Editing only header fields (customer, lead time, expiration) and saving leaves every line's `unit_price` exactly as it was, and reloading confirms this — *closest coverage is `__tests__/utils/quotesAccess.test.ts > 'updateQuote — reconcile (Issue #324 / #317 policy)' > 'unchanged lines keep snapshotted unit_price (no reprice on edit)'`; a dedicated header-only edit → reload E2E is automation-pending (`updateQuote`)*.
+- [ ] Quantity changes recompute via `resolveTier()` against the snapshotted basis — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'resolveTierFromSnapshot — quantity change honors snapshotted basis' > 'quantity change honors snapshotted basis'`*.
+- [ ] Lines with `is_quote_override = true` are never repriced under any circumstance (header edit, qty change, drift control, anything) — *write path verified by `__tests__/utils/quotesAccess.test.ts > 'updateQuote — reconcile (Issue #324 / #317 policy)' > 'NEVER reprices an override line, even if acceptDriftLineItemIds includes it'`; override-frozen reload-persistence E2E automation-pending (`updateQuote`)*.
 
 **Drift detection and flag UI**
 
 Drift = the current tier table differs from the line's snapshotted basis. Quantity-curve movement when the user changes a quantity is NOT drift; it's expected behavior computed against the snapshot.
 
-- [ ] A detection helper returns the set of line IDs whose current tier price differs from the snapshotted basis — *verified by `__tests__/utils/quotesAccess.test.ts > 'detectDrift returns flagged line IDs'`*.
-- [ ] On the edit form, drifted lines render a chip showing snapshotted price next to current price — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders drift chip on flagged lines'`*.
-- [ ] The form renders a per-line "Update to current price" control on each drifted line AND an "Update all flagged" bulk control above the lines list — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders per-line and update-all drift controls'`*.
-- [ ] Clicking the per-line control queues that line for repricing on save; the actual reprice happens at save time — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'per-line update marks line for reprice'`*.
-- [ ] The drift flag is NON-BLOCKING on untouched lines: a user can save a quote with drifted lines and never click any drift control — *verified by `e2e/quote-edit.spec.ts > 'untouched drifted line does not require user action to save'`*.
-- [ ] **An untouched drifted line keeps its original price after reload** — *verified by `e2e/quote-edit.spec.ts > 'untouched drifted line does not reprice on save'`*.
-- [ ] Drifted lines reprice only on explicit user choice (per-line control or update-all) — *verified by `e2e/quote-edit.spec.ts > 'drifted line repriced only via explicit control'`*.
-- [ ] `is_quote_override = true` lines are NEVER flagged as drifted, even if their tier has moved — *verified by `__tests__/utils/quotesAccess.test.ts > 'override lines never appear in drift set'` AND `__tests__/components/quotes/QuoteForm.test.tsx > 'override line never renders drift chip'`*.
+- [ ] A detection helper returns the set of line IDs whose current tier price differs from the snapshotted basis — *verified by `__tests__/utils/quotesAccess.test.ts > 'detectQuoteLineDrift' > 'returns flagged line IDs when current tier differs from snapshot'`*.
+- [ ] On the edit form, drifted lines render a chip showing snapshotted price next to current price — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders per-line drift chip and Update-all bulk control on flagged lines'`*.
+- [ ] The form renders a per-line "Update to current price" control on each drifted line AND an "Update all flagged" bulk control above the lines list — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'renders per-line drift chip and Update-all bulk control on flagged lines'` AND `__tests__/components/quotes/QuoteForm.test.tsx > 'Update-all bulk control opts every flagged line in at once'`*.
+- [ ] Clicking the per-line control queues that line for repricing on save; the actual reprice happens at save time — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'per-line update marks line for reprice — drift id flows into acceptDriftLineItemIds on save'`*.
+- [ ] The drift flag is NON-BLOCKING on untouched lines: a user can save a quote with drifted lines and never click any drift control — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'untouched drifted line saves without sending its id in acceptDriftLineItemIds (keeps snapshotted price)'` AND `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'untouched drifted line keeps original price after reload'`*.
+- [ ] **An untouched drifted line keeps its original price after reload** — *verified by `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'untouched drifted line keeps original price after reload'`*.
+- [ ] Drifted lines reprice only on explicit user choice (per-line control or update-all) — *verified by `e2e/quote-edit.spec.ts > 'Quote edit — reload contract' > 'drifted line repriced only via explicit control'`*.
+- [ ] `is_quote_override = true` lines are NEVER flagged as drifted, even if their tier has moved — *verified by `__tests__/utils/quotesAccess.test.ts > 'detectQuoteLineDrift' > 'override lines never appear in drift set'` AND `__tests__/components/quotes/QuoteForm.test.tsx > 'override line never renders drift chip'`*.
 
 **Forced keep-or-update: DROPPED ([Issue #325](https://github.com/debola31/Jigged/issues/325) decision, 2026-06-04)**
 
@@ -615,7 +615,7 @@ The forced-choice path — block save on an actively-edited drifted line until t
 
 If post-pilot data shows drift is more frequent than estimated, forced-choice can be revisited as a follow-up; it is not part of #324's implementation scope.
 
-- [x] Editing a drifted line and saving without making a drift choice uses the non-blocking chip behavior — the line keeps its snapshotted price unless the per-line control was clicked — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edit-time drift uses non-blocking chip only'`*.
+- [x] Editing a drifted line and saving without making a drift choice uses the non-blocking chip behavior — the line keeps its snapshotted price unless the per-line control was clicked — *verified by `__tests__/components/quotes/QuoteForm.test.tsx > 'edit-time drift uses non-blocking chip only — save is enabled without making a drift choice'`*.
 
 **Verification rule for the whole section**
 
@@ -625,7 +625,7 @@ Every editable behavior above has at least one `edit → save → reload → ass
 
 ## Printing Quotes
 
-Quote detail pages expose **View PDF** (in the actions overflow menu) that generates a customer-facing PDF locally in the browser (no server round-trip).
+Quote detail pages expose a standalone **View PDF** button that generates a customer-facing PDF locally in the browser (no server round-trip).
 
 **What the PDF contains:**
 
@@ -645,23 +645,9 @@ Quote detail pages expose **View PDF** (in the actions overflow menu) that gener
 
 **Filename:** `Quote-{quote_number}.pdf`
 
-## Emailing a Quote
-
-The overflow menu's **Email** action opens the **Quote Email dialog**
-(`components/quotes/QuoteEmailDialog.tsx`) rather than jumping straight to a bare
-`mailto:`. The dialog:
-
-- Seeds **To** with the customer's primary contact and lets the user add multiple
-  **To** and **Cc** addresses (chip inputs, basic email validation + de-dupe).
-- Shows the **example subject and message** (editable) so the user sees exactly
-  what will be sent.
-- On **Confirm**, does both: **downloads the quote PDF** (`Quote-{number}.pdf`) and
-  opens the user's default mail client via `buildQuoteMailto(quote, company, { to, cc, subject, body })`.
-- Reminds the user — `mailto:` can't carry an attachment — to **attach the
-  downloaded PDF** before sending.
-
-The email leaves from the salesperson's own mailbox, so replies and a sent-copy
-come for free; there is no server send.
+> **Email descoped.** An in-app "email this quote" action (a `mailto:`-backed
+> dialog) was intentionally removed — the detail page has no Email button, and
+> users send the downloaded PDF from their own mail client. There is no server send.
 
 **Branding:** Upload your logo at `/dashboard/{companyId}/settings` (admin-only, Company Branding card). PNG, JPG, or WebP up to 2 MB. SVGs are accepted for storage but currently fall back to a text-only header in the PDF — use a raster format for logos that should appear. If no logo is uploaded, the PDF renders with the company name only.
 
@@ -697,11 +683,11 @@ While creating a quote, users can create new entities without leaving the form:
 
 **Parts:** at least one part block; each block must have a part selected. A part may appear in only one block.
 
-**Quantities:** each block needs at least one quantity row; every quantity must be a whole number > 0 and unique within the part. Each non-override row must resolve to a priced tier (or use a custom price).
+**Quantities:** each block needs at least one quantity row; every quantity must be a number > 0 (fractional allowed — parts sold by the dozen / ounce / pound / length) and unique within the part. Each non-override row must resolve to a priced tier (or use a custom price).
 
 **Lead time:** required — a whole-number value plus a unit (business days / calendar days / weeks); normalizes to 0 – 3,650 days.
 
-**Payment terms:** optional — preset or custom free text.
+**Payment terms:** required — preset or custom free text; submission is blocked until a value is entered.
 
 **Expiration date:** ISO date (defaults to created + 10 days)
 

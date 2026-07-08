@@ -859,21 +859,23 @@ if (!hasDemoCompany) {
 
 ## 12. Acceptance Criteria
 
-- [ ] `system_admins` table exists with RLS policies
-- [ ] `is_system_admin()` function works correctly with `SECURITY DEFINER`
-- [ ] At least one bootstrap admin can be added via direct SQL
-- [ ] `demo_templates` table exists with RLS policies
-- [ ] `template_data` JSONB follows defined schema with `_ref` cross-references
-- [ ] `companies` table has `is_demo`, `demo_template_id`, `demo_owner_id` columns
-- [ ] `clone_demo_company()` creates a fully populated demo company
-- [ ] `reset_demo_company()` deletes and re-populates within 3 seconds
-- [ ] Signup flow creates demo company automatically
-- [ ] Demo operators can be authenticated via PIN in Operator View
-- [ ] DemoBanner displays when viewing a demo company
-- [ ] Demo company appears in company switcher with "(Demo)" badge
-- [ ] Reset Demo button works with confirmation dialog
-- [ ] Existing users receive demo company on next login (lazy creation)
-- [ ] Template versioning handles schema evolution gracefully
+> **SUPERSEDED — historical, not verifiable.** This checklist describes the v1 Demo Company design, which was never built and does not ship. None of the artifacts below exist in the codebase (`demo_templates`, `clone_demo_company()`, `companies.demo_template_id`/`demo_owner_id`, `DemoBanner`, the `/api/demo/*` routes, PIN-authenticated demo operators). The shipping feature is [Demo Mode](./demo-mode.md) — see its §12 for the live acceptance criteria and `docs/testing/divergence/demo-company.md` for the supersession evidence. The items are kept below verbatim for historical record only.
+
+- ~~`system_admins` table exists with RLS policies~~ *(revived under Demo Mode)*
+- ~~`is_system_admin()` function works correctly with `SECURITY DEFINER`~~ *(revived under Demo Mode)*
+- ~~At least one bootstrap admin can be added via direct SQL~~
+- ~~`demo_templates` table exists with RLS policies~~ *(v3 renamed → `demo_data_templates`)*
+- ~~`template_data` JSONB follows defined schema with `_ref` cross-references~~ *(v3 schema differs)*
+- ~~`companies` table has `is_demo`, `demo_template_id`, `demo_owner_id` columns~~ *(v3 uses `is_demo` + `demo_company_id`)*
+- ~~`clone_demo_company()` creates a fully populated demo company~~ *(never built; v3 = `create_demo_company()`)*
+- ~~`reset_demo_company()` deletes and re-populates within 3 seconds~~ *(v3 signature differs)*
+- ~~Signup flow creates demo company automatically~~ *(v3 = lazy, user-initiated from Settings)*
+- ~~Demo operators can be authenticated via PIN in Operator View~~ *(not built; v3 mirrors access instead)*
+- ~~DemoBanner displays when viewing a demo company~~ *(v3 = `DemoModeBanner`)*
+- ~~Demo company appears in company switcher with "(Demo)" badge~~ *(v3 hides the demo company)*
+- ~~Reset Demo button works with confirmation dialog~~ *(shipped under Demo Mode)*
+- ~~Existing users receive demo company on next login (lazy creation)~~ *(v3 = onboarding card / Settings)*
+- ~~Template versioning handles schema evolution gracefully~~
 
 ---
 

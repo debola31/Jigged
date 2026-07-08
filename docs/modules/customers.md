@@ -27,24 +27,38 @@ The Customers module manages the master list of companies that the shop does bus
 
 ## Data Model
 
+The `customers` row holds only **identity** — name + website. Contacts and addresses were split into their own tables (`customer_contacts`, `customer_addresses`), so a customer can have many of each. There is **no** `notes` column, no embedded `phone`/`email`, and no embedded single-contact/single-address columns.
+
+**`customers`**
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| name | Text | Yes | Full company name |
-| phone | Text | No | Main phone number |
-| email | Text | No | Main email address |
+| name | Text | Yes | Full company name (unique per company — `customers_company_name_unique`) |
 | website | Text | No | Company website |
-| contact_name | Text | No | Primary contact person |
-| contact_phone | Text | No | Primary contact's phone |
-| contact_email | Text | No | Primary contact's email |
-| address_line1 | Text | No | Street address |
-| address_line2 | Text | No | Suite/unit |
-| city | Text | No | City |
-| state | Text | No | State/province |
-| postal_code | Text | No | ZIP/postal code |
-| country | Text | No | Country (default: USA) |
-| notes | Text | No | Internal notes |
 
-> **Note:** Contact and address fields (`contact_name`, `contact_phone`, `contact_email`, `address_line1`/`line2`, `city`, `state`, `postal_code`, `country`) appear on printed quote PDFs in the **Bill To** block. Keep them filled in for customers you send quotes to. Missing fields are skipped cleanly — no "null" placeholders.
+**`customer_contacts`** (one person at the customer; managed via `utils/customerContactsAccess.ts`)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| name | Text | Yes | Contact person's name |
+| role | Enum | Yes | `buyer` / `accounts_payable` / `engineering` / `quality` / `shipping_receiving` / `other` |
+| role_label | Text | When `role='other'` | Free-text label (DB CHECK requires it for `other`) |
+| email | Text | No | Contact email |
+| phone | Text | No | Contact phone |
+| is_primary | Boolean | — | At most one primary per customer (`customer_contacts_one_primary` partial unique index) |
+
+**`customer_addresses`** (managed via `utils/customerAddressesAccess.ts`)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| address_line1 / address_line2 | Text | No | Street / suite |
+| city / state / postal_code | Text | No | Locality (state/country picked from canonical lists) |
+| country | Text | No | Default `USA` |
+| attention_to | Text | No | "ATTN:" recipient line printed above the address on packing slips |
+| default_billing | Boolean | — | At most one default-billing address per customer (partial unique index) |
+| default_shipping | Boolean | — | At most one default-shipping address per customer (partial unique index) |
+
+> **Note:** A quote **snapshots** the chosen billing/shipping address and contact at creation time (via `pickBillingAddress` / `pickShippingAddress` / `pickPrimaryContact`), and the printed quote PDF renders that frozen snapshot in its customer block — it does not read the customer's current default. Keep contacts + addresses filled in for customers you send quotes to. Missing fields are skipped cleanly — no "null" placeholders.
 
 ---
 
@@ -56,15 +70,17 @@ The Customers module manages the master list of companies that the shop does bus
 
 **Features:**
 
-- Table showing: Name, Contact, Phone, City/State
+- AG Grid showing: Name, Contact (primary contact name), Email (primary contact email), Phone (primary contact phone), Location (default-billing city/state)
 
-- Search box (searches name)
+- Search box (searches name, case-insensitive, debounced)
 
-- "+ New Customer" button
+- "New Customer" and "Import" buttons
 
-- Click row to view/edit
+- Row checkboxes with a bulk **Delete** action (and Export CSV) shown when rows are selected
 
-- Pagination (25 per page)
+- Click row (or Enter on a focused row) to open the customer detail page
+
+- Client-side pagination (25 per page, selector for 25 / 50 / 100)
 
 **Empty State:**
 
@@ -82,53 +98,35 @@ The Customers module manages the master list of companies that the shop does bus
 
 - Website
 
-▸ **Primary Contact**
+▸ **Initial Contact (optional — create mode only)**
 
-- Contact Name
+An expandable accordion that captures one optional primary contact so a user can create the customer and its first contact in one step. Fields: Contact Name, Role, Email, Phone (Role label appears when Role = Other). Leaving all fields blank inserts no contact. In **edit mode this accordion is hidden** — contacts and addresses are managed on the customer detail page.
 
-- Phone
-
-- Email
-
-▸ **Address**
-
-- Address Line 1
-
-- Address Line 2
-
-- City
-
-- State
-
-- Postal Code
-
-- Country
-
-▸ **Other**
-
-- Notes (multiline)
+There are **no** Address or Notes sections on this form. Additional contacts and all addresses are added/edited on the detail page.
 
 **Actions:**
 
-- Save → Returns to list
+- Save → Create mode routes to the new customer's detail page; edit mode routes back to detail
 
-- Cancel → Returns to list without saving
+- Cancel → Returns without saving
 
-- Delete (edit mode only) → Confirmation dialog, then hard delete
+- Delete (edit mode only) → Confirmation dialog, then hard delete (cascades to contacts + addresses)
 
-### 3. Customer Detail (Optional for Phase 0)
+### 3. Customer Detail
 
 **Route:** `/dashboard/{companyId}/customers/{id}`
 
-Read-only view showing:
+The detail page is the hub for everything below the name:
 
-- All customer fields
+- Header card: name + website link + created/updated timestamps
 
-- Related quotes (future)
+- **Contacts** card — list of contacts with a primary star, role chip, and email/phone links; add/edit via `CustomerContactModal`, "Set as primary" on non-primary rows, and per-row delete
 
-- Related jobs (future)
+- **Addresses** card — list of addresses with Billing / Shipping / "Not assigned" chips; add/edit via the inline `CustomerAddressForm`, and per-row delete (deleting a default warns it will leave the customer without one)
 
-- Edit button
+- **Related** card — live counts of the customer's Quotes and Jobs
+
+- **Edit** button (routes to the `/edit` form) and a **Delete** button that is disabled when the customer has related quotes or jobs
 
 ---
 
@@ -317,54 +315,72 @@ API keys remain in environment variables (secure). Default provider is Claude if
 
 ## Acceptance Criteria
 
-### Core CRUD
+Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #333.
 
-- [ ] Can view paginated list of customers
+**List & search**
 
-- [ ] Can search customers by name
+- [ ] **Given** a company's customers, **when** the list page loads, **then** it renders an AG Grid of Name / Contact / Email / Phone / Location (primary contact + default-billing city/state joined per row) with client-side pagination at 25/page — *access-layer join verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'getAllCustomers' > 'returns customers for a company'`; grid rendering automation-pending (`CustomersPage`)*.
 
-- [ ] Can create new customer with required fields
+- [ ] **Given** the search box, **when** the user types a name fragment, **then** the list filters to customers whose name matches (case-insensitive `name.ilike`, debounced) — *verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'getAllCustomers' > 'applies search filter correctly'`*.
 
-- [ ] Can edit existing customer
+**Create**
 
-- [ ] Can delete a customer (hard delete with confirmation)
+- [ ] **Given** the New Customer form, **when** the user submits with a Company Name, **then** a customer row is inserted (name + website only) and the app routes to the new customer's detail page — *verified by `__tests__/components/customers/CustomerForm.test.tsx > 'CustomerForm' > 'Create mode' > 'creates customer and redirects on success'` AND write path by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'createCustomer' > 'inserts customer and returns data'`*.
 
-- [ ] Customer name is unique within company
+- [ ] **Given** the create form's optional "Initial Contact" accordion, **when** the user fills a contact name and submits, **then** `createCustomer` receives that contact and inserts it as the customer's primary — *write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'createCustomer' > 'inserts customer and returns data'` (the 3rd-arg initial-contact plumbing is asserted undefined-by-default in `__tests__/components/customers/CustomerForm.test.tsx > 'CustomerForm' > 'Create mode' > 'creates customer and redirects on success'`); populated-contact E2E automation-pending (#367)*.
 
-- [ ] Form shows validation errors inline
+- [ ] **Given** the create form, **when** the user submits an empty Company Name, **then** an inline "Company name is required" error shows and no insert fires — *verified by `__tests__/components/customers/CustomerForm.test.tsx > 'CustomerForm' > 'Validation' > 'shows error when name is empty on submit'`*.
 
-### AI-Powered Import
+- [ ] **Given** a name already used in the company, **when** the user submits, **then** an inline "A customer with this name already exists" error shows (enforced by the `customers_company_name_unique` constraint) and no insert fires — *verified by `__tests__/components/customers/CustomerForm.test.tsx > 'CustomerForm' > 'Create mode' > 'shows error for duplicate customer name'` AND lookup by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'checkCustomerNameExists' > 'returns true when name exists'`*.
 
-- [ ] Can upload CSV file and see preview
+- [ ] **Given** the New Customer dialog opened from the Quote form (`CustomerFormModal`), **when** it is closed and reopened, **then** the embedded form remounts empty (no stale Company Name) — *verified by `__tests__/components/customers/CustomerFormModal.test.tsx > 'CustomerFormModal — reopen remounts a fresh CustomerForm (formKey bump)' > 'clears a typed Company Name when the modal is closed and reopened (no stale value)'`*.
 
-- [ ] AI analyzes CSV and suggests column mappings
+**Edit (edit -> save -> reload -> persists)**
 
-- [ ] Confidence scores displayed with color coding (green/yellow/red)
+- [ ] **Given** an existing customer, **when** the edit form loads, **then** it pre-fills Company Name + Website and hides the Initial Contact accordion (contacts/addresses are edited on the detail page) — *verified by `__tests__/components/customers/CustomerForm.test.tsx > 'CustomerForm' > 'Edit mode' > 'pre-fills form with existing customer data'`*.
 
-- [ ] Can manually override AI-suggested mappings
+- [ ] **Given** an edited customer, **when** the user saves and the detail page reloads, **then** the new name/website persist — *write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'updateCustomer' > 'updates customer and returns data'`; reload-persistence E2E automation-pending (#367)*.
 
-- [ ] Shows unmapped required fields as alert
+- [ ] **Given** a customer contact, **when** the user edits it in `CustomerContactModal` and saves, **then** reopening the modal on that contact shows the saved values (re-seeded on open, no stale carry-over) — *write path verified by `__tests__/utils/customerAccess.test.ts` is N/A (contact writes live in `customerContactsAccess`, `updateCustomerContact`, automation-pending); modal re-seed verified by `__tests__/components/customers/CustomerContactModal.test.tsx > 'CustomerContactModal — reopen shows fresh (re-seeded) state' > 're-seeds the Name field from a DIFFERENT existing contact on reopen (no stale carry-over)'`*.
 
-- [ ] Detects duplicate name conflicts
+- [ ] **Given** two contacts on a customer, **when** the user marks a different one primary, **then** the previous primary is cleared and only the new one carries the star (DB `customer_contacts_one_primary` partial unique index) — *automation-pending (`setPrimaryContact`)*.
 
-- [ ] Can skip conflicts and import valid rows
+- [ ] **Given** a customer address, **when** the user edits it in the inline `CustomerAddressForm` and saves with Default Billing/Shipping checked, **then** that flag is cleared on any other address and the saved row shows the Billing/Shipping chip on reload — *automation-pending (`updateCustomerAddress`)*.
 
-- [ ] Shows import results: imported, skipped, errors
+**Delete**
 
-- [ ] Falls back to manual mapping if AI fails
+- [ ] **Given** a customer with zero quotes and zero jobs, **when** the user confirms delete, **then** the row is hard-deleted (its contacts + addresses cascade) and the app returns to the list — *write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'softDeleteCustomer' > 'deletes customer by ID'` (note: `softDeleteCustomer` performs a hard `.delete()` despite the name — rename tracked in #550); reload E2E automation-pending (#367)*.
 
-- [ ] AI provider configurable per company via database
+- [ ] **Given** a customer referenced by quotes or jobs, **when** the user opens its detail page, **then** the Delete button is disabled with a "Cannot delete — customer is referenced by quotes or jobs" tooltip; a bulk delete that hits the FK surfaces "Cannot delete some customers because they have associated parts, quotes, or jobs" — *automation-pending (detail-page guard reads `quotes_count`/`jobs_count` from `getCustomerWithRelations`; bulk guard is the `23503` branch in `bulkSoftDeleteCustomers`)*. **Resolved (#550): the "Delete Behavior" section below documents this shipped block; the snapshot + archive model that would let a referenced customer be removed is Planned, not yet built.**
+
+- [ ] **Given** a contact or address on the detail page, **when** the user deletes it, **then** a confirmation dialog appears (address dialog warns if a default is being removed) and the row is deleted independently of the customer — *automation-pending (`deleteCustomerContact` / `deleteCustomerAddress`)*.
+
+**AI-powered CSV import** (`/customers/import`, backed by FastAPI `/api/customers/import/{analyze,validate,execute}`)
+
+- [ ] **Given** a CSV, **when** the user uploads it and AI analysis returns mappings, **then** the review table shows one row per mapping with the CSV column and a needs-review alert when any mapping is low-confidence — *verified by `__tests__/components/import/MappingReviewTable.test.tsx > 'MappingReviewTable' > 'renders one row per mapping with csv_column + reasoning'` AND `> 'shows the needs-review alert with singular wording for one needs-review mapping'`*.
+
+- [ ] **Given** the review table, **when** the user picks a different DB field (or "Skip") for a column, **then** the mapping change fires with the new field (or null) — *verified by `__tests__/components/import/MappingReviewTable.test.tsx > 'MappingReviewTable' > 'calls onMappingChange with the new db_field when the user changes the dropdown'` AND `> 'calls onMappingChange with null when "Skip" is selected'`*.
+
+- [ ] **Given** validation returns duplicate-name conflicts, **when** the conflict dialog opens, **then** it shows can-import / will-skip / total counts and lets the user proceed importing only the valid rows — *verified by `__tests__/components/import/ConflictDialog.test.tsx > 'ConflictDialog' > 'renders the headline counts (can-import / will-skip / total)'` AND `> 'enables the import button and labels it with the count'` AND `> 'calls onConfirm when the import button is clicked'`*.
+
+- [ ] **Given** zero importable rows, **when** the conflict dialog renders, **then** the import button is disabled — *verified by `__tests__/components/import/ConflictDialog.test.tsx > 'ConflictDialog' > 'disables the import button when validRowsCount is 0'`*.
+
+- [ ] **Given** an import row that maps contact/address columns (`contact_name`/`contact_phone`/`contact_email`/`address_line1`…/`country`), **when** execute runs, **then** the backend writes a `customers` row plus an optional `customer_contacts` row and `customer_addresses` row per customer — *manual: `api/routes/import_routes.py` execute handler splits each CSV row into customer + contact + address payloads (`CUSTOMER_FIELDS` in `types/import.ts` defines the mappable set)*.
+
+- [ ] **Given** the AI provider config, **when** no `ai_config` row exists for the company, **then** import defaults to Claude; a per-company row can select another provider — *automation-pending (provider factory in `api/services/ai/`)*.
 
 ---
 
 ## Delete Behavior
 
-Customers can be deleted even if they have related quotes or jobs. When a customer is deleted:
+**Current (shipped): a customer that is referenced by quotes or jobs cannot be deleted through the app.** There is **no** "delete anyway and orphan the records" flow, and nothing sets `customer_id` to NULL as a product action today.
 
-- Related quotes will have their customer_id set to NULL (orphaned)
+- On the **detail page**, the Delete button is **disabled** whenever the customer has related quotes or jobs — the page computes `hasRelatedRecords` from the `quotes_count` / `jobs_count` returned by `getCustomerWithRelations` and shows a "Cannot delete — customer is referenced by quotes or jobs" tooltip.
 
-- Related jobs will have their customer_id set to NULL (orphaned)
+- The **bulk delete** path (`bulkSoftDeleteCustomers`) does not pre-check counts; it catches the Postgres foreign-key violation (`23503`) and surfaces "Cannot delete some customers because they have associated parts, quotes, or jobs. Remove those references first." The single-delete path (`softDeleteCustomer`) likewise does not pre-check and re-throws the raw FK error.
 
-- Related parts will have their customer_id set to NULL (become generic parts)
+- A delete that *does* succeed (an unreferenced customer) cascades only to that customer's own `customer_contacts` and `customer_addresses` (both `ON DELETE CASCADE`).
 
-A warning is shown in the delete confirmation dialog when the customer has related records.
+_DB-level detail (for accuracy):_ the foreign keys to `customers(id)` are mixed — `quotes.customer_id` and `jobs.customer_id` are `ON DELETE SET NULL`, `customer_contacts` / `customer_addresses` are `ON DELETE CASCADE`, and `shipments.customer_id` is `NOT NULL` with a plain FK (`NO ACTION`), so a customer that has shipments is what actually raises the `23503` the delete paths hit. The user-facing guard keys off the `quotes_count` / `jobs_count` check, independent of these constraints. (No `parts → customers` FK exists, despite the bulk error string mentioning "parts".)
+
+> **Planned: snapshot + archive model (see #550).** Not built yet. The intended direction is to (a) **snapshot** the customer's display fields (name, bill-to address, contact) onto quotes / jobs / invoices at creation so each document is self-describing; (b) keep a **nullable `customer_id` FK with `ON DELETE SET NULL`** solely for the live count/link; and (c) make **Archive** (an `is_active` flag) the default verb, with a gated **"Permanently delete"** for the rare hard removal. None of the pieces exist today — no snapshot columns, no `is_active` column, and no Archive UI. Do not treat this model as shipped.

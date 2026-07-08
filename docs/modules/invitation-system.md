@@ -2,36 +2,43 @@
 
 ## 1. Overview
 
-Enable viral growth through user-to-user referrals and streamlined team onboarding via email invitations.
+Enable streamlined team onboarding via email invitations: a company admin invites a
+new member by email + role, the recipient establishes their account, and they join the
+company with that role.
+
+> **Descoped — referrals.** An earlier draft of this spec also proposed user-to-user
+> **referral links** (shareable codes that let outsiders create their own companies as
+> an owner, for viral growth). That half is **out of scope** and unbuilt — no referral
+> tables, functions, routes, or UI exist. It is not on the roadmap; the referral-specific
+> prose below has been removed. This module is now team invitations only.
 
 ### Problem Statement
 
 - No mechanism to invite new users to the platform
 - Company admins cannot onboard team members without manually creating accounts
-- No viral growth loop — users cannot refer others to create their own companies
 
 ### Solution
 
-1. **Team Invitations:** Company admins send email invites for team members with specific roles
-2. **Referral Links:** Company admins generate shareable links for others to create their own companies
+**Team Invitations:** Company admins send email invites for team members with a specific
+role. The recipient opens the emailed link, sets their name/password, and joins the
+existing company with the assigned role.
 
 ### Role Model
 
-The `user_company_access.role` CHECK constraint allows 4 roles:
+The `user_company_access.role` CHECK constraint allows exactly **three** roles (there is
+**no `owner` role** — the first company creator is simply an `admin`):
 
 ```
-owner, admin, user, operator
+admin, user, operator
 ```
 
-This PRD uses the following roles for invitation targets:
+Invitations target the same three roles (`invitations_role_check` = `admin | user | operator`):
 
 | Invitation Role | Maps to DB Role | Notes |
 |----------------|-----------------|-------|
-| `admin` | `admin` | Full company access |
+| `admin` | `admin` | Full company access, incl. team management |
 | `user` | `user` | Can use all modules but cannot manage team/settings |
 | `operator` | `operator` | Shop floor access only |
-
-Referral link users who create their own company receive the `owner` role.
 
 ### Reconciliation with Existing Team Edge Function
 
@@ -42,9 +49,9 @@ The current team management system (`supabase/functions/team/index.ts`) creates 
 | Direct creation (existing) | Operators who don't have personal email, quick admin setup | Admin provides email + password via Edge Function |
 | Invitation (new) | Standard onboarding for knowledge workers | Admin sends email invite, recipient creates own account |
 
-The team management UI (`/dashboard/[companyId]/settings/team`) will show a unified view of all team members regardless of how they were added. An "Invite" button will be added alongside the existing "Add" button.
+The team management UI (`/dashboard/[companyId]/team`) shows a unified view of all team members regardless of how they were added. The Team page exposes per-role "Invite {Role}" buttons alongside the direct "Add Member" flow.
 
-> **Note:** The existing Edge Function validates `['admin', 'user', 'operator']` for roles (line 62, 154, 258). This should be updated to match the full role set from the DB CHECK constraint, but that is a separate fix — not gated on this PRD.
+> **Note:** Both the existing team Edge Function and `team-invites` validate roles against `['admin', 'user', 'operator']`, matching the `user_company_access_role_check` and `invitations_role_check` constraints. There is no `owner` role to reconcile.
 
 ---
 
@@ -52,38 +59,25 @@ The team management UI (`/dashboard/[companyId]/settings/team`) will show a unif
 
 ### Company Admin
 
-- Invite team members by email with a specific role
+- Invite team members by email with a specific role (`admin`, `user`, or `operator`)
 - View pending, accepted, and expired invitations
 - Resend invitation emails
 - Revoke pending invitations
-- Generate referral links (max 5 uses per link)
-- See who redeemed referral links
-- Revoke referral links
 
 ### Invited User (New)
 
 - Receive email with invitation link
-- Click link to see company name and assigned role
-- Sign up with email and password
+- Open the link (via `/auth/confirm`) and land on the accept-invite page showing company name and assigned role
+- Set first name, last name, and a password
 - Automatically join the company with the specified role
 - Can enter Demo Mode from Settings to explore features
 
 ### Invited User (Existing Account)
 
 - Receive email with invitation link
-- Click link, recognized as existing user
-- Log in (if not already logged in)
+- Open the link, recognized as an existing user with a session
 - Automatically join the company — no signup needed
 - Redirected to the new company's dashboard
-
-### Referred User
-
-- Click a referral link shared by someone
-- See "Referred by {Company Name}"
-- Sign up with email and password
-- Name their new company
-- Become the `owner` of the new company
-- Can enter Demo Mode from Settings to explore features
 
 ---
 
@@ -94,26 +88,29 @@ The team management UI (`/dashboard/[companyId]/settings/team`) will show a unif
 | Type | Initiator | Outcome |
 |------|-----------|---------|
 | Team Invite | Company Admin | Recipient joins existing company with specified role |
-| Referral Link | Company Admin | Recipient creates a new company as owner |
 
 ### 3.2 Limits & Expiry
 
 | Parameter | Value |
 |-----------|-------|
 | Team invite expiry | 7 days |
-| Referral link expiry | 30 days |
-| Referral link max uses | 5 per link |
 | Pending invites per email per company | 1 (prevent duplicates) |
-| Rate limit: invitations | 10 per hour per company |
-| Rate limit: referral link creation | 3 per hour per company |
+
+> **Rate limiting is deferred** — see §8. The `team-invites` Edge Function currently
+> enforces no per-company rate limit.
 
 ### 3.3 Role-Based Permissions
 
-| Role | Can Invite | Can Create Referrals | Can View Invitations |
-|------|-----------|---------------------|---------------------|
-| Owner | Yes | Yes | All |
-| Admin | Yes | Yes | All |
-| All other roles | No | No | No |
+Only `admin` can send, list, resend, or revoke invitations. `user` and `operator` have no
+invitation permissions. (There is no `owner` role.) The `team-invites` Edge Function
+enforces this via `verifyAdmin` (`role IN ('admin')`); the UI additionally gates the Team
+page behind `AdminGuard`.
+
+| Role | Can Invite | Can View Invitations |
+|------|-----------|----------------------|
+| Admin | Yes | All |
+| User | No | No |
+| Operator | No | No |
 
 ---
 
@@ -157,263 +154,78 @@ CREATE POLICY "Company admins can manage invitations"
     USING (is_company_admin(company_id));
 ```
 
-### 4.2 `referral_links` Table
-
-```sql
-CREATE TABLE referral_links (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    code VARCHAR(20) UNIQUE NOT NULL,
-    max_uses INTEGER DEFAULT 5,
-    current_uses INTEGER DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'active',
-    created_by UUID NOT NULL REFERENCES auth.users(id),
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT referral_links_status_check CHECK (
-        status IN ('active', 'exhausted', 'expired', 'revoked')
-    ),
-    CONSTRAINT referral_links_uses_check CHECK (current_uses <= max_uses)
-);
-
--- Indexes
-CREATE INDEX idx_referral_links_code ON referral_links(code);
-CREATE INDEX idx_referral_links_company_id ON referral_links(company_id);
-
--- RLS
-ALTER TABLE referral_links ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Company admins can manage referral_links"
-    ON referral_links FOR ALL
-    USING (is_company_admin(company_id));
-```
-
-### 4.3 `referral_redemptions` Table
-
-```sql
-CREATE TABLE referral_redemptions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    referral_link_id UUID NOT NULL REFERENCES referral_links(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id),
-    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    referred_by_company_id UUID NOT NULL REFERENCES companies(id),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes
-CREATE INDEX idx_referral_redemptions_link ON referral_redemptions(referral_link_id);
-CREATE INDEX idx_referral_redemptions_user ON referral_redemptions(user_id);
-
--- RLS
-ALTER TABLE referral_redemptions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Company admins can view their referral redemptions"
-    ON referral_redemptions FOR SELECT
-    USING (is_company_admin(referred_by_company_id));
-```
-
-> **Referral chain analytics:** The `referred_by_company_id` column enables tracking referral chains. To query "who referred who," join `referral_redemptions` → `referral_links` → `companies`. Multi-level chain queries (A referred B who referred C) use recursive CTEs on `referred_by_company_id`.
+> **Referrals descoped:** the earlier draft added `referral_links` and
+> `referral_redemptions` tables (with a `referred_by_company_id` chain column for
+> referral analytics). Neither table exists in the schema and neither is planned —
+> referrals are out of scope for this module.
 
 ---
 
-## 5. Token & Code Generation
+## 5. Invitation Identifier
 
-### 5.1 Invitation Tokens
+Invitations are identified by their primary-key **`id`** (a `uuid`). There is **no token
+column** and no separate referral code — the earlier `token`/`ref-code` design was never
+built.
 
-- **Length:** 64 characters
-- **Character set:** URL-safe alphanumeric (`a-zA-Z0-9`)
-- **Generation:** Python `secrets.token_urlsafe(48)` (produces 64 characters)
-- **Runtime:** FastAPI backend
-- **URL format:** `https://app.jigged.com/signup?invite=TOKEN`
-
-### 5.2 Referral Codes
-
-- **Length:** 8 characters
-- **Character set:** Uppercase alphanumeric, no ambiguous characters (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` — no I, O, 0, 1)
-- **Generation:** Python `''.join(secrets.choice(CHARSET) for _ in range(8))`
-- **Case-sensitivity:** Case-insensitive (stored and compared as uppercase)
-- **Runtime:** FastAPI backend
-- **URL format:** `https://app.jigged.com/signup?ref=CODE`
+- The accept link is keyed by `id`: the emailed `/auth/confirm` link resolves to
+  `/accept-invite/[invitationId]`.
+- The `invitations` table has no `token` column (confirm: columns are
+  `id, company_id, email, role, status, invited_by, accepted_by, expires_at, created_at, accepted_at`).
+- Row creation and the `id` are handled by the `team-invites` Edge Function insert (§11);
+  no application-side token/code generation exists.
 
 ---
 
 ## 6. Database Functions
 
-### 6.1 `validate_invitation_token()`
+The only invitation-related DB function that exists is `accept_invitation()`. The
+draft's `validate_invitation_token()`, `validate_referral_code()`, and `redeem_referral()`
+were **never built** (the first assumed a nonexistent `token` column; the latter two are
+part of the descoped referral system). Validation of an invitation's status/expiry/email
+happens in the accept-invite page and the Edge Function's list handler, not a dedicated DB
+function.
+
+### 6.1 `accept_invitation()` (shipped)
+
+The deployed function is `accept_invitation(p_invitation_id UUID, p_user_id UUID)` — it
+looks the row up by **`id`** (there is no token), inserts a `user_company_access` row with
+`name = ''` (the accept-invite page collects the real name separately), and marks the
+invitation `accepted`. Source of truth: `supabase/migrations/20260527151536_baseline.sql`.
 
 ```sql
-CREATE OR REPLACE FUNCTION validate_invitation_token(p_token VARCHAR)
-RETURNS TABLE(
-    valid BOOLEAN,
-    invitation_id UUID,
-    company_name TEXT,
-    role VARCHAR,
-    email VARCHAR,
-    expires_at TIMESTAMPTZ
-)
-LANGUAGE plpgsql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        (i.status = 'pending' AND i.expires_at > NOW()) AS valid,
-        i.id AS invitation_id,
-        c.name AS company_name,
-        i.role,
-        i.email,
-        i.expires_at
-    FROM invitations i
-    JOIN companies c ON c.id = i.company_id
-    WHERE i.token = p_token;
-
-    -- If no rows returned, return invalid
-    IF NOT FOUND THEN
-        RETURN QUERY SELECT FALSE, NULL::UUID, NULL::TEXT, NULL::VARCHAR, NULL::VARCHAR, NULL::TIMESTAMPTZ;
-    END IF;
-END;
-$$;
-```
-
-### 6.2 `validate_referral_code()`
-
-```sql
-CREATE OR REPLACE FUNCTION validate_referral_code(p_code VARCHAR)
-RETURNS TABLE(
-    valid BOOLEAN,
-    referral_link_id UUID,
-    company_name TEXT,
-    uses_remaining INTEGER,
-    expires_at TIMESTAMPTZ
-)
-LANGUAGE plpgsql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        (r.status = 'active' AND r.expires_at > NOW() AND r.current_uses < r.max_uses) AS valid,
-        r.id AS referral_link_id,
-        c.name AS company_name,
-        (r.max_uses - r.current_uses) AS uses_remaining,
-        r.expires_at
-    FROM referral_links r
-    JOIN companies c ON c.id = r.company_id
-    WHERE UPPER(r.code) = UPPER(p_code);
-
-    IF NOT FOUND THEN
-        RETURN QUERY SELECT FALSE, NULL::UUID, NULL::TEXT, NULL::INTEGER, NULL::TIMESTAMPTZ;
-    END IF;
-END;
-$$;
-```
-
-### 6.3 `accept_invitation()`
-
-```sql
-CREATE OR REPLACE FUNCTION accept_invitation(p_token VARCHAR, p_user_id UUID)
+CREATE OR REPLACE FUNCTION public.accept_invitation(p_invitation_id UUID, p_user_id UUID)
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path TO 'public'
 AS $$
 DECLARE
-    v_invitation RECORD;
-    v_company_id UUID;
+    v_inv RECORD;
 BEGIN
-    -- Lock the invitation row
-    SELECT * INTO v_invitation
-    FROM invitations
-    WHERE token = p_token AND status = 'pending' AND expires_at > NOW()
+    -- Lock the invitation row to prevent concurrent acceptance
+    SELECT * INTO v_inv FROM invitations
+    WHERE id = p_invitation_id AND status = 'pending' AND expires_at > NOW()
     FOR UPDATE;
 
-    IF v_invitation IS NULL THEN
-        RAISE EXCEPTION 'Invalid or expired invitation token';
+    IF v_inv IS NULL THEN
+        RAISE EXCEPTION 'Invalid or expired invitation';
     END IF;
 
-    v_company_id := v_invitation.company_id;
-
-    -- Check if user already has access to this company
-    IF EXISTS (
+    -- Create user_company_access if not exists
+    -- Name is empty — the accept-invite page prompts the user for their name
+    INSERT INTO user_company_access (user_id, company_id, role, name)
+    SELECT p_user_id, v_inv.company_id, v_inv.role, ''
+    WHERE NOT EXISTS (
         SELECT 1 FROM user_company_access
-        WHERE user_id = p_user_id AND company_id = v_company_id
-    ) THEN
-        -- Already has access — just mark invitation as accepted
-        UPDATE invitations
-        SET status = 'accepted', accepted_by = p_user_id, accepted_at = NOW()
-        WHERE id = v_invitation.id;
-
-        RETURN v_company_id;
-    END IF;
-
-    -- Create user_company_access
-    INSERT INTO user_company_access (user_id, company_id, role)
-    VALUES (p_user_id, v_company_id, v_invitation.role);
+        WHERE user_id = p_user_id AND company_id = v_inv.company_id
+    );
 
     -- Mark invitation as accepted
     UPDATE invitations
     SET status = 'accepted', accepted_by = p_user_id, accepted_at = NOW()
-    WHERE id = v_invitation.id;
+    WHERE id = v_inv.id;
 
-    RETURN v_company_id;
-END;
-$$;
-```
-
-### 6.4 `redeem_referral()`
-
-```sql
-CREATE OR REPLACE FUNCTION redeem_referral(
-    p_code VARCHAR,
-    p_user_id UUID,
-    p_company_name VARCHAR
-)
-RETURNS UUID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_referral RECORD;
-    v_new_company_id UUID;
-BEGIN
-    -- Lock the referral link row
-    SELECT * INTO v_referral
-    FROM referral_links
-    WHERE UPPER(code) = UPPER(p_code)
-      AND status = 'active'
-      AND expires_at > NOW()
-      AND current_uses < max_uses
-    FOR UPDATE;
-
-    IF v_referral IS NULL THEN
-        RAISE EXCEPTION 'Invalid, expired, or exhausted referral code';
-    END IF;
-
-    -- Create new company
-    INSERT INTO companies (name)
-    VALUES (p_company_name)
-    RETURNING id INTO v_new_company_id;
-
-    -- Create user_company_access (owner role)
-    INSERT INTO user_company_access (user_id, company_id, role)
-    VALUES (p_user_id, v_new_company_id, 'owner');
-
-    -- Record redemption
-    INSERT INTO referral_redemptions (referral_link_id, user_id, company_id, referred_by_company_id)
-    VALUES (v_referral.id, p_user_id, v_new_company_id, v_referral.company_id);
-
-    -- Increment usage count
-    UPDATE referral_links
-    SET current_uses = current_uses + 1,
-        status = CASE WHEN current_uses + 1 >= max_uses THEN 'exhausted' ELSE status END
-    WHERE id = v_referral.id;
-
-    RETURN v_new_company_id;
+    RETURN v_inv.company_id;
 END;
 $$;
 ```
@@ -422,25 +234,35 @@ $$;
 
 ## 7. Email Integration (Resend)
 
-### 7.1 Package & Setup
+### 7.1 Runtime & Setup
 
-- **Package:** `resend` Python SDK (`pip install resend`, add to `requirements.txt`)
-- **Runtime:** FastAPI backend (not Edge Functions — keeps all invitation logic in one codebase)
-- **Sending domain:** `mail.jigged.app` (requires DNS configuration: SPF, DKIM, DMARC)
+Invitation email is sent by the **`team-invites` Supabase Edge Function**
+(`supabase/functions/team-invites/index.ts`), which calls the Resend REST API over
+`fetch`. This is the canonical backend — Jigged severely limits FastAPI use (see the
+API Architecture Rule in `CLAUDE.md`), and all invitation logic lives in the Edge
+Function, not in `api/`.
 
-### 7.2 Environment Variables
+> `api/services/email.py` exists for other transactional mail; its own docstring notes
+> invitation emails "can ride the same plumbing later." It is **not** wired to invitations
+> today — the Edge Function owns invitation email end-to-end.
+
+- **Sending:** Resend REST API via `fetch` from the Edge Function (Deno runtime).
+- **Sending domain:** requires DNS configuration (SPF, DKIM, DMARC) on the verified sender.
+
+### 7.2 Environment Variables (Edge Function)
+
+Set as Supabase Edge Function secrets:
 
 ```bash
 RESEND_API_KEY=re_xxxxxxxxxxxx          # Resend API key
-RESEND_FROM_EMAIL=noreply@mail.jigged.app  # Verified sending address
-NEXT_PUBLIC_APP_URL=https://app.jigged.app  # For constructing invitation URLs
+# Sender address + app base URL are configured for the Edge Function's environment.
 ```
 
-### 7.3 Email Templates
+### 7.3 Email Template
 
-Two email templates are needed, implemented as Python string templates (not React Email — keeping it simple in the FastAPI backend):
-
-#### Team Invitation Email
+A single team-invitation email is sent. Its link points at the first-party
+`/auth/confirm` handler, which establishes the session and forwards to
+`/accept-invite/[invitationId]` (see §9) — **not** a `?invite=TOKEN` signup URL.
 
 ```
 Subject: You've been invited to join {company_name} on Jigged
@@ -454,7 +276,7 @@ Jigged is a manufacturing data platform that helps shops manage jobs,
 inventory, and shop floor operations.
 
 Click the link below to accept your invitation:
-{app_url}/signup?invite={token}
+{app_url}/auth/confirm?...   →  /accept-invite/{invitation_id}
 
 This invitation expires on {expires_date}.
 
@@ -464,221 +286,99 @@ If you didn't expect this invitation, you can ignore this email.
 Jigged Manufacturing Data Platform
 ```
 
-#### Referral Invitation Email (Future Enhancement)
+### 7.4 Error Handling
 
-Not required for MVP. Referral links are shared manually by admins via copy/paste.
-
-### 7.4 Email Sending Code Location
-
-```
-api/
-├── services/
-│   └── email.py          # Resend client wrapper, send_invitation_email()
-├── routes/
-│   └── invitation_routes.py  # Invitation CRUD + sending
-```
-
-### 7.5 Error Handling
-
-- **Resend API failure:** Log the error, return 500 to the caller. The invitation is still created in the DB with status `pending` — admin can "Resend" later.
-- **Invalid email address:** Resend validates email format. If rejected, return 422 to the caller.
-- **Rate limiting by Resend:** Free tier allows 100 emails/day, 3000/month. Track sending volume and surface a warning in the UI if approaching limits.
-- **Bounce/complaint handling:** Future enhancement. For MVP, rely on Resend's built-in bounce handling.
+- **Resend API failure:** the invitation row is still created (`status='pending'`); the
+  Edge Function returns `email_sent: false` so the UI can warn rather than show a green
+  "sent," and the admin can Resend later. (Confirm: `team-invites` POST handler.)
+- **Invalid email / send rejected:** surfaced through the same `email_sent: false` path.
+- **Bounce/complaint handling:** relies on Resend's built-in handling.
 
 ---
 
-## 8. Rate Limiting
+## 8. Rate Limiting (Deferred)
 
-### Problem
+Rate limiting is **deferred — not shipped.** The `team-invites` Edge Function currently
+enforces **no** per-company invitation rate limit, and no rate-limiting index exists.
 
-The current rate limiter (`api/utils/rate_limiter.py`) is in-memory with `threading.Lock`. On Vercel serverless, each invocation gets a fresh process — the rate limiter resets on every cold start.
-
-### Solution: Database-Backed Rate Limiting
-
-Use the `invitations` and `referral_links` tables themselves for rate limiting. Count recent rows within the time window:
-
-```python
-async def check_invitation_rate_limit(company_id: str, supabase) -> bool:
-    """Check if company has exceeded invitation rate limit (10/hour)."""
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-
-    result = supabase.from_('invitations') \
-        .select('id', count='exact') \
-        .eq('company_id', company_id) \
-        .gte('created_at', one_hour_ago.isoformat()) \
-        .execute()
-
-    return result.count < 10
-
-
-async def check_referral_rate_limit(company_id: str, supabase) -> bool:
-    """Check if company has exceeded referral link creation rate limit (3/hour)."""
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-
-    result = supabase.from_('referral_links') \
-        .select('id', count='exact') \
-        .eq('company_id', company_id) \
-        .gte('created_at', one_hour_ago.isoformat()) \
-        .execute()
-
-    return result.count < 3
-```
-
-**Advantages:**
-- Works in serverless environments (no in-memory state)
-- Accurate across all instances
-- No additional infrastructure (no Redis needed)
-- Uses existing tables — no new rate-limiting tables
-
-**Performance:** These are simple COUNT queries with index support. Adding a composite index `(company_id, created_at)` on both tables ensures fast lookups.
+The earlier draft proposed DB-backed limits (e.g. 10 invites/hour/company) by counting
+recent `invitations` rows within a time window, plus a composite `(company_id, created_at)`
+index. If/when abuse-prevention becomes a launch requirement, that approach (count-recent-
+rows, no extra infrastructure) is the intended direction — but it is not built today, and
+duplicate-pending suppression (§3.2) is the only write-side guard currently in place.
 
 ---
 
-## 9. Signup Page Rework
+## 9. Accept-Invite Flow (Shipped)
 
-### 9.1 Current State
+The shipped feature does **not** rework `/signup` with `?invite=TOKEN`/`?ref=CODE` modes or
+localStorage token persistence. Instead, invitation acceptance has its own dedicated page
+reached through a first-party email-confirmation handler. This section documents the flow
+as built.
 
-`components/auth/SignUp.tsx` is a basic email/password form. After signup, it shows "Check your email for a confirmation link" and mentions "an administrator will grant you access."
+### 9.1 Entry: `/auth/confirm` → `/accept-invite/[invitationId]`
 
-### 9.2 Required Changes
+The invitation email links to the first-party handler
+`app/auth/confirm/route.ts` — e.g.
+`https://jigged.app/auth/confirm?token_hash=…&type=invite&next=/accept-invite/<id>`.
+The handler:
 
-The signup page must handle three modes:
+1. Validates `type` against an allow-list (`invite | magiclink | recovery | email | signup`)
+   and only honors a same-origin relative `next` (rejects `//` and `/\` to prevent open
+   redirects).
+2. Exchanges the one-time `token_hash` for a session server-side via
+   `supabase.auth.verifyOtp(...)` (setting the auth cookies the browser client reads).
+3. Redirects to `next` (the accept-invite page) on success, or **fails closed to `/login`**
+   on any missing/invalid/expired param (`verifyOtp` tokens are single-use).
 
-#### Mode 1: Standard Signup (no params)
+### 9.2 The accept-invite page (`app/accept-invite/[invitationId]/page.tsx`)
 
-Current behavior, with updated post-signup messaging:
-- Remove "an administrator will grant you access" text
-- Replace with "You can enter Demo Mode to explore the system"
+A client page keyed by `invitationId` (the invitation's `id` — **no token**). Its state
+machine is `loading → { no-session | name-prompt | accepting | error }`:
 
-#### Mode 2: Invitation Signup (`?invite=TOKEN`)
+1. **Establish session.** It processes auth tokens directly from the URL if present —
+   hash-fragment `access_token`/`refresh_token` (implicit flow) via `setSession`, or a
+   `code` param (PKCE) via `exchangeCodeForSession` — then reads the session (waiting
+   briefly on `onAuthStateChange` if it arrives asynchronously). No localStorage is
+   involved.
+2. **No session →** shows "Sign In Required" and routes to
+   `/login?returnTo=/accept-invite/{invitationId}` (an allow-listed `returnTo`).
+3. **Fetch the invitation** via `GET {team-invites}/{invitationId}` (Edge Function, service
+   role — bypasses the RLS/JWT-propagation timing issues of a direct table read right after
+   hash-fragment auth). The response includes the joined `company_name`.
+4. **Validate:** if `status === 'accepted'`, redirect straight to `/dashboard/{company_id}`;
+   any other non-`pending` status, or `expires_at` in the past, → error state. If the
+   session email doesn't match the invitation email, → error ("This invitation was sent to
+   {email}…").
+5. **name-prompt →** the form collects **first name, last name, and an optional password**
+   (pre-filled from user metadata when available; role shown as a chip).
 
-```
-1. Page mounts with ?invite=TOKEN in URL
-2. Call GET /api/invitations/validate/{token}
-3. If valid: Show invitation details above the form
-   ┌──────────────────────────────────────────────────┐
-   │  You've been invited to join                     │
-   │  **Acme Manufacturing** as an **Admin**          │
-   │                                                  │
-   │  [Email] ← pre-filled from invitation, disabled  │
-   │  [Password]                                      │
-   │  [Confirm Password]                              │
-   │  [Accept Invitation]                             │
-   │                                                  │
-   │  Already have an account? Sign in to accept →    │
-   └──────────────────────────────────────────────────┘
-4. If invalid/expired: Show error message with link to standard signup
-5. On form submit:
-   a. Sign up with Supabase Auth (email from invitation, user's password)
-   b. Store token in localStorage: invite_token = TOKEN
-   c. Show email verification message
-   d. After email verification + login, token is consumed (see section 9.3)
-```
+### 9.3 Submit (`handleAccept`)
 
-#### Mode 3: Referral Signup (`?ref=CODE`)
+On submit the page:
 
-```
-1. Page mounts with ?ref=CODE in URL
-2. Call GET /api/referrals/validate/{code}
-3. If valid: Show referral details above the form
-   ┌──────────────────────────────────────────────────┐
-   │  Referred by **Acme Manufacturing**              │
-   │                                                  │
-   │  [Your Company Name] ← new field                 │
-   │  [Email]                                         │
-   │  [Password]                                      │
-   │  [Confirm Password]                              │
-   │  [Create Account & Company]                      │
-   └──────────────────────────────────────────────────┘
-4. If invalid/expired: Show error with link to standard signup
-5. On form submit:
-   a. Sign up with Supabase Auth
-   b. Store in localStorage: ref_code = CODE, company_name = "My Shop"
-   c. Show email verification message
-   d. After email verification + login, referral is redeemed (see section 9.3)
-```
+1. Calls `supabase.auth.updateUser({ password?, data: { first_name, last_name,
+   display_name, invitation_id: null } })` — sets the password if provided and clears
+   `invitation_id` so the auth callback won't re-route here on future logins.
+2. Calls the DB RPC `accept_invitation({ p_invitation_id, p_user_id })` (§6.1), which
+   inserts the `user_company_access` row (role from the invitation, `name=''`) and marks the
+   invitation `accepted`.
+3. PATCHes the new `user_company_access` row's `name` to `"{first} {last}"` via the `team`
+   Edge Function (the RPC stored an empty name).
+4. `setLastCompany(userId, companyId)` and `router.replace('/dashboard/{companyId}')`.
 
-### 9.3 Post-Auth Token Consumption
+**Reload semantics:** re-opening the emailed link after acceptance hits step 4 of §9.2 —
+the page sees `status === 'accepted'` and routes straight to the dashboard, so acceptance
+persists idempotently.
 
-The critical challenge: tokens/codes must survive the signup → email verification → login flow. The solution uses `localStorage` to persist the token across page reloads.
+### 9.4 Existing user / already-logged-in
 
-**Implementation in `getPostLoginRoute()` (`utils/companyAccess.ts`):**
-
-```typescript
-export async function getPostLoginRoute(userId: string): Promise<string> {
-  // Check for pending invitation token
-  const inviteToken = typeof window !== 'undefined'
-    ? localStorage.getItem('invite_token')
-    : null;
-
-  if (inviteToken) {
-    try {
-      const res = await fetch(`/api/invitations/accept/${inviteToken}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const { company_id } = await res.json();
-      localStorage.removeItem('invite_token');
-      await setLastCompany(userId, company_id);
-      return `/dashboard/${company_id}`;
-    } catch (e) {
-      console.error('Failed to accept invitation:', e);
-      localStorage.removeItem('invite_token');
-    }
-  }
-
-  // Check for pending referral code
-  const refCode = typeof window !== 'undefined'
-    ? localStorage.getItem('ref_code')
-    : null;
-  const companyName = typeof window !== 'undefined'
-    ? localStorage.getItem('ref_company_name')
-    : null;
-
-  if (refCode && companyName) {
-    try {
-      const res = await fetch(`/api/referrals/redeem/${refCode}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ company_name: companyName })
-      });
-      const { company_id } = await res.json();
-      localStorage.removeItem('ref_code');
-      localStorage.removeItem('ref_company_name');
-      await setLastCompany(userId, company_id);
-      return `/dashboard/${company_id}`;
-    } catch (e) {
-      console.error('Failed to redeem referral:', e);
-      localStorage.removeItem('ref_code');
-      localStorage.removeItem('ref_company_name');
-    }
-  }
-
-  // ... existing routing logic (fetch companies, etc.)
-}
-```
-
-### 9.4 Existing User Accepting Invitation
-
-If the user clicks an invitation link but already has an account:
-
-1. They click "Already have an account? Sign in to accept"
-2. Redirected to `/login?invite=TOKEN`
-3. Login page stores `invite_token` in localStorage
-4. After login, `getPostLoginRoute()` detects the token and calls `accept_invitation()`
-5. User is routed to the new company's dashboard
-
-### 9.5 Already Logged-In User
-
-If a logged-in user clicks an invitation link:
-
-1. Signup page detects existing auth session
-2. Shows: "You're already signed in as {email}. Accept invitation to join {company}?"
-3. Two buttons: "Accept Invitation" / "Sign in as different user"
-4. "Accept Invitation" calls `accept_invitation()` directly (no signup needed)
+There is no separate "already signed in, accept?" confirmation screen. Because the flow is
+session-first, an already-authenticated invitee who follows the link simply lands on the
+accept-invite page with a session; if their session email matches the invitation they get
+the name-prompt (or an immediate dashboard redirect if already accepted), and if it doesn't
+match they get the email-mismatch error. A user with no active session is sent to
+`/login?returnTo=/accept-invite/{id}` and returns here after logging in.
 
 ---
 
@@ -686,251 +386,259 @@ If a logged-in user clicks an invitation link:
 
 ### Strategy: Lazy Expiration
 
-Invitations and referral links are checked for expiry **at query time**, not via a scheduled cleanup.
+Invitations are checked for expiry **at read time**, not via a scheduled cleanup:
 
-- `validate_invitation_token()` checks `expires_at > NOW()` — expired tokens return `valid = false`
-- `validate_referral_code()` checks `expires_at > NOW()` — expired codes return `valid = false`
-- `accept_invitation()` checks `expires_at > NOW()` — rejects expired tokens
+- The `team-invites` **GET-list** handler lazily flips overdue rows —
+  `update({ status: 'expired' }).eq('status','pending').lt('expires_at', now)` — before
+  returning the company's invitations, so the Team grid shows accurate statuses.
+- `accept_invitation()` re-checks `expires_at > NOW()` (§6.1) and rejects expired rows.
+- The accept-invite page independently re-checks `expires_at` before showing the form (§9.2).
 
-### Periodic Cleanup (Optional)
-
-A scheduled job (Supabase `pg_cron` or external cron) can update statuses for housekeeping:
-
-```sql
--- Run daily: mark expired invitations
-UPDATE invitations SET status = 'expired'
-WHERE status = 'pending' AND expires_at < NOW();
-
--- Run daily: mark expired referral links
-UPDATE referral_links SET status = 'expired'
-WHERE status = 'active' AND expires_at < NOW();
-```
-
-This is cosmetic — the validation functions already reject expired items. But it keeps the `status` column accurate for admin reporting.
+No `pg_cron` housekeeping job is required — the list handler's lazy flip keeps the `status`
+column current for admin reporting.
 
 ---
 
-## 11. API Endpoints
+## 11. Backend: `team-invites` Edge Function
 
-All endpoints are **FastAPI routes** in `api/routes/invitation_routes.py`, registered in `api/index.py`.
+The invitation backend is the Supabase **Edge Function**
+`supabase/functions/team-invites/index.ts` (Deno). There are **no FastAPI invitation
+routes** — this aligns with Jigged's Supabase-first, FastAPI-limited architecture. It uses
+the service-role client for DB writes (bypassing RLS) and an anon client with the caller's
+JWT to establish identity.
 
-### 11.1 Invitations
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/api/invitations` | Company Admin | Create invitation + send email |
-| `GET` | `/api/invitations?company_id=X` | Company Admin | List invitations for company |
-| `DELETE` | `/api/invitations/{id}` | Company Admin | Revoke invitation |
-| `POST` | `/api/invitations/{id}/resend` | Company Admin | Resend invitation email |
-| `GET` | `/api/invitations/validate/{token}` | Public | Validate token (for signup page) |
-| `POST` | `/api/invitations/accept/{token}` | Authenticated | Accept invitation |
-
-### 11.2 Referral Links
+### 11.1 Routes
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/referrals` | Company Admin | Create referral link |
-| `GET` | `/api/referrals?company_id=X` | Company Admin | List referral links for company |
-| `DELETE` | `/api/referrals/{id}` | Company Admin | Revoke referral link |
-| `GET` | `/api/referrals/validate/{code}` | Public | Validate referral code (for signup page) |
-| `POST` | `/api/referrals/redeem/{code}` | Authenticated | Redeem referral code |
-| `GET` | `/api/referrals/redemptions?company_id=X` | Company Admin | List redemptions for company |
+| `POST` | `/team-invites` | Admin | Validate role/email, block demo companies, revoke any prior pending invite, insert `invitations` row (`expires_at = now + 7d`), generate a one-time link, send Resend email. Returns `email_sent` boolean. |
+| `GET` | `/team-invites?company_id=X` | Admin | Lazily expire overdue pending rows, then list the company's invitations (newest first). |
+| `GET` | `/team-invites/{id}` | Session (no admin check) | Fetch a single invitation + joined `company_name` for the accept-invite page. Email match is validated client-side. |
+| `DELETE` | `/team-invites/{id}` | Admin | Revoke a **pending** invitation (`status='revoked'`); non-pending → 400. |
+| `POST` | `/team-invites/{id}/resend` | Admin | For a **pending** invitation, reset `expires_at` to now + 7d and re-send the email; non-pending → 400. |
 
-### 11.3 Auth Pattern
+There is no `validate` route and no `accept` route on the Edge Function — validation happens
+in the accept-invite page (§9.2) and acceptance goes through the `accept_invitation` DB RPC
+(§6.1) called directly from that page. No referral routes exist.
 
-Admin endpoints verify the caller's identity and role:
+### 11.2 Auth Pattern (`verifyAdmin`)
 
-```python
-async def verify_company_admin(company_id: str, request: Request) -> str:
-    """Verify the caller is an admin of the specified company. Returns user_id."""
-    # Extract Supabase JWT from Authorization header
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    # Verify with Supabase and get user_id
-    user = supabase.auth.get_user(token)
-    user_id = user.user.id
+Admin routes call `verifyAdmin(supabase, authHeader, companyId)`, which extracts the user
+from the JWT (anon client) and checks `user_company_access.role IN ('admin')` for that
+company via the service-role client. The role check is **`admin` only** — there is no
+`owner` role, and `user`/`operator` are refused. On failure it throws, mapped to **401**
+("Not authenticated") or **403** ("Not authorized — admin role required").
 
-    # Check admin access
-    result = supabase.from_('user_company_access') \
-        .select('role') \
-        .eq('user_id', user_id) \
-        .eq('company_id', company_id) \
-        .in_('role', ['owner', 'admin']) \
-        .single() \
-        .execute()
+```typescript
+const { data: access } = await supabase
+  .from('user_company_access')
+  .select('role')
+  .eq('user_id', user.id)
+  .eq('company_id', companyId)
+  .in('role', ['admin'])   // admin only — no 'owner'
+  .single();
 
-    if not result.data:
-        raise HTTPException(status_code=403, detail="Not authorized")
-
-    return user_id
+if (!access) {
+  throw new Error('Not authorized — admin role required');
+}
 ```
 
-Public endpoints (validate) require no auth. Accept/redeem endpoints require only authentication (any valid JWT).
+The single-invitation `GET /team-invites/{id}` intentionally skips the admin check (any
+valid session can fetch it) because the accept-invite page validates the session-email
+match itself.
 
 ---
 
 ## 12. UI Components & Pages
 
-### 12.1 New Pages
+> **Shipped location:** team management lives at **`/dashboard/[companyId]/team`**, not the
+> `/dashboard/[companyId]/settings/team` of the earlier draft. There is **no `/settings/*`
+> route tree** and **no referrals UI** (that half is descoped).
 
-#### `/dashboard/[companyId]/settings/team`
+### 12.1 Team page — `app/dashboard/[companyId]/team/page.tsx`
 
-Enhanced version of the existing team management page:
+A single tabbed grid (**Admins / Users / Operators**), wrapped in `AdminGuard` so non-admins
+see a permission message instead of the content. For each role tab:
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Team Members                           [Invite]  [Add Member]   │
-├──────────────────────────────────────────────────────────────────┤
-│  Name          Email              Role       Status    Actions    │
-│  John Smith    john@acme.com      Owner      Active    ···        │
-│  Jane Doe      jane@acme.com      Admin      Active    ···        │
-│  Bob Wilson    bob@acme.com       Operator   Active    ···        │
-├──────────────────────────────────────────────────────────────────┤
-│  Pending Invitations                                              │
-│  alice@example.com    Engineer    Expires Feb 27    [Resend] [✕]  │
-│  carl@example.com     Sales       Expires Feb 28    [Resend] [✕]  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-#### `/dashboard/[companyId]/settings/referrals`
+- Active members (from the `team` Edge Function) and **pending invitations** for that role
+  (from `team-invites`) are merged into one AG Grid — invitations become rows via
+  `invitationToRow` with `id: 'inv-{id}'` and `status: 'pending'`.
+- A per-tab search box filters rows client-side by name/email (debounced 300ms via
+  `searchDebounced`).
+- Each tab has an **"Invite {Role}"** button (hidden when `isDemoMode`) that navigates to
+  the invite page below.
+- Row actions include **Resend** and **Revoke** for pending-invitation rows; bulk delete
+  splits the selection by the `inv-` id prefix — members are removed via
+  `user_company_access` delete, invitations via the Edge Function.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  Referral Links                              [Create Link]        │
+│  [ Admins | Users | Operators ]                 [Invite Admin]    │
+│  [ Search… ]                                                       │
 ├──────────────────────────────────────────────────────────────────┤
-│  Code        Uses      Expires       Status    Actions            │
-│  ABCD1234    2/5       Mar 20        Active    [Copy Link] [✕]    │
-│  WXYZ5678    5/5       Mar 15        Exhausted                    │
-├──────────────────────────────────────────────────────────────────┤
-│  Redemptions                                                      │
-│  User                 Company Created      Date                   │
-│  alice@example.com    Alice's Shop         Feb 15, 2026           │
-│  bob@example.com      Bob's Machine Shop   Feb 18, 2026           │
+│  Name          Email              Role     Status     Actions      │
+│  Jane Doe      jane@acme.com      Admin    Active     ···          │
+│  alice@…       alice@example.com  Admin    Pending    [Resend] [✕] │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### 12.2 New Components
+### 12.2 Invite page — `app/dashboard/[companyId]/team/members/new/page.tsx`
 
-| Component | Description |
-|-----------|-------------|
-| `InviteTeamMemberDialog` | Modal with email + role selector. Validates email, checks for duplicates, sends invitation. |
-| `InvitationsList` | Table of pending/accepted/expired invitations with resend and revoke actions. |
-| `ReferralLinkCard` | Displays referral code, shareable URL with copy button, usage stats. |
-| `ReferralRedemptionsList` | Table of users who redeemed referral links. |
+A **full page** (not a modal) reached from the "Invite {Role}" buttons. It reads `?role`
+into `defaultRole`, lets the admin confirm/change the role and enter an email, and POSTs to
+`team-invites`. On `data.email_sent === false` it shows a warning and keeps the admin on the
+page to Resend, rather than a green "sent" confirmation.
 
-### 12.3 Settings Navigation
+### 12.3 Accept-invite page — `app/accept-invite/[invitationId]/page.tsx`
 
-The settings section doesn't currently exist. Create a settings layout:
+The invitee-facing page documented in §9 (session-first, name/password prompt, `AuthLayout`
+shell). Reached via the emailed `/auth/confirm` link, not the dashboard.
 
-```
-/dashboard/[companyId]/settings/
-├── team            # Team management + invitations
-├── referrals       # Referral link management
-├── demo            # Demo mode enter/exit/reset (see demo-mode.md)
-└── (future pages)
-```
+### 12.4 Navigation
 
-Navigation: Add a "Settings" item to the sidebar menu, with sub-navigation for Team and Referrals.
+Team is reached from the dashboard navigation (Team item), not a Settings section. No
+Settings layout, Referrals page, or referral components exist.
 
 ---
 
 ## 13. Demo Mode Integration (Optional)
 
-The [Demo Mode feature](./demo-mode.md) is independent of the Invitation System. Demo mode is user-initiated (entered on demand from Settings or onboarding), so no automatic hooks are needed in the invitation or referral flows.
+The [Demo Mode feature](./demo-mode.md) is independent of the Invitation System. Demo mode is user-initiated (entered on demand), so no automatic hooks are needed in the invitation flow.
 
-**Post-signup experience for invited/referred users:**
-- Invited users join an existing company — they see whatever data that company already has
-- Referred users create a new company — they land on an empty dashboard with the onboarding card offering "Enter Demo Mode"
+**Post-acceptance experience for invited users:**
+- Invited users join an existing company — they see whatever data that company already has.
+- Demo companies are explicitly **blocked as invitation targets** by the Edge Function (400: "Cannot send invitations to a demo company"); the Team page also hides the "Invite {Role}" buttons when the company is in demo mode.
 
-No code integration required between these two features.
+No code integration is required between these two features beyond the demo-company guard above.
 
 ---
 
-## 14. Frontend Routing Changes
+## 14. Frontend Routing (Shipped)
 
-### New Routes
+### Routes that exist
 
 ```
 app/
-├── dashboard/[companyId]/settings/
-│   ├── layout.tsx       # Settings layout with sub-navigation
-│   ├── page.tsx         # Redirects to /team
-│   ├── team/
-│   │   └── page.tsx     # Team management + invitations
-│   ├── referrals/
-│   │   └── page.tsx     # Referral link management
-│   └── demo/
-│       └── page.tsx     # Demo mode enter/exit/reset
+├── auth/confirm/route.ts                         # First-party email-link handler → /accept-invite/[id]
+├── accept-invite/[invitationId]/page.tsx         # Invitee accept page (§9)
+└── dashboard/[companyId]/team/
+    ├── page.tsx                                  # Tabbed team grid + invitations (§12.1)
+    └── members/new/page.tsx                      # Invite page, reads ?role (§12.2)
 ```
 
-### Modified Routes
+There is **no** `/dashboard/[companyId]/settings/*` tree and **no** referral route.
 
-| Route | Change |
-|-------|--------|
-| `/signup` | Handle `?invite=TOKEN` and `?ref=CODE` params |
-| `/login` | Handle `?invite=TOKEN` param (store in localStorage) |
-| `/no-access` | Update messaging: "Contact your admin for access" |
+### Auth-route involvement
+
+- `/login` accepts a `returnTo` param; its `isValidReturnTo` allow-list includes
+  `/accept-invite`, so a no-session invitee is round-tripped through login back to the
+  accept page.
+- `/signup` was **not** reworked for invitations — there is no `?invite=TOKEN` or `?ref=CODE`
+  signup mode. Acceptance is handled entirely by the accept-invite page.
 
 ---
 
 ## 15. Testing Strategy
 
-### Unit Tests (Backend)
+> **Current state:** there are **no automated tests** for the invitation system in
+> `__tests__/`, `e2e/`, or `api/tests/` today — every acceptance-criteria bullet in §16 is
+> `automation-pending` or `manual`. This is a standing gap worth a follow-up (cf. the May
+> 2026 `jobs.status` incident where an untested SELECT path shipped a regression). The
+> matrix below is the intended coverage for that follow-up. Referral/token/rate-limit rows
+> from the earlier draft are gone (those features don't exist).
+
+### Unit Tests (Edge Function / DB)
 
 | Test | Description |
 |------|-------------|
-| `validate_invitation_token()` | Valid token, expired token, revoked token, invalid token |
-| `validate_referral_code()` | Valid code, expired code, exhausted code, invalid code, case-insensitivity |
-| `accept_invitation()` | New user, existing user already in company, expired token, concurrent acceptance |
-| `redeem_referral()` | Valid redemption, company creation, usage increment, exhaustion |
-| Token generation | 64-char URL-safe tokens, uniqueness |
-| Code generation | 8-char uppercase, no ambiguous chars, uniqueness |
-| Rate limiting | Under limit, at limit, over limit |
-| Email sending | Successful send, API failure, invalid email |
+| `accept_invitation()` | New user, existing user already in company, expired invitation, concurrent acceptance (row lock) |
+| `verifyAdmin` | Admin allowed; `user`/`operator`/no-access refused (401/403) |
+| POST create | Valid create; invalid role rejected; demo-company rejected; prior pending revoked before insert |
+| GET list | Lazy-expire flips overdue pending → expired; returns company rows |
+| DELETE / resend | Only pending revocable/resendable; resend resets `expires_at` |
 
 ### Unit Tests (Frontend)
 
 | Test | Description |
 |------|-------------|
-| Signup with `?invite=TOKEN` | Validates token on mount, pre-fills email, stores token |
-| Signup with `?ref=CODE` | Validates code on mount, shows company name input, stores code |
-| Signup standard | No params, standard flow |
-| `getPostLoginRoute()` with invite token | Accepts invitation, routes to company |
-| `getPostLoginRoute()` with ref code | Redeems referral, routes to company |
-| Existing user flow | Detects session, shows accept button |
+| Accept-invite page | Session-first load; email-mismatch error; expired/revoked/accepted branches; name-prompt submit calls `accept_invitation` |
+| `/auth/confirm` handler | Valid `type` + same-origin `next` redirect; open-redirect rejection; fail-closed to `/login` |
+| Team page | Invitations merged into the role grid; search filter; invite buttons hidden in demo mode |
 
-### Integration Tests
+### Integration / E2E Tests
 
 | Test | Description |
 |------|-------------|
-| Full invitation flow | Create → email sent → validate → signup → verify → login → accept → dashboard |
-| Full referral flow | Create → share → validate → signup → verify → login → redeem → dashboard |
-| Invitation for existing user | Create → email → login → accept → dashboard |
-| Invitation revocation | Create → revoke → validate fails |
-| Rate limiting | Create 10 invitations → 11th fails |
+| Full invitation flow | Admin invites → email → `/auth/confirm` → accept-invite → name/password → `user_company_access` created → dashboard |
+| Invitation for existing user | Invite → magic-link → accept → dashboard (no new signup) |
+| Invitation revocation | Create → revoke → accept link shows "revoked" |
 
 ---
 
 ## 16. Acceptance Criteria
 
-- [ ] `invitations` table exists with proper indexes and RLS
-- [ ] `referral_links` table exists with proper indexes and RLS
-- [ ] `referral_redemptions` table exists with `referred_by_company_id` for chain tracking
-- [ ] Resend integration sends invitation emails successfully
-- [ ] Team invitation email includes correct company name, role, and link
-- [ ] Invitation acceptance works for new users (signup → verify → accept)
-- [ ] Invitation acceptance works for existing users (login → accept)
-- [ ] Invitation acceptance works for already-logged-in users (accept directly)
-- [ ] Referral link generation produces valid 8-char codes
-- [ ] Referral redemption creates new company with user as owner
-- [ ] Referral redemption includes company name input
-- [ ] Rate limiting prevents spam (DB-backed, works in serverless)
-- [ ] Expired invitations/referrals are rejected at validation and acceptance
-- [ ] Signup page handles `?invite=TOKEN`, `?ref=CODE`, and no params
-- [ ] Token persists through signup → email verification → login flow via localStorage
-- [ ] Settings/Team page shows unified team view + pending invitations
-- [ ] Settings/Referrals page shows links with usage stats and redemptions
-- [ ] Demo Mode feature is independent (works with or without Demo Mode feature deployed)
-- [ ] Existing team Edge Function continues to work alongside invitations
+> **Scope note (audit #338, owner decisions applied):** Sections 3–14 now describe the
+> **shipped** implementation. Per owner ruling, the invitation backend is canonically the
+> Supabase **Edge Function** (`supabase/functions/team-invites/index.ts`) — FastAPI is not
+> used; invitations are keyed by their **`id`** (there is **no `token` column** and no
+> `?invite=TOKEN` signup mode); the accept flow is the shipped
+> **`/accept-invite/[invitationId]`** + **`/auth/confirm`** pair; the team page is at
+> **`/dashboard/[companyId]/team`** (not `/settings/team`); the **owner role has been
+> removed** (only `admin | user | operator` exist, inviter scope is `admin`); **rate
+> limiting is deferred**; and the **referral system is descoped** (no `referral_links` /
+> `referral_redemptions` tables, no `redeem_referral` / `validate_*` DB functions, no
+> referral UI). Remaining doc-vs-reality notes are in
+> `docs/testing/divergence/invitation-system.md`.
+
+Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #338.
+
+The editable entities in the shipped system are: the **invitation** (created with an email + role; mutated via revoke, resend, and accept). No referral entity exists to test.
+
+**Send an invitation (Create)**
+
+- [ ] **Given** an admin on `/dashboard/[companyId]/team`, **when** they open a role tab and click "Invite {Role}", **then** they land on `/dashboard/[companyId]/team/members/new?role={role}` — a full page (not a modal `InviteTeamMemberDialog`) — with the role pre-selected — *manual: `app/dashboard/[companyId]/team/members/new/page.tsx` reads `?role` into `defaultRole`; automation-pending (no e2e/unit test exists for the team module)*.
+- [ ] **Given** the invite page, **when** an admin submits an email + role, **then** a `POST` to the `team-invites` Edge Function creates an `invitations` row (`status='pending'`, `expires_at = now + 7 days`) and sends a Resend email — *automation-pending (`supabase/functions/team-invites/index.ts` POST handler; no backend or e2e test covers the Edge Function)*.
+- [ ] **Given** a submitted invitation whose email send fails, **when** the Edge Function returns `email_sent: false`, **then** the page shows a warning (not a green "sent") and keeps the admin on the page to Resend — *automation-pending (`app/dashboard/[companyId]/team/members/new/page.tsx` `handleSubmit` branch on `data.email_sent === false`)*.
+- [ ] **Given** an email that already has a pending invitation for the company, **when** a new invite is sent to it, **then** the prior pending row is set to `revoked` before the new one is inserted — *automation-pending (`team-invites` POST handler; enforced at write, not just by the `idx_invitations_pending_email_company` partial-unique index)*.
+- [ ] **Given** a demo company (`companies.is_demo = true`), **when** an admin tries to invite, **then** the Edge Function rejects with 400 ("Cannot send invitations to a demo company") — *automation-pending (`team-invites` POST handler)*.
+- [ ] **Given** a role outside `admin | user | operator`, **when** an invite is submitted, **then** the Edge Function rejects with 400 — matching the `invitations_role_check` constraint (no `owner`) — *automation-pending (`team-invites` POST handler)*.
+
+**List, search & filter**
+
+- [ ] **Given** an admin on the Team page, **when** a role tab loads, **then** pending invitations for that role are merged into the grid as `status: 'pending'` rows alongside active members — *automation-pending (`app/dashboard/[companyId]/team/page.tsx` `invitationToRow` + per-tab `combined` merge)*.
+- [ ] **Given** the invitations list request, **when** the Edge Function serves `GET /team-invites?company_id=…`, **then** it first lazily flips any `pending` rows past `expires_at` to `expired`, then returns the company's invitations — *automation-pending (`team-invites` GET-list handler; lazy-expire `update(...).lt('expires_at', now)`)*.
+- [ ] **Given** the Team grid, **when** an admin types in the per-tab search box, **then** rows filter client-side by name or email (debounced 300ms) — *automation-pending (`app/dashboard/[companyId]/team/page.tsx` `searchDebounced` filter)*.
+
+**Accept an invitation (Edit -> save -> reload -> persists)**
+
+- [ ] **Given** an invitee who opens the emailed `/auth/confirm` link, **when** they arrive at `/accept-invite/[invitationId]` with a session, **then** the page fetches the invitation via `GET /team-invites/{id}` and validates status is `pending`, not expired, and the session email matches the invitation email — *automation-pending (`app/accept-invite/[invitationId]/page.tsx` `checkSessionAndLoadInvitation`)*.
+- [ ] **Given** a valid pending invitation, **when** the invitee submits first name, last name, and optional password, **then** `accept_invitation(p_invitation_id, p_user_id)` inserts a `user_company_access` row with the invitation's role and marks the invitation `accepted` (`accepted_by`, `accepted_at` set); **reloading** the emailed link afterward detects `status='accepted'` and routes straight to `/dashboard/{company_id}` — *automation-pending (`accept_invitation` DB function in `supabase/migrations/20260527151536_baseline.sql`; accept-invite page handles `status==='accepted'` by redirecting)*.
+- [ ] **Given** an invitee already logged in as a different email, **when** the accept page loads, **then** it blocks with "This invitation was sent to {email}…" rather than joining the wrong account — *automation-pending (`app/accept-invite/[invitationId]/page.tsx` email-mismatch branch)*.
+- [ ] **Given** an invitee with no session on the accept link, **when** the page resolves, **then** it shows "Sign In Required" and routes to `/login?returnTo=/accept-invite/{id}` (an allow-listed returnTo) — *automation-pending (`app/accept-invite/[invitationId]/page.tsx` no-session state; `components/auth/Login.tsx` `isValidReturnTo` allow-list includes `/accept-invite`)*.
+
+**Resend & Revoke (Edit -> save -> reload -> persists)**
+
+- [ ] **Given** a pending invitation row, **when** an admin clicks the Resend (send) icon, **then** `POST /team-invites/{id}/resend` resets `expires_at` to now + 7 days and re-sends the email; a non-pending invitation is rejected with 400 — *automation-pending (`team-invites` resend handler)*.
+- [ ] **Given** a pending invitation row, **when** an admin clicks the Revoke (✕) icon, **then** `DELETE /team-invites/{id}` sets `status='revoked'` and the list reload drops it; **reloading** the invite link then shows "This invitation has been revoked" — *automation-pending (`team-invites` DELETE handler; `app/accept-invite/[invitationId]/page.tsx` non-pending branch)*.
+- [ ] **Given** a mixed selection of active members and pending invitations, **when** an admin bulk-deletes, **then** members are removed via `user_company_access` delete (`count:'exact'`) and invitations are revoked via the Edge Function, with a toast reflecting partial failures — *automation-pending (`app/dashboard/[companyId]/team/page.tsx` `handleDelete` split-by-`inv-`-prefix)*.
+
+**Authorization**
+
+- [ ] **Given** a non-admin caller, **when** they hit any admin `team-invites` route, **then** `verifyAdmin` rejects (401/403); the check is role **`admin`** only, so `owner`/`user`/`operator` are refused — *automation-pending (`team-invites` `verifyAdmin`)*.
+- [ ] **Given** the Team page, **when** a non-admin renders it, **then** `AdminGuard` blocks the UI with a permission message — *automation-pending (`app/dashboard/[companyId]/team/page.tsx` wraps content in `<AdminGuard>`)*.
+
+**Schema & RLS**
+
+- [ ] **Given** the `invitations` table, **when** inspected, **then** it has the `id`/`company_id`/`email`/`role`/`status`/`invited_by`/`accepted_by`/`expires_at`/`created_at`/`accepted_at` columns (no `token`), the `company_id`/`email` and partial-unique `pending_email_company` indexes, and RLS policies "Admins can manage invitations" + "Users can read invitations for their email" — *manual: `supabase/schema.prod.sql` `invitations` table + `supabase/migrations/20260527151536_baseline.sql` indexes/policies*.
+
+**Referral system (descoped — owner decision)**
+
+- [ ] **Given** the codebase, **when** you search for referral tables, functions, routes, or a `/settings/referrals` page, **then** none exist — the referral half of this spec is **descoped**, not merely unbuilt — *manual: no `referral_links`/`referral_redemptions` in `supabase/schema.prod.sql`; no `redeem_referral`/`validate_referral_code`/`validate_invitation_token` functions; no referral route under `app/`; see Resolved (owner decision) in the divergence report*.
+
+**Coexistence & Demo Mode**
+
+- [ ] **Given** the existing unified team Edge Function (`supabase/functions/team/index.ts`), **when** it and `team-invites` both operate, **then** direct-created members and invited members appear in one Team grid — *automation-pending (Team page merges `team` member rows with `team-invites` invitation rows)*.
+- [ ] **Given** Demo Mode, **when** it is on for the company, **then** the "Invite {Role}" buttons are hidden and the invitation flow is independent of demo state — *automation-pending (`app/dashboard/[companyId]/team/page.tsx` gates invite buttons on `!isDemoMode`)*.
 
 ---
 
@@ -939,28 +647,28 @@ app/
 | # | Question | Resolution |
 |---|----------|------------|
 | 1 | Should demo mode be auto-entered on invitation acceptance? | No — demo mode is user-initiated. Invitations work independently. |
-| 2 | Should we track referral chain analytics? | Yes — `referred_by_company_id` column enables recursive CTE queries. |
-| 3 | Rate limiting approach in serverless? | DB-backed — count recent rows in the invitations/referral_links tables. |
-| 4 | Email provider? | Resend via Python SDK in FastAPI backend. |
+| 2 | Should we track referral chain analytics? | **Descoped** — referrals are out of scope, so no chain analytics (`referred_by_company_id` was never built). |
+| 3 | Rate limiting approach in serverless? | **Deferred** — no rate limiting shipped on the `team-invites` Edge Function (see §8). |
+| 4 | Email provider? | Resend, called over `fetch` from the `team-invites` **Edge Function** (not FastAPI). |
 | 5 | Coexist with existing team Edge Function? | Yes — both paths supported. Direct creation for operators, invitations for standard onboarding. |
-| 6 | Role model: `user` vs specific roles? | Simplified 3-role model: `admin`, `user`, `operator`. Old granular roles (bookkeeper, engineer, quality, sales) consolidated into `user`. |
-| 7 | Token persistence through auth flow? | localStorage — survives page reloads and redirects. |
-| 8 | Duplicate validation routes (GET+POST)? | Consolidate to GET only for validation. POST for acceptance/redemption. |
-| 9 | Where do invitation routes live? | FastAPI backend (`api/routes/invitation_routes.py`). Single codebase for all invitation logic. |
+| 6 | Role model: `user` vs specific roles? | 3-role model: `admin`, `user`, `operator` — **no `owner`**. Old granular roles consolidated into `user`. |
+| 7 | Token persistence through auth flow? | N/A — no token/localStorage flow. Session is established server-side by `/auth/confirm` (`verifyOtp`) and read by the accept-invite page. |
+| 8 | Duplicate validation routes (GET+POST)? | N/A — validation lives in the accept-invite page + Edge Function list handler; acceptance is the `accept_invitation` RPC. |
+| 9 | Where do invitation routes live? | The Supabase **Edge Function** `supabase/functions/team-invites/index.ts` — Jigged limits FastAPI use. |
 
 ---
 
 ## 18. Dependencies
 
 - **No dependency on [Demo Mode](./demo-mode.md):** Demo mode is user-initiated and fully independent. Invitations work the same with or without demo mode deployed.
-- **Resend account:** Must be set up with a verified sending domain before email features work.
-- **DNS configuration:** SPF, DKIM, and DMARC records for `mail.jigged.app`.
+- **Resend account:** Must be set up with a verified sending domain (`RESEND_API_KEY` set as an Edge Function secret) before invitation email works.
+- **DNS configuration:** SPF, DKIM, and DMARC records for the verified sending domain.
 
 ---
 
 ## 19. Success Metrics
 
-- **Team invitation acceptance rate:** % of invitations accepted vs expired/revoked
-- **Referral conversion rate:** % of referral link clicks that result in signups
-- **Referral chain depth:** Average depth of referral chains (A → B → C = depth 2)
-- **Viral coefficient:** Average number of new users generated per existing user via referrals
+- **Team invitation acceptance rate:** % of invitations accepted vs expired/revoked.
+- **Time to acceptance:** median time from invite sent to `user_company_access` created.
+
+*(Referral/viral metrics removed — the referral system is descoped.)*

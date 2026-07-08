@@ -1074,7 +1074,7 @@ Phase 0 is complete when the pilot shop owner can:
 
   - `converted_at` (timestamp) - When converted to job
 
-[Operations Module](modules/operations.md)
+Operations Module _(historical — superseded by [Work Centers](modules/work-centers.md); the standalone PRD was removed)_
 ## Overview
 
   The Operations module manages the catalog of operation types available in the shop. Operation types define what work can be done and at what cost - they're referenced when creating routings (Phase 1) and for job costing.

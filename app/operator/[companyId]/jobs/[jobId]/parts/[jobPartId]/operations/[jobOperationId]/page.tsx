@@ -307,8 +307,7 @@ export default function OperatorOperationActionPage() {
               <WarningAmberIcon fontSize="small" sx={{ mt: 0.25, flexShrink: 0 }} />
               <Typography variant="body2" color="inherit">
                 You&apos;re at <strong>{stationName || 'another station'}</strong>, but this step runs
-                at <strong>{job.operation_work_center_name || 'another station'}</strong> — complete
-                only if it&apos;s yours.
+                at <strong>{job.operation_work_center_name || 'another station'}</strong>.
               </Typography>
             </Box>
           )}

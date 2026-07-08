@@ -5,10 +5,14 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import Hero from './Hero';
+import LogoCloud from './LogoCloud';
 import PainPoints from './PainPoints';
 import Features from './Features';
+import ShopFloorShowcase from './ShopFloorShowcase';
+import KnowledgeCapture from './KnowledgeCapture';
 import HowItWorks from './HowItWorks';
-// import SocialProof from './SocialProof'; // Re-enable once testimonial is confirmed
+import EarlyAccess from './EarlyAccess';
+// import Testimonial from './Testimonial'; // Re-enable once a real quote is confirmed
 import FinalCTA from './FinalCTA';
 
 export default function LandingPageContent() {
@@ -31,10 +35,14 @@ export default function LandingPageContent() {
   return (
     <>
       <Hero />
+      <LogoCloud />
       <PainPoints />
       <Features />
+      <ShopFloorShowcase />
+      <KnowledgeCapture />
       <HowItWorks />
-      {/* <SocialProof /> Re-enable once testimonial is confirmed */}
+      <EarlyAccess />
+      {/* <Testimonial /> Re-enable once a real quote is confirmed */}
       <FinalCTA />
     </>
   );

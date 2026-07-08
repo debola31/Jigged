@@ -5,7 +5,14 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Link from 'next/link';
-import JiggedIcon from '@/components/branding/JiggedIcon';
+import Reveal from './Reveal';
+import { HERO } from '@/lib/constants/marketing';
+import {
+  gradientButtonSx,
+  eyebrowSx,
+  DISPLAY_FONT,
+  EYEBROW_COLOR,
+} from './marketingStyles';
 
 export default function Hero() {
   const backgroundSx = {
@@ -16,23 +23,25 @@ export default function Hero() {
     height: '100%',
     objectFit: 'cover',
     objectPosition: 'center bottom',
-    opacity: 0.22,
+    opacity: 0.18,
     mixBlendMode: 'screen',
-    maskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
-    WebkitMaskImage: 'radial-gradient(ellipse 55% 50% at 50% 43%, transparent 0%, black 100%)',
+    maskImage:
+      'radial-gradient(ellipse 65% 60% at 50% 42%, transparent 0%, black 100%)',
+    WebkitMaskImage:
+      'radial-gradient(ellipse 65% 60% at 50% 42%, transparent 0%, black 100%)',
     pointerEvents: 'none',
     zIndex: 0,
   } as const;
 
   return (
     <Box
+      component="section"
       sx={{
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: 'calc(100vh - 64px - 48px)',
-        pt: { xs: 4, md: 6 },
+        minHeight: { md: 'calc(100vh - 64px - 48px)' },
+        pt: { xs: 7, md: 9 },
         pb: { xs: 10, md: 14 },
         overflow: 'hidden',
         '&::before': {
@@ -40,21 +49,15 @@ export default function Hero() {
           position: 'absolute',
           inset: 0,
           backgroundImage: `
-            linear-gradient(rgba(70,130,180,0.07) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(70,130,180,0.07) 1px, transparent 1px)
+            linear-gradient(rgba(70,130,180,0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(70,130,180,0.08) 1px, transparent 1px)
           `,
-          backgroundSize: '60px 60px',
-          maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
-          WebkitMaskImage: 'radial-gradient(ellipse at center, black 30%, transparent 70%)',
+          backgroundSize: '52px 52px',
+          maskImage:
+            'radial-gradient(ellipse at 25% 35%, black 15%, transparent 70%)',
+          WebkitMaskImage:
+            'radial-gradient(ellipse at 25% 35%, black 15%, transparent 70%)',
           pointerEvents: 'none',
-        },
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          inset: 0,
-          background: 'radial-gradient(ellipse at 50% 43%, rgba(17,20,57,0.4) 0%, transparent 60%)',
-          pointerEvents: 'none',
-          zIndex: 0,
         },
       }}
     >
@@ -64,72 +67,121 @@ export default function Hero() {
             display: 'flex',
             flexDirection: { xs: 'column', md: 'row' },
             alignItems: 'center',
-            gap: { xs: 4, md: 8 },
+            gap: { xs: 6, md: 6 },
           }}
         >
-          {/* Icon — visual anchor */}
-          <Box
-            sx={{
-              flexShrink: 0,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
+          {/* Copy */}
+          <Reveal distance={28} sx={{ flex: { md: '0 0 52%' }, width: '100%' }}>
+            <Box sx={{ textAlign: { xs: 'center', md: 'left' } }}>
+              <Typography sx={{ ...eyebrowSx, color: EYEBROW_COLOR, mb: 3 }}>
+                {HERO.eyebrow}
+              </Typography>
+              <Typography
+                component="h1"
+                sx={{
+                  fontFamily: DISPLAY_FONT,
+                  fontWeight: 600,
+                  fontSize: 'clamp(2.75rem, 7vw, 5.5rem)',
+                  lineHeight: 0.98,
+                  letterSpacing: '-0.035em',
+                  textShadow: '0 2px 30px rgba(0,0,0,0.5)',
+                }}
+              >
+                {HERO.headlineLead}
+                <Box component="span" sx={{ display: 'block', color: '#fff' }}>
+                  {HERO.headlineEmphasis}
+                </Box>
+              </Typography>
+              <Typography
+                sx={{
+                  mt: 4,
+                  color: 'rgba(255, 255, 255, 0.78)',
+                  fontSize: { xs: '1.05rem', md: '1.22rem' },
+                  lineHeight: 1.6,
+                  maxWidth: 520,
+                  mx: { xs: 'auto', md: 0 },
+                }}
+              >
+                {HERO.subhead}
+              </Typography>
+              <Box
+                sx={{
+                  mt: 5,
+                  display: 'flex',
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  gap: 2,
+                  alignItems: 'center',
+                  justifyContent: { xs: 'center', md: 'flex-start' },
+                }}
+              >
+                <Button
+                  component={Link}
+                  href={HERO.primaryCta.href}
+                  variant="contained"
+                  size="large"
+                  sx={{ minWidth: 210, py: 1.4, fontSize: '1rem', ...gradientButtonSx }}
+                >
+                  {HERO.primaryCta.label}
+                </Button>
+                <Button
+                  component="a"
+                  href={HERO.secondaryCta.href}
+                  variant="text"
+                  size="large"
+                  sx={{
+                    color: 'rgba(255,255,255,0.85)',
+                    fontWeight: 500,
+                    '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.06)' },
+                  }}
+                >
+                  {HERO.secondaryCta.label} →
+                </Button>
+              </Box>
+            </Box>
+          </Reveal>
+
+          {/* Product proof — frameless, dissolving into the page */}
+          <Reveal
+            delay={160}
+            distance={36}
+            sx={{ flex: { md: '1 1 auto' }, width: '100%', minWidth: 0 }}
           >
-            <JiggedIcon size={160} />
-          </Box>
-
-          {/* Content */}
-          <Box sx={{ textAlign: { xs: 'center', md: 'left' } }}>
-            <Typography
-              variant="h2"
-              component="h1"
-              sx={{
-                fontWeight: 700,
-                mb: 2,
-                fontSize: { xs: '2.25rem', sm: '3rem', md: '3.75rem' },
-                lineHeight: 1.1,
-                textShadow: '0 2px 20px rgba(0,0,0,0.5)',
-              }}
-            >
-              Your Shop Floor,
-              <br />
-              Finally Under Control
-            </Typography>
-
-            <Typography
-              variant="body1"
-              sx={{
-                color: 'rgba(255, 255, 255, 0.85)',
-                mb: 4,
-                maxWidth: 520,
-                fontSize: { xs: '1rem', md: '1.15rem' },
-                lineHeight: 1.7,
-              }}
-            >
-              Quoting, job tracking, inventory, and operator tools — built for
-              precision shops, not enterprise factories. Everything you need, nothing you don&apos;t.
-            </Typography>
-            <Button
-              component={Link}
-              href="/invite/early-access"
-              variant="contained"
-              size="large"
-              sx={{
-                minWidth: { xs: 'auto', md: 220 },
-                fontWeight: 600,
-                background: 'linear-gradient(135deg, #D4872A 0%, #4682B4 50%, #2BBCB3 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #b8721f 0%, #3A6B94 50%, #239e97 100%)',
-                },
-              }}
-            >
-              Get Started
-            </Button>
-          </Box>
+            <Box sx={{ position: 'relative' }}>
+              <Box
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  inset: '2% -6% -10% -2%',
+                  background:
+                    'radial-gradient(closest-side, rgba(70,130,180,0.28), transparent)',
+                  filter: 'blur(56px)',
+                  zIndex: 0,
+                }}
+              />
+              <Box
+                component="img"
+                src="/screenshots/feature-job-status.png"
+                alt="Jigged job list showing the status of every job at a glance"
+                sx={{
+                  position: 'relative',
+                  zIndex: 1,
+                  width: '100%',
+                  height: 'auto',
+                  borderRadius: 2,
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  boxShadow: '0 40px 90px -30px rgba(0,0,0,0.8)',
+                  maskImage:
+                    'linear-gradient(to bottom, black 82%, transparent 100%)',
+                  WebkitMaskImage:
+                    'linear-gradient(to bottom, black 82%, transparent 100%)',
+                }}
+              />
+            </Box>
+          </Reveal>
         </Box>
       </Container>
 
-      {/* Looping wireframe manufacturing scene background */}
+      {/* Looping wireframe manufacturing scene — ambient backdrop */}
       <Box
         component="video"
         autoPlay
@@ -140,15 +192,11 @@ export default function Hero() {
         preload="none"
         sx={{
           ...backgroundSx,
-          '@media (prefers-reduced-motion: reduce)': {
-            display: 'none',
-          },
+          '@media (prefers-reduced-motion: reduce)': { display: 'none' },
         }}
       >
         <source src="/wireframe-scene.mp4" type="video/mp4" />
       </Box>
-
-      {/* Static fallback for reduced-motion preference */}
       <Box
         component="img"
         src="/wireframe-scene.png"
@@ -156,9 +204,7 @@ export default function Hero() {
         sx={{
           ...backgroundSx,
           display: 'none',
-          '@media (prefers-reduced-motion: reduce)': {
-            display: 'block',
-          },
+          '@media (prefers-reduced-motion: reduce)': { display: 'block' },
         }}
       />
     </Box>

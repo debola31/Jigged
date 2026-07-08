@@ -343,6 +343,172 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
 }
 
 // ============================================================================
+// COMPLETED JOB LIST (the jobs page "Completed" filter)
+// ============================================================================
+
+// Cap the "recently completed" list. An operator reaches it to undo a mis-tapped
+// completion, so what matters is the LATEST completions, not full history —
+// ordered by completed_at desc, this is "the most recent N completed steps".
+const COMPLETED_LIST_LIMIT = 50;
+
+// A completed job_operation shaped as a ReadyRow (so buildOperatorJobs can enrich
+// it exactly like the ready list), plus the two fields the completed list adds:
+// which station it ran at and when it was completed.
+interface CompletedOpRow {
+  ready: ReadyRow;
+  work_center_id: string | null;
+  completed_at: string | null;
+}
+
+// Fetch the most-recently-completed operations across the given station(s),
+// joined to their part/job for the display fields buildOperatorJobs needs.
+// Company isolation is enforced two ways: the explicit jobs.company_id filter and
+// work_center_id ∈ this company's stations.
+async function getCompletedOperationRows(
+  companyId: string,
+  workCenterIds: string[],
+): Promise<CompletedOpRow[]> {
+  if (workCenterIds.length === 0) return [];
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_operations')
+    .select(`
+      id, job_id, job_part_id, operation_name, status, completed_at, work_center_id,
+      job_parts!inner(
+        quantity, part_id,
+        parts(part_name, description),
+        jobs!inner(job_number, company_id)
+      )
+    `)
+    .eq('status', 'completed')
+    .eq('job_parts.jobs.company_id', companyId)
+    .in('work_center_id', workCenterIds)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(COMPLETED_LIST_LIMIT);
+
+  if (error) {
+    // Mirror getReadyOperationsForStation: surface the failure instead of
+    // swallowing it into an empty list (the jobs page shows it in an Alert).
+    throw new Error(`Failed to load completed operations: ${error.message}`);
+  }
+
+  type Row = {
+    id: string;
+    job_id: string;
+    job_part_id: string;
+    operation_name: string;
+    status: string;
+    completed_at: string | null;
+    work_center_id: string | null;
+    job_parts:
+      | {
+          quantity: number;
+          part_id: string;
+          parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
+        }
+      | {
+          quantity: number;
+          part_id: string;
+          parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
+        }[]
+      | null;
+  };
+
+  return ((data ?? []) as Row[]).map((r) => {
+    const partJoin = Array.isArray(r.job_parts) ? r.job_parts[0] : r.job_parts;
+    const partsJoin = partJoin
+      ? Array.isArray(partJoin.parts) ? partJoin.parts[0] : partJoin.parts
+      : null;
+    const jobJoin = partJoin
+      ? Array.isArray(partJoin.jobs) ? partJoin.jobs[0] : partJoin.jobs
+      : null;
+    return {
+      ready: {
+        job_id: r.job_id,
+        job_part_id: r.job_part_id,
+        job_operation_id: r.id,
+        operation_name: r.operation_name,
+        op_status: r.status,
+        job_number: jobJoin?.job_number ?? '',
+        part_id: partJoin?.part_id ?? '',
+        part_name: partsJoin?.part_name ?? '',
+        part_description: partsJoin?.description ?? null,
+        part_quantity: partJoin?.quantity ?? 0,
+      },
+      work_center_id: r.work_center_id,
+      completed_at: r.completed_at,
+    };
+  });
+}
+
+/**
+ * Recently completed work at ONE station — backs the jobs list's "Completed"
+ * filter under the My Station scope. One card per job_part (its most recent
+ * completed operation at the station), most-recent first, so an operator can
+ * reopen a step they finished by mistake and undo it. Mirrors getOperatorJobs
+ * (the ready list) but keyed on completed operations instead of the readiness RPC.
+ */
+export async function getCompletedOperatorJobs(
+  companyId: string,
+  workCenterId?: string,
+): Promise<OperatorJob[]> {
+  if (!workCenterId) return [];
+  const rows = await getCompletedOperationRows(companyId, [workCenterId]);
+
+  // Dedupe by job_part (rows are completed_at-desc, so the first seen per part is
+  // its most recent completion) → one card per part, like the ready list.
+  const seen = new Set<string>();
+  const unique = rows.filter((r) => {
+    if (seen.has(r.ready.job_part_id)) return false;
+    seen.add(r.ready.job_part_id);
+    return true;
+  });
+
+  const jobs = await buildOperatorJobs(unique.map((r) => r.ready));
+  // buildOperatorJobs preserves input order (1:1 over readyRows), so index-align
+  // the completed_at timestamps back onto the enriched rows.
+  return jobs.map((job, i) => ({ ...job, completed_at: unique[i].completed_at }));
+}
+
+/**
+ * Whole-plant ("All Stations") "Completed" list: recently completed work across
+ * every station, grouped by station in the UI. One card per (job_part, station),
+ * since a part can have completed work at more than one station.
+ */
+export async function getAllStationsCompletedOperatorJobs(
+  companyId: string,
+  stations: Station[],
+): Promise<OperatorPlantJob[]> {
+  const stationIds = stations.map((s) => s.id);
+  if (stationIds.length === 0) return [];
+  const rows = await getCompletedOperationRows(companyId, stationIds);
+
+  const nameById = new Map(stations.map((s) => [s.id, s.name] as const));
+  const seen = new Set<string>();
+  const unique = rows.filter((r) => {
+    const key = `${r.ready.job_part_id}:${r.work_center_id ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const jobs = await buildOperatorJobs(unique.map((r) => r.ready));
+  return jobs.map((job, i) => {
+    const wcId = unique[i].work_center_id;
+    return {
+      ...job,
+      completed_at: unique[i].completed_at,
+      work_center_id: wcId,
+      work_center_name: wcId ? nameById.get(wcId) ?? null : null,
+    };
+  });
+}
+
+// ============================================================================
 // PER-PART JOB DETAIL (the page where Start/Stop/Complete lives)
 // ============================================================================
 

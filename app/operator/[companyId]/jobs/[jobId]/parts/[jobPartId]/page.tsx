@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -53,18 +53,24 @@ function StepIcon({ status }: { status: string }) {
  * the operation pages) is shown read-only up top; capture happens on the
  * operation page where the operator is working.
  */
-export default function OperatorJobTravelerPage() {
+function OperatorJobTravelerPageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
 
-  // Header back → the station jobs list. (Files + Previous notes live in an
-  // in-content reference row; the "All N parts" jump stays in-content too.)
-  useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
+  // Header back → the jobs list the operator came from. The caller threads
+  // ?back=<jobs url with scope+completed> (e.g. from All Stations); default to
+  // the plain jobs list for a direct/QR deep-link. (Files + Previous notes live
+  // in an in-content reference row; the "All N parts" jump stays in-content.)
+  const rawBack = searchParams.get('back');
+  const backToJobs =
+    rawBack && rawBack.startsWith('/operator/') ? rawBack : `/operator/${companyId}/jobs`;
+  useSetOperatorChrome({ back: { href: backToJobs, label: 'Back to jobs' } }, [backToJobs]);
 
   const { data: traveler, loading } = useLoad(
     async () => {
@@ -83,7 +89,15 @@ export default function OperatorJobTravelerPage() {
   );
 
   const openStep = (op: JobTravelerOperation) => {
-    router.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);
+    // Thread THIS traveler's URL (including its own ?back) as the operation's
+    // return target, so Back retraces operation → traveler → the jobs list it
+    // all started from.
+    const selfUrl = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}${
+      rawBack && rawBack.startsWith('/operator/') ? `?back=${encodeURIComponent(rawBack)}` : ''
+    }`;
+    router.push(
+      `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}?back=${encodeURIComponent(selfUrl)}`,
+    );
   };
 
   if (loading) {
@@ -100,7 +114,7 @@ export default function OperatorJobTravelerPage() {
         <Alert severity="error" sx={{ mb: 2 }}>
           {error || 'Job not found.'}
         </Alert>
-        <Button variant="outlined" onClick={() => router.push(`/operator/${companyId}/jobs`)}>
+        <Button variant="outlined" onClick={() => router.push(backToJobs)}>
           Back to jobs
         </Button>
       </Box>
@@ -255,5 +269,20 @@ export default function OperatorJobTravelerPage() {
       </Box>
 
     </Box>
+  );
+}
+
+export default function OperatorJobTravelerPage() {
+  // useSearchParams (for the ?back return target) requires a Suspense boundary.
+  return (
+    <Suspense
+      fallback={
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <OperatorJobTravelerPageContent />
+    </Suspense>
   );
 }

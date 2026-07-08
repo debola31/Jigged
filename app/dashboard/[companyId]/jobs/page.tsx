@@ -56,6 +56,7 @@ import {
 import Tooltip from '@mui/material/Tooltip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddIcon from '@mui/icons-material/Add';
+import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import AcceptPurchaseOrderModal from '@/components/jobs/AcceptPurchaseOrderModal';
 import type { JobWithRelations, JobFilters, JobLifecycleStage } from '@/types/job';
 
@@ -640,6 +641,16 @@ export default function JobsPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
+
+        {/* Open the shop-floor (operator) view to watch/monitor jobs live. The
+            operator shell has a matching Dashboard icon to return. */}
+        <Button
+          variant="outlined"
+          startIcon={<PrecisionManufacturingIcon />}
+          onClick={() => router.push(`/operator/${companyId}`)}
+        >
+          Shop floor view
+        </Button>
 
         <Button
           variant="contained"

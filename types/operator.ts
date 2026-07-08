@@ -52,6 +52,12 @@ export interface OperatorJob {
   // Per-part progress
   operations_total: number;
   operations_completed: number;
+  /**
+   * When this row's operation was completed (job_operations.completed_at).
+   * Only set on rows from the "Completed" list (getCompletedOperatorJobs /
+   * getAllStationsCompletedOperatorJobs); undefined on the ready list.
+   */
+  completed_at?: string | null;
 }
 
 /**

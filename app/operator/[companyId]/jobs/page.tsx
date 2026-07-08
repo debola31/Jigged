@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useState, useEffect, useMemo } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
@@ -13,7 +13,13 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import { getOperatorJobs, getAllStationsOperatorJobs } from '@/utils/operatorAccess';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import {
+  getOperatorJobs,
+  getAllStationsOperatorJobs,
+  getCompletedOperatorJobs,
+  getAllStationsCompletedOperatorJobs,
+} from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
@@ -21,33 +27,56 @@ import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
 /**
  * Operator Jobs List Page.
  *
- * Two lenses:
- *  - "My Station" — work ready/in-progress at the selected station (the
- *    dispatch list). Prompts for a station if none is selected.
- *  - "All Stations" — the whole plant: every active job grouped by station, so
- *    a roaming operator or lead can find work / see floor status without
- *    picking one station.
+ * Two controls, orthogonal:
+ *  - Scope (segmented, the primary/high-frequency switch):
+ *    - "My Station" — work ready/in-progress at the selected station (the
+ *      dispatch list). Prompts for a station if none is selected.
+ *    - "All Stations" — the whole plant: every active job grouped by station, so
+ *      a roaming operator or lead can find work / see floor status.
+ *  - "Completed" (a filter chip, secondary): swaps the list to recently
+ *    completed work so an operator can reopen a step finished by mistake and
+ *    undo it. Off by default — the plain list IS the active/ready view (there is
+ *    deliberately no "Active" label; the app has no "active" state).
+ *
+ * Both controls live in the URL (?scope=, ?completed=1) so returning to this
+ * page — e.g. Back from a traveler opened via All Stations — restores the exact
+ * view the operator left.
  */
-type Lens = 'station' | 'plant';
+type Scope = 'station' | 'plant';
 
-export default function OperatorJobsPage() {
+function OperatorJobsPageContent() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const { stationId, stations, initializing } = useStationContext();
 
-  const [lens, setLens] = useState<Lens>('station');
+  // Scope + completed are URL-backed so Back restores this exact view.
+  const scope: Scope = searchParams.get('scope') === 'plant' ? 'plant' : 'station';
+  const completed = searchParams.get('completed') === '1';
+
   const [jobs, setJobs] = useState<OperatorJob[]>([]);
   const [plantJobs, setPlantJobs] = useState<OperatorPlantJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // The URL for this exact view — used both to write toggle changes and as the
+  // "return here" target threaded into detail pages (see handlePartClick).
+  const jobsUrl = (s: Scope, c: boolean) =>
+    `/operator/${companyId}/jobs?scope=${s}${c ? '&completed=1' : ''}`;
+
+  const updateView = (next: { scope?: Scope; completed?: boolean }) => {
+    const nextScope = next.scope ?? scope;
+    const nextCompleted = next.completed ?? completed;
+    router.replace(jobsUrl(nextScope, nextCompleted));
+  };
+
   useEffect(() => {
-    // Re-run on lens / station / stations change. Cancellation guards against a
-    // slow fetch landing after the inputs changed (e.g. station just resolved).
+    // Re-run on scope / completed / station / stations change. Cancellation
+    // guards against a slow fetch landing after the inputs changed.
     let cancelled = false;
     (async () => {
-      if (lens === 'station' && !stationId) {
+      if (scope === 'station' && !stationId) {
         setJobs([]);
         setLoading(false);
         return;
@@ -55,11 +84,15 @@ export default function OperatorJobsPage() {
       setLoading(true);
       setError(null);
       try {
-        if (lens === 'plant') {
-          const data = await getAllStationsOperatorJobs(companyId, stations);
+        if (scope === 'plant') {
+          const data = completed
+            ? await getAllStationsCompletedOperatorJobs(companyId, stations)
+            : await getAllStationsOperatorJobs(companyId, stations);
           if (!cancelled) setPlantJobs(data);
         } else {
-          const data = await getOperatorJobs(companyId, stationId as string);
+          const data = completed
+            ? await getCompletedOperatorJobs(companyId, stationId as string)
+            : await getOperatorJobs(companyId, stationId as string);
           if (!cancelled) setJobs(data);
         }
       } catch (err) {
@@ -71,31 +104,24 @@ export default function OperatorJobsPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, stationId, lens, stations]);
+  }, [companyId, stationId, scope, completed, stations]);
 
-  // Tapping a row opens the ready operation (skipping the traveler). When the
-  // row is at a different station than the operator's current selection, the
-  // operation page's station-match guard handles the mismatch ("switch &
-  // complete") — so the All-Stations lens reuses the same safe path.
+  // Tapping a row. My Station + Active keeps the one-tap fast path straight to
+  // the ready operation (highest-frequency action). All Stations, or any
+  // Completed row, opens the traveler instead — the operator picks the step
+  // there — so Back retraces exactly one step. Either way we thread this exact
+  // jobs view as the return target so Back lands where they came from.
   const handlePartClick = (row: OperatorJob) => {
+    const back = encodeURIComponent(jobsUrl(scope, completed));
     const base = `/operator/${companyId}/jobs/${row.job_id}/parts/${row.id}`;
-    router.push(row.operation_id ? `${base}/operations/${row.operation_id}` : base);
-  };
-
-  const getStatusColor = (status: string): 'default' | 'primary' | 'success' | 'warning' | 'error' => {
-    switch (status) {
-      case 'completed':
-        return 'success';
-      case 'in_progress':
-        return 'primary';
-      case 'not_started':
-        return 'default';
-      default:
-        return 'default';
+    if (completed || scope === 'plant' || !row.operation_id) {
+      router.push(`${base}?back=${back}`);
+    } else {
+      router.push(`${base}/operations/${row.operation_id}?back=${back}`);
     }
   };
 
-  // Group whole-plant rows by station for the "All Stations" lens.
+  // Group whole-plant rows by station for the "All Stations" scope.
   const plantGroups = useMemo(() => {
     const map = new Map<string, OperatorPlantJob[]>();
     for (const row of plantJobs) {
@@ -120,6 +146,7 @@ export default function OperatorJobsPage() {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'flex-start',
+              gap: 1,
               mb: 1,
             }}
           >
@@ -131,11 +158,17 @@ export default function OperatorJobsPage() {
                 Order qty {row.part_quantity}
               </Typography>
             </Box>
-            <Chip
-              label={row.operation_status || row.production_status}
-              size="small"
-              color={getStatusColor(row.operation_status || row.production_status)}
-            />
+            {/* Completed rows show WHEN they were finished where the (removed)
+                status chip used to sit; active rows convey state via the bar. */}
+            {row.completed_at && (
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                Completed {formatCompletedAt(row.completed_at)}
+              </Typography>
+            )}
           </Box>
 
           <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
@@ -167,7 +200,7 @@ export default function OperatorJobsPage() {
     </Card>
   );
 
-  const showStationSelector = lens === 'station' && !stationId;
+  const showStationSelector = scope === 'station' && !stationId;
 
   // Wait for the station context to hydrate its stored default before deciding
   // whether to prompt for a station — avoids a one-paint picker flash for a
@@ -182,22 +215,43 @@ export default function OperatorJobsPage() {
 
   return (
     <Box>
-      {/* Lens toggle (My Station / All Stations) — hidden on the station picker,
-          where there's no selected station to scope by yet. */}
+      {/* Toolbar: scope segmented control (primary) + a "Completed" filter chip
+          (secondary). Hidden on the station picker, where there's no selected
+          station to scope by yet. */}
       {!showStationSelector && (
-        <Box sx={{ mb: 2 }}>
+        <Box
+          sx={{
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            flexWrap: 'wrap',
+          }}
+        >
           <ToggleButtonGroup
             size="small"
             exclusive
-            value={lens}
+            value={scope}
             onChange={(_e, value) => {
-              if (value) setLens(value as Lens);
+              if (value) updateView({ scope: value as Scope });
             }}
             aria-label="Job list scope"
           >
             <ToggleButton value="station">My Station</ToggleButton>
             <ToggleButton value="plant">All Stations</ToggleButton>
           </ToggleButtonGroup>
+
+          <Box sx={{ flex: 1 }} />
+
+          <Chip
+            icon={<CheckCircleOutlineIcon />}
+            label="Completed"
+            color={completed ? 'primary' : 'default'}
+            variant={completed ? 'filled' : 'outlined'}
+            onClick={() => updateView({ completed: !completed })}
+            aria-pressed={completed}
+            sx={{ minHeight: 40 }}
+          />
         </Box>
       )}
 
@@ -220,30 +274,16 @@ export default function OperatorJobsPage() {
         >
           <CircularProgress />
         </Box>
-      ) : lens === 'station' ? (
+      ) : scope === 'station' ? (
         jobs.length === 0 ? (
-          <Box sx={{ textAlign: 'center', py: 8, px: 2 }}>
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No jobs available
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              There are no pending jobs for your station at this time.
-            </Typography>
-          </Box>
+          <EmptyState completed={completed} scope="station" />
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {jobs.map((row) => renderJobCard(row, row.id))}
+            {jobs.map((row) => renderJobCard(row, row.operation_id ?? row.id))}
           </Box>
         )
       ) : plantJobs.length === 0 ? (
-        <Box sx={{ textAlign: 'center', py: 8, px: 2 }}>
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No active jobs
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            There is no ready or in-progress work across the plant right now.
-          </Typography>
-        </Box>
+        <EmptyState completed={completed} scope="plant" />
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {plantGroups.map(([station, rows]) => (
@@ -263,5 +303,56 @@ export default function OperatorJobsPage() {
         </Box>
       )}
     </Box>
+  );
+}
+
+/** Empty-state copy, keyed on scope + whether the Completed filter is on. */
+function EmptyState({ completed, scope }: { completed: boolean; scope: Scope }) {
+  const [title, body] = completed
+    ? scope === 'station'
+      ? ['No recently completed jobs', 'You haven’t completed any steps at this station recently.']
+      : ['No recently completed jobs', 'No steps have been completed across the plant recently.']
+    : scope === 'station'
+      ? ['No jobs available', 'There are no pending jobs for your station at this time.']
+      : ['No active jobs', 'There is no ready or in-progress work across the plant right now.'];
+  return (
+    <Box sx={{ textAlign: 'center', py: 8, px: 2 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        {title}
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        {body}
+      </Typography>
+    </Box>
+  );
+}
+
+/** Compact "how long ago" for a completion timestamp; falls back to a date. */
+function formatCompletedAt(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const min = Math.round((Date.now() - then) / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+export default function OperatorJobsPage() {
+  // useSearchParams requires a Suspense boundary (matches app/login/page.tsx).
+  return (
+    <Suspense
+      fallback={
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '40vh' }}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <OperatorJobsPageContent />
+    </Suspense>
   );
 }

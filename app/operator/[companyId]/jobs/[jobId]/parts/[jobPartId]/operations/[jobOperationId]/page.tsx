@@ -279,20 +279,32 @@ export default function OperatorOperationActionPage() {
       />
 
       {isCompleted ? (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Alert severity="success">This step is complete.</Alert>
-          <Button
-            variant="outlined"
-            size="large"
-            color="inherit"
-            startIcon={<UndoIcon />}
-            onClick={handleRevert}
-            disabled={actionLoading}
-            sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
-          >
-            {actionLoading ? <CircularProgress size={24} /> : 'UNDO COMPLETION'}
-          </Button>
-        </Box>
+        // The completed state IS the undo control — one element shows the status
+        // (green check + "complete") and doubles as the button that reverts it,
+        // instead of a separate success banner above a big UNDO button.
+        <Button
+          fullWidth
+          variant="outlined"
+          size="large"
+          onClick={handleRevert}
+          disabled={actionLoading}
+          aria-label="This step is complete — tap to undo"
+          sx={{ minHeight: 56 }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}>
+            <CheckCircleIcon color="success" />
+            <Box component="span" sx={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: '1.05rem' }}>
+              This step is complete
+            </Box>
+            {actionLoading ? (
+              <CircularProgress size={18} />
+            ) : (
+              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, opacity: 0.8, fontWeight: 500 }}>
+                <UndoIcon fontSize="small" /> Undo
+              </Box>
+            )}
+          </Box>
+        </Button>
       ) : stationMismatch ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Alert severity="warning">

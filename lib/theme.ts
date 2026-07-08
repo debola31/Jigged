@@ -149,9 +149,13 @@ const jiggedTheme = createTheme({
           backgroundColor: 'rgba(32, 38, 82, 0.78)',
           backdropFilter: 'blur(15px)',               // Frosted glass effect
           WebkitBackdropFilter: 'blur(15px)',         // Safari support
-          // Brighter hairline: on the dark canvas a 0.18 border nearly vanished; 0.28 white
-          // gives cards a crisp defined edge that seals the panel against the lit canvas.
-          border: '1px solid rgba(255, 255, 255, 0.28)',
+          // Hairline that seals the panel against the lit canvas. 0.18 nearly vanished on the
+          // dark canvas, but 0.28 — crisp on a small card — read as a bright frame stretched
+          // around large full-width tables (Jobs/Parts/Quotes wrap an AG Grid in a Card, and
+          // that Card edge IS the table's outer border). 0.20 is the middle: still a defined
+          // edge on cards, calm around big tables. Internal grid row lines keep their own
+          // fainter 0.12 (lib/agGridTheme.ts).
+          border: '1px solid rgba(255, 255, 255, 0.20)',
           // boxShadow handled by elevation prop
           transition: 'transform 0.2s ease, box-shadow 0.2s ease',
           '&:hover': {

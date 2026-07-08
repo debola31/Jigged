@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -12,9 +12,9 @@ import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
   getOperatorOperationDetail,
   getCurrentOperator,
@@ -46,7 +46,6 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  */
 export default function OperatorOperationActionPage() {
   const params = useParams();
-  const router = useRouter();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
@@ -54,7 +53,7 @@ export default function OperatorOperationActionPage() {
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
-  const { stationId, stationName, setStation, initializing } = useStationContext();
+  const { stationId, stationName, initializing } = useStationContext();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -117,15 +116,6 @@ export default function OperatorOperationActionPage() {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  // The operator confirms they are at this step's station, then completes in the
-  // same tap. setStation persists the choice so later scans match too.
-  const handleSwitchAndComplete = async () => {
-    if (job?.operation_work_center_id) {
-      setStation(job.operation_work_center_id);
-    }
-    await handleComplete();
   };
 
   const isCompleted = job?.operation_status === 'completed';
@@ -305,54 +295,35 @@ export default function OperatorOperationActionPage() {
             )}
           </Box>
         </Button>
-      ) : stationMismatch ? (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Alert severity="warning">
-            This step runs at <strong>{job.operation_work_center_name || 'another station'}</strong>.
-            You&apos;re at <strong>{stationName || 'a different station'}</strong> — did you scan the
-            wrong code?
-          </Alert>
+      ) : (
+        // Not completed. A station mismatch (this step's work center ≠ the
+        // operator's selected station) only WARNS — completion doesn't need or
+        // record the station (completeOperation keys off the operation id), so
+        // the action stays a plain MARK COMPLETE and we don't silently switch
+        // their station. They change it from the header if they've actually moved.
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          {stationMismatch && (
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
+              <WarningAmberIcon fontSize="small" sx={{ mt: 0.25, flexShrink: 0 }} />
+              <Typography variant="body2" color="inherit">
+                You&apos;re at <strong>{stationName || 'another station'}</strong>, but this step runs
+                at <strong>{job.operation_work_center_name || 'another station'}</strong>.
+              </Typography>
+            </Box>
+          )}
           <Button
             fullWidth
             variant="contained"
             size="large"
             color="primary"
             startIcon={<CheckCircleIcon />}
-            onClick={handleSwitchAndComplete}
+            onClick={handleComplete}
             disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
+            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
           >
-            {actionLoading ? (
-              <CircularProgress size={24} />
-            ) : (
-              `Switch to ${job.operation_work_center_name || 'this station'} & complete`
-            )}
-          </Button>
-          <Button
-            variant="outlined"
-            size="large"
-            color="inherit"
-            startIcon={<ArrowBackIcon />}
-            onClick={() => router.push(travelerHref)}
-            disabled={actionLoading}
-            sx={{ minHeight: 56, fontSize: '1.1rem', fontWeight: 600 }}
-          >
-            Not my step — back to traveler
+            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
           </Button>
         </Box>
-      ) : (
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          color="primary"
-          startIcon={<CheckCircleIcon />}
-          onClick={handleComplete}
-          disabled={actionLoading}
-          sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
-        >
-          {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
-        </Button>
       )}
 
       {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read

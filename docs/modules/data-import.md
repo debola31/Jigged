@@ -260,14 +260,18 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   - **Empty module lists:** each module's empty state (Parts / Vendors / Work centers /
     Customers) links to the **same** unified importer ("Import all your data at once").
   - **Non-empty shop (data already present) — the recurring entry.** Neither the checklist
-    nor the empty-states show once there's data, so the recurring entry is the **persistent
-    "Import" button already in each module's toolbar** (Parts, Vendors, …). This is the
-    HubSpot/Salesforce "Import on the object index" pattern and is where an owner naturally
-    goes to add more of a type; it stays available regardless of whether the list is empty.
-    Today it opens the per-entity importer; once unified ingestion lands it routes into the
-    unified importer scoped to that entity. **Open sub-decision:** whether to add ONE
-    persistent central entry for "import several types at once" in a non-empty shop (e.g. a
-    Header/dashboard quick-action) or rely solely on the per-module toolbar buttons.
+    nor the empty-states show once there's data. Because related data must be imported
+    *together* to auto-resolve links and load in dependency order (isolated per-entity
+    imports are exactly what forces manual reconciliation later — the Salesforce
+    "split into per-object lists" failure mode), the recurring entry is a **persistent
+    "Import data" quick-action on the dashboard** that launches the one unified,
+    relationship-aware importer. The dashboard is the always-available home base — no
+    Settings, no permanent nav module. The per-module toolbar "Import" buttons stay for a
+    genuinely isolated single type (e.g. just customers), and in Phase 2 they **route into
+    the unified importer** (scoped to that module but able to pull in related files), so
+    even single-entity adds are relationship-aware. Model: HubSpot's one import tool that
+    ingests multiple related objects at once and auto-associates them; Dynamics 365's
+    multi-entity, dependency-sequenced import jobs.
   - **Not** a Settings → Import area — the onboarding research doesn't point there and it
     duplicated the recurring role; dropped.
 

@@ -207,12 +207,20 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   to a white-glove/guided step. Phase 2 wires the actual dependency-ordered write, reusing
   the existing per-entity import execution as the write layer.
 
-- **Placement (decision pending final confirmation).** Research favors a single, first-run
-  "Get started"/"Import your data" entry, not a permanent nav module. Current build: a
-  flag-gated "Import your data" CTA on the empty-dashboard onboarding card; the permanent
-  "Data Health" nav item was removed. Candidate additions still to confirm: a persistent
-  "Get started" checklist until data exists, and/or a Settings → Import area for later
-  top-ups, and/or module empty-states linking to the one importer.
+- **Placement (decided): one flow, two purpose-built signposts.** Multiple *entries* to the
+  one flow are fine; multiple *flows* is the anti-pattern. There is no permanent nav module
+  (the old "Data Health" item was removed).
+  - **First-run onboarding:** a **"Get started" checklist** on the empty dashboard, leading
+    with "Import your data" (research: Dynamics 365 Business Central's Get-started
+    banner-that-reveals-a-checklist; Appcues onboarding-checklist completion lift). Shown
+    until the shop has data; flag-gated.
+  - **Recurring access:** each module's empty state (Parts / Vendors / Work centers /
+    Customers) shows a link to the **same** unified importer ("Import all your data at
+    once"). The module keeps its own per-entity "Import CSV" as the working single-entity
+    write path until unified ingestion (Phase 2) lands — a shop owner adding parts looks at
+    Parts, which is the natural recurring home (more so than Settings).
+  - **Not** a Settings → Import area — the onboarding research doesn't point there and it
+    duplicated the recurring role; dropped.
 
 ## Testing Decisions
 

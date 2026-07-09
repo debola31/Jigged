@@ -1,5 +1,7 @@
 'use client';
 
+import ImportAllDataLink from '@/components/import/ImportAllDataLink';
+
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
@@ -441,6 +443,7 @@ export default function WorkCentersPage() {
                 </Button>
               </Box>
             )}
+            {!searchDebounced && <ImportAllDataLink />}
           </CardContent>
         </Card>
       ) : (

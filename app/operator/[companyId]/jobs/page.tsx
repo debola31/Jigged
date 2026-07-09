@@ -7,13 +7,13 @@ import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
-import Chip from '@mui/material/Chip';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import {
   getOperatorJobs,
   getAllStationsOperatorJobs,
@@ -215,9 +215,11 @@ function OperatorJobsPageContent() {
 
   return (
     <Box>
-      {/* Toolbar: scope segmented control (primary) + a "Completed" filter chip
-          (secondary). Hidden on the station picker, where there's no selected
-          station to scope by yet. */}
+      {/* Toolbar: scope segmented control (primary) + a "Show completed"
+          checkbox (secondary — an explicit on/off so it's clear whether you're
+          viewing completed vs. active work, which a single color-toggle chip
+          didn't convey). Hidden on the station picker, where there's no
+          selected station to scope by yet. */}
       {!showStationSelector && (
         <Box
           sx={{
@@ -243,14 +245,22 @@ function OperatorJobsPageContent() {
 
           <Box sx={{ flex: 1 }} />
 
-          <Chip
-            icon={<CheckCircleOutlineIcon />}
-            label="Completed"
-            color={completed ? 'primary' : 'default'}
-            variant={completed ? 'filled' : 'outlined'}
-            onClick={() => updateView({ completed: !completed })}
-            aria-pressed={completed}
-            sx={{ minHeight: 40 }}
+          {/* Explicit on/off: checked = viewing completed, unchecked = active.
+              Mirrors the dashboard jobs list's "Overdue only" checkbox, incl. the
+              high-contrast styling that reads on the dark toolbar. */}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={completed}
+                onChange={(e) => updateView({ completed: e.target.checked })}
+                sx={{
+                  color: 'rgba(255,255,255,0.6)',
+                  '&.Mui-checked': { color: 'primary.light' },
+                }}
+              />
+            }
+            label="Show completed"
+            sx={{ mr: 0, minHeight: 48 }}
           />
         </Box>
       )}

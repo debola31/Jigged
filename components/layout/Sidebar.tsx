@@ -22,7 +22,6 @@ import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import PercentIcon from '@mui/icons-material/Percent';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
-import FactCheckIcon from '@mui/icons-material/FactCheck';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import CompanySwitcher from './CompanySwitcher';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -56,7 +55,6 @@ const menuItems: MenuItem[] = [
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
   { name: 'Markup Rates', path: '/markup-rates', icon: PercentIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
-  { name: 'Data Health', path: '/health-report', icon: FactCheckIcon, featureFlag: 'data_health_report' },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },
 ];

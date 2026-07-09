@@ -17,6 +17,9 @@ function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
   // pathname like /dashboard/[companyId]/customers/new -> segments = ['dashboard', companyId, 'customers', 'new']
 
+  // Unified data-import wizard: /dashboard/[companyId]/import (import right after companyId)
+  if (segments[2] === 'import') return 'Import your data';
+
   // Check for quotes routes first
   if (segments.includes('quotes')) {
     if (segments.includes('new')) return 'New Quote';

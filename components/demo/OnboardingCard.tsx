@@ -7,7 +7,10 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import { useRouter } from 'next/navigation';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 const DISMISSED_KEY = 'jigged_onboarding_dismissed';
 
@@ -38,6 +41,9 @@ interface OnboardingCardProps {
 
 export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardProps) {
   const { hasDemoCompany, isDemoMode, enterDemoMode, isCreating, isLoading } = useDemoMode();
+  const { features } = useCompanyFeatures();
+  const router = useRouter();
+  const importEnabled = !!features.data_health_report;
   const [dismissed, setDismissedState] = useState(true);
 
   useEffect(() => {
@@ -61,12 +67,22 @@ export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardPro
           Welcome to Jigged!
         </Typography>
         <Typography variant="body1" sx={{ color: 'text.secondary', mb: 3 }}>
-          Want to see what a populated shop looks like? Enter demo mode to
-          explore sample customers, parts, quotes, jobs, and more.
+          {importEnabled
+            ? "Bring your existing shop data into Jigged to get started — we'll check it first and show you exactly what will come in. Or explore a sample shop to see how everything works."
+            : 'Want to see what a populated shop looks like? Enter demo mode to explore sample customers, parts, quotes, jobs, and more.'}
         </Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          {importEnabled && (
+            <Button
+              variant="contained"
+              startIcon={<UploadFileIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/import`)}
+            >
+              Import your data
+            </Button>
+          )}
           <Button
-            variant="contained"
+            variant={importEnabled ? 'outlined' : 'contained'}
             onClick={enterDemoMode}
             disabled={isCreating}
             startIcon={isCreating ? <CircularProgress size={16} /> : undefined}

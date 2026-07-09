@@ -446,6 +446,43 @@ def _inactive_flags(af: AnalyzedFile) -> list[Finding]:
     ]
 
 
+def needed_raw_columns(
+    entity_type: EntityType, column_roles: dict[str, str], headers: list[str]
+) -> list[str]:
+    """The RAW headers this analyzer actually reads for a file.
+
+    Lets the caller upload only these columns (not the whole file), which keeps the
+    request small. Covers: the identity field (duplicates + join target), referential
+    child fields (orphans), required fields (missing/gap), parts cost (coverage), and any
+    status/inactive column (read directly, not via column_roles).
+    """
+    needed_canonical: set[str] = set()
+    identity = ENTITY_IDENTITY_FIELD.get(entity_type)
+    if identity:
+        needed_canonical.add(identity)
+    for child_entity, child_field, _pe, _pf in REFERENTIAL_LINKS:
+        if child_entity == entity_type:
+            needed_canonical.add(child_field)
+    schema = ENTITY_SCHEMAS.get(entity_type) or {}
+    needed_canonical |= {k for k, v in schema.items() if v.get("required")}
+    if entity_type == EntityType.PARTS:
+        needed_canonical.add("cost_per_unit")
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for canonical in needed_canonical:
+        col = column_roles.get(canonical)
+        if col and col not in seen:
+            out.append(col)
+            seen.add(col)
+    for h in headers:
+        token = re.sub(r"[^a-z0-9_]+", "", _norm(h))
+        if token in _INACTIVE_HEADER_TOKENS and h not in seen:
+            out.append(h)
+            seen.add(h)
+    return out
+
+
 def analyze_bundle(files: list[AnalyzedFile]) -> list[Finding]:
     """Run every deterministic check and return findings sorted by severity."""
     findings: list[Finding] = []

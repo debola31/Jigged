@@ -23,13 +23,6 @@ import type {
 type Stage = 'upload' | 'analyzing' | 'review';
 
 const SAMPLE_ROWS = 20; // rows sent to the AI structure step (headers + a few samples only)
-const STATUS_TOKENS = ['active', 'is_active', 'isactive', 'status', 'inactive', 'disabled', 'archived'];
-
-/** Mirrors the backend inactive-flag column detection so those columns are included. */
-function isStatusHeader(h: string): boolean {
-  const n = h.toLowerCase().replace(/[^a-z0-9_]+/g, '');
-  return STATUS_TOKENS.includes(n);
-}
 
 export default function HealthReportPage() {
   const params = useParams();
@@ -85,28 +78,21 @@ export default function HealthReportPage() {
         token,
       );
 
-      // Phase 2 — upload ONLY the columns the analyzer needs (role columns + status),
-      // keeping the request small regardless of how wide the export is.
+      // Phase 2 — upload ONLY the columns the analyzer needs (the backend tells us which),
+      // encoded positionally (no repeated keys). Keeps the request small no matter how many
+      // rows or columns the export has.
       const uploadedByName = new Map(files.map((f) => [f.filename, f]));
       const findingsFiles = structure.files.map((fc) => {
         const uploaded = uploadedByName.get(fc.filename);
         const rows = uploaded?.rows ?? [];
-        const needed = new Set(Object.values(fc.column_roles));
-        const subsetHeaders = fc.headers.filter((h) => needed.has(h) || isStatusHeader(h));
-        const subsetRows = rows.map((r) => {
-          const o: Record<string, string> = {};
-          subsetHeaders.forEach((h) => {
-            o[h] = r[h] ?? '';
-          });
-          return o;
-        });
+        const cols = structure.needed_columns[fc.filename] ?? [];
         return {
           filename: fc.filename,
           entity_type: fc.entity_type,
           entity_confidence: fc.entity_confidence,
           column_roles: fc.column_roles,
-          headers: subsetHeaders,
-          rows: subsetRows,
+          headers: cols,
+          rows: rows.map((r) => cols.map((h) => r[h] ?? '')),
         };
       });
 

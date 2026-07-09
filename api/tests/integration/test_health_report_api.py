@@ -156,20 +156,19 @@ async def _post(path, body, client_mock, headers=None):
 
 
 def _build_findings_body(structure_json):
-    """Mirror the frontend: subset to the needed columns and call /findings."""
+    """Mirror the frontend: send only needed_columns, encoded positionally."""
     files = []
+    needed = structure_json["needed_columns"]
     for fc in structure_json["files"]:
         rows = _FULL_ROWS.get(fc["filename"], [])
-        needed = set(fc["column_roles"].values())
-        subset_headers = [h for h in fc["headers"] if h in needed]
-        subset_rows = [{h: r.get(h, "") for h in subset_headers} for r in rows]
+        cols = needed.get(fc["filename"], [])
         files.append({
             "filename": fc["filename"],
             "entity_type": fc["entity_type"],
             "entity_confidence": fc["entity_confidence"],
             "column_roles": fc["column_roles"],
-            "headers": subset_headers,
-            "rows": subset_rows,
+            "headers": cols,
+            "rows": [[r.get(h, "") for h in cols] for r in rows],
         })
     return {"company_id": "co-1", "erp_detection": structure_json["erp_detection"], "files": files}
 
@@ -224,11 +223,10 @@ async def test_findings_too_many_rows_is_413():
         "company_id": "co-1",
         "erp_detection": {"source": "unknown"},
         "files": [{"filename": "big.csv", "entity_type": "parts", "column_roles": {"part_name": "PartNo"},
-                   "headers": ["PartNo"], "rows": [{"PartNo": str(i)} for i in range(0)]}],
+                   "headers": ["PartNo"], "rows": [["1"], ["2"]]}],
     }
     # Force the cap without materializing 200k rows: patch the constant low.
     with patch.object(hr, "MAX_TOTAL_ROWS", 1):
-        body["files"][0]["rows"] = [{"PartNo": "1"}, {"PartNo": "2"}]
         resp = await _post("/api/health-report/findings", body, MockClient())
     assert resp.status_code == 413
 

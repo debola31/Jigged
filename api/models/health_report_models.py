@@ -190,6 +190,8 @@ class StructureRequest(BaseModel):
 class StructureResponse(BaseModel):
     erp_detection: ErpDetection
     files: list[FileClassification]
+    # filename -> the RAW headers the analyzer needs; the client uploads only these.
+    needed_columns: dict[str, list[str]] = {}
 
 
 class FindingsFileInput(BaseModel):
@@ -197,8 +199,8 @@ class FindingsFileInput(BaseModel):
     entity_type: EntityType = EntityType.UNKNOWN
     entity_confidence: float = 0.0
     column_roles: dict[str, str] = {}
-    headers: list[str] = []  # the subset of headers actually included in rows
-    rows: list[dict[str, str]] = []  # only the needed columns' values
+    headers: list[str] = []  # the needed columns, in the order the rows are encoded
+    rows: list[list[str]] = []  # positional (values only, no repeated keys) — keeps payload small
 
 
 class FindingsRequest(BaseModel):

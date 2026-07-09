@@ -71,6 +71,8 @@ export interface HealthReportResponse {
 export interface StructureResponse {
   erp_detection: ErpDetection;
   files: FileClassification[];
+  /** filename -> the raw headers the analyzer needs (upload only these). */
+  needed_columns: Record<string, string[]>;
 }
 
 /** Phase 2: /findings returns the deterministic findings + grounded narrative. */

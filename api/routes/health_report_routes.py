@@ -42,7 +42,7 @@ from models.health_report_models import (
     entity_type_from_str,
 )
 from services.ai.factory import get_provider
-from services.health_report_analyzer import AnalyzedFile, analyze_bundle
+from services.health_report_analyzer import AnalyzedFile, analyze_bundle, needed_raw_columns
 from utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,13 @@ async def structure(request: StructureRequest, req: Request) -> StructureRespons
             ai_provider=provider.provider_name,
             ai_model=model,
         )
-        return StructureResponse(erp_detection=erp_detection, files=classifications)
+        needed_columns = {
+            fc.filename: needed_raw_columns(fc.entity_type, fc.column_roles, fc.headers)
+            for fc in classifications
+        }
+        return StructureResponse(
+            erp_detection=erp_detection, files=classifications, needed_columns=needed_columns
+        )
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
@@ -237,7 +243,8 @@ async def findings(request: FindingsRequest, req: Request) -> FindingsResponse:
                 filename=f.filename,
                 entity_type=f.entity_type,
                 column_roles=f.column_roles,
-                rows=f.rows,
+                # Rebuild dict rows from the compact positional encoding.
+                rows=[dict(zip(f.headers, row)) for row in f.rows],
                 headers=f.headers,
             )
             for f in request.files

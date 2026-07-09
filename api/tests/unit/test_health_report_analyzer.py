@@ -9,7 +9,7 @@ phantom N", and misclassification tolerance.
 import pytest
 
 from models.health_report_models import EntityType, FindingCategory, Severity
-from services.health_report_analyzer import AnalyzedFile, analyze_bundle
+from services.health_report_analyzer import AnalyzedFile, analyze_bundle, needed_raw_columns
 
 pytestmark = pytest.mark.unit
 
@@ -240,6 +240,33 @@ def test_headers_only_file_no_crash():
     findings = analyze_bundle([parts])
     counts = _by_cat(findings, FindingCategory.RECORD_COUNT)
     assert counts[0].count == 0
+
+
+# --------------------------------------------------------------------------- needed_raw_columns
+def test_needed_columns_routings_is_minimal():
+    # routings maps 9 columns, but the analyzer only reads part_name + work_center_name.
+    roles = {
+        "part_name": "Part", "work_center_name": "WC", "sequence": "Seq",
+        "setup_minutes": "Setup", "cycle_minutes_per_unit": "Cycle",
+        "labor_rate_override": "Rate", "external_unit_price": "Price",
+        "external_setup_cost": "SetupCost", "instructions": "Instr",
+    }
+    cols = needed_raw_columns(EntityType.ROUTINGS, roles, list(roles.values()))
+    assert set(cols) == {"Part", "WC"}
+
+
+def test_needed_columns_parts_includes_cost_and_status():
+    roles = {"part_name": "PartNo", "preferred_vendor_name": "Vendor", "cost_per_unit": "Cost",
+             "description": "Desc"}
+    headers = ["PartNo", "Vendor", "Cost", "Desc", "Status"]
+    cols = needed_raw_columns(EntityType.PARTS, roles, headers)
+    assert set(cols) == {"PartNo", "Vendor", "Cost", "Status"}  # not the free-text Desc
+
+
+def test_needed_columns_vendor_is_name():
+    cols = needed_raw_columns(EntityType.VENDORS, {"name": "VendName", "city": "City"},
+                              ["VendName", "City"])
+    assert cols == ["VendName"]
 
 
 def test_findings_sorted_critical_first():

@@ -30,9 +30,7 @@ export interface JobOperation {
   estimated_setup_minutes: number;
   estimated_run_minutes_per_unit: number;
   status: 'pending' | 'in_progress' | 'completed';
-  started_at: string | null;
   completed_at: string | null;
-  assigned_to: string | null;
   completed_by: string | null;
   /** Resolved display name of `completed_by` (from user_company_access), attached by
    *  getJobWithRelations — not a DB column. Null if unresolved/unset. */

@@ -49,7 +49,7 @@ vi.mock('jspdf', () => ({
 }));
 
 const baseProps = {
-  operationTypeId: 'wc-lathe-01',
+  workCenterId: 'wc-lathe-01',
   operationName: 'CNC Lathe 1',
   companyId: 'co-acme',
 };

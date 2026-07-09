@@ -26,7 +26,7 @@ import {
   getPartAttachmentUrl,
   validatePartAttachmentFile,
 } from '@/utils/partAttachmentsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { useUserRole } from '@/hooks/useUserRole';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
 import type { Part, PartAttachment } from '@/types/part';
@@ -83,7 +83,7 @@ export default function FilesTab({ partId, companyId }: FilesTabProps) {
 
   useEffect(() => {
     let cancelled = false;
-    getCurrentOperator(companyId)
+    getCurrentMember(companyId)
       .then((op) => {
         if (!cancelled) setOperatorId(op?.id ?? null);
       })

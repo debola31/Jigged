@@ -11,11 +11,13 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import MultiFileDropzone from '@/components/health-report/MultiFileDropzone';
 import HealthReportView from '@/components/health-report/HealthReportView';
+import { analyzeBundle, type AnalyzedFile } from '@/lib/healthReportAnalyzer';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
-  FindingsResponse,
+  Finding,
   HealthReport,
+  NarrativeResponse,
   StructureResponse,
   UploadedFilePayload,
 } from '@/types/health-report';
@@ -45,7 +47,7 @@ export default function HealthReportPage() {
         const b = await res.json();
         if (b?.detail && typeof b.detail === 'string') detail = b.detail;
       } catch {
-        /* keep default (e.g. a platform 413 with no JSON body) */
+        /* keep default */
       }
       throw new Error(detail);
     }
@@ -63,7 +65,7 @@ export default function HealthReportPage() {
       if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
       const token = session.access_token;
 
-      // Phase 1 — tiny payload: headers + a few sample rows -> column roles + ERP.
+      // Phase 1 (server, AI) — tiny payload: headers + a few sample rows -> column roles + ERP.
       const structure = await postJson<StructureResponse>(
         '/api/health-report/structure',
         {
@@ -78,40 +80,67 @@ export default function HealthReportPage() {
         token,
       );
 
-      // Phase 2 — upload ONLY the columns the analyzer needs (the backend tells us which),
-      // encoded positionally (no repeated keys). Keeps the request small no matter how many
-      // rows or columns the export has.
+      // Deterministic analysis runs HERE in the browser — the rows never leave the machine,
+      // so file size is unbounded and nothing is uploaded or stored.
       const uploadedByName = new Map(files.map((f) => [f.filename, f]));
-      const findingsFiles = structure.files.map((fc) => {
-        const uploaded = uploadedByName.get(fc.filename);
-        const rows = uploaded?.rows ?? [];
-        const cols = structure.needed_columns[fc.filename] ?? [];
-        return {
-          filename: fc.filename,
-          entity_type: fc.entity_type,
-          entity_confidence: fc.entity_confidence,
-          column_roles: fc.column_roles,
-          headers: cols,
-          rows: rows.map((r) => cols.map((h) => r[h] ?? '')),
-        };
-      });
+      const analyzed: AnalyzedFile[] = structure.files.map((fc) => ({
+        filename: fc.filename,
+        entityType: fc.entity_type,
+        columnRoles: fc.column_roles,
+        rows: uploadedByName.get(fc.filename)?.rows ?? [],
+        headers: fc.headers,
+      }));
+      const findings = analyzeBundle(analyzed);
 
-      const fr = await postJson<FindingsResponse>(
-        '/api/health-report/findings',
-        { company_id: companyId, erp_detection: structure.erp_detection, files: findingsFiles },
+      // Phase 2 (server, AI) — findings only (no rows) -> grounded narrative.
+      const narrative = await postJson<NarrativeResponse>(
+        '/api/health-report/narrative',
+        {
+          company_id: companyId,
+          erp_detection: structure.erp_detection,
+          findings: findings.map((f) => ({
+            id: f.id,
+            category: f.category,
+            severity: f.severity,
+            title: f.title,
+            detail: f.detail,
+            count: f.count,
+            examples: f.examples.slice(0, 3),
+          })),
+          file_summaries: analyzed.map((af) => ({
+            filename: af.filename,
+            entity_type: af.entityType,
+            row_count: af.rows.length,
+          })),
+        },
         token,
       );
+
+      // AI "gotchas" are informative but unverified — appended as verified=false findings.
+      const gotchaFindings: Finding[] = narrative.gotchas.map((g, i) => ({
+        id: `gotcha.${i}`,
+        category: 'erp_gotcha',
+        severity: 'info',
+        entity_type: 'unknown',
+        title: g.title || 'Worth verifying',
+        detail: g.detail || '',
+        count: 0,
+        examples: [],
+        source_files: [],
+        verified: false,
+        recommended_action: g.recommended_action || '',
+      }));
 
       setReport({
         schema_version: 1,
         erp_detection: structure.erp_detection,
         files: structure.files,
-        findings: fr.findings,
-        summary: fr.summary,
-        recommendations: fr.recommendations,
-        narrative_available: fr.narrative_available,
-        ai_provider: fr.ai_provider,
-        ai_model: fr.ai_model,
+        findings: [...findings, ...gotchaFindings],
+        summary: narrative.narrative_available ? narrative.summary : '',
+        recommendations: narrative.recommendations,
+        narrative_available: narrative.narrative_available,
+        ai_provider: narrative.ai_provider,
+        ai_model: narrative.ai_model,
         generated_at: new Date().toISOString(),
       });
       setStage('review');

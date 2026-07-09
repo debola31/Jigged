@@ -10,12 +10,13 @@ Design notes:
     this slice. The schema is kept reuse-ready (``schema_version`` + a structured
     ``ErpDetection``) so detection templates / fine-tuning data can be derived later
     (#524) without a migration now.
-  - The deterministic findings layer cannot key on canonical field names directly,
-    because uploaded CSVs are RAW ERP exports whose headers are the source system's own
-    column names. So an AI "structure" pass first produces, per file, a
-    ``column_roles`` map (canonical_field -> raw_header); the analyzer consumes that.
+  - An AI "structure" pass produces, per file, a ``column_roles`` map (canonical_field
+    -> raw_header). The DETERMINISTIC analyzer that consumes it runs in the BROWSER
+    (lib/healthReportAnalyzer.ts): the uploaded rows are already parsed client-side and
+    this report is read-only, so the rows never hit the server (no 4.5 MB limit) and
+    the server keeps only the two AI steps here.
   - Cross-file joins are ASYMMETRIC: vendors/work_centers/customers identify by ``name``
-    while parts identify by ``part_name``. See ``REFERENTIAL_LINKS``.
+    while parts identify by ``part_name`` (encoded in the browser analyzer).
 """
 
 from __future__ import annotations
@@ -167,13 +168,14 @@ class HealthReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Two-phase request/response.
+# Request/response for the two AI-only endpoints.
 #
-# A single "upload every row of every file" request blows past Vercel's ~4.5 MB body
-# limit for a real bundle. So the flow is split: a tiny `/structure` call (headers + a
-# few sample rows) returns the column roles, then a `/findings` call uploads ONLY the
-# columns the analyzer needs (role columns + a status column), keeping each request
-# small no matter how many extra columns the export carries.
+# Uploading rows blows past Vercel's ~4.5 MB body limit for a real bundle, so the raw
+# rows NEVER hit the server. The browser runs the deterministic analyzer locally (the
+# rows are already parsed there) and the server keeps only the two AI steps, which need
+# the secret API key and take tiny payloads:
+#   /structure — headers + a few sample rows -> entity + column_roles + ERP detection
+#   /narrative — the client-computed findings -> grounded prose
 # ---------------------------------------------------------------------------
 class StructureFileInput(BaseModel):
     filename: str
@@ -190,29 +192,25 @@ class StructureRequest(BaseModel):
 class StructureResponse(BaseModel):
     erp_detection: ErpDetection
     files: list[FileClassification]
-    # filename -> the RAW headers the analyzer needs; the client uploads only these.
-    needed_columns: dict[str, list[str]] = {}
 
 
-class FindingsFileInput(BaseModel):
-    filename: str
-    entity_type: EntityType = EntityType.UNKNOWN
-    entity_confidence: float = 0.0
-    column_roles: dict[str, str] = {}
-    headers: list[str] = []  # the needed columns, in the order the rows are encoded
-    rows: list[list[str]] = []  # positional (values only, no repeated keys) — keeps payload small
+class NarrativeRequest(BaseModel):
+    """Client-computed findings + context -> the AI narrative. No raw rows are sent.
 
+    ``findings`` is treated as untrusted input used only to write advisory prose for the
+    caller's own report — there is no write path, so it needs no server-side re-compute.
+    """
 
-class FindingsRequest(BaseModel):
     company_id: str
     erp_detection: ErpDetection
-    files: list[FindingsFileInput]
+    findings: list[dict] = []
+    file_summaries: list[dict] = []
 
 
-class FindingsResponse(BaseModel):
-    findings: list[Finding]
+class NarrativeResponse(BaseModel):
     summary: str = ""
     recommendations: list[str] = []
+    gotchas: list[dict] = []  # {"title","detail","recommended_action"} — informative, unverified
     narrative_available: bool = True
     ai_provider: str = ""
     ai_model: str = ""
@@ -232,26 +230,10 @@ ENTITY_SCHEMAS: dict[EntityType, dict] = {
     EntityType.CUSTOMERS: CUSTOMER_SCHEMA,
 }
 
-# The single field that identifies a row of each entity (for duplicate + join targets).
-# NOTE the asymmetry: parts identify by ``part_name``; vendors/work_centers/customers by
-# ``name``. Routings and BOM have no single identity row (they are line-item files).
-ENTITY_IDENTITY_FIELD: dict[EntityType, str] = {
-    EntityType.PARTS: "part_name",
-    EntityType.VENDORS: "name",
-    EntityType.WORK_CENTERS: "name",
-    EntityType.CUSTOMERS: "name",
-}
-
-# Cross-file referential links: (child_entity, child_field) -> (parent_entity, parent_field).
-# A child value that has no matching parent identity value is an orphan reference.
-REFERENTIAL_LINKS: list[tuple[EntityType, str, EntityType, str]] = [
-    (EntityType.PARTS, "preferred_vendor_name", EntityType.VENDORS, "name"),
-    (EntityType.WORK_CENTERS, "vendor_name", EntityType.VENDORS, "name"),
-    (EntityType.ROUTINGS, "work_center_name", EntityType.WORK_CENTERS, "name"),
-    (EntityType.ROUTINGS, "part_name", EntityType.PARTS, "part_name"),
-    (EntityType.BOM, "parent_part_name", EntityType.PARTS, "part_name"),
-    (EntityType.BOM, "child_part_name", EntityType.PARTS, "part_name"),
-]
+# The identity field and the cross-file referential-join graph now live with the
+# deterministic analyzer that uses them, which runs in the browser
+# (lib/healthReportAnalyzer.ts). The server keeps only ENTITY_SCHEMAS (for the AI
+# structure prompt) + ERP_CATALOG.
 
 # ERP catalog — prompt grounding ONLY (not a detection lookup). E2 and JobBOSS² are
 # merged branding (ECI folded E2 Shop into JobBOSS²), so hints are intentionally loose.

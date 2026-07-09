@@ -1,21 +1,17 @@
 """Read-only Data Health / Import-Readiness report endpoints (#523).
 
-Strictly advisory. These routes perform NO writes to any table and call no
-``auth.admin`` — their only database access is SELECTs (verify caller access, read the
-company feature flag, resolve the AI provider from ``ai_config``). They deliberately do
-NOT import any ``*_import_routes`` / execute path, so there is no reachable write.
+Strictly advisory and AI-only. The deterministic analysis runs in the BROWSER
+(lib/healthReportAnalyzer.ts) on rows that are already parsed there, so raw rows never
+reach the server (no 4.5 MB body limit, and nothing is stored). The server keeps only the
+two steps that need the secret API key, each with a tiny payload:
 
-Two-phase flow (one explicit user action — the frontend "Analyze" button):
-  1. ``POST /structure`` — tiny payload (headers + a few sample rows). Verifies access +
-     the opt-in flag, then runs the AI "structure" call: per-file entity classification,
+  1. ``POST /structure`` — headers + a few sample rows -> per-file entity classification,
      raw->canonical ``column_roles``, and ERP detection.
-  2. ``POST /findings`` — the client uploads ONLY the columns the analyzer needs (the
-     identified role columns + a status column). Runs the pure-Python deterministic
-     analyzer over those, then the grounded narrative call.
+  2. ``POST /narrative`` — the client-computed findings -> grounded plain-English prose.
 
-The split keeps every request well under Vercel's ~4.5 MB body limit regardless of how
-many extra columns the export carries. No on-disk cache is used (it would write the
-uploaded rows to disk / EROFS on Vercel).
+Both perform NO writes to any table and call no ``auth.admin``; their only database access
+is SELECTs (verify caller access, read the company feature flag, resolve the AI provider).
+They deliberately import no ``*_import_routes`` / execute path.
 """
 
 from __future__ import annotations
@@ -32,17 +28,13 @@ from models.health_report_models import (
     ERP_CATALOG,
     ErpDetection,
     FileClassification,
-    Finding,
-    FindingCategory,
-    FindingsRequest,
-    FindingsResponse,
-    Severity,
+    NarrativeRequest,
+    NarrativeResponse,
     StructureRequest,
     StructureResponse,
     entity_type_from_str,
 )
 from services.ai.factory import get_provider
-from services.health_report_analyzer import AnalyzedFile, analyze_bundle, needed_raw_columns
 from utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -51,11 +43,9 @@ router = APIRouter(prefix="/api/health-report", tags=["health-report"])
 
 FEATURE_FLAG = "data_health_report"
 
-# Size caps — reject oversized inputs (413) rather than silently truncate (which would
-# make the deterministic counts wrong).
 MAX_FILES = 12
 MAX_HEADERS_PER_FILE = 300
-MAX_TOTAL_ROWS = 200_000
+MAX_FINDINGS = 500  # findings are aggregated (small); bound the AI prompt anyway
 
 # Best-effort per-company limiter (weak on serverless cold starts; the meaningful bound
 # is the feature flag + caller authorization).
@@ -125,7 +115,7 @@ def _feature_enabled(company_id: str, client: Client) -> bool:
 
 
 async def _authorize(request: Request, company_id: str) -> Client:
-    """Shared gate for both phases: caller auth + opt-in flag + rate limit."""
+    """Shared gate for both endpoints: caller auth + opt-in flag + rate limit."""
     client = _service_client()
     await _verify_company_access(request, company_id, client)
     if not _feature_enabled(company_id, client):
@@ -210,13 +200,7 @@ async def structure(request: StructureRequest, req: Request) -> StructureRespons
             ai_provider=provider.provider_name,
             ai_model=model,
         )
-        needed_columns = {
-            fc.filename: needed_raw_columns(fc.entity_type, fc.column_roles, fc.headers)
-            for fc in classifications
-        }
-        return StructureResponse(
-            erp_detection=erp_detection, files=classifications, needed_columns=needed_columns
-        )
+        return StructureResponse(erp_detection=erp_detection, files=classifications)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
@@ -224,80 +208,29 @@ async def structure(request: StructureRequest, req: Request) -> StructureRespons
         raise HTTPException(status_code=500, detail="Failed to analyze the uploaded files.")
 
 
-@router.post("/findings", response_model=FindingsResponse)
-async def findings(request: FindingsRequest, req: Request) -> FindingsResponse:
-    """Phase 2: deterministic findings over the needed columns + grounded narrative."""
+@router.post("/narrative", response_model=NarrativeResponse)
+async def narrative(request: NarrativeRequest, req: Request) -> NarrativeResponse:
+    """Phase 2: turn the client-computed findings into grounded plain-English prose."""
     company_id = request.company_id
     client = await _authorize(req, company_id)
 
-    total_rows = sum(len(f.rows) for f in request.files)
-    if total_rows > MAX_TOTAL_ROWS:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Too many rows in one upload (max {MAX_TOTAL_ROWS:,}).",
-        )
-
     try:
-        analyzed = [
-            AnalyzedFile(
-                filename=f.filename,
-                entity_type=f.entity_type,
-                column_roles=f.column_roles,
-                # Rebuild dict rows from the compact positional encoding.
-                rows=[dict(zip(f.headers, row)) for row in f.rows],
-                headers=f.headers,
-            )
-            for f in request.files
-        ]
-        deterministic = analyze_bundle(analyzed)
-
-        file_summaries = [
-            {"filename": af.filename, "entity_type": af.entity_type.value, "row_count": len(af.rows)}
-            for af in analyzed
-        ]
-        findings_payload = [
-            {
-                "id": f.id,
-                "category": f.category.value,
-                "severity": f.severity.value,
-                "title": f.title,
-                "detail": f.detail,
-                "count": f.count,
-                "examples": f.examples[:3],
-            }
-            for f in deterministic
-        ]
         provider = await get_provider(client, company_id, "csv_mapping")
-        narrative = await provider.generate_health_narrative(
+        result = await provider.generate_health_narrative(
             erp=request.erp_detection.model_dump(),
-            findings=findings_payload,
-            file_summaries=file_summaries,
+            findings=request.findings[:MAX_FINDINGS],
+            file_summaries=request.file_summaries[:MAX_FILES],
         )
-
-        out = list(deterministic)
-        for i, g in enumerate(narrative.gotchas):
-            out.append(
-                Finding(
-                    id=f"gotcha.{i}",
-                    category=FindingCategory.ERP_GOTCHA,
-                    severity=Severity.INFO,
-                    title=g.get("title", "Worth verifying"),
-                    detail=g.get("detail", ""),
-                    recommended_action=g.get("recommended_action", ""),
-                    verified=False,
-                )
-            )
-
-        return FindingsResponse(
-            findings=out,
-            summary=narrative.summary if narrative.available else "",
-            recommendations=narrative.recommendations,
-            narrative_available=narrative.available,
+        return NarrativeResponse(
+            summary=result.summary if result.available else "",
+            recommendations=result.recommendations,
+            gotchas=result.gotchas,
+            narrative_available=result.available,
             ai_provider=provider.provider_name,
             ai_model=getattr(provider, "model", ""),
         )
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
-        logger.warning("Health report findings step failed: %s", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Failed to analyze the uploaded files.")
+        logger.warning("Health report narrative step failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to generate the summary.")

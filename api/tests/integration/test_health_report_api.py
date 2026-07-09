@@ -1,8 +1,9 @@
-"""API tests for the read-only Data Health report endpoints (routes/health_report_routes.py).
+"""API tests for the read-only Data Health endpoints (routes/health_report_routes.py).
 
-Fully mocked (no DB, no AI). Covers the two-phase flow (/structure then /findings),
-caller-authorization, the opt-in feature gate, size caps, and — critically for #523 —
-the write-free guarantee (a static AST check + a runtime mock that raises on any write).
+The server is AI-only now (the deterministic analyzer runs in the browser). These cover
+the two AI endpoints (/structure, /narrative), caller-authorization, the opt-in feature
+gate, caps, and — for #523 — the write-free guarantee (static AST + runtime write-raising
+mock). The deterministic findings logic is tested in the TS vitest suite.
 """
 
 import ast
@@ -101,15 +102,11 @@ class MockProvider:
     model = "mock-model"
 
     async def analyze_structure(self, files, entity_schemas, erp_catalog):
-        structs = []
-        for f in files:
-            name = f["filename"]
-            if "vendor" in name:
-                structs.append(FileStructure(filename=name, entity_type="vendors",
-                                             entity_confidence=0.9, column_roles={"name": "VendName"}))
-            else:
-                structs.append(FileStructure(filename=name, entity_type="parts", entity_confidence=0.9,
-                                             column_roles={"part_name": "PartNo", "preferred_vendor_name": "Vendor"}))
+        structs = [
+            FileStructure(filename=f["filename"], entity_type="parts", entity_confidence=0.9,
+                          column_roles={"part_name": "PartNo"})
+            for f in files
+        ]
         return StructureResult(
             erp=ErpDetectionResult(source="tangle", display_name="Tangle", confidence=0.8,
                                    matched_headers=[{"header": "PartNo", "signal": "job-shop id"}]),
@@ -130,68 +127,44 @@ _STRUCTURE_BODY = {
     "files": [
         {"filename": "parts.csv", "headers": ["PartNo", "Vendor"], "row_count": 2,
          "sample_rows": [["A", "Acme"], ["B", "Ghost Co"]]},
-        {"filename": "vendors.csv", "headers": ["VendName"], "row_count": 1,
-         "sample_rows": [["Acme"]]},
     ],
 }
 
-# Full rows the client holds locally and subsets for /findings.
-_FULL_ROWS = {
-    "parts.csv": [{"PartNo": "A", "Vendor": "Acme"}, {"PartNo": "B", "Vendor": "Ghost Co"}],
-    "vendors.csv": [{"VendName": "Acme"}],
+_NARRATIVE_BODY = {
+    "company_id": "co-1",
+    "erp_detection": {"source": "tangle", "display_name": "Tangle", "confidence": 0.8},
+    "findings": [{"id": "orphan.parts.preferred_vendor_name", "category": "orphan_reference",
+                  "severity": "critical", "title": "1 part references a missing vendor", "count": 1}],
+    "file_summaries": [{"filename": "parts.csv", "entity_type": "parts", "row_count": 2}],
 }
-
-
-def _client():
-    transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://testserver")
 
 
 async def _post(path, body, client_mock, headers=None):
     headers = headers if headers is not None else {"Authorization": "Bearer test-token"}
     with patch.object(hr, "_service_client", return_value=client_mock), \
          patch.object(hr, "get_provider", new=AsyncMock(return_value=MockProvider())):
-        async with _client() as ac:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
             return await ac.post(path, json=body, headers=headers)
 
 
-def _build_findings_body(structure_json):
-    """Mirror the frontend: send only needed_columns, encoded positionally."""
-    files = []
-    needed = structure_json["needed_columns"]
-    for fc in structure_json["files"]:
-        rows = _FULL_ROWS.get(fc["filename"], [])
-        cols = needed.get(fc["filename"], [])
-        files.append({
-            "filename": fc["filename"],
-            "entity_type": fc["entity_type"],
-            "entity_confidence": fc["entity_confidence"],
-            "column_roles": fc["column_roles"],
-            "headers": cols,
-            "rows": [[r.get(h, "") for h in cols] for r in rows],
-        })
-    return {"company_id": "co-1", "erp_detection": structure_json["erp_detection"], "files": files}
-
-
 # --------------------------------------------------------------------------- tests
-async def test_full_flow_structure_then_findings():
+async def test_structure_then_narrative_flow():
     client = MockClient()
     sresp = await _post("/api/health-report/structure", _STRUCTURE_BODY, client)
     assert sresp.status_code == 200
     sj = sresp.json()
     assert sj["erp_detection"]["source"] == "tangle"
     assert sj["erp_detection"]["header_signature"]
-    assert {f["filename"] for f in sj["files"]} == {"parts.csv", "vendors.csv"}
+    assert sj["files"][0]["filename"] == "parts.csv"
 
-    fresp = await _post("/api/health-report/findings", _build_findings_body(sj), client)
-    assert fresp.status_code == 200
-    fj = fresp.json()
-    assert fj["narrative_available"] is True
-    assert "ready" in fj["summary"].lower()
-    ids = {f["id"] for f in fj["findings"]}
-    assert "orphan.parts.preferred_vendor_name" in ids  # "Ghost Co" has no vendor row
-    assert any(f["category"] == "erp_gotcha" and f["verified"] is False for f in fj["findings"])
-    assert client.writes == []  # neither phase attempted a write
+    nresp = await _post("/api/health-report/narrative", _NARRATIVE_BODY, client)
+    assert nresp.status_code == 200
+    nj = nresp.json()
+    assert nj["narrative_available"] is True
+    assert "ready" in nj["summary"].lower()
+    assert nj["gotchas"][0]["title"] == "Check units"
+    assert client.writes == []  # neither endpoint attempted a write
 
 
 async def test_structure_missing_token_is_401():
@@ -210,24 +183,16 @@ async def test_structure_feature_flag_off_is_403():
     assert "not enabled" in resp.json()["detail"].lower()
 
 
+async def test_narrative_feature_flag_off_is_403():
+    resp = await _post("/api/health-report/narrative", _NARRATIVE_BODY, MockClient(features={}))
+    assert resp.status_code == 403
+
+
 async def test_structure_too_many_files_is_413():
     body = {"company_id": "co-1",
             "files": [{"filename": f"f{i}.csv", "headers": ["A"], "row_count": 0, "sample_rows": []}
                       for i in range(13)]}
     resp = await _post("/api/health-report/structure", body, MockClient())
-    assert resp.status_code == 413
-
-
-async def test_findings_too_many_rows_is_413():
-    body = {
-        "company_id": "co-1",
-        "erp_detection": {"source": "unknown"},
-        "files": [{"filename": "big.csv", "entity_type": "parts", "column_roles": {"part_name": "PartNo"},
-                   "headers": ["PartNo"], "rows": [["1"], ["2"]]}],
-    }
-    # Force the cap without materializing 200k rows: patch the constant low.
-    with patch.object(hr, "MAX_TOTAL_ROWS", 1):
-        resp = await _post("/api/health-report/findings", body, MockClient())
     assert resp.status_code == 413
 
 

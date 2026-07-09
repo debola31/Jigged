@@ -13,9 +13,23 @@ import MultiFileDropzone from '@/components/health-report/MultiFileDropzone';
 import HealthReportView from '@/components/health-report/HealthReportView';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
-import type { HealthReport, HealthReportResponse, UploadedFilePayload } from '@/types/health-report';
+import type {
+  FindingsResponse,
+  HealthReport,
+  StructureResponse,
+  UploadedFilePayload,
+} from '@/types/health-report';
 
 type Stage = 'upload' | 'analyzing' | 'review';
+
+const SAMPLE_ROWS = 20; // rows sent to the AI structure step (headers + a few samples only)
+const STATUS_TOKENS = ['active', 'is_active', 'isactive', 'status', 'inactive', 'disabled', 'archived'];
+
+/** Mirrors the backend inactive-flag column detection so those columns are included. */
+function isStatusHeader(h: string): boolean {
+  const n = h.toLowerCase().replace(/[^a-z0-9_]+/g, '');
+  return STATUS_TOKENS.includes(n);
+}
 
 export default function HealthReportPage() {
   const params = useParams();
@@ -26,6 +40,25 @@ export default function HealthReportPage() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function postJson<T>(path: string, body: unknown, token: string): Promise<T> {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `Analysis failed (${res.status})`;
+      try {
+        const b = await res.json();
+        if (b?.detail && typeof b.detail === 'string') detail = b.detail;
+      } catch {
+        /* keep default (e.g. a platform 413 with no JSON body) */
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<T>;
+  }
+
   async function analyze() {
     setError(null);
     setStage('analyzing');
@@ -34,32 +67,67 @@ export default function HealthReportPage() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Your session has expired. Please sign in again.');
-      }
+      if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
+      const token = session.access_token;
 
-      const res = await fetch(`${API_BASE_URL}/api/health-report/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+      // Phase 1 — tiny payload: headers + a few sample rows -> column roles + ERP.
+      const structure = await postJson<StructureResponse>(
+        '/api/health-report/structure',
+        {
+          company_id: companyId,
+          files: files.map((f) => ({
+            filename: f.filename,
+            headers: f.headers,
+            row_count: f.rows.length,
+            sample_rows: f.rows.slice(0, SAMPLE_ROWS).map((r) => f.headers.map((h) => r[h] ?? '')),
+          })),
         },
-        body: JSON.stringify({ company_id: companyId, files }),
+        token,
+      );
+
+      // Phase 2 — upload ONLY the columns the analyzer needs (role columns + status),
+      // keeping the request small regardless of how wide the export is.
+      const uploadedByName = new Map(files.map((f) => [f.filename, f]));
+      const findingsFiles = structure.files.map((fc) => {
+        const uploaded = uploadedByName.get(fc.filename);
+        const rows = uploaded?.rows ?? [];
+        const needed = new Set(Object.values(fc.column_roles));
+        const subsetHeaders = fc.headers.filter((h) => needed.has(h) || isStatusHeader(h));
+        const subsetRows = rows.map((r) => {
+          const o: Record<string, string> = {};
+          subsetHeaders.forEach((h) => {
+            o[h] = r[h] ?? '';
+          });
+          return o;
+        });
+        return {
+          filename: fc.filename,
+          entity_type: fc.entity_type,
+          entity_confidence: fc.entity_confidence,
+          column_roles: fc.column_roles,
+          headers: subsetHeaders,
+          rows: subsetRows,
+        };
       });
 
-      if (!res.ok) {
-        let detail = `Analysis failed (${res.status})`;
-        try {
-          const body = await res.json();
-          if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : detail;
-        } catch {
-          /* keep default */
-        }
-        throw new Error(detail);
-      }
+      const fr = await postJson<FindingsResponse>(
+        '/api/health-report/findings',
+        { company_id: companyId, erp_detection: structure.erp_detection, files: findingsFiles },
+        token,
+      );
 
-      const data: HealthReportResponse = await res.json();
-      setReport(data.report);
+      setReport({
+        schema_version: 1,
+        erp_detection: structure.erp_detection,
+        files: structure.files,
+        findings: fr.findings,
+        summary: fr.summary,
+        recommendations: fr.recommendations,
+        narrative_available: fr.narrative_available,
+        ai_provider: fr.ai_provider,
+        ai_model: fr.ai_model,
+        generated_at: new Date().toISOString(),
+      });
       setStage('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');

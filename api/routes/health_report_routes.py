@@ -1,23 +1,21 @@
-"""Read-only Data Health / Import-Readiness report endpoint (#523).
+"""Read-only Data Health / Import-Readiness report endpoints (#523).
 
-Strictly advisory. This route performs NO writes to any table and calls no
-``auth.admin`` — its only database access is SELECTs (verify caller access, read the
-company feature flag, resolve the AI provider from ``ai_config``). It deliberately does
+Strictly advisory. These routes perform NO writes to any table and call no
+``auth.admin`` — their only database access is SELECTs (verify caller access, read the
+company feature flag, resolve the AI provider from ``ai_config``). They deliberately do
 NOT import any ``*_import_routes`` / execute path, so there is no reachable write.
 
-Flow (one explicit user action — the frontend "Analyze" button):
-  1. Verify the caller has access to ``company_id`` (never trust the body alone).
-  2. Server-side feature-flag gate (opt-in; the client flag only hides the UI).
-  3. Enforce size caps (files / headers / total rows).
-  4. Best-effort in-memory rate limit (real bound is flag + caller-auth; a serverless
-     in-memory limiter is weak by itself — see plan).
-  5. AI "structure" call: per-file entity + raw->canonical column_roles + ERP detection.
-  6. Deterministic findings over the uploaded bundle (pure Python, no AI, no DB).
-  7. AI "narrative" call, grounded strictly in those findings (informative, never
-     fabricating numbers; degrades to raw findings if it fails).
+Two-phase flow (one explicit user action — the frontend "Analyze" button):
+  1. ``POST /structure`` — tiny payload (headers + a few sample rows). Verifies access +
+     the opt-in flag, then runs the AI "structure" call: per-file entity classification,
+     raw->canonical ``column_roles``, and ERP detection.
+  2. ``POST /findings`` — the client uploads ONLY the columns the analyzer needs (the
+     identified role columns + a status column). Runs the pure-Python deterministic
+     analyzer over those, then the grounded narrative call.
 
-No on-disk cache is used here: the reused import-route cache would write the uploaded
-rows to disk (a data-at-rest leak, and it EROFS-fails on Vercel anyway).
+The split keeps every request well under Vercel's ~4.5 MB body limit regardless of how
+many extra columns the export carries. No on-disk cache is used (it would write the
+uploaded rows to disk / EROFS on Vercel).
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from supabase import Client, create_client
@@ -37,10 +34,11 @@ from models.health_report_models import (
     FileClassification,
     Finding,
     FindingCategory,
-    HealthReport,
-    HealthReportRequest,
-    HealthReportResponse,
+    FindingsRequest,
+    FindingsResponse,
     Severity,
+    StructureRequest,
+    StructureResponse,
     entity_type_from_str,
 )
 from services.ai.factory import get_provider
@@ -53,16 +51,15 @@ router = APIRouter(prefix="/api/health-report", tags=["health-report"])
 
 FEATURE_FLAG = "data_health_report"
 
-# Size caps — reject oversized bundles (413) rather than silently truncate, which would
-# make the deterministic counts wrong.
+# Size caps — reject oversized inputs (413) rather than silently truncate (which would
+# make the deterministic counts wrong).
 MAX_FILES = 12
 MAX_HEADERS_PER_FILE = 300
 MAX_TOTAL_ROWS = 200_000
-_SAMPLE_SCAN_ROWS = 50  # rows scanned to find one non-empty sample value per column
 
-# Best-effort per-company limiter (10 reports / 10 min). Weak on serverless cold starts;
-# the meaningful bound is the feature flag + caller authorization.
-_limiter = RateLimiter(max_requests=10, window_seconds=600)
+# Best-effort per-company limiter (weak on serverless cold starts; the meaningful bound
+# is the feature flag + caller authorization).
+_limiter = RateLimiter(max_requests=20, window_seconds=600)
 
 
 def _service_client() -> Client:
@@ -106,11 +103,9 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
 
 
 def _feature_enabled(company_id: str, client: Client) -> bool:
-    """Opt-IN gate: only true when companies.settings.features.data_health_report is set.
+    """Opt-IN gate: true only when companies.settings.features.data_health_report is set.
 
-    Unlike ai_insights (opt-out), this new tool is off unless explicitly enabled per
-    company. Fails CLOSED on read error — an advisory extra shouldn't dark-launch on a
-    DB blip.
+    Fails CLOSED on read error — an advisory extra shouldn't dark-launch on a DB blip.
     """
     try:
         resp = (
@@ -129,93 +124,126 @@ def _feature_enabled(company_id: str, client: Client) -> bool:
     return raw is True or raw == "true"
 
 
-def _enforce_caps(files) -> None:
-    if len(files) > MAX_FILES:
-        raise HTTPException(status_code=413, detail=f"Too many files (max {MAX_FILES}).")
-    total_rows = sum(len(f.rows) for f in files)
-    if total_rows > MAX_TOTAL_ROWS:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Too many rows in one upload (max {MAX_TOTAL_ROWS:,}).",
-        )
-    for f in files:
-        if len(f.headers) > MAX_HEADERS_PER_FILE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"'{f.filename}' has too many columns (max {MAX_HEADERS_PER_FILE}).",
-            )
-
-
-def _column_samples(headers: list[str], rows: list[dict]) -> dict[str, str]:
-    """One non-empty sample value per column, scanning only the first few rows."""
-    out: dict[str, str] = {}
-    scan = rows[:_SAMPLE_SCAN_ROWS]
-    for h in headers:
-        for row in scan:
-            v = (row.get(h) or "").strip()
-            if v:
-                out[h] = v
-                break
-    return out
-
-
-def _bundle_signature(files) -> str:
-    per_file = ["|".join(sorted(f.headers)) for f in files]
-    return hashlib.md5("||".join(sorted(per_file)).encode()).hexdigest()
-
-
-@router.post("/analyze", response_model=HealthReportResponse)
-async def analyze(request: HealthReportRequest, req: Request) -> HealthReportResponse:
-    company_id = request.company_id
+async def _authorize(request: Request, company_id: str) -> Client:
+    """Shared gate for both phases: caller auth + opt-in flag + rate limit."""
     client = _service_client()
-
-    # 1-2. authorization + opt-in feature gate (both before any paid AI work)
-    await _verify_company_access(req, company_id, client)
+    await _verify_company_access(request, company_id, client)
     if not _feature_enabled(company_id, client):
         raise HTTPException(status_code=403, detail="Data Health report is not enabled for this company.")
-
-    # 3. size caps
-    _enforce_caps(request.files)
-
-    # 4. best-effort rate limit
     if not _limiter.check(company_id):
         raise HTTPException(
             status_code=429,
             detail="Too many data-health analyses. Please wait a few minutes and try again.",
             headers={"Retry-After": "600"},
         )
+    return client
+
+
+def _column_samples(headers: list[str], sample_rows: list[list[str]]) -> dict[str, str]:
+    """One non-empty sample value per column, from the positional sample rows."""
+    out: dict[str, str] = {}
+    for j, h in enumerate(headers):
+        for row in sample_rows:
+            if j < len(row):
+                v = (row[j] or "").strip()
+                if v:
+                    out[h] = v
+                    break
+    return out
+
+
+def _bundle_signature(all_headers: list[list[str]]) -> str:
+    per_file = ["|".join(sorted(h)) for h in all_headers]
+    return hashlib.md5("||".join(sorted(per_file)).encode()).hexdigest()
+
+
+@router.post("/structure", response_model=StructureResponse)
+async def structure(request: StructureRequest, req: Request) -> StructureResponse:
+    """Phase 1: classify each file + detect the ERP from headers + a small sample."""
+    company_id = request.company_id
+    client = await _authorize(req, company_id)
+
+    if len(request.files) > MAX_FILES:
+        raise HTTPException(status_code=413, detail=f"Too many files (max {MAX_FILES}).")
+    for f in request.files:
+        if len(f.headers) > MAX_HEADERS_PER_FILE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"'{f.filename}' has too many columns (max {MAX_HEADERS_PER_FILE}).",
+            )
 
     try:
-        # 5. AI structure + source detection
         entity_schemas = {et.value: schema for et, schema in ENTITY_SCHEMAS.items()}
         struct_input = [
             {
                 "filename": f.filename,
                 "headers": f.headers,
-                "column_samples": _column_samples(f.headers, f.rows),
+                "column_samples": _column_samples(f.headers, f.sample_rows),
             }
             for f in request.files
         ]
         provider = await get_provider(client, company_id, "csv_mapping")
-        structure = await provider.analyze_structure(struct_input, entity_schemas, ERP_CATALOG)
+        result = await provider.analyze_structure(struct_input, entity_schemas, ERP_CATALOG)
         model = getattr(provider, "model", "")
 
-        # 6. deterministic findings over the AI-identified column roles
-        rows_by_name = {f.filename: f.rows for f in request.files}
-        headers_by_name = {f.filename: f.headers for f in request.files}
-        analyzed = [
-            AnalyzedFile(
+        by_name = {f.filename: f for f in request.files}
+        classifications = [
+            FileClassification(
                 filename=fs.filename,
                 entity_type=entity_type_from_str(fs.entity_type),
+                entity_confidence=fs.entity_confidence,
+                headers=by_name[fs.filename].headers if fs.filename in by_name else [],
+                row_count=by_name[fs.filename].row_count if fs.filename in by_name else 0,
                 column_roles=fs.column_roles,
-                rows=rows_by_name.get(fs.filename, []),
-                headers=headers_by_name.get(fs.filename, []),
             )
-            for fs in structure.files
+            for fs in result.files
         ]
-        findings = analyze_bundle(analyzed)
+        erp = result.erp
+        erp_detection = ErpDetection(
+            source=erp.source,
+            display_name=erp.display_name,
+            confidence=erp.confidence,
+            matched_headers=erp.matched_headers,
+            evidence=erp.evidence,
+            alternatives=erp.alternatives,
+            header_signature=_bundle_signature([f.headers for f in request.files]),
+            ai_provider=provider.provider_name,
+            ai_model=model,
+        )
+        return StructureResponse(erp_detection=erp_detection, files=classifications)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — log the type only, never row content
+        logger.warning("Health report structure step failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to analyze the uploaded files.")
 
-        # 7. grounded narrative
+
+@router.post("/findings", response_model=FindingsResponse)
+async def findings(request: FindingsRequest, req: Request) -> FindingsResponse:
+    """Phase 2: deterministic findings over the needed columns + grounded narrative."""
+    company_id = request.company_id
+    client = await _authorize(req, company_id)
+
+    total_rows = sum(len(f.rows) for f in request.files)
+    if total_rows > MAX_TOTAL_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many rows in one upload (max {MAX_TOTAL_ROWS:,}).",
+        )
+
+    try:
+        analyzed = [
+            AnalyzedFile(
+                filename=f.filename,
+                entity_type=f.entity_type,
+                column_roles=f.column_roles,
+                rows=f.rows,
+                headers=f.headers,
+            )
+            for f in request.files
+        ]
+        deterministic = analyze_bundle(analyzed)
+
         file_summaries = [
             {"filename": af.filename, "entity_type": af.entity_type.value, "row_count": len(af.rows)}
             for af in analyzed
@@ -230,17 +258,18 @@ async def analyze(request: HealthReportRequest, req: Request) -> HealthReportRes
                 "count": f.count,
                 "examples": f.examples[:3],
             }
-            for f in findings
+            for f in deterministic
         ]
+        provider = await get_provider(client, company_id, "csv_mapping")
         narrative = await provider.generate_health_narrative(
-            erp=structure.erp.model_dump(),
+            erp=request.erp_detection.model_dump(),
             findings=findings_payload,
             file_summaries=file_summaries,
         )
 
-        # AI "gotchas" are informative but unverified — appended as verified=False findings.
+        out = list(deterministic)
         for i, g in enumerate(narrative.gotchas):
-            findings.append(
+            out.append(
                 Finding(
                     id=f"gotcha.{i}",
                     category=FindingCategory.ERP_GOTCHA,
@@ -252,47 +281,16 @@ async def analyze(request: HealthReportRequest, req: Request) -> HealthReportRes
                 )
             )
 
-        classifications = [
-            FileClassification(
-                filename=fs.filename,
-                entity_type=entity_type_from_str(fs.entity_type),
-                entity_confidence=fs.entity_confidence,
-                headers=headers_by_name.get(fs.filename, []),
-                row_count=len(rows_by_name.get(fs.filename, [])),
-                column_roles=fs.column_roles,
-            )
-            for fs in structure.files
-        ]
-
-        erp = structure.erp
-        erp_detection = ErpDetection(
-            source=erp.source,
-            display_name=erp.display_name,
-            confidence=erp.confidence,
-            matched_headers=erp.matched_headers,
-            evidence=erp.evidence,
-            alternatives=erp.alternatives,
-            header_signature=_bundle_signature(request.files),
-            ai_provider=provider.provider_name,
-            ai_model=model,
-        )
-
-        report = HealthReport(
-            erp_detection=erp_detection,
-            files=classifications,
-            findings=findings,
+        return FindingsResponse(
+            findings=out,
             summary=narrative.summary if narrative.available else "",
             recommendations=narrative.recommendations,
             narrative_available=narrative.available,
             ai_provider=provider.provider_name,
-            ai_model=model,
-            generated_at=datetime.now(timezone.utc).isoformat(),
+            ai_model=getattr(provider, "model", ""),
         )
-        return HealthReportResponse(report=report)
     except HTTPException:
         raise
-    except Exception as e:  # noqa: BLE001
-        # Log the error TYPE only — never the uploaded row content (avoids leaking a
-        # shop's data into logs/Sentry, since send_default_pii is on).
-        logger.warning("Health report analysis failed: %s", type(e).__name__)
+    except Exception as e:  # noqa: BLE001 — log the type only, never row content
+        logger.warning("Health report findings step failed: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to analyze the uploaded files.")

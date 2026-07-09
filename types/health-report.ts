@@ -67,6 +67,22 @@ export interface HealthReportResponse {
   report: HealthReport;
 }
 
+/** Phase 1: /structure returns per-file classification + ERP detection. */
+export interface StructureResponse {
+  erp_detection: ErpDetection;
+  files: FileClassification[];
+}
+
+/** Phase 2: /findings returns the deterministic findings + grounded narrative. */
+export interface FindingsResponse {
+  findings: Finding[];
+  summary: string;
+  recommendations: string[];
+  narrative_available: boolean;
+  ai_provider: string;
+  ai_model: string;
+}
+
 /** One uploaded CSV, parsed client-side, sent to the backend. */
 export interface UploadedFilePayload {
   filename: string;

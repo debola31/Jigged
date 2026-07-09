@@ -167,6 +167,56 @@ class HealthReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Two-phase request/response.
+#
+# A single "upload every row of every file" request blows past Vercel's ~4.5 MB body
+# limit for a real bundle. So the flow is split: a tiny `/structure` call (headers + a
+# few sample rows) returns the column roles, then a `/findings` call uploads ONLY the
+# columns the analyzer needs (role columns + a status column), keeping each request
+# small no matter how many extra columns the export carries.
+# ---------------------------------------------------------------------------
+class StructureFileInput(BaseModel):
+    filename: str
+    headers: list[str]
+    sample_rows: list[list[str]] = []  # small: first N rows, positional (values only)
+    row_count: int = 0
+
+
+class StructureRequest(BaseModel):
+    company_id: str
+    files: list[StructureFileInput]
+
+
+class StructureResponse(BaseModel):
+    erp_detection: ErpDetection
+    files: list[FileClassification]
+
+
+class FindingsFileInput(BaseModel):
+    filename: str
+    entity_type: EntityType = EntityType.UNKNOWN
+    entity_confidence: float = 0.0
+    column_roles: dict[str, str] = {}
+    headers: list[str] = []  # the subset of headers actually included in rows
+    rows: list[dict[str, str]] = []  # only the needed columns' values
+
+
+class FindingsRequest(BaseModel):
+    company_id: str
+    erp_detection: ErpDetection
+    files: list[FindingsFileInput]
+
+
+class FindingsResponse(BaseModel):
+    findings: list[Finding]
+    summary: str = ""
+    recommendations: list[str] = []
+    narrative_available: bool = True
+    ai_provider: str = ""
+    ai_model: str = ""
+
+
+# ---------------------------------------------------------------------------
 # Shared constants (single source of truth for the analyzer + the AI structure prompt)
 # ---------------------------------------------------------------------------
 

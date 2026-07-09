@@ -8,7 +8,6 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
@@ -59,8 +58,8 @@ export default function OperatorOperationActionPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Header back → the traveler for this part. (Files + Previous notes live in an
-  // in-content reference row below the job card, not the header.)
+  // Header back pops in-app history (nav.goBack). This href is only the deep-link
+  // fallback — the part's traveler — for an operation scanned into directly.
   useSetOperatorChrome({ back: { href: travelerHref, label: 'Back to traveler' } }, [travelerHref]);
 
   useEffect(() => {
@@ -120,12 +119,6 @@ export default function OperatorOperationActionPage() {
 
   const isCompleted = job?.operation_status === 'completed';
 
-  const statusColor = (status: string | null): 'success' | 'primary' | 'default' => {
-    if (status === 'completed') return 'success';
-    if (status === 'in_progress') return 'primary';
-    return 'default';
-  };
-
   // Wait for BOTH the job fetch and the station context's one-time init before
   // deciding what to render — otherwise the "no station" branch can flash for an
   // operator who actually has a stored station.
@@ -184,19 +177,13 @@ export default function OperatorOperationActionPage() {
         sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
       >
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-            <Box>
-              <Typography variant="h5" component="h1" fontWeight={700}>
-                {job.job_number}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {job.customer_name || 'No customer'}
-              </Typography>
-            </Box>
-            <Chip
-              label={job.operation_status || job.production_status}
-              color={statusColor(job.operation_status)}
-            />
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="h5" component="h1" fontWeight={700}>
+              {job.job_number}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {job.customer_name || 'No customer'}
+            </Typography>
           </Box>
 
           {/* Lead with the part (what they're making). The operation's work

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'in', 'order', 'single'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'in', 'not', 'order', 'limit', 'single'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -29,7 +29,13 @@ vi.mock('@/lib/supabaseErrors', () => ({
     opts?.fallback ?? 'error',
 }));
 
-import { getJobNotes, addJobNote, getAllStationsOperatorJobs } from '@/utils/operatorAccess';
+import {
+  getJobNotes,
+  addJobNote,
+  getAllStationsOperatorJobs,
+  getCompletedOperatorJobs,
+  getAllStationsCompletedOperatorJobs,
+} from '@/utils/operatorAccess';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -69,6 +75,54 @@ describe('getAllStationsOperatorJobs', () => {
     await expect(
       getAllStationsOperatorJobs('c1', [{ id: 'wc1', name: 'Lathe' }]),
     ).rejects.toThrow(/column j\.status does not exist/);
+  });
+});
+
+describe('getCompletedOperatorJobs', () => {
+  it('returns [] without querying when no station is selected', async () => {
+    const result = await getCompletedOperatorJobs('c1');
+    expect(result).toEqual([]);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+  });
+
+  it('queries completed job_operations for the station (recent-first, capped) and returns [] when none', async () => {
+    mockQueryBuilder.data = [];
+    const result = await getCompletedOperatorJobs('c1', 'wc1');
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('job_operations');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('status', 'completed');
+    expect(mockQueryBuilder.in).toHaveBeenCalledWith('work_center_id', ['wc1']);
+    expect(mockQueryBuilder.order).toHaveBeenCalledWith('completed_at', { ascending: false });
+    expect(mockQueryBuilder.limit).toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+
+  it('throws (surfaces the error) when the completed query fails', async () => {
+    mockQueryBuilder.error = { message: 'boom' };
+    await expect(getCompletedOperatorJobs('c1', 'wc1')).rejects.toThrow(
+      /Failed to load completed operations/,
+    );
+  });
+});
+
+describe('getAllStationsCompletedOperatorJobs', () => {
+  it('returns [] without querying when there are no stations', async () => {
+    const result = await getAllStationsCompletedOperatorJobs('c1', []);
+    expect(result).toEqual([]);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+  });
+
+  it('queries completed operations across all given stations', async () => {
+    mockQueryBuilder.data = [];
+    const stations = [
+      { id: 'wc1', name: 'Lathe' },
+      { id: 'wc2', name: 'Mill' },
+    ];
+    const result = await getAllStationsCompletedOperatorJobs('c1', stations);
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('job_operations');
+    expect(mockQueryBuilder.in).toHaveBeenCalledWith('work_center_id', ['wc1', 'wc2']);
+    expect(result).toEqual([]);
   });
 });
 

@@ -24,7 +24,7 @@ import { getSupabase } from '@/lib/supabase';
 import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
-import { OperatorChromeProvider, useOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
@@ -187,6 +187,7 @@ function OperatorShell({
 }) {
   const { stationId, stationName, stations, setStation } = useStationContext();
   const chrome = useOperatorChrome();
+  const nav = useOperatorNav();
   const { features } = useCompanyFeatures();
   const pathname = usePathname();
   const router = useRouter();
@@ -242,9 +243,7 @@ function OperatorShell({
               color="inherit"
               size="small"
               aria-label={chrome.back.label ?? 'Back'}
-              onClick={() => {
-                if (chrome.back) router.push(chrome.back.href);
-              }}
+              onClick={() => nav.goBack()}
             >
               <ArrowBackIcon fontSize="small" />
             </IconButton>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -18,7 +18,7 @@ import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import type { JobTravelerOperation } from '@/types/operator';
@@ -55,16 +55,17 @@ function StepIcon({ status }: { status: string }) {
  */
 export default function OperatorJobTravelerPage() {
   const params = useParams();
-  const router = useRouter();
+  const nav = useOperatorNav();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
 
-  // Header back → the station jobs list. (Files + Previous notes live in an
-  // in-content reference row; the "All N parts" jump stays in-content too.)
-  useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
+  const jobsHref = `/operator/${companyId}/jobs`;
+  // Header back pops in-app history (nav.goBack). This href is only the deep-link
+  // fallback — the jobs list — for a traveler scanned into directly.
+  useSetOperatorChrome({ back: { href: jobsHref, label: 'Back to jobs' } }, [jobsHref]);
 
   const { data: traveler, loading } = useLoad(
     async () => {
@@ -83,7 +84,7 @@ export default function OperatorJobTravelerPage() {
   );
 
   const openStep = (op: JobTravelerOperation) => {
-    router.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);
+    nav.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);
   };
 
   if (loading) {
@@ -100,7 +101,7 @@ export default function OperatorJobTravelerPage() {
         <Alert severity="error" sx={{ mb: 2 }}>
           {error || 'Job not found.'}
         </Alert>
-        <Button variant="outlined" onClick={() => router.push(`/operator/${companyId}/jobs`)}>
+        <Button variant="outlined" onClick={() => nav.push(jobsHref)}>
           Back to jobs
         </Button>
       </Box>
@@ -119,7 +120,7 @@ export default function OperatorJobTravelerPage() {
           <Button
             size="small"
             startIcon={<LayersIcon />}
-            onClick={() => router.push(`/operator/${companyId}/jobs/${jobId}`)}
+            onClick={() => nav.push(`/operator/${companyId}/jobs/${jobId}`)}
           >
             All {traveler.job_part_count} parts
           </Button>

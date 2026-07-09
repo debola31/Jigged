@@ -14,7 +14,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { getJobPartsOverview } from '@/utils/operatorAccess';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import type { JobPartsOverview, JobPartSummary } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -33,6 +33,7 @@ function statusColor(status: string): 'default' | 'primary' | 'success' {
 export default function OperatorJobPartsHubPage() {
   const params = useParams();
   const router = useRouter();
+  const nav = useOperatorNav();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
 
@@ -40,8 +41,9 @@ export default function OperatorJobPartsHubPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Header back → the station jobs list. Registered on mount so it's present
-  // even for the brief single-part case before this hub redirects to the traveler.
+  // Header back pops in-app history (nav.goBack); this href is only the deep-link
+  // fallback — the jobs list. Registered on mount so it's present even for the
+  // brief single-part case before this hub redirects to the traveler.
   useSetOperatorChrome({ back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } }, [companyId]);
 
   useEffect(() => {
@@ -76,7 +78,7 @@ export default function OperatorJobPartsHubPage() {
   }, [companyId, jobId, router]);
 
   const openPart = (part: JobPartSummary) => {
-    router.push(`/operator/${companyId}/jobs/${jobId}/parts/${part.job_part_id}`);
+    nav.push(`/operator/${companyId}/jobs/${jobId}/parts/${part.job_part_id}`);
   };
 
   if (loading) {
@@ -93,7 +95,7 @@ export default function OperatorJobPartsHubPage() {
         <Alert severity="error" sx={{ mb: 2 }}>
           {error || 'Job not found.'}
         </Alert>
-        <Button variant="outlined" onClick={() => router.push(`/operator/${companyId}/jobs`)}>
+        <Button variant="outlined" onClick={() => nav.push(`/operator/${companyId}/jobs`)}>
           Back to jobs
         </Button>
       </Box>

@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -43,9 +43,8 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  * by a guide with a one-tap "switch & complete" (for legit cross-station work)
  * and a way back to the traveler.
  */
-function OperatorOperationActionPageContent() {
+export default function OperatorOperationActionPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const jobId = params.jobId as string;
   const jobPartId = params.jobPartId as string;
@@ -53,27 +52,15 @@ function OperatorOperationActionPageContent() {
 
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
-  // Header back retraces the entry path: the caller threads ?back=<return url>
-  // (the traveler when opened from it; the jobs list on the My-Station fast
-  // path). Falls back to the traveler for a direct/QR deep-link.
-  const rawBack = searchParams.get('back');
-  const backHref = rawBack && rawBack.startsWith('/operator/') ? rawBack : travelerHref;
-  const backPath = backHref.split('?')[0];
-  const backLabel = backPath.endsWith('/jobs')
-    ? 'Back to jobs'
-    : backPath.includes('/parts/')
-      ? 'Back to traveler'
-      : 'Back';
-
   const { stationId, stationName, initializing } = useStationContext();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // (Files + Previous notes live in an in-content reference row below the job
-  // card, not the header.)
-  useSetOperatorChrome({ back: { href: backHref, label: backLabel } }, [backHref, backLabel]);
+  // Header back pops in-app history (nav.goBack). This href is only the deep-link
+  // fallback — the part's traveler — for an operation scanned into directly.
+  useSetOperatorChrome({ back: { href: travelerHref, label: 'Back to traveler' } }, [travelerHref]);
 
   useEffect(() => {
     async function loadOperator() {
@@ -342,20 +329,5 @@ function OperatorOperationActionPageContent() {
       </Box>
 
     </Box>
-  );
-}
-
-export default function OperatorOperationActionPage() {
-  // useSearchParams (for the ?back return target) requires a Suspense boundary.
-  return (
-    <Suspense
-      fallback={
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-          <CircularProgress />
-        </Box>
-      }
-    >
-      <OperatorOperationActionPageContent />
-    </Suspense>
   );
 }

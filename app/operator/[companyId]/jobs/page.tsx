@@ -22,6 +22,7 @@ import {
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
+import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
 
 /**
@@ -50,6 +51,7 @@ function OperatorJobsPageContent() {
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
   const { stationId, stations, initializing } = useStationContext();
+  const nav = useOperatorNav();
 
   // Scope + completed are URL-backed so Back restores this exact view.
   const scope: Scope = searchParams.get('scope') === 'plant' ? 'plant' : 'station';
@@ -60,8 +62,8 @@ function OperatorJobsPageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // The URL for this exact view — used both to write toggle changes and as the
-  // "return here" target threaded into detail pages (see handlePartClick).
+  // The URL for this exact view — used to write the scope/completed toggle state
+  // into the URL (so Back restores the exact view the operator left).
   const jobsUrl = (s: Scope, c: boolean) =>
     `/operator/${companyId}/jobs?scope=${s}${c ? '&completed=1' : ''}`;
 
@@ -109,15 +111,14 @@ function OperatorJobsPageContent() {
   // Tapping a row. My Station + Active keeps the one-tap fast path straight to
   // the ready operation (highest-frequency action). All Stations, or any
   // Completed row, opens the traveler instead — the operator picks the step
-  // there — so Back retraces exactly one step. Either way we thread this exact
-  // jobs view as the return target so Back lands where they came from.
+  // there. nav.push records the hop so the header back retraces it (see
+  // OperatorChromeContext); no return URL is threaded.
   const handlePartClick = (row: OperatorJob) => {
-    const back = encodeURIComponent(jobsUrl(scope, completed));
     const base = `/operator/${companyId}/jobs/${row.job_id}/parts/${row.id}`;
     if (completed || scope === 'plant' || !row.operation_id) {
-      router.push(`${base}?back=${back}`);
+      nav.push(base);
     } else {
-      router.push(`${base}/operations/${row.operation_id}?back=${back}`);
+      nav.push(`${base}/operations/${row.operation_id}`);
     }
   };
 

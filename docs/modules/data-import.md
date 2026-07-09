@@ -141,6 +141,31 @@ The same surface serves both the first-time "bring my whole shop in" journey and
 34. As an admin, I want only authorized company members to run the import for my company, so
     that my data isn't exposed.
 
+**Importing when data already exists (upsert)**
+35. As an established shop owner, I want an obvious place to import more data even when my
+    shop already has data (not only on the empty first-run screen), so that I can add data
+    whenever I need to.
+36. As an established shop owner, I want to import more parts (or any type) without creating
+    duplicates of what's already in Jigged, so that my data stays clean.
+37. As an established shop owner, I want the import to recognize records I already have (by
+    part number, vendor name, etc.) and update them instead of duplicating, so that I can
+    refresh data safely.
+38. As an established shop owner, I want to choose whether to only add new records, only
+    update existing ones, or both, so that I control the effect of the import.
+39. As an established shop owner, before importing I want to see how many records are new,
+    how many will be updated, how many are already up to date, and how many conflict, so
+    that there are no surprises.
+40. As an established shop owner, I want records that are identical to what I already have
+    skipped automatically, so that I'm not needlessly touching data.
+41. As an established shop owner, I want a safe default that never deletes or overwrites data
+    I didn't include, so that importing can't quietly wreck my shop.
+42. As an established shop owner, I want conflicts (e.g. same name but a different ID)
+    surfaced for me to resolve rather than guessed, so that I don't corrupt records.
+43. As an established shop owner, after import I want a summary of what was added, updated,
+    and skipped (with reasons), so that I can verify and go fix the rest.
+44. As an established shop owner who only wants to add one type, I want to start the import
+    from that module (e.g. Parts), so that I don't wade through the whole onboarding flow.
+
 ## Implementation Decisions
 
 - **One unified import surface**, not per-entity importers. Only a surface that sees all
@@ -207,18 +232,42 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   to a white-glove/guided step. Phase 2 wires the actual dependency-ordered write, reusing
   the existing per-entity import execution as the write layer.
 
-- **Placement (decided): one flow, two purpose-built signposts.** Multiple *entries* to the
-  one flow are fine; multiple *flows* is the anti-pattern. There is no permanent nav module
-  (the old "Data Health" item was removed).
-  - **First-run onboarding:** a **"Get started" checklist** on the empty dashboard, leading
-    with "Import your data" (research: Dynamics 365 Business Central's Get-started
-    banner-that-reveals-a-checklist; Appcues onboarding-checklist completion lift). Shown
-    until the shop has data; flag-gated.
-  - **Recurring access:** each module's empty state (Parts / Vendors / Work centers /
-    Customers) shows a link to the **same** unified importer ("Import all your data at
-    once"). The module keeps its own per-entity "Import CSV" as the working single-entity
-    write path until unified ingestion (Phase 2) lands — a shop owner adding parts looks at
-    Parts, which is the natural recurring home (more so than Settings).
+- **Importing into a non-empty company is an UPSERT, not a load.** When the shop already
+  has data, the unified flow gains a **reconciliation step**: match each uploaded row
+  against existing Jigged records by the entity's identity key (parts by `part_name` /
+  `legacy_id`; vendors, work centers, customers by `name`) and bucket every row as **New**,
+  **Update** (fields differ), **Unchanged** (identical → skip), or **Conflict** (e.g. same
+  name, different id → surface, don't guess). The owner chooses a **mode** — default
+  **Add new + update existing** (non-destructive: only the columns present are written,
+  nothing is deleted, unchanged rows are skipped), or create-only, or update-only. The
+  pre-commit review becomes **"what will change"** with the bucket counts + a downloadable
+  skip list, and the post-import summary reports added / updated / skipped. The existing
+  per-entity importers already implement the write-side upsert (conflict detection vs.
+  existing rows + `legacy_id` ON CONFLICT), so Phase 2 reuses that; the pre-import *preview*
+  needs only a bounded, read-only fetch of existing identity values (RLS-safe) to bucket
+  new-vs-update. This whole capability is **Phase 2** — Phase 1 handles the empty
+  (greenfield) case, where every row is "New." Research basis: HubSpot / Salesforce /
+  Insycle import modes + match keys; Dynamics 365 duplicate detection; categorized
+  preview + skip file.
+
+- **Placement (decided): one flow, several purpose-built signposts.** Multiple *entries* to
+  the one flow are fine; multiple *flows* is the anti-pattern. There is no permanent nav
+  module (the old "Data Health" item was removed).
+  - **First-run onboarding (empty shop):** a **"Get started" checklist** on the empty
+    dashboard, leading with "Import your data" (research: Dynamics 365 Business Central's
+    Get-started banner-that-reveals-a-checklist; Appcues onboarding-checklist completion
+    lift). Shown until the shop has data; flag-gated.
+  - **Empty module lists:** each module's empty state (Parts / Vendors / Work centers /
+    Customers) links to the **same** unified importer ("Import all your data at once").
+  - **Non-empty shop (data already present) — the recurring entry.** Neither the checklist
+    nor the empty-states show once there's data, so the recurring entry is the **persistent
+    "Import" button already in each module's toolbar** (Parts, Vendors, …). This is the
+    HubSpot/Salesforce "Import on the object index" pattern and is where an owner naturally
+    goes to add more of a type; it stays available regardless of whether the list is empty.
+    Today it opens the per-entity importer; once unified ingestion lands it routes into the
+    unified importer scoped to that entity. **Open sub-decision:** whether to add ONE
+    persistent central entry for "import several types at once" in a non-empty shop (e.g. a
+    Header/dashboard quick-action) or rely solely on the per-module toolbar buttons.
   - **Not** a Settings → Import area — the onboarding research doesn't point there and it
     duplicated the recurring role; dropped.
 

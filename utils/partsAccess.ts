@@ -22,6 +22,7 @@ import {
   deleteStoredFilesByPaths,
 } from '@/utils/partAttachmentsAccess';
 import { convertToBaseUnit } from '@/lib/unitPresets';
+import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
   'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, markup_rate_id, legacy_id, is_location_tracked, created_at, updated_at';
@@ -99,7 +100,7 @@ export async function getAllParts(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;
@@ -146,7 +147,7 @@ export async function getStockedParts(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;
@@ -188,7 +189,7 @@ export async function getMadeParts(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;
@@ -232,7 +233,7 @@ export async function getBoughtParts(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+      query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;
@@ -270,7 +271,7 @@ export async function getPartsPaginated(
     .range(offset, offset + limit - 1);
 
   if (search.trim()) {
-    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
   }
 
   const { data, error } = await query;
@@ -298,7 +299,7 @@ export async function getPartsCount(
     .eq('company_id', companyId);
 
   if (search.trim()) {
-    query = query.or(`part_name.ilike.%${search}%,description.ilike.%${search}%`);
+    query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
   }
 
   const { count, error } = await query;
@@ -669,7 +670,7 @@ export async function searchPartsForSelect(
 
   const trimmed = query.trim();
   if (trimmed) {
-    q = q.or(`part_name.ilike.%${trimmed}%,description.ilike.%${trimmed}%`);
+    q = q.or(`part_name.ilike.${orIlikeValue(trimmed)},description.ilike.${orIlikeValue(trimmed)}`);
   }
 
   const { data, error } = await q;

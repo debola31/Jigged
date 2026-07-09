@@ -18,6 +18,7 @@ import type {
   CustomerContactRole,
 } from '@/types/customerContact';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
+import { orIlikeValue } from '@/utils/searchFilter';
 
 /**
  * Customer access layer.
@@ -85,7 +86,7 @@ export async function getCustomers(
     .range(offset, offset + limit - 1);
 
   if (search.trim()) {
-    query = query.or(`name.ilike.%${search}%`);
+    query = query.or(`name.ilike.${orIlikeValue(search)}`);
   }
 
   const { data, error, count } = await query;
@@ -134,7 +135,7 @@ export async function getAllCustomers(
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (search.trim()) {
-      query = query.or(`name.ilike.%${search}%`);
+      query = query.or(`name.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;

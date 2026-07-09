@@ -2,6 +2,7 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
+import { orIlikeValue } from '@/utils/searchFilter';
 
 // Insert payload for the vendors table, minus company_id which is added
 // at the boundary. Narrowing this avoids the Record<string, unknown>
@@ -50,7 +51,7 @@ export async function getAllVendors(
     if (search.trim()) {
       // Search the vendor name + city only. Contact-name search would require a
       // join through vendor_contacts; defer until usability shows users want it.
-      query = query.or(`name.ilike.%${search}%,city.ilike.%${search}%`);
+      query = query.or(`name.ilike.${orIlikeValue(search)},city.ilike.${orIlikeValue(search)}`);
     }
 
     const { data, error } = await query;

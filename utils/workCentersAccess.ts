@@ -6,6 +6,7 @@ import type {
   WorkCenterWithRelations,
   WorkCenterImportResult,
 } from '@/types/workCenter';
+import { orIlikeValue } from '@/utils/searchFilter';
 
 const WORK_CENTER_COLUMNS =
   'id, company_id, name, kind, vendor_id, labor_rate, description, metadata, created_at, updated_at';
@@ -28,7 +29,7 @@ export async function getAllWorkCenters(
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search?.trim()) {
-    query = query.or(`name.ilike.%${search}%`);
+    query = query.or(`name.ilike.${orIlikeValue(search)}`);
   }
 
   const { data, error } = await query;
@@ -60,7 +61,7 @@ export async function getWorkCentersByKind(
     .order('name', { ascending: true });
 
   if (search?.trim()) {
-    query = query.or(`name.ilike.%${search}%`);
+    query = query.or(`name.ilike.${orIlikeValue(search)}`);
   }
 
   const { data, error } = await query;
@@ -91,7 +92,7 @@ export async function getWorkCentersFlat(
     query = query.eq('kind', options.kind);
   }
   if (options?.search?.trim()) {
-    query = query.or(`name.ilike.%${options.search}%`);
+    query = query.or(`name.ilike.${orIlikeValue(options.search)}`);
   }
 
   const { data, error } = await query;

@@ -30,6 +30,7 @@ import {
   deleteLineItem,
 } from '@/utils/quoteLineItemsAccess';
 import { isDrifted, isDriftedDegraded } from '@/utils/quotePricingResolver';
+import { escapeIlikePattern } from '@/utils/searchFilter';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
@@ -74,18 +75,6 @@ function normalizeLeadTime(formData: QuoteFormData): {
     throw new Error('Lead time must be 3,650 days or fewer.');
   }
   return { leadTimeValue: value, leadTimeUnit: unit, leadTimeDays };
-}
-
-/**
- * Sanitize search string for use in LIKE/ILIKE queries
- * Escapes SQL wildcards to prevent unintended pattern matching
- */
-function sanitizeSearchString(search: string): string {
-  return search
-    .replace(/\\/g, '\\\\')
-    .replace(/%/g, '\\%')
-    .replace(/_/g, '\\_')
-    .substring(0, 100);
 }
 
 /**
@@ -171,7 +160,7 @@ export async function getQuotes(
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
   if (filters.search?.trim()) {
-    const sanitized = sanitizeSearchString(filters.search.trim());
+    const sanitized = escapeIlikePattern(filters.search.trim());
     query = query.ilike('quote_number', `%${sanitized}%`);
   }
 
@@ -220,7 +209,7 @@ export async function getAllQuotes(
     if (filters.customerId) query = query.eq('customer_id', filters.customerId);
     if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
     if (filters.search?.trim()) {
-      const sanitized = sanitizeSearchString(filters.search.trim());
+      const sanitized = escapeIlikePattern(filters.search.trim());
       query = query.ilike('quote_number', `%${sanitized}%`);
     }
 
@@ -259,7 +248,7 @@ export async function getQuotesCount(
   if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.search?.trim()) {
-    const sanitized = sanitizeSearchString(filters.search.trim());
+    const sanitized = escapeIlikePattern(filters.search.trim());
     query = query.ilike('quote_number', `%${sanitized}%`);
   }
 

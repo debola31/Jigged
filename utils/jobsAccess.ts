@@ -32,21 +32,11 @@ import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
+import { orIlikeValue } from '@/utils/searchFilter';
 import {
   getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
 } from '@/utils/quickbooksAccess';
-
-/**
- * Sanitize search string for use in LIKE/ILIKE queries
- */
-function sanitizeSearchString(search: string): string {
-  return search
-    .replace(/\\/g, '\\\\')
-    .replace(/%/g, '\\%')
-    .replace(/_/g, '\\_')
-    .substring(0, 100);
-}
 
 /**
  * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
@@ -156,8 +146,7 @@ export async function getAllJobs(
       }
       query = query.in('id', ids);
     } else if (filters.search?.trim()) {
-      const sanitized = sanitizeSearchString(filters.search.trim());
-      query = query.or(`job_number.ilike.%${sanitized}%`);
+      query = query.or(`job_number.ilike.${orIlikeValue(filters.search.trim())}`);
     }
     if (filters.overdue) {
       // Single source of truth for the overdue predicate — see

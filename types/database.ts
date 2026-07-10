@@ -2995,7 +2995,10 @@ export type Database = {
       compute_part_cost_explain: {
         Args: { p_part_id: string; p_qty: number }
         Returns: {
+          is_priceable: boolean
           missing_leaves: Json
+          missing_markups: Json
+          missing_op_rates: Json
           unit_cost: number
         }[]
       }

@@ -1052,21 +1052,55 @@ export interface PartCostMissingLeaf {
   qty_required: number;
 }
 
+/** A part in the BOM tree (root or descendant) that has no pricing tier (markup). */
+export interface PartMarkupGap {
+  part_id: string;
+  part_name: string;
+  depth: number;
+  source: 'made' | 'bought';
+}
+
+/** A made part in the BOM tree that has an unpriced routing operation. */
+export interface PartOpRateGap {
+  part_id: string;
+  part_name: string;
+  depth: number;
+}
+
 /**
- * Same cost as `getComputedPartCost`, plus an array of the bought leaves
- * whose procurement tier lookup returned NULL at the cascaded qty. UI
- * surfaces these in tooltips so the user can navigate to the offending
- * leaf and add a tier.
+ * Full structural pricing status for a part and its BOM tree — the single
+ * source of truth the part-detail page shares with the parts list
+ * (`get_priceable_part_ids`). `is_priceable` is true iff all three gap arrays
+ * are empty, so the detail chip and the list ✓/⚠ column can never disagree.
+ */
+export interface PartPricingStatus {
+  /** Best-effort unit cost; NULL when a rate/tier is missing. Display only. */
+  unit_cost: number | null;
+  /** True iff there are no missing leaves, markups, or op rates. */
+  is_priceable: boolean;
+  /** Bought leaves whose procurement tier lookup returned NULL at the cascaded qty. */
+  missing_leaves: PartCostMissingLeaf[];
+  /** Any part in the tree (root or descendant) with no pricing tier (markup). */
+  missing_markups: PartMarkupGap[];
+  /** Made parts in the tree with an unpriced routing op. */
+  missing_op_rates: PartOpRateGap[];
+}
+
+/**
+ * Structural pricing status for a part: its best-effort `unit_cost`, an
+ * `is_priceable` verdict, and three gap arrays describing exactly why a part
+ * isn't ready to quote — bought leaves with no procurement tier
+ * (`missing_leaves`), any tree node with no markup (`missing_markups`), and
+ * made nodes with an unpriced op (`missing_op_rates`).
  *
- * `missing_leaves` is skinny — it only contains the offending bought
- * leaves, never the made-part ancestors above them. Diamond BOM
- * occurrences may appear more than once (different cumulative qtys per
- * branch).
+ * Each array is skinny: `{ part_id, part_name, depth, … }`, one row per
+ * offending part (a diamond BOM occurrence collapses to its shallowest depth).
+ * The UI links each entry to the offending part so the user can fix it there.
  */
 export async function getPartCostExplain(
   partId: string,
   qty: number,
-): Promise<{ unit_cost: number | null; missing_leaves: PartCostMissingLeaf[] }> {
+): Promise<PartPricingStatus> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
@@ -1081,18 +1115,39 @@ export async function getPartCostExplain(
     throw error;
   }
 
-  const row = (data ?? { unit_cost: null, missing_leaves: [] }) as {
+  const row = (data ?? {
+    unit_cost: null,
+    is_priceable: false,
+    missing_leaves: [],
+    missing_markups: [],
+    missing_op_rates: [],
+  }) as {
     unit_cost: number | null;
+    is_priceable: boolean | null;
     missing_leaves: PartCostMissingLeaf[] | null;
+    missing_markups: PartMarkupGap[] | null;
+    missing_op_rates: PartOpRateGap[] | null;
   };
 
   return {
     unit_cost: row.unit_cost === null ? null : Number(row.unit_cost),
+    is_priceable: row.is_priceable ?? false,
     missing_leaves: (row.missing_leaves ?? []).map((leaf) => ({
       part_id: leaf.part_id,
       part_name: leaf.part_name,
       depth: Number(leaf.depth),
       qty_required: Number(leaf.qty_required),
+    })),
+    missing_markups: (row.missing_markups ?? []).map((gap) => ({
+      part_id: gap.part_id,
+      part_name: gap.part_name,
+      depth: Number(gap.depth),
+      source: gap.source,
+    })),
+    missing_op_rates: (row.missing_op_rates ?? []).map((gap) => ({
+      part_id: gap.part_id,
+      part_name: gap.part_name,
+      depth: Number(gap.depth),
     })),
   };
 }

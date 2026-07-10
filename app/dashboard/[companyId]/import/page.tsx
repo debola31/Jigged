@@ -24,19 +24,23 @@ import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
 import ColumnMappingStep from '@/components/data-import/ColumnMappingStep';
 import ImportReviewView from '@/components/data-import/ImportReviewView';
 import EditableDataGrid from '@/components/data-import/EditableDataGrid';
+import FixToolbar from '@/components/data-import/FixToolbar';
+import MergeVariantsDialog from '@/components/data-import/MergeVariantsDialog';
 import { analyzeBundle } from '@/lib/dataImportAnalyzer';
 import { summarize } from '@/lib/dataImportReview';
 import {
-  applyEdit,
+  applyOp,
   buildWorkingFiles,
-  invertEdit,
+  invertOp,
   setWorkingEntity,
   setWorkingRole,
   workingToAnalyzed,
   workingToClassification,
-  type CellEdit,
+  type EditOp,
   type WorkingFile,
 } from '@/lib/dataImportEditing';
+import { bulkReplace, fillBlanks, mergeVariants } from '@/lib/dataImportActions';
+import { ENTITY_IDENTITY_FIELD } from '@/lib/dataImportSchema';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
@@ -110,9 +114,10 @@ export default function ImportDataPage() {
   const [structure, setStructure] = useState<StructureResponse | null>(null);
   const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
   const [working, setWorking] = useState<WorkingFile[]>([]);
-  const [journal, setJournal] = useState<CellEdit[]>([]);
-  const [redoStack, setRedoStack] = useState<CellEdit[]>([]);
+  const [journal, setJournal] = useState<EditOp[]>([]);
+  const [redoStack, setRedoStack] = useState<EditOp[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -238,6 +243,18 @@ export default function ImportDataPage() {
     );
   }
 
+  // Apply one remediation op (a single cell edit or a bulk batch): it lands on the undo
+  // journal as one unit and re-runs the analyzer. This is the single path the grid, the
+  // bulk toolbar, and the merge dialog all go through.
+  function applyRemediation(op: EditOp) {
+    if (op.edits.length === 0) return;
+    const next = applyOp(working, op);
+    setWorking(next);
+    setJournal((j) => [...j, op]);
+    setRedoStack([]);
+    recompute(next);
+  }
+
   function handleCellEdit(
     fileIndex: number,
     rowId: string,
@@ -245,18 +262,13 @@ export default function ImportDataPage() {
     oldValue: string,
     newValue: string,
   ) {
-    const edit: CellEdit = { fileIndex, rowId, colId, oldValue, newValue };
-    const next = applyEdit(working, edit);
-    setWorking(next);
-    setJournal((j) => [...j, edit]);
-    setRedoStack([]);
-    recompute(next);
+    applyRemediation({ label: `Edit ${colId}`, edits: [{ fileIndex, rowId, colId, oldValue, newValue }] });
   }
 
   function undo() {
     if (journal.length === 0) return;
     const last = journal[journal.length - 1];
-    const next = applyEdit(working, invertEdit(last));
+    const next = applyOp(working, invertOp(last));
     setWorking(next);
     setJournal((j) => j.slice(0, -1));
     setRedoStack((r) => [...r, last]);
@@ -266,12 +278,19 @@ export default function ImportDataPage() {
   function redo() {
     if (redoStack.length === 0) return;
     const last = redoStack[redoStack.length - 1];
-    const next = applyEdit(working, last);
+    const next = applyOp(working, last);
     setWorking(next);
     setRedoStack((r) => r.slice(0, -1));
     setJournal((j) => [...j, last]);
     recompute(next);
   }
+
+  const activeFile = working[gridIndex];
+  const mergeDefaultCol = activeFile
+    ? activeFile.columnRoles[ENTITY_IDENTITY_FIELD[activeFile.entityType] ?? ''] ??
+      activeFile.headers[0] ??
+      ''
+    : '';
 
   return (
     <Box>
@@ -405,15 +424,39 @@ export default function ImportDataPage() {
                     </Button>
                   </Box>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Double-click any cell to edit. The review above updates as you go — no need to
-                    re-upload or use a spreadsheet.
+                    Fix a whole column at once below, or double-click any cell to edit. The review
+                    above updates as you go — no spreadsheet needed.
                   </Typography>
+                  {activeFile && (
+                    <FixToolbar
+                      key={activeFile.filename}
+                      file={activeFile}
+                      onBulkReplace={(colId, find, replace) =>
+                        applyRemediation(bulkReplace(working, gridIndex, colId, find, replace))
+                      }
+                      onFillBlanks={(colId, value) =>
+                        applyRemediation(fillBlanks(working, gridIndex, colId, value))
+                      }
+                      onOpenMerge={() => setMergeOpen(true)}
+                    />
+                  )}
                   <EditableDataGrid
                     files={working}
                     activeIndex={gridIndex}
                     onActiveIndexChange={setGridIndex}
                     onCellEdit={handleCellEdit}
                   />
+                  {activeFile && (
+                    <MergeVariantsDialog
+                      open={mergeOpen}
+                      onClose={() => setMergeOpen(false)}
+                      file={activeFile}
+                      defaultColId={mergeDefaultCol}
+                      onMerge={(colId, canonical, variants) =>
+                        applyRemediation(mergeVariants(working, gridIndex, colId, canonical, variants))
+                      }
+                    />
+                  )}
                 </>
               )}
 

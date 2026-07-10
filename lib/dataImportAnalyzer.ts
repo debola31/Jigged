@@ -65,7 +65,7 @@ const REFERENTIAL_LINKS: [EntityType, string, EntityType, string][] = [
 // --------------------------------------------------------------------------- helpers
 const norm = (v: string | undefined | null): string => (v ?? '').trim().toLowerCase();
 
-function aggressiveNorm(v: string | undefined | null): string {
+export function aggressiveNorm(v: string | undefined | null): string {
   let s = norm(v).replace(/[^a-z0-9]+/g, '');
   let changed = true;
   while (changed) {

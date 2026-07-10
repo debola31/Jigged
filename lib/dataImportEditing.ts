@@ -28,6 +28,27 @@ export interface CellEdit {
   newValue: string;
 }
 
+/**
+ * One undoable remediation step = a labeled batch of cell edits. A single grid edit is a
+ * batch of one; a bulk find-replace / fill / merge is a batch of many that undoes as a unit.
+ * The label is the "we changed this for you" audit line. This is the shape the (future)
+ * agent proposes and the UI applies — one action layer.
+ */
+export interface EditOp {
+  label: string;
+  edits: CellEdit[];
+}
+
+/** Apply a batch of edits in order. */
+export function applyOp(working: WorkingFile[], op: EditOp): WorkingFile[] {
+  return op.edits.reduce((w, e) => applyEdit(w, e), working);
+}
+
+/** Invert a batch for undo/redo (reverse order, each edit inverted). */
+export function invertOp(op: EditOp): EditOp {
+  return { label: op.label, edits: [...op.edits].reverse().map(invertEdit) };
+}
+
 /** Build the editable working set from the uploaded files + the AI structure classification. */
 export function buildWorkingFiles(
   files: UploadedFilePayload[],

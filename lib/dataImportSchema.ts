@@ -26,6 +26,15 @@ export const ENTITY_LABELS: Record<EntityType, string> = {
   unknown: "Not sure — skip this file",
 };
 
+/** The single name-like identity column per entity (the natural default for merge-look-alikes).
+ *  routings/bom have no single identity, so merge falls back to a user-picked column. */
+export const ENTITY_IDENTITY_FIELD: Partial<Record<EntityType, string>> = {
+  parts: 'part_name',
+  vendors: 'name',
+  work_centers: 'name',
+  customers: 'name',
+};
+
 /** The entities the owner can classify a file as (excludes the passthrough 'unknown'). */
 export const KNOWN_ENTITIES: EntityType[] = [
   'parts',

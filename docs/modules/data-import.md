@@ -433,6 +433,6 @@ endpoint/pytest seam; one E2E through the whole journey).
 - **Source systems seen so far.** Tangle (real, from customer #1), plus JobBOSS/E2 and
   spreadsheets expected. The tool must not depend on prebuilt per-ERP signatures; detection
   is AI-first and may return "unknown" without degrading the report.
-- **Companion design doc.** A short technical design doc (the ingestion write pipeline,
-  reuse of the per-entity execution, planner data structures) should be written when Phase 2
-  begins — deliberately not now, to avoid churn before the ingestion architecture is chosen.
+- **Companion design doc.** The Phase 2 *how* — guided-remediation mechanics + the
+  dependency-ordered ingestion write (reusing the per-entity execute routes) + upsert — is
+  specced in [data-import-phase2-design.md](data-import-phase2-design.md).

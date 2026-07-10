@@ -78,7 +78,7 @@ downgrades the finding (so "no problems" never hides an unmade decision).
 A bounded, read-only fetch of existing identity values for the target entities (RLS-safe,
 client-side via the typed Supabase client or a small read endpoint) → match uploaded rows
 (exact-normalized first; fuzzy as a proposal) → present **new / matches-existing / ambiguous**
-→ user confirms links. Open decision (§10): auto-link exact matches vs. always-ask.
+→ user confirms links. Open decision (§11): auto-link exact matches vs. always-ask.
 
 ### 4f. AI-suggested fixes — new endpoint, guardrail-bound
 `POST /api/health-report/suggest-fixes` (AI, mirrors the narrative endpoint: tiny payload =
@@ -136,13 +136,92 @@ for v1. Dependency order makes partial success *safe*: parents commit first and 
 their own; if a child tier fails, those child rows are reported as skipped and the run is
 **resumable** (re-import fills the rest, idempotently via ON CONFLICT). If true atomicity is
 later required, the hardening path is a server orchestrator that refactors the per-entity
-execute bodies into service functions callable inside one transaction (§10) — bigger, deferred.
+execute bodies into service functions callable inside one transaction (§11) — bigger, deferred.
 
 ### 6e. Post-import summary
 Aggregate each entity's execute response into one **added / updated / skipped (with reasons)**
 summary + a downloadable skip list, then route the owner to fix + re-run the remainder.
 
-## 7. Endpoint inventory
+## 7. Agent orchestration — surface, action layer, approval gates
+
+*(2nd adversarially-verified research pass + Anthropic's agent guidance.)* Headline: **this
+is a workflow, not an autonomous agent — and the increment 1–4 scaffolding IS the agent's
+toolbox, so there is no rework.**
+
+### 7a. Surface: workflow first; agency only where the task is genuinely ambiguous
+Anthropic separates **workflows** (LLMs + tools on *predefined code paths* — predictable, for
+well-defined tasks) from **agents** (the LLM *dynamically directs* its own process). Our steps
+are known in advance (map → fix → review → import), so the **wizard is the orchestrator** and
+the LLM is called only at the ambiguous points (which look-alikes are the same part, what fix
+to propose, how to phrase it). *"Add agentic complexity only when simpler solutions fall
+short… which might mean not building agentic systems at all."* Escalate to a real tool-calling
+agent loop only if deterministic routing proves insufficient — and even then keep it a **thin
+orchestrator + manual loop + confirm gate** (Anthropic: use the manual loop when you need human
+approval before each tool call), never the auto tool-runner. [Anthropic, *Building Effective
+Agents*]
+
+### 7b. One shared action layer (typed action contracts)
+Represent every remediation action as a **typed contract**: `name` + a detailed description +
+JSON-Schema input + a permission predicate + `validate()` (reusing the app's own domain rules)
++ `execute()` that runs **through the app's existing services**. The UI buttons and the later
+agent call the *same* contracts; the model **never mutates the backend directly** — it proposes
+a call, the app executes it. (A tool is "a contract between deterministic systems and
+non-deterministic agents" that can pick the wrong tool or wrong params — design for the agent,
+not as thin CRUD wrappers.) The increment 2–4 actions become the contracts: `bulk_replace` ·
+`merge_group` · `fill_gap` · `link_to_existing` · `import_bundle`. [Anthropic, *Writing tools
+for agents*; *Bounded Autonomy for Enterprise AI* — architectural core only, see 7f]
+
+### 7c. Consolidate, keep it small, describe it well
+- **Intent-level, not CRUD** — one `merge_group` that clusters + rewrites, not raw row-update
+  wrappers ("tools should let agents subdivide and solve tasks the way a human would";
+  Cloudflare collapsed 2,500 endpoints to 2 intent tools).
+- **Small surface** — group related ops into one tool with an `action` param; tool-selection
+  accuracy degrades past ~15–20 tools.
+- **Descriptions are "by far the most important factor in tool performance"** — 3–4+ sentences
+  each (what it does, when to use / when NOT, each param, caveats). This is where an action is
+  flagged **irreversible / requires confirmation** to the model. [Anthropic + Claude Platform
+  *Define tools*]
+
+### 7d. Approval gates — the agent proposes, the human disposes
+Every mutation is confirm-before-act; the irreversible / wrong-entity-risking ones
+(`merge_group`, `link_to_existing`, and above all `import_bundle`) are a **hard gate**. Why it
+matters: **wrong-entity mutation is the one failure class no backend check catches** —
+permission passes, scope is right, the payload is schema-valid, yet the model acted on the
+*wrong record* and can report false success. Only **disambiguation** (return a candidate list;
+block until the target is uniquely resolved) **+ an explicit confirmation gate** intercept it.
+Our gate is the wizard's own **accept / edit / reject** UI on each proposal (edit = tweak a
+proposed merge/fill before it runs; undo already gives reversibility). Reference
+implementations (not necessarily dependencies — we're on Claude tool-use + FastAPI): LangChain
+`HumanInTheLoopMiddleware` (pause-before-call, approve/edit/reject/respond, `when` predicate to
+gate only risky calls) and the OpenAI Agents SDK `needsApproval` flag (pauses the run, returns
+serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / OpenAI HITL docs]
+
+### 7e. Bound autonomy + cost
+- **Explicit user action only** (standing rule) — no LLM call on mount/poll; every propose
+  gesture is deliberate.
+- **Stopping conditions** — cap iterations; checkpoint on blockers. [Anthropic]
+- **Model/effort** — `claude-opus-4-8` (pinned default) + adaptive thinking; low effort for
+  mechanical proposal calls.
+- If we ever **bulk-execute** safe row ops in one block, keep the confirm gate **outside**
+  it — programmatic tool calling "wants to run to completion" and compresses the audit trail,
+  so it must not wrap the final confirmed `import_bundle`.
+
+### 7f. Honest gaps (this pass did not settle these)
+- **Conversational-onboarding UX** for a non-technical 50–60-yr-old owner (one-thing-at-a-time
+  pacing, plain language, ask-vs-act thresholds, progress) is **not** evidence-backed here —
+  lean on the earlier human-white-glove findings and **usability-test with real owners**.
+- **When the agent should LEAD vs. defer** to a plain deterministic UI step has no principled
+  rule in the sources — default to deferring to the grid/checklist; the AI *proposes*, it
+  doesn't drive.
+- **No import-specific study** shows agent assistance beats a pure deterministic wizard for
+  messy-data onboarding — keep the AI layer thin and instrument outcomes.
+- **Eval harness** — before trusting the agent, add tests asserting it **never proposes an
+  unconfirmed destructive action and never loops**.
+- **Source caveat** — the typed-contract + wrong-entity claims lean on a single
+  non-peer-reviewed preprint whose *numbers* were refuted; we adopt only its architectural
+  core, which Anthropic's guidance independently supports.
+
+## 8. Endpoint inventory
 - **Reused (existing):** each entity's `…/import/execute` (the write); `/structure` (mapping +
   ERP); `/narrative` (prose). Existing conflict/validate logic is reused as-is.
 - **New:** `/api/health-report/suggest-fixes` (AI proposals, no writes); optionally a small
@@ -151,14 +230,14 @@ summary + a downloadable skip list, then route the owner to fix + re-run the rem
 - **Unchanged guarantee:** the read/AI endpoints keep the Phase 1 no-domain-write property;
   only the per-entity execute routes write, exactly as they do today.
 
-## 8. Data contracts (shape, not final types)
+## 9. Data contracts (shape, not final types)
 - **Working dataset** (client): `{ files: [{ filename, entityType, columnRoles, headers, rows[] }], journal[], decisions{} }`.
 - **suggest-fixes**: request `{ company_id, findings[], file_summaries[] }` → response
   `{ suggestions: [{ findingId, action, uncertaintyNote }] }` (no confidence scalar).
 - **Write orchestration** (client → existing execute, per entity, per ≤500-row batch):
   `{ company_id, mappings, rows, mode }` → `{ added, updated, skipped, errors[] }`.
 
-## 9. Testing seams (per the PRD's three seams)
+## 10. Testing seams (per the PRD's three seams)
 1. **Remediation logic (client)** — vitest over pure transforms: apply-edit / bulk-replace /
    merge-group / fill-gap / confirm-blank → re-`analyzeBundle` → asserted findings + readiness
    delta; undo restores prior state. Same seam as the existing `__tests__/lib/*` suites.
@@ -171,7 +250,7 @@ summary + a downloadable skip list, then route the owner to fix + re-run the rem
 
 Test *external behavior* (dataset in → findings/verdict/write-plan out), never private helpers.
 
-## 10. Open technical decisions / risks
+## 11. Open technical decisions / risks
 - **Link-to-existing default:** auto-link exact-normalized matches vs. always-ask (mis-link
   risk vs. fatigue) — PRD open question; lean auto-link only on exact identity match, fuzzy
   always-ask.
@@ -185,7 +264,7 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
 - **No verified ROI** for the whole pattern (PRD note) — instrument completion/abandonment so
   we learn on real usage rather than assume.
 
-## 11. Suggested build sequence (small, shippable increments)
+## 12. Suggested build sequence (small, shippable increments)
 1. Editable grid + live re-analyze + undo (no AI) — the core "fix here" loop.
 2. Bulk find-replace + fill/confirm-blank + cluster-merge (client-only) — the highest-value
    fixes, still no AI.
@@ -194,4 +273,6 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
    writes** — gate carefully.
 4. Upsert modes + link-to-existing (bounded reads + confirm).
 5. `suggest-fixes` AI proposals with the guardrail UX (accept/reject + uncertainty), last — so
-   the deterministic, trustworthy fixes land before any AI-proposed ones.
+   the deterministic, trustworthy fixes land before any AI-proposed ones. Built as a thin
+   orchestrator over the §7 typed-action layer (workflow-first, confirm-gated), not an
+   autonomous loop.

@@ -12,15 +12,27 @@ import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
 import Stack from '@mui/material/Stack';
+import Divider from '@mui/material/Divider';
 import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import UndoIcon from '@mui/icons-material/Undo';
+import RedoIcon from '@mui/icons-material/Redo';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import MultiFileDropzone from '@/components/health-report/MultiFileDropzone';
 import HealthReportView from '@/components/health-report/HealthReportView';
+import EditableDataGrid from '@/components/health-report/EditableDataGrid';
 import { analyzeBundle, type AnalyzedFile } from '@/lib/healthReportAnalyzer';
 import { summarize } from '@/lib/healthReportSummary';
+import {
+  applyEdit,
+  buildWorkingFiles,
+  invertEdit,
+  workingToAnalyzed,
+  type CellEdit,
+  type WorkingFile,
+} from '@/lib/healthReportEditing';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
@@ -43,6 +55,40 @@ const WHAT_TO_EXPORT = [
   { name: 'Customers', hint: 'optional, if you have them' },
 ];
 
+/** Compose the report from structure + freshly-computed findings + the (stable) AI narrative. */
+function composeReport(
+  structure: StructureResponse,
+  deterministic: Finding[],
+  narrative: NarrativeResponse | null,
+  generatedAt: string,
+): HealthReport {
+  const gotchas: Finding[] = (narrative?.gotchas ?? []).map((g, i) => ({
+    id: `gotcha.${i}`,
+    category: 'erp_gotcha',
+    severity: 'info',
+    entity_type: 'unknown',
+    title: g.title || 'Worth verifying',
+    detail: g.detail || '',
+    count: 0,
+    examples: [],
+    source_files: [],
+    verified: false,
+    recommended_action: g.recommended_action || '',
+  }));
+  return {
+    schema_version: 1,
+    erp_detection: structure.erp_detection,
+    files: structure.files,
+    findings: [...deterministic, ...gotchas],
+    summary: narrative?.narrative_available ? narrative.summary : '',
+    recommendations: narrative?.recommendations ?? [],
+    narrative_available: narrative?.narrative_available ?? false,
+    ai_provider: narrative?.ai_provider ?? '',
+    ai_model: narrative?.ai_model ?? '',
+    generated_at: generatedAt,
+  };
+}
+
 export default function ImportDataPage() {
   const params = useParams();
   const companyId = params.companyId as string;
@@ -52,6 +98,15 @@ export default function ImportDataPage() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Phase 2 remediation state: the editable working dataset + undo/redo journal. Edits
+  // re-run the analyzer client-side (no server round-trip), so readiness updates live.
+  const [structure, setStructure] = useState<StructureResponse | null>(null);
+  const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
+  const [working, setWorking] = useState<WorkingFile[]>([]);
+  const [journal, setJournal] = useState<CellEdit[]>([]);
+  const [redoStack, setRedoStack] = useState<CellEdit[]>([]);
+  const [gridIndex, setGridIndex] = useState(0);
 
   async function postJson<T>(path: string, body: unknown, token: string): Promise<T> {
     const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -130,38 +185,63 @@ export default function ImportDataPage() {
         token,
       );
 
-      const gotchaFindings: Finding[] = narrative.gotchas.map((g, i) => ({
-        id: `gotcha.${i}`,
-        category: 'erp_gotcha',
-        severity: 'info',
-        entity_type: 'unknown',
-        title: g.title || 'Worth verifying',
-        detail: g.detail || '',
-        count: 0,
-        examples: [],
-        source_files: [],
-        verified: false,
-        recommended_action: g.recommended_action || '',
-      }));
-
-      setReport({
-        schema_version: 1,
-        erp_detection: structure.erp_detection,
-        files: structure.files,
-        findings: [...findings, ...gotchaFindings],
-        summary: narrative.narrative_available ? narrative.summary : '',
-        recommendations: narrative.recommendations,
-        narrative_available: narrative.narrative_available,
-        ai_provider: narrative.ai_provider,
-        ai_model: narrative.ai_model,
-        generated_at: new Date().toISOString(),
-      });
+      setStructure(structure);
+      setNarrative(narrative);
+      setWorking(buildWorkingFiles(files, structure.files));
+      setJournal([]);
+      setRedoStack([]);
+      setGridIndex(0);
+      setReport(composeReport(structure, findings, narrative, new Date().toISOString()));
       setActiveStep(2);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  // Re-run the deterministic analyzer over the edited working set and refresh the report.
+  function recompute(next: WorkingFile[]) {
+    if (!structure) return;
+    const findings = analyzeBundle(workingToAnalyzed(next));
+    setReport((prev) =>
+      composeReport(structure, findings, narrative, prev?.generated_at ?? new Date().toISOString()),
+    );
+  }
+
+  function handleCellEdit(
+    fileIndex: number,
+    rowId: string,
+    colId: string,
+    oldValue: string,
+    newValue: string,
+  ) {
+    const edit: CellEdit = { fileIndex, rowId, colId, oldValue, newValue };
+    const next = applyEdit(working, edit);
+    setWorking(next);
+    setJournal((j) => [...j, edit]);
+    setRedoStack([]);
+    recompute(next);
+  }
+
+  function undo() {
+    if (journal.length === 0) return;
+    const last = journal[journal.length - 1];
+    const next = applyEdit(working, invertEdit(last));
+    setWorking(next);
+    setJournal((j) => j.slice(0, -1));
+    setRedoStack((r) => [...r, last]);
+    recompute(next);
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    const last = redoStack[redoStack.length - 1];
+    const next = applyEdit(working, last);
+    setWorking(next);
+    setRedoStack((r) => r.slice(0, -1));
+    setJournal((j) => [...j, last]);
+    recompute(next);
   }
 
   return (
@@ -245,10 +325,38 @@ export default function ImportDataPage() {
         <AIAnalysisLoading description="Reading your files, detecting the source system, and checking data quality…" />
       )}
 
-      {/* Step 2 — Review */}
+      {/* Step 2 — Review + fix (live re-analyze) */}
       {activeStep === 2 && report && (
         <Box>
           <HealthReportView report={report} onUploadMore={() => setActiveStep(1)} />
+
+          {working.length > 0 && (
+            <>
+              <Divider sx={{ my: 4 }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
+                <Typography variant="h6" sx={{ flex: 1 }}>
+                  Fix your data
+                </Typography>
+                <Button size="small" startIcon={<UndoIcon />} disabled={journal.length === 0} onClick={undo}>
+                  Undo
+                </Button>
+                <Button size="small" startIcon={<RedoIcon />} disabled={redoStack.length === 0} onClick={redo}>
+                  Redo
+                </Button>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Double-click any cell to edit. The readiness check above updates as you go — no need
+                to re-upload or use a spreadsheet.
+              </Typography>
+              <EditableDataGrid
+                files={working}
+                activeIndex={gridIndex}
+                onActiveIndexChange={setGridIndex}
+                onCellEdit={handleCellEdit}
+              />
+            </>
+          )}
+
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
             <Button onClick={() => setActiveStep(1)}>Back to files</Button>
             <Button variant="contained" size="large" onClick={() => setActiveStep(3)}>

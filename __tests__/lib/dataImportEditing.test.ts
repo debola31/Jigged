@@ -3,7 +3,10 @@ import {
   applyEdit,
   buildWorkingFiles,
   invertEdit,
+  setWorkingEntity,
+  setWorkingRole,
   workingToAnalyzed,
+  workingToClassification,
   type CellEdit,
 } from '@/lib/dataImportEditing';
 import { analyzeBundle } from '@/lib/dataImportAnalyzer';
@@ -100,5 +103,64 @@ describe('the fix → re-analyze loop', () => {
     const undone = applyEdit(fixed, invertEdit(edit));
     const findings = analyzeBundle(workingToAnalyzed(undone));
     expect(findings.some((f) => f.id === 'orphan.parts.preferred_vendor_name')).toBe(true);
+  });
+});
+
+describe('Map stage helpers', () => {
+  it('setWorkingEntity re-classifies one file immutably', () => {
+    const working = buildWorkingFiles(FILES, STRUCTURE);
+    const next = setWorkingEntity(working, 1, 'customers');
+    expect(next[1].entityType).toBe('customers');
+    expect(working[1].entityType).toBe('vendors'); // original unchanged
+    expect(next[0]).toBe(working[0]); // other files kept by reference
+  });
+
+  it('setWorkingRole sets and clears a column mapping immutably', () => {
+    const working = buildWorkingFiles(FILES, STRUCTURE);
+    const set = setWorkingRole(working, 0, 'preferred_vendor_name', 'PartNo');
+    expect(set[0].columnRoles.preferred_vendor_name).toBe('PartNo');
+    expect(working[0].columnRoles.preferred_vendor_name).toBe('Vendor'); // original unchanged
+
+    const cleared = setWorkingRole(working, 0, 'preferred_vendor_name', '');
+    expect('preferred_vendor_name' in cleared[0].columnRoles).toBe(false);
+  });
+
+  it('workingToClassification snapshots the confirmed mapping (confidence = 1)', () => {
+    const working = buildWorkingFiles(FILES, STRUCTURE);
+    const fc = workingToClassification(working);
+    expect(fc[0]).toMatchObject({
+      filename: 'parts.csv',
+      entity_type: 'parts',
+      entity_confidence: 1,
+      row_count: 2,
+    });
+    expect(fc[0].column_roles.part_name).toBe('PartNo');
+  });
+});
+
+describe('the map → re-analyze loop', () => {
+  it('clearing the vendor mapping stops the orphan check (a correction changes the review)', () => {
+    const working = buildWorkingFiles(FILES, STRUCTURE);
+    // "Ghost" has no matching vendor -> orphan finding present while the mapping stands.
+    expect(
+      analyzeBundle(workingToAnalyzed(working)).some((f) => f.id === 'orphan.parts.preferred_vendor_name'),
+    ).toBe(true);
+
+    // Owner: "that column isn't the vendor" -> clear the role; the orphan check can't run.
+    const next = setWorkingRole(working, 0, 'preferred_vendor_name', '');
+    expect(
+      analyzeBundle(workingToAnalyzed(next)).some((f) => f.id === 'orphan.parts.preferred_vendor_name'),
+    ).toBe(false);
+  });
+
+  it('re-classifying a file changes which entity checks run', () => {
+    const working = buildWorkingFiles(FILES, STRUCTURE);
+    const reclassified = setWorkingEntity(working, 0, 'unknown');
+    // parts.csv is no longer "parts", so the parts orphan check no longer applies.
+    expect(
+      analyzeBundle(workingToAnalyzed(reclassified)).some(
+        (f) => f.id === 'orphan.parts.preferred_vendor_name',
+      ),
+    ).toBe(false);
   });
 });

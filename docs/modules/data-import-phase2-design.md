@@ -4,8 +4,9 @@
 > is the *what/why*; this is the *how* for Phase 2. Status: Draft for review. Scope: the
 > guided in-app remediation experience and the actual ingestion write — everything Phase 1
 > deferred. Phase 1 (read-only review, client-side analyzer, `/structure` +
-> `/narrative` endpoints, the `/import` wizard up to ingestion, placement) is built on PR
-> #561 and is the substrate this builds on.
+> `/narrative` endpoints, the `/import` wizard **Upload → Map → Review & Fix → Import** up to
+> ingestion — including the Map confirm-columns step — and placement) is built on PR #561 and
+> is the substrate this builds on.
 
 ## 1. What Phase 2 adds
 

@@ -41,9 +41,11 @@ in all the CSV exports they have (or just the ones they want); Jigged reads ever
 1. **Upload** — drag in the CSVs; they're parsed in the browser (nothing leaves the machine
    yet).
 2. **Map** — Jigged **auto-detects** what each file is (parts, vendors, work centers,
-   routings, BOMs, customers) and maps each raw column to the right Jigged field; the owner
-   can correct a wrong guess. *(Today the mapping is inferred and applied invisibly; a
-   user-visible confirm-columns step is a future increment — see "Out of Scope".)*
+   routings, BOMs, customers) and maps each raw column to the right Jigged field, then shows
+   it on a **confirm-columns step** so the owner corrects any wrong guess *before* the review
+   runs. Nothing is inferred-and-hidden — the review reflects the mapping they confirmed. (A
+   correction here visibly changes the review, since the analyzer keys its checks on the
+   confirmed roles.)
 3. **Review & Fix** — reading everything read-only (nothing written, nothing stored), Jigged
    shows a plain-English **review** that leads with the single most important blocking issue
    and a plain verdict (**"Ready to import" / "1 thing to fix"**), then a prioritized **"What

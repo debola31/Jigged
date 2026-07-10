@@ -1,0 +1,61 @@
+/**
+ * The canonical fields the owner can confirm/correct in the **Map** stage, per entity.
+ *
+ * This is the review-relevant slice — identity, required, referential, and cost fields —
+ * i.e. the ones the deterministic analyzer (dataImportAnalyzer.ts) actually keys its checks
+ * on, so a correction here visibly changes the review. Keys MUST match the analyzer's roles
+ * (e.g. parts cost is `cost_per_unit`); keep the two in step when the check set changes.
+ */
+
+import type { EntityType } from '@/types/data-import';
+
+export interface CanonicalField {
+  key: string; // canonical role the analyzer + importer use
+  label: string; // plain-language label for a non-technical owner
+  required: boolean; // needed to import this entity at all
+}
+
+/** Friendly names for the "this file is…" picker (covers every EntityType). */
+export const ENTITY_LABELS: Record<EntityType, string> = {
+  parts: 'Parts',
+  vendors: 'Vendors',
+  work_centers: 'Work centers',
+  routings: 'Routings',
+  bom: 'Bill of materials',
+  customers: 'Customers',
+  unknown: "Not sure — skip this file",
+};
+
+/** The entities the owner can classify a file as (excludes the passthrough 'unknown'). */
+export const KNOWN_ENTITIES: EntityType[] = [
+  'parts',
+  'vendors',
+  'work_centers',
+  'routings',
+  'bom',
+  'customers',
+];
+
+export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
+  parts: [
+    { key: 'part_name', label: 'Part number / name', required: true },
+    { key: 'preferred_vendor_name', label: 'Preferred vendor', required: false },
+    { key: 'cost_per_unit', label: 'Cost / price', required: false },
+  ],
+  vendors: [{ key: 'name', label: 'Vendor name', required: true }],
+  work_centers: [
+    { key: 'name', label: 'Work center name', required: true },
+    { key: 'vendor_name', label: 'Outside vendor (if outsourced)', required: false },
+  ],
+  routings: [
+    { key: 'part_name', label: 'Part number / name', required: true },
+    { key: 'work_center_name', label: 'Work center', required: false },
+  ],
+  bom: [
+    { key: 'parent_part_name', label: 'Assembly (parent part)', required: true },
+    { key: 'child_part_name', label: 'Component (child part)', required: true },
+    { key: 'quantity', label: 'Quantity', required: true },
+    { key: 'unit', label: 'Unit', required: true },
+  ],
+  customers: [{ key: 'name', label: 'Customer name', required: true }],
+};

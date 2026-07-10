@@ -21,21 +21,26 @@ import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
+import ColumnMappingStep from '@/components/data-import/ColumnMappingStep';
 import ImportReviewView from '@/components/data-import/ImportReviewView';
 import EditableDataGrid from '@/components/data-import/EditableDataGrid';
-import { analyzeBundle, type AnalyzedFile } from '@/lib/dataImportAnalyzer';
+import { analyzeBundle } from '@/lib/dataImportAnalyzer';
 import { summarize } from '@/lib/dataImportReview';
 import {
   applyEdit,
   buildWorkingFiles,
   invertEdit,
+  setWorkingEntity,
+  setWorkingRole,
   workingToAnalyzed,
+  workingToClassification,
   type CellEdit,
   type WorkingFile,
 } from '@/lib/dataImportEditing';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
+  EntityType,
   Finding,
   ImportReview,
   NarrativeResponse,
@@ -43,7 +48,7 @@ import type {
   UploadedFilePayload,
 } from '@/types/data-import';
 
-const STEPS = ["What you'll need", 'Upload your files', 'Review', 'Import'];
+const STEPS = ["What you'll need", 'Upload your files', 'Map columns', 'Review', 'Import'];
 const SAMPLE_ROWS = 20;
 
 const WHAT_TO_EXPORT = [
@@ -55,7 +60,7 @@ const WHAT_TO_EXPORT = [
   { name: 'Customers', hint: 'optional, if you have them' },
 ];
 
-/** Compose the report from structure + freshly-computed findings + the (stable) AI narrative. */
+/** Compose the review from structure + freshly-computed findings + the (stable) AI narrative. */
 function composeReport(
   structure: StructureResponse,
   deterministic: Finding[],
@@ -96,17 +101,27 @@ export default function ImportDataPage() {
   const [activeStep, setActiveStep] = useState(0);
   const [files, setFiles] = useState<UploadedFilePayload[]>([]);
   const [report, setReport] = useState<ImportReview | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Phase 2 remediation state: the editable working dataset + undo/redo journal. Edits
-  // re-run the analyzer client-side (no server round-trip), so the review updates live.
+  // Working dataset threaded through Map → Review: editable entity + column mapping, then
+  // editable rows. Edits re-run the analyzer client-side (no server round-trip), so the
+  // review updates live. The AI narrative is computed once (on Map confirm) and reused.
   const [structure, setStructure] = useState<StructureResponse | null>(null);
   const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
   const [working, setWorking] = useState<WorkingFile[]>([]);
   const [journal, setJournal] = useState<CellEdit[]>([]);
   const [redoStack, setRedoStack] = useState<CellEdit[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
+
+  async function authToken(): Promise<string> {
+    const supabase = getSupabase();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
+    return session.access_token;
+  }
 
   async function postJson<T>(path: string, body: unknown, token: string): Promise<T> {
     const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -127,18 +142,14 @@ export default function ImportDataPage() {
     return res.json() as Promise<T>;
   }
 
-  async function analyze() {
+  // Upload → Map: classify each file + map its columns (AI structure pass), then let the
+  // owner confirm/correct on the Map step BEFORE anything is analyzed.
+  async function runStructure() {
     setError(null);
-    setAnalyzing(true);
+    setBusy(true);
     try {
-      const supabase = getSupabase();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
-      const token = session.access_token;
-
-      const structure = await postJson<StructureResponse>(
+      const token = await authToken();
+      const result = await postJson<StructureResponse>(
         '/api/data-import/structure',
         {
           company_id: companyId,
@@ -151,18 +162,26 @@ export default function ImportDataPage() {
         },
         token,
       );
+      setStructure(result);
+      setWorking(buildWorkingFiles(files, result.files));
+      setActiveStep(2);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      const uploadedByName = new Map(files.map((f) => [f.filename, f]));
-      const analyzed: AnalyzedFile[] = structure.files.map((fc) => ({
-        filename: fc.filename,
-        entityType: fc.entity_type,
-        columnRoles: fc.column_roles,
-        rows: uploadedByName.get(fc.filename)?.rows ?? [],
-        headers: fc.headers,
-      }));
-      const findings = analyzeBundle(analyzed);
-
-      const narrative = await postJson<NarrativeResponse>(
+  // Map → Review: run the deterministic analyzer on the CONFIRMED mapping, then the grounded
+  // AI narrative once. The confirmed classification replaces the AI's guess in the review.
+  async function confirmMapping() {
+    if (!structure) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const token = await authToken();
+      const findings = analyzeBundle(workingToAnalyzed(working));
+      const narrativeResult = await postJson<NarrativeResponse>(
         '/api/data-import/narrative',
         {
           company_id: companyId,
@@ -176,31 +195,41 @@ export default function ImportDataPage() {
             count: f.count,
             examples: f.examples.slice(0, 3),
           })),
-          file_summaries: analyzed.map((af) => ({
-            filename: af.filename,
-            entity_type: af.entityType,
-            row_count: af.rows.length,
+          file_summaries: working.map((wf) => ({
+            filename: wf.filename,
+            entity_type: wf.entityType,
+            row_count: wf.rows.length,
           })),
         },
         token,
       );
-
-      setStructure(structure);
-      setNarrative(narrative);
-      setWorking(buildWorkingFiles(files, structure.files));
+      const confirmed: StructureResponse = {
+        erp_detection: structure.erp_detection,
+        files: workingToClassification(working),
+      };
+      setStructure(confirmed);
+      setNarrative(narrativeResult);
       setJournal([]);
       setRedoStack([]);
       setGridIndex(0);
-      setReport(composeReport(structure, findings, narrative, new Date().toISOString()));
-      setActiveStep(2);
+      setReport(composeReport(confirmed, findings, narrativeResult, new Date().toISOString()));
+      setActiveStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
-      setAnalyzing(false);
+      setBusy(false);
     }
   }
 
-  // Re-run the deterministic analyzer over the edited working set and refresh the report.
+  function handleEntityChange(fileIndex: number, entityType: EntityType) {
+    setWorking((w) => setWorkingEntity(w, fileIndex, entityType));
+  }
+
+  function handleRoleChange(fileIndex: number, field: string, rawHeader: string) {
+    setWorking((w) => setWorkingRole(w, fileIndex, field, rawHeader));
+  }
+
+  // Re-run the deterministic analyzer over the edited working set and refresh the review.
   function recompute(next: WorkingFile[]) {
     if (!structure) return;
     const findings = analyzeBundle(workingToAnalyzed(next));
@@ -251,8 +280,8 @@ export default function ImportDataPage() {
           Import your data
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Bring your existing shop data into Jigged. We&apos;ll check it first and show you exactly what
-          will come in — nothing is imported until you say so.
+          Bring your existing shop data into Jigged. We&apos;ll help you check and fix it first, and
+          show you exactly what will come in — nothing is imported until you say so.
         </Typography>
       </Box>
 
@@ -270,104 +299,137 @@ export default function ImportDataPage() {
         </Alert>
       )}
 
-      {/* Step 0 — What you'll need */}
-      {activeStep === 0 && (
-        <Card elevation={2}>
-          <CardContent sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Export these from your current system as CSV
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Add whatever you have — you don&apos;t need all of them, and you can add more later. Most
-              shop systems (JobBOSS, E2, Tangle, spreadsheets) can export each list to CSV.
-            </Typography>
-            <Stack spacing={1.25}>
-              {WHAT_TO_EXPORT.map((w) => (
-                <Box key={w.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <DescriptionOutlinedIcon color="action" />
-                  <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                    {w.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    — {w.hint}
-                  </Typography>
-                </Box>
-              ))}
-            </Stack>
-            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-              <Button variant="contained" size="large" onClick={() => setActiveStep(1)}>
-                Get started
-              </Button>
-            </Box>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 1 — Upload */}
-      {activeStep === 1 && !analyzing && (
-        <Box>
-          <MultiFileDropzone files={files} onChange={setFiles} />
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
-            <Button onClick={() => setActiveStep(0)}>Back</Button>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={<AutoAwesomeIcon />}
-              disabled={files.length === 0}
-              onClick={analyze}
-            >
-              Analyze {files.length > 0 ? `${files.length} file${files.length === 1 ? '' : 's'}` : ''}
-            </Button>
-          </Box>
-        </Box>
-      )}
-      {activeStep === 1 && analyzing && (
-        <AIAnalysisLoading description="Reading your files, detecting the source system, and checking data quality…" />
-      )}
-
-      {/* Step 2 — Review + fix (live re-analyze) */}
-      {activeStep === 2 && report && (
-        <Box>
-          <ImportReviewView report={report} onUploadMore={() => setActiveStep(1)} />
-
-          {working.length > 0 && (
-            <>
-              <Divider sx={{ my: 4 }} />
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                <Typography variant="h6" sx={{ flex: 1 }}>
-                  Fix your data
+      {busy ? (
+        <AIAnalysisLoading
+          description={
+            activeStep === 1
+              ? 'Reading your files and detecting the source system…'
+              : 'Checking your data and writing the summary…'
+          }
+        />
+      ) : (
+        <>
+          {/* Step 0 — What you'll need */}
+          {activeStep === 0 && (
+            <Card elevation={2}>
+              <CardContent sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Export these from your current system as CSV
                 </Typography>
-                <Button size="small" startIcon={<UndoIcon />} disabled={journal.length === 0} onClick={undo}>
-                  Undo
-                </Button>
-                <Button size="small" startIcon={<RedoIcon />} disabled={redoStack.length === 0} onClick={redo}>
-                  Redo
-                </Button>
-              </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Double-click any cell to edit. The review above updates as you go — no need
-                to re-upload or use a spreadsheet.
-              </Typography>
-              <EditableDataGrid
-                files={working}
-                activeIndex={gridIndex}
-                onActiveIndexChange={setGridIndex}
-                onCellEdit={handleCellEdit}
-              />
-            </>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Add whatever you have — you don&apos;t need all of them, and you can add more later.
+                  Most shop systems (JobBOSS, E2, Tangle, spreadsheets) can export each list to CSV.
+                </Typography>
+                <Stack spacing={1.25}>
+                  {WHAT_TO_EXPORT.map((w) => (
+                    <Box key={w.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <DescriptionOutlinedIcon color="action" />
+                      <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                        {w.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        — {w.hint}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+                <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button variant="contained" size="large" onClick={() => setActiveStep(1)}>
+                    Get started
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
           )}
 
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
-            <Button onClick={() => setActiveStep(1)}>Back to files</Button>
-            <Button variant="contained" size="large" onClick={() => setActiveStep(3)}>
-              Continue to import
-            </Button>
-          </Box>
-        </Box>
-      )}
+          {/* Step 1 — Upload */}
+          {activeStep === 1 && (
+            <Box>
+              <MultiFileDropzone files={files} onChange={setFiles} />
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(0)}>Back</Button>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<AutoAwesomeIcon />}
+                  disabled={files.length === 0}
+                  onClick={runStructure}
+                >
+                  Analyze {files.length > 0 ? `${files.length} file${files.length === 1 ? '' : 's'}` : ''}
+                </Button>
+              </Box>
+            </Box>
+          )}
 
-      {/* Step 3 — Import (pre-commit review; the write is deferred) */}
-      {activeStep === 3 && report && <ImportStep report={report} onBack={() => setActiveStep(2)} />}
+          {/* Step 2 — Map columns (confirm what each file is + how columns map) */}
+          {activeStep === 2 && (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Check what each file is
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                We filled in our best guess for what each file is and which column holds what. Fix
+                anything that looks wrong, then continue — the review uses what you confirm here.
+              </Typography>
+              <ColumnMappingStep
+                files={working}
+                onEntityChange={handleEntityChange}
+                onRoleChange={handleRoleChange}
+              />
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(1)}>Back to files</Button>
+                <Button variant="contained" size="large" onClick={confirmMapping}>
+                  Looks right — continue
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 3 — Review + fix (live re-analyze) */}
+          {activeStep === 3 && report && (
+            <Box>
+              <ImportReviewView report={report} onUploadMore={() => setActiveStep(1)} />
+
+              {working.length > 0 && (
+                <>
+                  <Divider sx={{ my: 4 }} />
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
+                    <Typography variant="h6" sx={{ flex: 1 }}>
+                      Fix your data
+                    </Typography>
+                    <Button size="small" startIcon={<UndoIcon />} disabled={journal.length === 0} onClick={undo}>
+                      Undo
+                    </Button>
+                    <Button size="small" startIcon={<RedoIcon />} disabled={redoStack.length === 0} onClick={redo}>
+                      Redo
+                    </Button>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Double-click any cell to edit. The review above updates as you go — no need to
+                    re-upload or use a spreadsheet.
+                  </Typography>
+                  <EditableDataGrid
+                    files={working}
+                    activeIndex={gridIndex}
+                    onActiveIndexChange={setGridIndex}
+                    onCellEdit={handleCellEdit}
+                  />
+                </>
+              )}
+
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(2)}>Back to mapping</Button>
+                <Button variant="contained" size="large" onClick={() => setActiveStep(4)}>
+                  Continue to import
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 4 — Import (pre-commit review; the write is deferred) */}
+          {activeStep === 4 && report && <ImportStep report={report} onBack={() => setActiveStep(3)} />}
+        </>
+      )}
     </Box>
   );
 }
@@ -400,8 +462,8 @@ function ImportStep({ report, onBack }: { report: ImportReview; onBack: () => vo
         {blocking > 0 ? (
           <Alert severity="warning" sx={{ mb: 2 }}>
             You still have <strong>{blocking} blocking issue{blocking === 1 ? '' : 's'}</strong>. We
-            strongly recommend fixing {blocking === 1 ? 'it' : 'them'} in your source files and
-            re-checking before importing, or some records will be dropped.
+            strongly recommend fixing {blocking === 1 ? 'it' : 'them'} first (back on the Review step),
+            or some records will be dropped.
           </Alert>
         ) : (
           <Alert severity="success" icon={<CheckCircleOutlineIcon />} sx={{ mb: 2 }}>
@@ -411,7 +473,7 @@ function ImportStep({ report, onBack }: { report: ImportReview; onBack: () => vo
 
         <Alert severity="info" sx={{ mb: 2 }}>
           Guided one-click import is coming soon. For now, our team brings your cleaned data into
-          Jigged with you — this check is the first step so nothing is lost.
+          Jigged with you — this review is the first step so nothing is lost.
         </Alert>
 
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>

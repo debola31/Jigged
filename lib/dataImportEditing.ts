@@ -73,3 +73,43 @@ export function workingToAnalyzed(working: WorkingFile[]): AnalyzedFile[] {
     headers: wf.headers,
   }));
 }
+
+// --- Map stage: confirm/correct entity + column mapping (immutable) ---------
+
+/** Re-classify a file (Map stage "this file is…" picker). */
+export function setWorkingEntity(
+  working: WorkingFile[],
+  fileIndex: number,
+  entityType: EntityType,
+): WorkingFile[] {
+  return working.map((wf, i) => (i === fileIndex ? { ...wf, entityType } : wf));
+}
+
+/** Point a canonical field at a raw header, or clear it when `rawHeader` is empty. */
+export function setWorkingRole(
+  working: WorkingFile[],
+  fileIndex: number,
+  field: string,
+  rawHeader: string,
+): WorkingFile[] {
+  return working.map((wf, i) => {
+    if (i !== fileIndex) return wf;
+    const columnRoles = { ...wf.columnRoles };
+    if (rawHeader) columnRoles[field] = rawHeader;
+    else delete columnRoles[field];
+    return { ...wf, columnRoles };
+  });
+}
+
+/** Snapshot the confirmed working set back into FileClassification[] for the review model.
+ *  entity_confidence is 1 — the owner confirmed it in the Map stage. */
+export function workingToClassification(working: WorkingFile[]): FileClassification[] {
+  return working.map((wf) => ({
+    filename: wf.filename,
+    entity_type: wf.entityType,
+    entity_confidence: 1,
+    headers: wf.headers,
+    row_count: wf.rows.length,
+    column_roles: wf.columnRoles,
+  }));
+}

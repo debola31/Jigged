@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Paper from '@mui/material/Paper';
+import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
@@ -41,6 +45,12 @@ import {
 } from '@/lib/dataImportEditing';
 import { bulkReplace, fillBlanks, mergeVariants } from '@/lib/dataImportActions';
 import { ENTITY_IDENTITY_FIELD } from '@/lib/dataImportSchema';
+import {
+  buildImportPlan,
+  runImportPlan,
+  type ExecuteResponseShape,
+  type ImportSummary,
+} from '@/lib/dataImportIngest';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
@@ -118,6 +128,8 @@ export default function ImportDataPage() {
   const [redoStack, setRedoStack] = useState<EditOp[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -283,6 +295,23 @@ export default function ImportDataPage() {
     setRedoStack((r) => r.slice(0, -1));
     setJournal((j) => [...j, last]);
     recompute(next);
+  }
+
+  // Review → Import: the actual dependency-ordered write, reusing the per-entity execute routes.
+  async function runImport() {
+    setError(null);
+    setImporting(true);
+    try {
+      const token = await authToken();
+      const plan = buildImportPlan(working);
+      const post = (endpoint: string, body: unknown) =>
+        postJson<ExecuteResponseShape>(endpoint, body, token);
+      setImportSummary(await runImportPlan(plan, companyId, post));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed.');
+    } finally {
+      setImporting(false);
+    }
   }
 
   const activeFile = working[gridIndex];
@@ -469,17 +498,94 @@ export default function ImportDataPage() {
             </Box>
           )}
 
-          {/* Step 4 — Import (pre-commit review; the write is deferred) */}
-          {activeStep === 4 && report && <ImportStep report={report} onBack={() => setActiveStep(3)} />}
+          {/* Step 4 — Import (pre-commit plan → confirm → dependency-ordered write → summary) */}
+          {activeStep === 4 && report && (
+            <ImportStep
+              report={report}
+              working={working}
+              importing={importing}
+              summary={importSummary}
+              onImport={runImport}
+              onBack={() => setActiveStep(3)}
+            />
+          )}
         </>
       )}
     </Box>
   );
 }
 
-function ImportStep({ report, onBack }: { report: ImportReview; onBack: () => void }) {
-  const s = summarize(report);
-  const blocking = s.verdict.counts.critical;
+function ImportStep({
+  report,
+  working,
+  importing,
+  summary,
+  onImport,
+  onBack,
+}: {
+  report: ImportReview;
+  working: WorkingFile[];
+  importing: boolean;
+  summary: ImportSummary | null;
+  onImport: () => void;
+  onBack: () => void;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const plan = useMemo(() => buildImportPlan(working), [working]);
+  const planByEntity = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of plan) m.set(b.entity, (m.get(b.entity) ?? 0) + b.rows.length);
+    return [...m.entries()];
+  }, [plan]);
+  const blocking = summarize(report).verdict.counts.critical;
+
+  if (summary) {
+    return (
+      <Card elevation={2}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            {summary.failed ? 'Import finished with some errors' : 'Import complete'}
+          </Typography>
+          <Alert
+            severity={summary.failed ? 'warning' : 'success'}
+            icon={summary.failed ? undefined : <CheckCircleOutlineIcon />}
+            sx={{ mb: 2 }}
+          >
+            Created {summary.totalCreated.toLocaleString()}
+            {summary.totalUpdated > 0 ? `, updated ${summary.totalUpdated.toLocaleString()}` : ''}
+            {summary.totalSkipped > 0 ? `, skipped ${summary.totalSkipped.toLocaleString()}` : ''}
+            {summary.totalErrors > 0
+              ? ` · ${summary.totalErrors} error${summary.totalErrors === 1 ? '' : 's'}`
+              : ''}
+            .
+          </Alert>
+          <Stack spacing={1}>
+            {summary.byEntity.map((e) => (
+              <Box key={e.entity} sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 130, textTransform: 'capitalize' }}>
+                  {e.entity.replace('_', ' ')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {e.created.toLocaleString()} created
+                  {e.updated > 0 ? `, ${e.updated} updated` : ''}
+                  {e.skipped > 0 ? `, ${e.skipped} skipped` : ''}
+                  {e.errorCount > 0 ? `, ${e.errorCount} error${e.errorCount === 1 ? '' : 's'}` : ''}
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
+          {summary.totalSkipped + summary.totalErrors > 0 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Skipped rows usually reference something not yet in Jigged. Fix them on the Review step
+              and re-run — re-importing is safe (existing records update in place, they don&apos;t
+              duplicate).
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card elevation={2}>
       <CardContent sx={{ p: 3 }}>
@@ -487,44 +593,66 @@ function ImportStep({ report, onBack }: { report: ImportReview; onBack: () => vo
           Review what will be created
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Once imported, Jigged will contain:
+          We&apos;ll create these in order, so linked records connect up:
         </Typography>
-        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1.5, mb: 2 }}>
-          {s.outlook.map((o) => (
-            <Paper key={o.entityType} variant="outlined" sx={{ px: 2, py: 1.5, minWidth: 130 }}>
-              <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                {o.count.toLocaleString()}
+        <Stack spacing={1} sx={{ mb: 2 }}>
+          {planByEntity.map(([entity, count], i) => (
+            <Box key={entity} sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+              <Chip size="small" label={i + 1} />
+              <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 130 }}>
+                {entity.replace('_', ' ')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {o.label}
+                {count.toLocaleString()} row{count === 1 ? '' : 's'}
               </Typography>
-            </Paper>
+            </Box>
           ))}
         </Stack>
 
-        {blocking > 0 ? (
+        {blocking > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            You still have <strong>{blocking} blocking issue{blocking === 1 ? '' : 's'}</strong>. We
-            strongly recommend fixing {blocking === 1 ? 'it' : 'them'} first (back on the Review step),
-            or some records will be dropped.
-          </Alert>
-        ) : (
-          <Alert severity="success" icon={<CheckCircleOutlineIcon />} sx={{ mb: 2 }}>
-            No blocking issues — your data looks ready to bring in.
+            You still have <strong>{blocking} blocking issue{blocking === 1 ? '' : 's'}</strong>. Rows
+            that can&apos;t be resolved will be skipped (and reported) — fix them on the Review step
+            for a complete import.
           </Alert>
         )}
 
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Guided one-click import is coming soon. For now, our team brings your cleaned data into
-          Jigged with you — this review is the first step so nothing is lost.
-        </Alert>
-
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Button onClick={onBack}>Back to review</Button>
-          <Button variant="contained" size="large" disabled>
-            Import into Jigged (coming soon)
+          <Button onClick={onBack} disabled={importing}>
+            Back to review
+          </Button>
+          <Button
+            variant="contained"
+            size="large"
+            disabled={importing || plan.length === 0}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {importing ? 'Importing…' : 'Import into Jigged'}
           </Button>
         </Box>
+
+        <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+          <DialogTitle>Import into Jigged?</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2">
+              This creates and updates records in your Jigged company. Existing records (matched by
+              name / part number) update in place — nothing is duplicated, and rows that can&apos;t be
+              resolved are skipped and reported. You can re-run safely.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setConfirmOpen(false);
+                onImport();
+              }}
+            >
+              Yes, import
+            </Button>
+          </DialogActions>
+        </Dialog>
       </CardContent>
     </Card>
   );

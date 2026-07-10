@@ -22,6 +22,7 @@ import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import PercentIcon from '@mui/icons-material/Percent';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import CompanySwitcher from './CompanySwitcher';
 import { useUserRole } from '@/hooks/useUserRole';
@@ -55,6 +56,10 @@ const menuItems: MenuItem[] = [
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
   { name: 'Markup Rates', path: '/markup-rates', icon: PercentIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
+  // Utility area (near Team/Settings): the recurring, low-emphasis entry to the unified
+  // data importer. Onboarding discoverability lives on the empty-dashboard Get-started
+  // checklist + module empty-states; this is the "find it later" home. Flag-gated.
+  { name: 'Import data', path: '/import', icon: UploadFileIcon, featureFlag: 'data_health_report' },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },
 ];

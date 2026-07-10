@@ -263,12 +263,17 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     nor the empty-states show once there's data. Because related data must be imported
     *together* to auto-resolve links and load in dependency order (isolated per-entity
     imports are exactly what forces manual reconciliation later — the Salesforce
-    "split into per-object lists" failure mode), the recurring entry is a **persistent
-    "Import data" action in the dashboard's top app bar** (the Header, right-aligned,
-    dashboard route only) that launches the one unified, relationship-aware importer. It
-    sits in the app bar — NOT in a content band above the KPIs — so the metrics row keeps
-    leading the dashboard (Material Design top-app-bar action items; NN/G "KPIs lead";
-    Stripe/Linear "calm KPI row up top"). No Settings, no permanent nav module. The
+    "split into per-object lists" failure mode), the recurring entry is a **low-emphasis
+    "Import data" item in the sidebar's utility area** (near Team/Settings) that launches
+    the one unified, relationship-aware importer. Rationale (designer review): a prominent
+    action in the dashboard's top app bar over-emphasized an infrequent task on the primary
+    status screen the user opens first, and was inconsistent (visible only on the dashboard,
+    so unreachable from other pages — fails recognition-over-recall). A utility sidebar item
+    is instead **persistent and consistent across every page, always findable, and quiet** —
+    it stays out of the dashboard's KPI spotlight (which must lead the content: NN/G "KPIs
+    lead"; Stripe/Linear "calm KPI row up top"). It reads as utility (grouped with
+    Settings), not a loud primary destination, and onboarding discoverability stays on the
+    Get-started checklist + empty-states so this entry can afford to be understated. The
     per-module toolbar "Import" buttons stay for a
     genuinely isolated single type (e.g. just customers), and in Phase 2 they **route into
     the unified importer** (scoped to that module but able to pull in related files), so

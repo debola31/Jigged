@@ -23,6 +23,9 @@ import {
   getPartUnitConversions,
   getPartNamesByIds,
   getPartCostExplain,
+  type PartCostMissingLeaf,
+  type PartMarkupGap,
+  type PartOpRateGap,
 } from '@/utils/partsAccess';
 import { parseBackChain } from '@/lib/partNavStack';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
@@ -121,6 +124,14 @@ export default function PartWorkspace({
   // so the completeness chip can't disagree with the list ✓/⚠ column. null
   // while loading. Recomputed when refreshKey bumps (routing/pricing changed).
   const [isPriceable, setIsPriceable] = useState<boolean | null>(null);
+  // The structural gaps behind a not-priceable verdict (missing markups on
+  // sub-parts, unpriced ops, purchased leaves with no vendor cost) so the
+  // workspace can name exactly what to fix. null while loading / on error.
+  const [pricingGaps, setPricingGaps] = useState<{
+    missing_markups: PartMarkupGap[];
+    missing_op_rates: PartOpRateGap[];
+    missing_leaves: PartCostMissingLeaf[];
+  } | null>(null);
 
   // Fetch the part + its side-loads. The mount load (and a partId change)
   // shows the spinner; a post-mutation refetch comes through a deps bump
@@ -160,14 +171,22 @@ export default function PartWorkspace({
     if (!partId) return;
     let cancelled = false;
     getPartCostExplain(partId, 1)
-      .then(({ unit_cost }) => {
-        if (!cancelled) setIsPriceable(unit_cost !== null);
+      .then((status) => {
+        if (!cancelled) {
+          setIsPriceable(status.is_priceable);
+          setPricingGaps({
+            missing_markups: status.missing_markups,
+            missing_op_rates: status.missing_op_rates,
+            missing_leaves: status.missing_leaves,
+          });
+        }
       })
       .catch((err) => {
         // Non-fatal — the chip just stays hidden rather than guessing.
         if (!cancelled) {
           console.warn('Failed to compute part cost:', err);
           setIsPriceable(null);
+          setPricingGaps(null);
         }
       });
     return () => {
@@ -369,6 +388,7 @@ export default function PartWorkspace({
           currentChain={currentChain}
           refreshAfterMutation={refreshAfterMutation}
           setupStatus={setupStatus}
+          pricingGaps={pricingGaps}
         />
       )}
 

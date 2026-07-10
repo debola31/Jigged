@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
@@ -38,7 +38,11 @@ import {
   replaceTiersForPart,
   setPartMarkupRate,
 } from '@/utils/partPricingTiersAccess';
-import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
+import {
+  getAllMarkupRates,
+  applyRateToPart,
+  applyDefaultRateToPart,
+} from '@/utils/markupRatesAccess';
 import { addPartPricingNote } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import {
@@ -64,6 +68,13 @@ interface PartPricingProps {
    * for callers outside the part-detail page.
    */
   currentChain?: string[];
+  /**
+   * Called after this card mutates the part's pricing on its own (currently:
+   * auto-applying the company Default rate to an unconfigured part). Lets the
+   * parent re-fetch so the workspace completeness banner reflects the new
+   * markup instead of going stale.
+   */
+  onPricingChanged?: () => void;
 }
 
 /**
@@ -143,6 +154,7 @@ export default function PartPricing({
   part,
   refreshKey = 0,
   currentChain = [],
+  onPricingChanged,
 }: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
@@ -233,6 +245,51 @@ export default function PartPricing({
       cancelled = true;
     };
   }, [companyId]);
+
+  // Auto-default: a never-configured part (no rate link AND no tiers — e.g. a
+  // freshly imported part) should silently follow the company Default rate
+  // rather than prompting the user to pick one. Applied per-part, on first view;
+  // the user can change it afterwards. This is deliberately a per-part write on
+  // a user-navigated action, NOT a bulk backfill of data at rest.
+  //
+  // Latched per part so a slow/absent parent refresh can't re-trigger it, and
+  // scoped to the *persisted* unconfigured state (part.markup_rate_id === null
+  // && no tiers) so a deliberate "switched to Custom, cleared tiers" edit —
+  // which reaches the same UI state via user action — is left alone.
+  const autoDefaultedPartRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading) return; // wait for the tier load to settle
+    if (part.markup_rate_id !== null) return; // already rate-linked
+    if (rows.length > 0) return; // has tiers (custom, or already applied)
+    if (autoDefaultedPartRef.current === partId) return; // handled this part
+    const defaultRate = userRates.find((r) => r.is_default);
+    if (!defaultRate) return; // no company default → keep the manual prompt
+
+    autoDefaultedPartRef.current = partId; // latch before the async write
+    applyDefaultRateToPart(companyId, partId)
+      .then(() => {
+        setLinkedRateId(defaultRate.id);
+        // Prefer the parent refresh (re-runs the workspace priceability banner
+        // too); fall back to a local reload if this card is used standalone.
+        if (onPricingChanged) onPricingChanged();
+        else loadAll();
+      })
+      .catch((err) => {
+        // Non-fatal: leave the part unconfigured and fall back to the manual
+        // empty-state prompt. Stay latched so we don't retry-loop on a hard
+        // failure (a page reload will try again).
+        console.error('Failed to auto-apply default markup rate:', err);
+      });
+  }, [
+    loading,
+    part.markup_rate_id,
+    rows.length,
+    userRates,
+    companyId,
+    partId,
+    onPricingChanged,
+    loadAll,
+  ]);
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));

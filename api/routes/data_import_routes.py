@@ -28,10 +28,13 @@ from models.data_import_models import (
     ERP_CATALOG,
     ErpDetection,
     FileClassification,
+    FixSuggestion,
     NarrativeRequest,
     NarrativeResponse,
     StructureRequest,
     StructureResponse,
+    SuggestFixesRequest,
+    SuggestFixesResponse,
     entity_type_from_str,
 )
 from services.ai.factory import get_provider
@@ -234,3 +237,32 @@ async def narrative(request: NarrativeRequest, req: Request) -> NarrativeRespons
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
         logger.warning("Import narrative step failed: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to generate the summary.")
+
+
+@router.post("/suggest-fixes", response_model=SuggestFixesResponse)
+async def suggest_fixes(request: SuggestFixesRequest, req: Request) -> SuggestFixesResponse:
+    """Phase 2: per-finding, guardrail-bound fix suggestions (proposals only — never applied).
+
+    Fires only on an explicit user action ("Suggest fixes"), gated + rate-limited like the
+    other AI steps, and performs no writes.
+    """
+    company_id = request.company_id
+    client = await _authorize(req, company_id)
+
+    try:
+        provider = await get_provider(client, company_id, "csv_mapping")
+        result = await provider.suggest_fixes(
+            findings=request.findings[:MAX_FINDINGS],
+            file_summaries=request.file_summaries[:MAX_FILES],
+        )
+        return SuggestFixesResponse(
+            suggestions=[FixSuggestion(**s) for s in result.suggestions],
+            suggestions_available=result.available,
+            ai_provider=provider.provider_name,
+            ai_model=getattr(provider, "model", ""),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — log the type only, never row content
+        logger.warning("Import suggest-fixes step failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to suggest fixes.")

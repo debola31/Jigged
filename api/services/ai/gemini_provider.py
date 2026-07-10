@@ -8,6 +8,7 @@ from google import genai
 
 from .base_provider import (
     AIProvider,
+    FixSuggestionResult,
     ImportNarrativeResult,
     MappingSuggestion,
     StructureResult,
@@ -76,6 +77,9 @@ class GeminiProvider(AIProvider):
 
     async def generate_import_narrative(self, erp, findings, file_summaries) -> ImportNarrativeResult:
         raise NotImplementedError("generate_import_narrative is not implemented for the Gemini provider")
+
+    async def suggest_fixes(self, findings, file_summaries) -> FixSuggestionResult:
+        raise NotImplementedError("suggest_fixes is not implemented for the Gemini provider")
 
     async def suggest_column_mappings(
         self,

@@ -192,6 +192,27 @@ class NarrativeResponse(BaseModel):
     ai_model: str = ""
 
 
+class SuggestFixesRequest(BaseModel):
+    """Client-computed findings -> per-finding AI suggestions. No raw rows are sent; no writes."""
+
+    company_id: str
+    findings: list[dict] = []
+    file_summaries: list[dict] = []
+
+
+class FixSuggestion(BaseModel):
+    finding_id: str = ""  # echoes a Finding.id so the UI can attach it inline
+    action: str = ""  # one concrete plain-language step, tied to the in-app fix tools
+    uncertainty: str = ""  # honest "not sure" note — never a confidence score
+
+
+class SuggestFixesResponse(BaseModel):
+    suggestions: list[FixSuggestion] = []
+    suggestions_available: bool = True  # False -> AI unavailable; UI shows the deterministic actions only
+    ai_provider: str = ""
+    ai_model: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Shared constants (single source of truth for the analyzer + the AI structure prompt)
 # ---------------------------------------------------------------------------

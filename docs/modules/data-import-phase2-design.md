@@ -225,9 +225,10 @@ serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / Open
 ## 8. Endpoint inventory
 - **Reused (existing):** each entity's `…/import/execute` (the write); `/structure` (mapping +
   ERP); `/narrative` (prose). Existing conflict/validate logic is reused as-is.
-- **New:** `/api/data-import/suggest-fixes` (AI proposals, no writes); optionally a small
-  read to fetch existing identity values for link-to-existing (or use the typed Supabase client
-  directly under RLS).
+- **Built:** `/api/data-import/suggest-fixes` (AI proposals, no writes) — guardrail-bound
+  per-finding suggestions (explicit action, uncertainty-not-confidence, never auto-applied).
+  **Remaining (increment 4):** a small read to fetch existing identity values for
+  link-to-existing (or use the typed Supabase client directly under RLS).
 - **Unchanged guarantee:** the read/AI endpoints keep the Phase 1 no-domain-write property;
   only the per-entity execute routes write, exactly as they do today.
 
@@ -265,15 +266,19 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
 - **No verified ROI** for the whole pattern (PRD note) — instrument completion/abandonment so
   we learn on real usage rather than assume.
 
-## 12. Suggested build sequence (small, shippable increments)
-1. Editable grid + live re-analyze + undo (no AI) — the core "fix here" loop.
-2. Bulk find-replace + fill/confirm-blank + cluster-merge (client-only) — the highest-value
-   fixes, still no AI.
-3. The ingestion write: client orchestrates dependency-ordered calls to existing per-entity
-   executes (default upsert) + post-import summary. **This is the first time data actually
-   writes** — gate carefully.
-4. Upsert modes + link-to-existing (bounded reads + confirm).
-5. `suggest-fixes` AI proposals with the guardrail UX (accept/reject + uncertainty), last — so
-   the deterministic, trustworthy fixes land before any AI-proposed ones. Built as a thin
-   orchestrator over the §7 typed-action layer (workflow-first, confirm-gated), not an
-   autonomous loop.
+## 12. Build sequence — status
+1. ✅ **Built** — editable grid + live re-analyze + undo (`lib/dataImportEditing.ts` /
+   `EditableDataGrid`). *(Also built ahead of Phase 2: the **Map** confirm-columns step —
+   `ColumnMappingStep` + `lib/dataImportSchema.ts`.)*
+2. ✅ **Built** — bulk find-replace + fill-blanks + cluster-merge as the typed reversible action
+   layer (`lib/dataImportActions.ts`, `EditOp`; `FixToolbar` / `MergeVariantsDialog`).
+3. ✅ **Built** — the ingestion write (`lib/dataImportIngest.ts`): dependency-ordered calls to
+   the existing per-entity executes, ≤500-row batches, `skip_conflicts` (resumable), plan
+   preview + confirm dialog + post-import summary. **First real write** — live behind the flag +
+   confirm gate; still owes one preview/local E2E run.
+4. ⏳ **Remaining** — upsert modes + link-to-existing (bounded reads + confirm) for the
+   non-empty-company journey.
+5. ✅ **Built** — `suggest-fixes`: guardrail-bound AI proposals fired only on an explicit click
+   (plain-language step + honest uncertainty, never a confidence score, never auto-applied — the
+   owner applies via the deterministic tools). `POST /api/data-import/suggest-fixes` +
+   `SuggestFixesPanel`. Deterministic fixes (1–2) landed first, by design.

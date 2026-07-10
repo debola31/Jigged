@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from services.ai.base_provider import ImportNarrativeResult, StructureResult
+from services.ai.base_provider import FixSuggestionResult, ImportNarrativeResult, StructureResult
 from services.ai.claude_provider import ClaudeProvider, _clamp01, _parse_json_response
 from services.ai.factory import create_provider
 
@@ -155,3 +155,38 @@ class TestGenerateNarrative:
         assert result.available is False
         assert result.summary == ""
         assert result.recommendations == []
+
+
+class TestSuggestFixes:
+    async def test_parses_suggestions_with_uncertainty(self):
+        payload = {
+            "suggestions": [
+                {"finding_id": "orphan.parts.preferred_vendor_name",
+                 "action": "Add the missing vendor 'Ghost Co', or fix the spelling.", "uncertainty": ""},
+                {"finding_id": "name_variant.vendors",
+                 "action": "Use Merge look-alikes on the vendor name column.",
+                 "uncertainty": "I'm not certain these are the same — please confirm."},
+            ]
+        }
+        p = _provider_with_response(json.dumps(payload))
+        result = await p.suggest_fixes(findings=[], file_summaries=[])
+        assert isinstance(result, FixSuggestionResult)
+        assert result.available is True
+        assert len(result.suggestions) == 2
+        assert result.suggestions[0]["finding_id"] == "orphan.parts.preferred_vendor_name"
+        assert result.suggestions[1]["uncertainty"]  # honest note preserved
+
+    async def test_drops_suggestions_without_an_action(self):
+        payload = {"suggestions": [
+            {"finding_id": "x", "action": "", "uncertainty": ""},
+            {"finding_id": "y", "action": "Do this"},
+        ]}
+        p = _provider_with_response(json.dumps(payload))
+        result = await p.suggest_fixes(findings=[], file_summaries=[])
+        assert len(result.suggestions) == 1
+
+    async def test_failure_sets_unavailable(self):
+        p = _provider_with_response("<garbage/>")
+        result = await p.suggest_fixes(findings=[], file_summaries=[])
+        assert result.available is False
+        assert result.suggestions == []

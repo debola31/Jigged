@@ -1,8 +1,11 @@
 # PRD: Unified data import / onboarding flow
 
-> Status: Draft. **Phase 1** (the read-only review + placement) built; the **target** is a
-> guided in-app fix → confirm → ingestion flow (mostly **Phase 2**; ingestion deferred).
-> Supersedes the thin FR-16 "Legacy Data Migration" line in
+> Status: Draft. The full flow **Upload → Map → Review & Fix → Import** is built end-to-end —
+> confirm-columns mapping, live review + in-app remediation (edit / bulk find-replace /
+> fill-blanks / cluster-merge / guardrail-bound AI suggestions), and the dependency-ordered
+> **write** (reusing the per-entity execute routes; behind the flag + a confirm gate).
+> **Remaining:** the non-empty-company upsert / link-to-existing journey, and a preview E2E run
+> of the live write. Supersedes the thin FR-16 "Legacy Data Migration" line in
 > [docs/prd.md](../prd.md) and the retired data-health module note. Related:
 > epic #492 and sub-issues #519–#524.
 > Generated with the `to-prd` skill from the design conversation; also published to the

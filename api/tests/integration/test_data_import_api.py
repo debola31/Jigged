@@ -16,7 +16,13 @@ from httpx import ASGITransport, AsyncClient
 
 import routes.data_import_routes as hr
 from index import app
-from services.ai.base_provider import ErpDetectionResult, FileStructure, ImportNarrativeResult, StructureResult
+from services.ai.base_provider import (
+    ErpDetectionResult,
+    FileStructure,
+    FixSuggestionResult,
+    ImportNarrativeResult,
+    StructureResult,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -121,6 +127,12 @@ class MockProvider:
             available=True,
         )
 
+    async def suggest_fixes(self, findings, file_summaries):
+        return FixSuggestionResult(
+            suggestions=[{"finding_id": "f1", "action": "Merge the vendor spellings.", "uncertainty": ""}],
+            available=True,
+        )
+
 
 _STRUCTURE_BODY = {
     "company_id": "co-1",
@@ -136,6 +148,12 @@ _NARRATIVE_BODY = {
     "findings": [{"id": "orphan.parts.preferred_vendor_name", "category": "orphan_reference",
                   "severity": "critical", "title": "1 part references a missing vendor", "count": 1}],
     "file_summaries": [{"filename": "parts.csv", "entity_type": "parts", "row_count": 2}],
+}
+
+_SUGGEST_BODY = {
+    "company_id": "co-1",
+    "findings": [{"id": "f1", "category": "name_variant", "severity": "warning", "title": "x", "count": 3}],
+    "file_summaries": [{"filename": "vendors.csv", "entity_type": "vendors", "row_count": 3}],
 }
 
 
@@ -185,6 +203,21 @@ async def test_structure_feature_flag_off_is_403():
 
 async def test_narrative_feature_flag_off_is_403():
     resp = await _post("/api/data-import/narrative", _NARRATIVE_BODY, MockClient(features={}))
+    assert resp.status_code == 403
+
+
+async def test_suggest_fixes_flow():
+    client = MockClient()
+    resp = await _post("/api/data-import/suggest-fixes", _SUGGEST_BODY, client)
+    assert resp.status_code == 200
+    j = resp.json()
+    assert j["suggestions_available"] is True
+    assert j["suggestions"][0]["finding_id"] == "f1"
+    assert client.writes == []  # proposals only — no write
+
+
+async def test_suggest_fixes_feature_flag_off_is_403():
+    resp = await _post("/api/data-import/suggest-fixes", _SUGGEST_BODY, MockClient(features={}))
     assert resp.status_code == 403
 
 

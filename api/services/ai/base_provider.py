@@ -51,6 +51,16 @@ class ImportNarrativeResult(BaseModel):
     available: bool = True  # False -> narrative generation failed; UI shows raw findings only
 
 
+class FixSuggestionResult(BaseModel):
+    """Per-finding, guardrail-bound guidance: a concrete recommended step + an honest
+    uncertainty note (never a confidence score). Proposals only — the client applies them via
+    the deterministic fix tools on explicit accept; nothing is auto-applied.
+    """
+
+    suggestions: list[dict] = []  # {"finding_id","action","uncertainty"}
+    available: bool = True
+
+
 class AIProvider(ABC):
     """Abstract base class for AI providers."""
 
@@ -112,5 +122,17 @@ class AIProvider(ABC):
         """Write a plain-text import-review narrative grounded STRICTLY in the given
         deterministic findings (no invented numbers). Returns available=False on failure
         so the caller can show raw findings instead of fabricated prose.
+        """
+        pass
+
+    @abstractmethod
+    async def suggest_fixes(
+        self,
+        findings: list[dict],
+        file_summaries: list[dict],
+    ) -> FixSuggestionResult:
+        """Per finding, propose ONE concrete, plain-language next step the owner can take with
+        the in-app fix tools, plus an honest uncertainty note. Grounded STRICTLY in the given
+        findings (no invented numbers, no confidence scores). available=False on failure.
         """
         pass

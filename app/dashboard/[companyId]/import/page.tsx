@@ -30,6 +30,7 @@ import ImportReviewView from '@/components/data-import/ImportReviewView';
 import EditableDataGrid from '@/components/data-import/EditableDataGrid';
 import FixToolbar from '@/components/data-import/FixToolbar';
 import MergeVariantsDialog from '@/components/data-import/MergeVariantsDialog';
+import SuggestFixesPanel from '@/components/data-import/SuggestFixesPanel';
 import { analyzeBundle } from '@/lib/dataImportAnalyzer';
 import { summarize } from '@/lib/dataImportReview';
 import {
@@ -56,9 +57,11 @@ import { getSupabase } from '@/lib/supabase';
 import type {
   EntityType,
   Finding,
+  FixSuggestion,
   ImportReview,
   NarrativeResponse,
   StructureResponse,
+  SuggestFixesResponse,
   UploadedFilePayload,
 } from '@/types/data-import';
 
@@ -130,6 +133,9 @@ export default function ImportDataPage() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestAvailable, setSuggestAvailable] = useState(true);
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -314,6 +320,45 @@ export default function ImportDataPage() {
     }
   }
 
+  // Explicit-action only (AI-cost rule): the owner clicks "Suggest how to fix these".
+  async function requestSuggestions() {
+    if (!report) return;
+    setSuggestLoading(true);
+    try {
+      const token = await authToken();
+      const resp = await postJson<SuggestFixesResponse>(
+        '/api/data-import/suggest-fixes',
+        {
+          company_id: companyId,
+          findings: report.findings
+            .filter((f) => f.verified)
+            .map((f) => ({
+              id: f.id,
+              category: f.category,
+              severity: f.severity,
+              title: f.title,
+              detail: f.detail,
+              count: f.count,
+              examples: f.examples.slice(0, 3),
+            })),
+          file_summaries: working.map((wf) => ({
+            filename: wf.filename,
+            entity_type: wf.entityType,
+            row_count: wf.rows.length,
+          })),
+        },
+        token,
+      );
+      setSuggestions(resp.suggestions);
+      setSuggestAvailable(resp.suggestions_available);
+    } catch {
+      setSuggestions([]);
+      setSuggestAvailable(false);
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
   const activeFile = working[gridIndex];
   const mergeDefaultCol = activeFile
     ? activeFile.columnRoles[ENTITY_IDENTITY_FIELD[activeFile.entityType] ?? ''] ??
@@ -456,6 +501,12 @@ export default function ImportDataPage() {
                     Fix a whole column at once below, or double-click any cell to edit. The review
                     above updates as you go — no spreadsheet needed.
                   </Typography>
+                  <SuggestFixesPanel
+                    suggestions={suggestions}
+                    loading={suggestLoading}
+                    available={suggestAvailable}
+                    onRequest={requestSuggestions}
+                  />
                   {activeFile && (
                     <FixToolbar
                       key={activeFile.filename}

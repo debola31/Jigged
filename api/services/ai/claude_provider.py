@@ -12,6 +12,7 @@ from .base_provider import (
     AIProvider,
     ErpDetectionResult,
     FileStructure,
+    FixSuggestionResult,
     ImportNarrativeResult,
     MappingSuggestion,
     StructureResult,
@@ -355,6 +356,50 @@ class ClaudeProvider(AIProvider):
             gotchas=gotchas,
             available=True,
         )
+
+    async def suggest_fixes(
+        self,
+        findings: list[dict],
+        file_summaries: list[dict],
+    ) -> FixSuggestionResult:
+        """Per-finding recommended step + uncertainty, grounded strictly in the findings."""
+        prompt = (
+            "You are helping a non-technical machine-shop owner get their legacy data into a "
+            "new system. Below are DATA ISSUES already found in their files — trust these "
+            "exactly and never invent numbers.\n\n"
+            "For EACH issue, write ONE concrete, plain-language next step the owner can take "
+            'with the in-app fix tools (edit a cell, "Find & replace" a column, "Fill blanks", '
+            '"Merge look-alikes"). Be specific and encouraging, not technical. If you are NOT '
+            'sure your suggestion is right, say so plainly in "uncertainty" (e.g. "I\'m not '
+            'certain these are the same — please confirm"). NEVER use confidence scores or '
+            "percentages.\n\n"
+            f"FILES:\n{json.dumps(file_summaries, indent=2)}\n\n"
+            f"ISSUES (echo each finding_id back):\n{json.dumps(findings, indent=2)}\n\n"
+            "Return ONLY valid JSON (plain text in every string, no markdown):\n"
+            '{"suggestions": [{"finding_id": "<echo the issue id>", "action": "one concrete '
+            'step", "uncertainty": "an honest note if unsure, else empty"}]}'
+        )
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            data = _parse_json_response(response.content[0].text.strip())
+        except Exception as e:  # noqa: BLE001 — surface the gap, never fabricate
+            logger.warning(f"suggest_fixes failed: {e}")
+            return FixSuggestionResult(available=False)
+
+        suggestions = [
+            {
+                "finding_id": str(s.get("finding_id", "")),
+                "action": str(s.get("action", "")),
+                "uncertainty": str(s.get("uncertainty", "")),
+            }
+            for s in (data.get("suggestions") or [])
+            if isinstance(s, dict) and str(s.get("action", "")).strip()
+        ]
+        return FixSuggestionResult(suggestions=suggestions, available=True)
 
     async def chat_with_tools(
         self,

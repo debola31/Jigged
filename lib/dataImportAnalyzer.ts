@@ -1,19 +1,17 @@
 /**
- * Deterministic data-health analyzer — runs in the BROWSER.
+ * Deterministic data-import analyzer — runs in the BROWSER.
  *
- * The uploaded rows already live in browser memory (parseCSV runs client-side), and this
- * report is read-only/advisory (no write path, no trust boundary), so the deterministic
+ * The uploaded rows already live in browser memory (parseCSV runs client-side), and the
+ * review is read-only/advisory (no write path, no trust boundary), so the deterministic
  * findings are computed here — the rows never leave the machine and never hit the 4.5 MB
  * request limit. The server keeps only the two AI steps (ERP/structure detection and the
  * grounded narrative), which need the secret API key and take tiny payloads.
  *
- * Faithful port of api/services/health_report_analyzer.py — keep the two in sync if the
- * check set changes (the Python copy backs the same logic under pytest; this one under
- * vitest). Cross-file joins use the CORRECT asymmetric keys (parts identify by
+ * Cross-file joins use the CORRECT asymmetric keys (parts identify by
  * `part_name`; vendors/work_centers/customers by `name`).
  */
 
-import type { EntityType, Finding, Severity } from '@/types/health-report';
+import type { EntityType, Finding, Severity } from '@/types/data-import';
 
 export interface AnalyzedFile {
   filename: string;

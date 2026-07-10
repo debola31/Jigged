@@ -1,4 +1,4 @@
-"""API tests for the read-only Data Health endpoints (routes/health_report_routes.py).
+"""API tests for the data-import endpoints (routes/data_import_routes.py).
 
 The server is AI-only now (the deterministic analyzer runs in the browser). These cover
 the two AI endpoints (/structure, /narrative), caller-authorization, the opt-in feature
@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import routes.health_report_routes as hr
+import routes.data_import_routes as hr
 from index import app
-from services.ai.base_provider import ErpDetectionResult, FileStructure, HealthNarrativeResult, StructureResult
+from services.ai.base_provider import ErpDetectionResult, FileStructure, ImportNarrativeResult, StructureResult
 
 pytestmark = pytest.mark.unit
 
@@ -79,7 +79,7 @@ class _Auth:
 class MockClient:
     def __init__(self, has_access=True, features=None, user_id="user-1"):
         self._has_access = has_access
-        self._features = features if features is not None else {"data_health_report": True}
+        self._features = features if features is not None else {"data_import": True}
         self.auth = _Auth(user_id)
         self.writes: list[str] = []
 
@@ -113,8 +113,8 @@ class MockProvider:
             files=structs,
         )
 
-    async def generate_health_narrative(self, erp, findings, file_summaries):
-        return HealthNarrativeResult(
+    async def generate_import_narrative(self, erp, findings, file_summaries):
+        return ImportNarrativeResult(
             summary="Your data is mostly ready to import.",
             recommendations=["Add the missing vendor 'Ghost Co'."],
             gotchas=[{"title": "Check units", "detail": "verify", "recommended_action": "review"}],
@@ -151,14 +151,14 @@ async def _post(path, body, client_mock, headers=None):
 # --------------------------------------------------------------------------- tests
 async def test_structure_then_narrative_flow():
     client = MockClient()
-    sresp = await _post("/api/health-report/structure", _STRUCTURE_BODY, client)
+    sresp = await _post("/api/data-import/structure", _STRUCTURE_BODY, client)
     assert sresp.status_code == 200
     sj = sresp.json()
     assert sj["erp_detection"]["source"] == "tangle"
     assert sj["erp_detection"]["header_signature"]
     assert sj["files"][0]["filename"] == "parts.csv"
 
-    nresp = await _post("/api/health-report/narrative", _NARRATIVE_BODY, client)
+    nresp = await _post("/api/data-import/narrative", _NARRATIVE_BODY, client)
     assert nresp.status_code == 200
     nj = nresp.json()
     assert nj["narrative_available"] is True
@@ -168,23 +168,23 @@ async def test_structure_then_narrative_flow():
 
 
 async def test_structure_missing_token_is_401():
-    resp = await _post("/api/health-report/structure", _STRUCTURE_BODY, MockClient(), headers={})
+    resp = await _post("/api/data-import/structure", _STRUCTURE_BODY, MockClient(), headers={})
     assert resp.status_code == 401
 
 
 async def test_structure_no_company_access_is_403():
-    resp = await _post("/api/health-report/structure", _STRUCTURE_BODY, MockClient(has_access=False))
+    resp = await _post("/api/data-import/structure", _STRUCTURE_BODY, MockClient(has_access=False))
     assert resp.status_code == 403
 
 
 async def test_structure_feature_flag_off_is_403():
-    resp = await _post("/api/health-report/structure", _STRUCTURE_BODY, MockClient(features={}))
+    resp = await _post("/api/data-import/structure", _STRUCTURE_BODY, MockClient(features={}))
     assert resp.status_code == 403
     assert "not enabled" in resp.json()["detail"].lower()
 
 
 async def test_narrative_feature_flag_off_is_403():
-    resp = await _post("/api/health-report/narrative", _NARRATIVE_BODY, MockClient(features={}))
+    resp = await _post("/api/data-import/narrative", _NARRATIVE_BODY, MockClient(features={}))
     assert resp.status_code == 403
 
 
@@ -192,7 +192,7 @@ async def test_structure_too_many_files_is_413():
     body = {"company_id": "co-1",
             "files": [{"filename": f"f{i}.csv", "headers": ["A"], "row_count": 0, "sample_rows": []}
                       for i in range(13)]}
-    resp = await _post("/api/health-report/structure", body, MockClient())
+    resp = await _post("/api/data-import/structure", body, MockClient())
     assert resp.status_code == 413
 
 

@@ -93,7 +93,7 @@ export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardPro
   const { hasDemoCompany, isDemoMode, enterDemoMode, isCreating, isLoading } = useDemoMode();
   const { features } = useCompanyFeatures();
   const router = useRouter();
-  const importEnabled = !!features.data_health_report;
+  const importEnabled = !!features.data_import;
   const [dismissed, setDismissedState] = useState(true);
 
   useEffect(() => {

@@ -20,11 +20,11 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
-import MultiFileDropzone from '@/components/health-report/MultiFileDropzone';
-import HealthReportView from '@/components/health-report/HealthReportView';
-import EditableDataGrid from '@/components/health-report/EditableDataGrid';
-import { analyzeBundle, type AnalyzedFile } from '@/lib/healthReportAnalyzer';
-import { summarize } from '@/lib/healthReportSummary';
+import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
+import ImportReviewView from '@/components/data-import/ImportReviewView';
+import EditableDataGrid from '@/components/data-import/EditableDataGrid';
+import { analyzeBundle, type AnalyzedFile } from '@/lib/dataImportAnalyzer';
+import { summarize } from '@/lib/dataImportReview';
 import {
   applyEdit,
   buildWorkingFiles,
@@ -32,16 +32,16 @@ import {
   workingToAnalyzed,
   type CellEdit,
   type WorkingFile,
-} from '@/lib/healthReportEditing';
+} from '@/lib/dataImportEditing';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
   Finding,
-  HealthReport,
+  ImportReview,
   NarrativeResponse,
   StructureResponse,
   UploadedFilePayload,
-} from '@/types/health-report';
+} from '@/types/data-import';
 
 const STEPS = ["What you'll need", 'Upload your files', 'Review', 'Import'];
 const SAMPLE_ROWS = 20;
@@ -61,7 +61,7 @@ function composeReport(
   deterministic: Finding[],
   narrative: NarrativeResponse | null,
   generatedAt: string,
-): HealthReport {
+): ImportReview {
   const gotchas: Finding[] = (narrative?.gotchas ?? []).map((g, i) => ({
     id: `gotcha.${i}`,
     category: 'erp_gotcha',
@@ -95,12 +95,12 @@ export default function ImportDataPage() {
 
   const [activeStep, setActiveStep] = useState(0);
   const [files, setFiles] = useState<UploadedFilePayload[]>([]);
-  const [report, setReport] = useState<HealthReport | null>(null);
+  const [report, setReport] = useState<ImportReview | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Phase 2 remediation state: the editable working dataset + undo/redo journal. Edits
-  // re-run the analyzer client-side (no server round-trip), so readiness updates live.
+  // re-run the analyzer client-side (no server round-trip), so the review updates live.
   const [structure, setStructure] = useState<StructureResponse | null>(null);
   const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
   const [working, setWorking] = useState<WorkingFile[]>([]);
@@ -139,7 +139,7 @@ export default function ImportDataPage() {
       const token = session.access_token;
 
       const structure = await postJson<StructureResponse>(
-        '/api/health-report/structure',
+        '/api/data-import/structure',
         {
           company_id: companyId,
           files: files.map((f) => ({
@@ -163,7 +163,7 @@ export default function ImportDataPage() {
       const findings = analyzeBundle(analyzed);
 
       const narrative = await postJson<NarrativeResponse>(
-        '/api/health-report/narrative',
+        '/api/data-import/narrative',
         {
           company_id: companyId,
           erp_detection: structure.erp_detection,
@@ -328,7 +328,7 @@ export default function ImportDataPage() {
       {/* Step 2 — Review + fix (live re-analyze) */}
       {activeStep === 2 && report && (
         <Box>
-          <HealthReportView report={report} onUploadMore={() => setActiveStep(1)} />
+          <ImportReviewView report={report} onUploadMore={() => setActiveStep(1)} />
 
           {working.length > 0 && (
             <>
@@ -345,7 +345,7 @@ export default function ImportDataPage() {
                 </Button>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Double-click any cell to edit. The readiness check above updates as you go — no need
+                Double-click any cell to edit. The review above updates as you go — no need
                 to re-upload or use a spreadsheet.
               </Typography>
               <EditableDataGrid
@@ -372,7 +372,7 @@ export default function ImportDataPage() {
   );
 }
 
-function ImportStep({ report, onBack }: { report: HealthReport; onBack: () => void }) {
+function ImportStep({ report, onBack }: { report: ImportReview; onBack: () => void }) {
   const s = summarize(report);
   const blocking = s.verdict.counts.critical;
   return (

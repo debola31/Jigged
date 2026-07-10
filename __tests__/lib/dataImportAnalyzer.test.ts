@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeBundle, type AnalyzedFile } from '@/lib/healthReportAnalyzer';
-import type { EntityType, Finding } from '@/types/health-report';
+import { analyzeBundle, type AnalyzedFile } from '@/lib/dataImportAnalyzer';
+import type { EntityType, Finding } from '@/types/data-import';
 
 function af(
   filename: string,

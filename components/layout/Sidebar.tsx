@@ -59,7 +59,7 @@ const menuItems: MenuItem[] = [
   // Utility area (near Team/Settings): the recurring, low-emphasis entry to the unified
   // data importer. Onboarding discoverability lives on the empty-dashboard Get-started
   // checklist + module empty-states; this is the "find it later" home. Flag-gated.
-  { name: 'Import data', path: '/import', icon: UploadFileIcon, featureFlag: 'data_health_report' },
+  { name: 'Import data', path: '/import', icon: UploadFileIcon, featureFlag: 'data_import' },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },
 ];

@@ -1,4 +1,4 @@
-"""Unit tests for the health-report AI provider methods (services/ai/claude_provider.py).
+"""Unit tests for the data-import AI provider methods (services/ai/claude_provider.py).
 
 Mocks self.client.messages.create so no Anthropic calls happen. Covers the shared JSON
 parse helper, structure parsing (incl. hallucinated-header rejection + graceful degrade),
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from services.ai.base_provider import HealthNarrativeResult, StructureResult
+from services.ai.base_provider import ImportNarrativeResult, StructureResult
 from services.ai.claude_provider import ClaudeProvider, _clamp01, _parse_json_response
 from services.ai.factory import create_provider
 
@@ -142,8 +142,8 @@ class TestGenerateNarrative:
             "gotchas": [{"title": "Trailing spaces", "detail": "check", "recommended_action": "trim"}],
         }
         p = _provider_with_response(json.dumps(payload))
-        result = await p.generate_health_narrative(erp={}, findings=[], file_summaries=[])
-        assert isinstance(result, HealthNarrativeResult)
+        result = await p.generate_import_narrative(erp={}, findings=[], file_summaries=[])
+        assert isinstance(result, ImportNarrativeResult)
         assert result.available is True
         assert result.summary.startswith("Your data")
         assert len(result.recommendations) == 2
@@ -151,7 +151,7 @@ class TestGenerateNarrative:
 
     async def test_failure_sets_unavailable_and_no_fabricated_prose(self):
         p = _provider_with_response("<garbage/>")
-        result = await p.generate_health_narrative(erp={}, findings=[], file_summaries=[])
+        result = await p.generate_import_narrative(erp={}, findings=[], file_summaries=[])
         assert result.available is False
         assert result.summary == ""
         assert result.recommendations == []

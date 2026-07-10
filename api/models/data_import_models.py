@@ -1,9 +1,9 @@
-"""Pydantic models + shared constants for the read-only Data Health / Import-Readiness report.
+"""Pydantic models + shared constants for the data-import review (the Review & Fix stage).
 
 This feature is an ONBOARDING aid (not a sales demo): a shop already committed to
-adopting Jigged uploads its legacy ERP CSV exports, and the tool produces a read-only,
-advisory report of what's in the files, what won't import cleanly, and what to fix —
-plus an informative guess at the source ERP. It NEVER writes to any business system.
+adopting Jigged uploads its legacy ERP CSV exports, and the tool reviews what's in the
+files, what won't import cleanly, and what to fix — plus an informative guess at the
+source ERP — so the owner can fix it in-app and import it. These AI endpoints only read.
 
 Design notes:
   - The report is computed on demand and returned; nothing is persisted server-side in
@@ -12,7 +12,7 @@ Design notes:
     (#524) without a migration now.
   - An AI "structure" pass produces, per file, a ``column_roles`` map (canonical_field
     -> raw_header). The DETERMINISTIC analyzer that consumes it runs in the BROWSER
-    (lib/healthReportAnalyzer.ts): the uploaded rows are already parsed client-side and
+    (lib/dataImportAnalyzer.ts): the uploaded rows are already parsed client-side and
     this report is read-only, so the rows never hit the server (no 4.5 MB limit) and
     the server keeps only the two AI steps here.
   - Cross-file joins are ASYMMETRIC: vendors/work_centers/customers identify by ``name``
@@ -143,30 +143,6 @@ class UploadedFile(BaseModel):
     rows: list[dict[str, str]]  # header -> value, matching the import-route row shape
 
 
-class HealthReportRequest(BaseModel):
-    company_id: str
-    files: list[UploadedFile]
-
-
-class HealthReport(BaseModel):
-    """The advisory report. Kept reuse-ready (schema_version + structured detection)."""
-
-    schema_version: int = 1
-    erp_detection: ErpDetection
-    files: list[FileClassification]
-    findings: list[Finding]  # sorted by severity at render time
-    summary: str = ""  # AI narrative, plain text (no markdown)
-    recommendations: list[str] = []
-    narrative_available: bool = True  # False -> UI shows "AI summary unavailable"
-    ai_provider: str = ""
-    ai_model: str = ""
-    generated_at: str = ""  # ISO 8601, stamped by the route
-
-
-class HealthReportResponse(BaseModel):
-    report: HealthReport
-
-
 # ---------------------------------------------------------------------------
 # Request/response for the two AI-only endpoints.
 #
@@ -232,7 +208,7 @@ ENTITY_SCHEMAS: dict[EntityType, dict] = {
 
 # The identity field and the cross-file referential-join graph now live with the
 # deterministic analyzer that uses them, which runs in the browser
-# (lib/healthReportAnalyzer.ts). The server keeps only ENTITY_SCHEMAS (for the AI
+# (lib/dataImportAnalyzer.ts). The server keeps only ENTITY_SCHEMAS (for the AI
 # structure prompt) + ERP_CATALOG.
 
 # ERP catalog — prompt grounding ONLY (not a detection lookup). E2 and JobBOSS² are

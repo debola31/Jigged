@@ -42,7 +42,7 @@ class StructureResult(BaseModel):
     files: list[FileStructure] = []
 
 
-class HealthNarrativeResult(BaseModel):
+class ImportNarrativeResult(BaseModel):
     """Plain-text narrative + guidance, grounded in the deterministic findings."""
 
     summary: str = ""
@@ -103,13 +103,13 @@ class AIProvider(ABC):
         pass
 
     @abstractmethod
-    async def generate_health_narrative(
+    async def generate_import_narrative(
         self,
         erp: dict,
         findings: list[dict],
         file_summaries: list[dict],
-    ) -> HealthNarrativeResult:
-        """Write a plain-text data-health narrative grounded STRICTLY in the given
+    ) -> ImportNarrativeResult:
+        """Write a plain-text import-review narrative grounded STRICTLY in the given
         deterministic findings (no invented numbers). Returns available=False on failure
         so the caller can show raw findings instead of fabricated prose.
         """

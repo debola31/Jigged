@@ -13,7 +13,7 @@ import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Chip from '@mui/material/Chip';
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import type { EditableRow, WorkingFile } from '@/lib/healthReportEditing';
+import type { EditableRow, WorkingFile } from '@/lib/dataImportEditing';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -27,7 +27,7 @@ interface EditableDataGridProps {
 /**
  * Spreadsheet-like grid for fixing uploaded data in-app (double-click a cell to edit;
  * sort/filter). One tab per file. Every edit is reported up so the wizard can update the
- * working dataset, re-run the analyzer, and refresh readiness live. Increment 1: cell edits
+ * working dataset, re-run the analyzer, and refresh the review live. Increment 1: cell edits
  * only — bulk find-replace and cluster-merge come in later increments.
  */
 export default function EditableDataGrid({

@@ -1,9 +1,9 @@
 # PRD: Unified data import / onboarding flow
 
-> Status: Draft. **Phase 1** (read-only readiness report + placement) built; the **target**
-> is a guided in-app remediation → confirm → ingestion flow (mostly **Phase 2**; ingestion
-> deferred). Supersedes the thin FR-16 "Legacy Data Migration" line in
-> [docs/prd.md](../prd.md) and the removed `data-health-report.md` module note. Related:
+> Status: Draft. **Phase 1** (the read-only review + placement) built; the **target** is a
+> guided in-app fix → confirm → ingestion flow (mostly **Phase 2**; ingestion deferred).
+> Supersedes the thin FR-16 "Legacy Data Migration" line in
+> [docs/prd.md](../prd.md) and the retired data-health module note. Related:
 > epic #492 and sub-issues #519–#524.
 > Generated with the `to-prd` skill from the design conversation; also published to the
 > issue tracker with the `ready-for-agent` label.
@@ -32,32 +32,38 @@ written.
 
 ## Solution
 
-One unified **"Import your data"** flow — a single surface, not scattered per-entity
-importers. The owner drops in all the CSV exports they have (or just the ones they want).
-Jigged, reading everything **together**:
+One unified **"Import your data"** flow — a single guided importer, not scattered per-entity
+importers. It follows the shape every embedded data-onboarding product uses (Flatfile,
+OneSchema, Nuvo/Ingestro, Dromo): **Upload → Map → Review & Fix → Import.** The owner drops
+in all the CSV exports they have (or just the ones they want); Jigged reads everything
+**together** and walks them through:
 
-1. **Auto-detects** what each file is (parts, vendors, work centers, routings, BOMs,
-   customers) and lets the owner correct a wrong guess.
-2. **Checks the data read-only** — nothing is written, nothing is stored — and produces a
-   plain-English **readiness report** that leads with the single most important blocking
-   issue, then a prioritized "what to fix" checklist, then a "what you're importing"
-   outlook (record counts + how the entities reference each other and where those
-   references are broken), then a "to finish setup" list that prompts for missing data or
-   files.
-3. **Previews exactly what will be created** — a dependency-ordered plan (vendors and work
-   centers first, then parts, then routings and BOMs) with relationships auto-resolved and
-   anything that would be excluded called out explicitly, so nothing silently drops.
-4. **Imports** in that dependency order behind a single, explicit final action. *(Phase 1
-   stops here: the write is deferred to a white-glove/guided step; the flow goes right up
-   to ingestion.)*
+1. **Upload** — drag in the CSVs; they're parsed in the browser (nothing leaves the machine
+   yet).
+2. **Map** — Jigged **auto-detects** what each file is (parts, vendors, work centers,
+   routings, BOMs, customers) and maps each raw column to the right Jigged field; the owner
+   can correct a wrong guess. *(Today the mapping is inferred and applied invisibly; a
+   user-visible confirm-columns step is a future increment — see "Out of Scope".)*
+3. **Review & Fix** — reading everything read-only (nothing written, nothing stored), Jigged
+   shows a plain-English **review** that leads with the single most important blocking issue
+   and a plain verdict (**"Ready to import" / "1 thing to fix"**), then a prioritized **"What
+   to fix"** checklist, then a **"What you're importing"** outlook (record counts + how the
+   entities reference each other and where those references are broken), then a **"To finish
+   setup"** list that prompts for missing data or files. The owner fixes it **in-app** (see
+   the guided-remediation target below) rather than in spreadsheets.
+4. **Import** — a preview of **exactly what will be created** (dependency-ordered: vendors
+   and work centers first, then parts, then routings and BOMs; relationships auto-resolved;
+   anything excluded called out so nothing silently drops), then the write behind a single,
+   explicit final action. *(Phase 1 stops just before the write — deferred to a
+   white-glove/guided step; the flow goes right up to ingestion.)*
 
-**Where this is going — guided remediation (evolving from the read-only report).** The
-report above is Phase 1. The target experience does more than *flag* problems and send the
-owner off to fix data in spreadsheets: it **guides them to fix the data inside Jigged.**
-Each issue becomes a **decision with a recommended default** — merge look-alike duplicates,
-fill or confirm missing values, add the missing records a routing references, link a row to
-data already in Jigged — fixable **inline and in bulk in a spreadsheet-like grid**, with a
-**running readiness verdict** ("ready? / here's what you still need") and an explicit
+**The Review & Fix stage is guided remediation, not a read-only report.** Phase 1 ships the
+review read-only; the target experience does more than *flag* problems and send the owner
+off to fix data in spreadsheets: it **guides them to fix the data inside Jigged.** Each issue
+becomes a **decision with a recommended default** — merge look-alike duplicates, fill or
+confirm missing values, add the missing records a routing references, link a row to data
+already in Jigged — fixable **inline and in bulk in a spreadsheet-like grid**, with a
+**running verdict** ("Ready to import? / here's what you still need") and an explicit
 pre-commit confirmation. AI *proposes* fixes; it never applies them silently.
 
 The same surface serves both the first-time "bring my whole shop in" journey and the later
@@ -87,8 +93,8 @@ The same surface serves both the first-time "bring my whole shop in" journey and
 9. As a shop owner, I want very large files to work, so that my 18,000-line routings export
    doesn't fail.
 
-**Readiness report — reading it**
-10. As a shop owner, I want the report to open with a one-line verdict (ready / almost /
+**Review — reading it**
+10. As a shop owner, I want the review to open with a one-line verdict (ready / almost /
     not ready) and the single biggest problem, so that I immediately know where I stand.
 11. As a shop owner, I want a short count of how many blocking issues, things to review,
     and informational notes there are, so that I can gauge the size of the job.
@@ -193,7 +199,7 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     and to let me undo, so that I stay in control of my own records.
 50. As a shop owner, I want the AI to tell me when it's NOT sure ("these might be the same —
     can you confirm?") rather than sound confident, so that I don't rubber-stamp a wrong fix.
-51. As a shop owner, I want a running "here's exactly what will import" and a readiness meter
+51. As a shop owner, I want a running "here's exactly what will import" and a verdict that updates
     that updates as I fix things, so that I can see progress and know when I'm ready.
 52. As a shop owner, I want the tool to clearly separate "we fixed this for you" from "you
     still need to handle this", so that I know what's been done on my behalf.
@@ -209,7 +215,7 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   importer, not a separate wizard.
 
 - **Where each stage runs (the load-bearing architecture decision):** the uploaded rows are
-  already parsed in the browser and the readiness check is read-only, so the **deterministic
+  already parsed in the browser and the review is read-only, so the **deterministic
   analysis runs in the browser** and the rows never reach the server. This makes file size
   effectively unbounded (no request-body limit), and strengthens the "nothing is stored"
   promise. The server keeps only the two steps that need the secret AI key and take tiny
@@ -238,7 +244,7 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   create phantom orphans. If a referenced tier's file is absent, the flow imports what's
   resolvable and flags the blocked references explicitly rather than silently dropping them.
 
-- **Readiness report information architecture** (inverted pyramid, progressive disclosure):
+- **Review information architecture** (inverted pyramid, progressive disclosure):
   a one-line **verdict** leading with the single most important blocking issue and
   bucketed counts; a prioritized **"What to fix"** checklist (three-tier severity, ordered
   critical > warning > info, each item = plain-language what's wrong + affected count +
@@ -254,12 +260,12 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   things that need attention, which is why the old green confidence chips were removed
   (confidence is now shown only when a classification is low-confidence).
 
-- **Read-only / no-write guarantee.** The readiness endpoints only ever SELECT (verify
+- **Read-only / no-write guarantee.** The review endpoints only ever SELECT (verify
   access, read the feature flag, resolve the AI provider); they perform no table writes, no
   `auth.admin`, and keep no on-disk cache of uploaded rows. This is enforced by a test.
 
 - **Flow shape.** A guided, sequential wizard: *What you'll need → Upload & auto-classify →
-  Readiness report → Review what will be created → Import*. The final Import is the single,
+  Review & Fix → Confirm what will be created → Import*. The final Import is the single,
   explicit, separate write action. **Phase 1 stops at that line** — the write is deferred
   to a white-glove/guided step. Phase 2 wires the actual dependency-ordered write, reusing
   the existing per-entity import execution as the write layer.
@@ -278,7 +284,7 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     confirm-blank; orphan refs → add the missing parent records or accept-skip;
     link-to-existing → reconciliation-style matching against the shop's OWN records, with
     per-edit approval.
-  - **Say what's missing UPFRONT + a readiness verdict** ("ready? / you still need Y"),
+  - **Say what's missing UPFRONT + a verdict** ("ready? / you still need Y"),
     before the owner invests effort.
   - **Three never-blurred visual states:** auto-fixed vs. warning (review, still accepted)
     vs. blocking (must fix) — maps onto the existing severity buckets.
@@ -353,11 +359,11 @@ The same surface serves both the first-time "bring my whole shop in" journey and
 ## Testing Decisions
 
 Good tests here assert **external behavior**, not implementation details — given a set of
-uploaded files (or findings) in, assert the findings / verdict / report structure out; do
+uploaded files (or findings) in, assert the findings / verdict / review structure out; do
 not assert private helpers or DOM internals. Three seams, fewest and highest:
 
-1. **Readiness engine (primary seam)** — the pure browser modules that compute findings and
-   the report view-model. Behavior tested: entity classification handling, within-file
+1. **Review engine (primary seam)** — the pure browser modules that compute findings and
+   the review view-model. Behavior tested: entity classification handling, within-file
    duplicates, cross-file orphan references with the correct asymmetric keys, normalized
    matching (no phantom orphans), missing/blank required columns, cost coverage, name
    variants, inactive flags, "never a silent 0 / never phantom N", and the derived verdict /
@@ -370,7 +376,7 @@ not assert private helpers or DOM internals. Three seams, fewest and highest:
    Prior art: the existing pytest integration test for these endpoints.
 
 3. **The wizard journey (highest end-to-end seam)** — one Playwright E2E that drives
-   `/import` with sample CSV fixtures: upload → analyze → a readiness verdict renders →
+   `/import` with sample CSV fixtures: upload → analyze → a verdict renders →
    review "what will be created" → the import step appears. Prior art: the existing `e2e/`
    Playwright specs and their seeded-data conventions.
 
@@ -385,10 +391,10 @@ endpoint/pytest seam; one E2E through the whole journey).
 - **Inline fix-in-place editing** (the guided-remediation grid, cluster-merge, bulk fix,
   link-to-existing) is the **Phase 2 target**, not out of scope permanently — see the
   "Guided remediation" implementation decision + user stories #45–52. **Phase 1** is
-  report-and-re-upload: the owner fixes in their source files and re-checks.
+  review-and-re-upload: the owner fixes in their source files and re-checks.
 - **Detection-template / gotcha-rule library and fine-tuning harvesting** (#522, #524
-  payoff) — the report schema is kept reuse-ready, but harvesting is a later phase.
-- **Server-side persistence of reports** and any shareable/exported artifact (PDF).
+  payoff) — the review schema is kept reuse-ready, but harvesting is a later phase.
+- **Server-side persistence of reviews** and any shareable/exported artifact (PDF).
 - **Non-CSV sources** (direct ERP API connectors, Excel-with-multiple-sheets parsing beyond
   CSV, etc.).
 - **Migrating transactional history** (quotes, jobs, shipments, invoices). Phase 1 covers
@@ -429,10 +435,10 @@ endpoint/pytest seam; one E2E through the whole journey).
     unvalidated and should be usability-tested with real owners.
 - **Personas.** Primary: the shop owner/admin (non-technical, 50–60, on desktop or a
   bright-light shop tablet). Secondary: the Jigged white-glove migrator who currently does
-  the actual write, for whom the readiness report is the pre-flight.
+  the actual write, for whom the review is the pre-flight.
 - **Source systems seen so far.** Tangle (real, from customer #1), plus JobBOSS/E2 and
   spreadsheets expected. The tool must not depend on prebuilt per-ERP signatures; detection
-  is AI-first and may return "unknown" without degrading the report.
+  is AI-first and may return "unknown" without degrading the review.
 - **Companion design doc.** The Phase 2 *how* — guided-remediation mechanics + the
   dependency-ordered ingestion write (reusing the per-entity execute routes) + upsert — is
   specced in [data-import-phase2-design.md](data-import-phase2-design.md).

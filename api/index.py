@@ -73,7 +73,7 @@ from routes.insights_routes import router as insights_router
 from routes.admin_routes import router as system_admin_router
 from routes.quote_email_routes import router as quote_email_router
 from routes.quickbooks_routes import router as quickbooks_router
-from routes.health_report_routes import router as health_report_router
+from routes.data_import_routes import router as data_import_router
 
 app.include_router(import_router)
 app.include_router(parts_import_router)
@@ -86,7 +86,7 @@ app.include_router(insights_router)
 app.include_router(system_admin_router)
 app.include_router(quote_email_router)
 app.include_router(quickbooks_router)
-app.include_router(health_report_router)
+app.include_router(data_import_router)
 
 
 # For local development

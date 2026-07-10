@@ -3,7 +3,7 @@
 > Companion to the PRD ([docs/modules/data-import.md](data-import.md) · issue #562). The PRD
 > is the *what/why*; this is the *how* for Phase 2. Status: Draft for review. Scope: the
 > guided in-app remediation experience and the actual ingestion write — everything Phase 1
-> deferred. Phase 1 (read-only readiness report, client-side analyzer, `/structure` +
+> deferred. Phase 1 (read-only review, client-side analyzer, `/structure` +
 > `/narrative` endpoints, the `/import` wizard up to ingestion, placement) is built on PR
 > #561 and is the substrate this builds on.
 
@@ -11,7 +11,7 @@
 
 1. **Guided remediation** — the owner fixes data *in Jigged* (edit cells, bulk find-replace,
    merge duplicate/variant names, fill/confirm gaps, link rows to existing records), with AI
-   *proposing* fixes it never silently applies, and a **live** readiness verdict.
+   *proposing* fixes it never silently applies, and a **live** verdict (ready-to-import + what to fix).
 2. **The ingestion write** — the actual dependency-ordered write, reusing the existing
    per-entity importers as the write layer.
 3. **Upsert into a non-empty company** — match against existing records; new / update /
@@ -20,9 +20,9 @@
 ## 2. Guiding architecture principle — keep it client-heavy until the write
 
 Phase 1's load-bearing decision holds: **the working dataset lives in the browser** (already
-parsed there) and the **deterministic analyzer runs client-side** ([lib/healthReportAnalyzer.ts](../../lib/healthReportAnalyzer.ts)).
+parsed there) and the **deterministic analyzer runs client-side** ([lib/dataImportAnalyzer.ts](../../lib/dataImportAnalyzer.ts)).
 Remediation therefore happens **almost entirely client-side** — every edit/merge/fill mutates
-the in-browser dataset and re-runs the analyzer to update findings + readiness instantly, with
+the in-browser dataset and re-runs the analyzer to update findings + the verdict instantly, with
 **no server round-trip and no size limit**. The server is touched only for:
 
 - **AI *suggestions*** (propose fixes / merges) — a tiny payload (findings + samples), like the
@@ -37,7 +37,7 @@ forward.
 
 ## 3. The working dataset (client state)
 
-A single in-memory model the grid, analyzer, readiness panel, and writer all read from:
+A single in-memory model the grid, analyzer, review panel, and writer all read from:
 
 - Per file: `filename`, `entityType`, `columnRoles` (canonical→raw), `headers`, and `rows`
   (mutable).
@@ -47,7 +47,7 @@ A single in-memory model the grid, analyzer, readiness panel, and writer all rea
   alongside so re-analysis and the write both honor them.
 
 Everything is derived: mutate rows/decisions → re-run `analyzeBundle` → recompute `summarize`
-→ the readiness panel and "what will import" update. No separate source of truth.
+→ the review panel and "what will import" update. No separate source of truth.
 
 ## 4. Guided-remediation mechanics
 
@@ -81,16 +81,16 @@ client-side via the typed Supabase client or a small read endpoint) → match up
 → user confirms links. Open decision (§11): auto-link exact matches vs. always-ask.
 
 ### 4f. AI-suggested fixes — new endpoint, guardrail-bound
-`POST /api/health-report/suggest-fixes` (AI, mirrors the narrative endpoint: tiny payload =
+`POST /api/data-import/suggest-fixes` (AI, mirrors the narrative endpoint: tiny payload =
 findings + column samples, gated by flag + caller-auth, rate-limited, **no writes**). Returns,
 per finding, an optional **proposed action + a plain-language uncertainty note** — deliberately
 **no confidence number** (research: confidence scores backfire for this audience). The client
 renders each as an **accept / reject** proposal; nothing is applied without an explicit accept.
 This is the concrete realization of the PRD's "AI-fix guardrails."
 
-## 5. Readiness, recomputed live
+## 5. The review verdict, recomputed live
 `summarize()` already yields the verdict + severity counts + outlook + relationships. In Phase
-2 it runs after every remediation step, so the **readiness meter and "what will import" update
+2 it runs after every remediation step, so the **verdict and "what will import" update
 in real time** as the owner fixes things — the "watch it get to ready" loop. The final Review
 screen is this same view-model at the moment of commit.
 
@@ -224,7 +224,7 @@ serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / Open
 ## 8. Endpoint inventory
 - **Reused (existing):** each entity's `…/import/execute` (the write); `/structure` (mapping +
   ERP); `/narrative` (prose). Existing conflict/validate logic is reused as-is.
-- **New:** `/api/health-report/suggest-fixes` (AI proposals, no writes); optionally a small
+- **New:** `/api/data-import/suggest-fixes` (AI proposals, no writes); optionally a small
   read to fetch existing identity values for link-to-existing (or use the typed Supabase client
   directly under RLS).
 - **Unchanged guarantee:** the read/AI endpoints keep the Phase 1 no-domain-write property;
@@ -239,13 +239,13 @@ serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / Open
 
 ## 10. Testing seams (per the PRD's three seams)
 1. **Remediation logic (client)** — vitest over pure transforms: apply-edit / bulk-replace /
-   merge-group / fill-gap / confirm-blank → re-`analyzeBundle` → asserted findings + readiness
+   merge-group / fill-gap / confirm-blank → re-`analyzeBundle` → asserted findings + verdict
    delta; undo restores prior state. Same seam as the existing `__tests__/lib/*` suites.
 2. **suggest-fixes + the write orchestration** — pytest with the AI provider mocked and the
    Supabase client mocked: assert suggestions are proposals only (no writes on suggest), and
    assert the orchestrator calls the per-entity executes **in dependency order** with correct
    batching + mode. Reuse the existing import-route test patterns.
-3. **One E2E** (Playwright) — upload → fix a duplicate + a gap in the grid → readiness flips to
+3. **One E2E** (Playwright) — upload → fix a duplicate + a gap in the grid → the verdict flips to
    ready → confirm → a (test-DB) write → post-import summary. Extends the Phase 1 wizard E2E.
 
 Test *external behavior* (dataset in → findings/verdict/write-plan out), never private helpers.

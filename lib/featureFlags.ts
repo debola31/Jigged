@@ -67,10 +67,10 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     defaultEnabled: true,
   },
   {
-    key: 'data_health_report',
-    label: 'Data Health Report',
+    key: 'data_import',
+    label: 'Data import',
     description:
-      'Read-only onboarding aid: upload legacy ERP CSV exports to get an advisory data-health / import-readiness report (record counts, duplicates, orphan references, gaps) plus a best-effort source-ERP guess. Never writes any data. Opt-in per tenant while onboarding.',
+      'Guided data importer for onboarding: upload legacy ERP CSV exports, review what will come in and what to fix (record counts, duplicates, orphan references, gaps) plus a best-effort source-ERP guess, then import. Opt-in per tenant while onboarding.',
   },
 ] as const;
 
@@ -115,13 +115,13 @@ export function isInventoryLocationsEnabled(
 }
 
 /**
- * Data Health report is opt-IN: off unless the company row explicitly sets
- * settings.features.data_health_report = true (enabled per tenant while onboarding).
+ * Data import is opt-IN: off unless the company row explicitly sets
+ * settings.features.data_import = true (enabled per tenant while onboarding).
  */
-export function isDataHealthReportEnabled(
+export function isDataImportEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
-  return readFeatureFlag(company, 'data_health_report');
+  return readFeatureFlag(company, 'data_import');
 }
 
 /**

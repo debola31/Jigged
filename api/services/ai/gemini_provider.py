@@ -8,7 +8,7 @@ from google import genai
 
 from .base_provider import (
     AIProvider,
-    HealthNarrativeResult,
+    ImportNarrativeResult,
     MappingSuggestion,
     StructureResult,
 )
@@ -71,11 +71,11 @@ class GeminiProvider(AIProvider):
         return "gemini"
 
     async def analyze_structure(self, files, entity_schemas, erp_catalog) -> StructureResult:
-        # The data-health report is Anthropic-only for now (factory defaults to Anthropic).
+        # The data-import review is Anthropic-only for now (factory defaults to Anthropic).
         raise NotImplementedError("analyze_structure is not implemented for the Gemini provider")
 
-    async def generate_health_narrative(self, erp, findings, file_summaries) -> HealthNarrativeResult:
-        raise NotImplementedError("generate_health_narrative is not implemented for the Gemini provider")
+    async def generate_import_narrative(self, erp, findings, file_summaries) -> ImportNarrativeResult:
+        raise NotImplementedError("generate_import_narrative is not implemented for the Gemini provider")
 
     async def suggest_column_mappings(
         self,

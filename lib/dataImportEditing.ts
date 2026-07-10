@@ -1,13 +1,13 @@
 /**
  * Working-dataset model for Phase 2 guided remediation (increment 1: edit + live re-analyze
  * + undo). The uploaded rows already live in the browser; edits mutate this in-memory model
- * and the client re-runs the analyzer, so readiness updates instantly with no server round
+ * and the client re-runs the analyzer, so the review updates instantly with no server round
  * trip and no size limit — the same client-heavy property as Phase 1. Pure + testable; the
  * grid/wizard wire these together with analyzeBundle().
  */
 
-import type { AnalyzedFile } from '@/lib/healthReportAnalyzer';
-import type { EntityType, FileClassification, UploadedFilePayload } from '@/types/health-report';
+import type { AnalyzedFile } from '@/lib/dataImportAnalyzer';
+import type { EntityType, FileClassification, UploadedFilePayload } from '@/types/data-import';
 
 /** A row with a stable id so edits/undo target the right row regardless of sort/filter. */
 export type EditableRow = Record<string, string> & { __rowId: string };

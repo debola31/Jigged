@@ -1,12 +1,12 @@
 /**
- * Derives the scannable, decision-first view-model for the import readiness report from
- * the raw HealthReport. Research-backed structure (NN/G inverted pyramid; GX Cloud
+ * Derives the scannable, decision-first view-model for the import review from
+ * the raw ImportReview. Research-backed structure (NN/G inverted pyramid; GX Cloud
  * severity buckets; Purview "no green noise"): a verdict that leads with the single most
  * important blocking issue, a prioritized fix-first action list, a plain "what you're
  * importing" outlook with cross-entity relationships, and a "to finish setup" list.
  */
 
-import type { EntityType, Finding, HealthReport, Severity } from '@/types/health-report';
+import type { EntityType, Finding, ImportReview, Severity } from '@/types/data-import';
 
 export interface SeverityCounts {
   critical: number;
@@ -29,7 +29,7 @@ export interface RelationshipHealth {
   note: string;
 }
 
-export interface ReportSummary {
+export interface ReviewSummary {
   verdict: {
     level: 'blocking' | 'review' | 'ready';
     headline: string;
@@ -72,7 +72,7 @@ const isActionable = (f: Finding) => f.category !== 'record_count';
 
 const TO_FINISH_CATEGORIES = new Set(['missing_column', 'data_gap', 'not_checked']);
 
-export function summarize(report: HealthReport): ReportSummary {
+export function summarize(report: ImportReview): ReviewSummary {
   const findings = report.findings;
 
   const counts: SeverityCounts = { critical: 0, warning: 0, info: 0 };

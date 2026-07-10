@@ -19,7 +19,7 @@ export default function ImportAllDataLink({ sx }: { sx?: object }) {
   const { features } = useCompanyFeatures();
   const companyId = params.companyId as string;
 
-  if (!features.data_health_report) return null;
+  if (!features.data_import) return null;
 
   return (
     <Box sx={{ mt: 1.5, ...sx }}>

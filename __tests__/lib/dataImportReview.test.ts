@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { summarize } from '@/lib/healthReportSummary';
-import type { EntityType, Finding, HealthReport } from '@/types/health-report';
+import { summarize } from '@/lib/dataImportReview';
+import type { EntityType, Finding, ImportReview } from '@/types/data-import';
 
 function finding(partial: Partial<Finding> & Pick<Finding, 'id' | 'category' | 'severity' | 'title'>): Finding {
   return {
@@ -15,7 +15,7 @@ function finding(partial: Partial<Finding> & Pick<Finding, 'id' | 'category' | '
   };
 }
 
-function report(files: { filename: string; entity_type: EntityType; row_count: number }[], findings: Finding[]): HealthReport {
+function report(files: { filename: string; entity_type: EntityType; row_count: number }[], findings: Finding[]): ImportReview {
   return {
     schema_version: 1,
     erp_detection: {

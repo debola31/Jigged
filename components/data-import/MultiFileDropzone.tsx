@@ -12,7 +12,7 @@ import Typography from '@mui/material/Typography';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { parseCSV } from '@/utils/csvParser';
-import type { UploadedFilePayload } from '@/types/health-report';
+import type { UploadedFilePayload } from '@/types/data-import';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB per file
 

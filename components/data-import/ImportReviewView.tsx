@@ -19,8 +19,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import type { Finding, HealthReport, Severity } from '@/types/health-report';
-import { summarize } from '@/lib/healthReportSummary';
+import type { Finding, ImportReview, Severity } from '@/types/data-import';
+import { summarize } from '@/lib/dataImportReview';
 
 // Severity is encoded with THREE channels (icon + text label + color), never color alone
 // — WCAG 1.4.1 + IBM Carbon. Info is deliberately low-key (no "green noise").
@@ -80,7 +80,7 @@ const REL_STATUS: Record<'ok' | 'broken' | 'unverified', { color: 'success' | 'e
   unverified: { color: 'warning', Icon: HelpOutlineIcon },
 };
 
-export default function HealthReportView({ report, onUploadMore }: { report: HealthReport; onUploadMore?: () => void }) {
+export default function ImportReviewView({ report, onUploadMore }: { report: ImportReview; onUploadMore?: () => void }) {
   const [showDetails, setShowDetails] = useState(false);
   const s = summarize(report);
   const v = s.verdict;

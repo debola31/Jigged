@@ -12,7 +12,7 @@ from .base_provider import (
     AIProvider,
     ErpDetectionResult,
     FileStructure,
-    HealthNarrativeResult,
+    ImportNarrativeResult,
     MappingSuggestion,
     StructureResult,
 )
@@ -97,7 +97,7 @@ NARRATIVE_PROMPT_TEMPLATE = """You are helping a machine-shop owner get their le
 
 Return ONLY valid JSON in this exact shape (no markdown, plain text in every string):
 {{
-  "summary": "2-4 short paragraphs summarizing data readiness, citing finding counts.",
+  "summary": "2-4 short paragraphs summarizing the import review, citing finding counts.",
   "recommendations": ["ordered, concrete next steps the owner can act on"],
   "gotchas": [{{"title": "short", "detail": "why it might matter", "recommended_action": "what to check"}}]
 }}"""
@@ -316,12 +316,12 @@ class ClaudeProvider(AIProvider):
             )
         return StructureResult(erp=erp, files=file_structs)
 
-    async def generate_health_narrative(
+    async def generate_import_narrative(
         self,
         erp: dict,
         findings: list[dict],
         file_summaries: list[dict],
-    ) -> HealthNarrativeResult:
+    ) -> ImportNarrativeResult:
         """Write a plain-text narrative grounded strictly in the deterministic findings."""
         prompt = NARRATIVE_PROMPT_TEMPLATE.format(
             erp_json=json.dumps(erp, indent=2),
@@ -336,8 +336,8 @@ class ClaudeProvider(AIProvider):
             )
             data = _parse_json_response(response.content[0].text.strip())
         except Exception as e:  # noqa: BLE001 — surface the gap, never fabricate prose
-            logger.warning(f"generate_health_narrative failed: {e}")
-            return HealthNarrativeResult(available=False)
+            logger.warning(f"generate_import_narrative failed: {e}")
+            return ImportNarrativeResult(available=False)
 
         recs = [str(r) for r in (data.get("recommendations") or []) if str(r).strip()]
         gotchas = [
@@ -349,7 +349,7 @@ class ClaudeProvider(AIProvider):
             for g in (data.get("gotchas") or [])
             if isinstance(g, dict) and str(g.get("title", "")).strip()
         ]
-        return HealthNarrativeResult(
+        return ImportNarrativeResult(
             summary=str(data.get("summary", "") or ""),
             recommendations=recs,
             gotchas=gotchas,

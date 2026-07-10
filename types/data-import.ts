@@ -1,6 +1,7 @@
 /**
- * Types for the read-only Data Health / Import-Readiness report.
- * Mirrors api/models/health_report_models.py (HealthReportResponse).
+ * Types for the data-import review (the Review & Fix stage).
+ * Field shapes mirror api/models/data_import_models.py; the ImportReview composite is
+ * assembled client-side from the /structure + /narrative responses.
  */
 
 export type Severity = 'info' | 'warning' | 'critical';
@@ -59,7 +60,7 @@ export interface Finding {
   recommended_action: string;
 }
 
-export interface HealthReport {
+export interface ImportReview {
   schema_version: number;
   erp_detection: ErpDetection;
   files: FileClassification[];
@@ -70,10 +71,6 @@ export interface HealthReport {
   ai_provider: string;
   ai_model: string;
   generated_at: string;
-}
-
-export interface HealthReportResponse {
-  report: HealthReport;
 }
 
 /** Phase 1: /structure returns per-file classification (incl. column_roles) + ERP detection. */

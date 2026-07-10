@@ -1,7 +1,7 @@
-"""Read-only Data Health / Import-Readiness report endpoints (#523).
+"""Data-import endpoints (#523): the AI-only steps behind the Review & Fix stage.
 
 Strictly advisory and AI-only. The deterministic analysis runs in the BROWSER
-(lib/healthReportAnalyzer.ts) on rows that are already parsed there, so raw rows never
+(lib/dataImportAnalyzer.ts) on rows that are already parsed there, so raw rows never
 reach the server (no 4.5 MB body limit, and nothing is stored). The server keeps only the
 two steps that need the secret API key, each with a tiny payload:
 
@@ -23,7 +23,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request
 from supabase import Client, create_client
 
-from models.health_report_models import (
+from models.data_import_models import (
     ENTITY_SCHEMAS,
     ERP_CATALOG,
     ErpDetection,
@@ -39,9 +39,9 @@ from utils.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/health-report", tags=["health-report"])
+router = APIRouter(prefix="/api/data-import", tags=["data-import"])
 
-FEATURE_FLAG = "data_health_report"
+FEATURE_FLAG = "data_import"
 
 MAX_FILES = 12
 MAX_HEADERS_PER_FILE = 300
@@ -93,7 +93,7 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
 
 
 def _feature_enabled(company_id: str, client: Client) -> bool:
-    """Opt-IN gate: true only when companies.settings.features.data_health_report is set.
+    """Opt-IN gate: true only when companies.settings.features.data_import is set.
 
     Fails CLOSED on read error — an advisory extra shouldn't dark-launch on a DB blip.
     """
@@ -119,11 +119,11 @@ async def _authorize(request: Request, company_id: str) -> Client:
     client = _service_client()
     await _verify_company_access(request, company_id, client)
     if not _feature_enabled(company_id, client):
-        raise HTTPException(status_code=403, detail="Data Health report is not enabled for this company.")
+        raise HTTPException(status_code=403, detail="Data import is not enabled for this company.")
     if not _limiter.check(company_id):
         raise HTTPException(
             status_code=429,
-            detail="Too many data-health analyses. Please wait a few minutes and try again.",
+            detail="Too many import analyses. Please wait a few minutes and try again.",
             headers={"Retry-After": "600"},
         )
     return client
@@ -204,7 +204,7 @@ async def structure(request: StructureRequest, req: Request) -> StructureRespons
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
-        logger.warning("Health report structure step failed: %s", type(e).__name__)
+        logger.warning("Import structure step failed: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to analyze the uploaded files.")
 
 
@@ -216,7 +216,7 @@ async def narrative(request: NarrativeRequest, req: Request) -> NarrativeRespons
 
     try:
         provider = await get_provider(client, company_id, "csv_mapping")
-        result = await provider.generate_health_narrative(
+        result = await provider.generate_import_narrative(
             erp=request.erp_detection.model_dump(),
             findings=request.findings[:MAX_FINDINGS],
             file_summaries=request.file_summaries[:MAX_FILES],
@@ -232,5 +232,5 @@ async def narrative(request: NarrativeRequest, req: Request) -> NarrativeRespons
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 — log the type only, never row content
-        logger.warning("Health report narrative step failed: %s", type(e).__name__)
+        logger.warning("Import narrative step failed: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to generate the summary.")

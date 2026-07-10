@@ -5,9 +5,9 @@ import {
   invertEdit,
   workingToAnalyzed,
   type CellEdit,
-} from '@/lib/healthReportEditing';
-import { analyzeBundle } from '@/lib/healthReportAnalyzer';
-import type { FileClassification, UploadedFilePayload } from '@/types/health-report';
+} from '@/lib/dataImportEditing';
+import { analyzeBundle } from '@/lib/dataImportAnalyzer';
+import type { FileClassification, UploadedFilePayload } from '@/types/data-import';
 
 const FILES: UploadedFilePayload[] = [
   {

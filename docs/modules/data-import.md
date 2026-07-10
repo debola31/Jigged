@@ -264,9 +264,12 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     *together* to auto-resolve links and load in dependency order (isolated per-entity
     imports are exactly what forces manual reconciliation later — the Salesforce
     "split into per-object lists" failure mode), the recurring entry is a **persistent
-    "Import data" quick-action on the dashboard** that launches the one unified,
-    relationship-aware importer. The dashboard is the always-available home base — no
-    Settings, no permanent nav module. The per-module toolbar "Import" buttons stay for a
+    "Import data" action in the dashboard's top app bar** (the Header, right-aligned,
+    dashboard route only) that launches the one unified, relationship-aware importer. It
+    sits in the app bar — NOT in a content band above the KPIs — so the metrics row keeps
+    leading the dashboard (Material Design top-app-bar action items; NN/G "KPIs lead";
+    Stripe/Linear "calm KPI row up top"). No Settings, no permanent nav module. The
+    per-module toolbar "Import" buttons stay for a
     genuinely isolated single type (e.g. just customers), and in Phase 2 they **route into
     the unified importer** (scoped to that module but able to pull in related files), so
     even single-entity adds are relationship-aware. Model: HubSpot's one import tool that

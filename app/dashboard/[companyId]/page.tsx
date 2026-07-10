@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 
 import { InsightsSection, PinnedMetrics, RecentActivity } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
@@ -15,7 +13,6 @@ import { getMetricValue, getDashboardActivity, type ActivityItem } from '@/utils
 export default function DashboardPage() {
   const params = useParams();
   const companyId = params.companyId as string;
-  const router = useRouter();
   const { features, loading: featuresLoading } = useCompanyFeatures();
   const [savedVersion, setSavedVersion] = useState(0);
   const [isEmpty, setIsEmpty] = useState(false);
@@ -54,24 +51,9 @@ export default function DashboardPage() {
   // tenant). Gate the whole AI area — ask-bar + saved charts — on the flag;
   // kept hidden while the flag is still loading so it never flashes in then out.
   const aiInsightsEnabled = !featuresLoading && features.ai_insights;
-  // Persistent "Import data" entry for a shop that already has data (the empty-shop case
-  // is covered by the OnboardingCard checklist). Launches the one unified importer.
-  const importEnabled = !featuresLoading && !!features.data_health_report;
 
   return (
     <Box>
-      {importEnabled && !isEmpty && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<UploadFileIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/import`)}
-          >
-            Import data
-          </Button>
-        </Box>
-      )}
-
       {/* Onboarding Card — shown when dashboard is empty and no demo exists */}
       <OnboardingCard companyId={companyId} isEmpty={isEmpty} />
 

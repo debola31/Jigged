@@ -8,8 +8,10 @@ import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { usePageTitle } from './PageTitleProvider';
 import AlertBadge from './AlertBadge';
 
@@ -167,6 +169,10 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
   // the record identity stays visible in the sticky app bar while scrolling.
   const { title: overrideTitle } = usePageTitle();
   const pageTitle = overrideTitle ?? getPageTitle(pathname);
+  // Persistent "Import data" action in the top app bar (Material top-app-bar action items;
+  // keeps the dashboard's KPI row leading the content). Shown on the dashboard home only.
+  const { features } = useCompanyFeatures();
+  const showImport = !!companyId && pathname === `/dashboard/${companyId}` && !!features.data_health_report;
 
   const handleSignOut = async () => {
     await signOut();
@@ -214,6 +220,31 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
         )}
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {showImport &&
+          (isMobile ? (
+            <IconButton
+              onClick={() => router.push(`/dashboard/${companyId}/import`)}
+              aria-label="Import data"
+              sx={{ color: 'rgba(255, 255, 255, 0.85)' }}
+            >
+              <UploadFileIcon />
+            </IconButton>
+          ) : (
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<UploadFileIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/import`)}
+              sx={{
+                color: 'white',
+                borderColor: 'rgba(255, 255, 255, 0.4)',
+                '&:hover': { borderColor: 'white', bgcolor: 'rgba(255, 255, 255, 0.08)' },
+                mr: 0.5,
+              }}
+            >
+              Import data
+            </Button>
+          ))}
         {!isMobile && firstName && (
           <Typography
             variant="body2"

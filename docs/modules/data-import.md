@@ -1,8 +1,10 @@
 # PRD: Unified data import / onboarding flow
 
-> Status: Draft (Phase 1 readiness slice built; ingestion deferred) · Supersedes the thin
-> FR-16 "Legacy Data Migration" line in [docs/prd.md](../prd.md) and the removed
-> `data-health-report.md` module note. Related: epic #492 and sub-issues #519–#524.
+> Status: Draft. **Phase 1** (read-only readiness report + placement) built; the **target**
+> is a guided in-app remediation → confirm → ingestion flow (mostly **Phase 2**; ingestion
+> deferred). Supersedes the thin FR-16 "Legacy Data Migration" line in
+> [docs/prd.md](../prd.md) and the removed `data-health-report.md` module note. Related:
+> epic #492 and sub-issues #519–#524.
 > Generated with the `to-prd` skill from the design conversation; also published to the
 > issue tracker with the `ready-for-agent` label.
 
@@ -48,6 +50,15 @@ Jigged, reading everything **together**:
 4. **Imports** in that dependency order behind a single, explicit final action. *(Phase 1
    stops here: the write is deferred to a white-glove/guided step; the flow goes right up
    to ingestion.)*
+
+**Where this is going — guided remediation (evolving from the read-only report).** The
+report above is Phase 1. The target experience does more than *flag* problems and send the
+owner off to fix data in spreadsheets: it **guides them to fix the data inside Jigged.**
+Each issue becomes a **decision with a recommended default** — merge look-alike duplicates,
+fill or confirm missing values, add the missing records a routing references, link a row to
+data already in Jigged — fixable **inline and in bulk in a spreadsheet-like grid**, with a
+**running readiness verdict** ("ready? / here's what you still need") and an explicit
+pre-commit confirmation. AI *proposes* fixes; it never applies them silently.
 
 The same surface serves both the first-time "bring my whole shop in" journey and the later
 "just add/refresh my parts" journey — the latter is simply the former with fewer files.
@@ -166,6 +177,27 @@ The same surface serves both the first-time "bring my whole shop in" journey and
 44. As an established shop owner who only wants to add one type, I want to start the import
     from that module (e.g. Parts), so that I don't wade through the whole onboarding flow.
 
+**Guided remediation (fix data in Jigged, not spreadsheets)**
+45. As a shop owner, I want to fix problems right here — edit a cell, fill a blank, merge
+    look-alikes — instead of exporting to Excel and re-uploading, so that I get it done in
+    one sitting.
+46. As a shop owner, I want to fix a repeated problem in one move (e.g. rename a mistyped
+    vendor everywhere at once), so that I'm not editing hundreds of cells by hand.
+47. As a shop owner, when the tool spots likely duplicates or spelling variants, I want it to
+    group them and let me merge / keep separate / ignore — with a suggested default — so that
+    I decide quickly without judging every pair from scratch.
+48. As a shop owner, when a routing references a work center I didn't include, I want to be
+    offered to add the missing work centers (or accept those rows being skipped), so that I
+    complete the picture instead of hitting a dead end.
+49. As a shop owner, I want the AI to suggest a fix but never change my data without my yes,
+    and to let me undo, so that I stay in control of my own records.
+50. As a shop owner, I want the AI to tell me when it's NOT sure ("these might be the same —
+    can you confirm?") rather than sound confident, so that I don't rubber-stamp a wrong fix.
+51. As a shop owner, I want a running "here's exactly what will import" and a readiness meter
+    that updates as I fix things, so that I can see progress and know when I'm ready.
+52. As a shop owner, I want the tool to clearly separate "we fixed this for you" from "you
+    still need to handle this", so that I know what's been done on my behalf.
+
 ## Implementation Decisions
 
 - **One unified import surface**, not per-entity importers. Only a surface that sees all
@@ -231,6 +263,41 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   explicit, separate write action. **Phase 1 stops at that line** — the write is deferred
   to a white-glove/guided step. Phase 2 wires the actual dependency-ordered write, reusing
   the existing per-entity import execution as the write layer.
+
+- **Guided remediation — the target experience (mostly Phase 2), research-backed.** The
+  evolution from *report* to *fix-it-here* follows the embedded-import product pattern
+  (Flatfile, OneSchema, Nuvo/Ingestro, Dromo) and no-code remediation (OpenRefine):
+  - **Linear staged flow, never an upfront wall of errors:** upload → AI-suggested mapping
+    (confirmable) → guided review/fix → running "what will import" → confirm → write.
+  - **Fix in-app in a spreadsheet-like grid** (double-click-edit, sort/filter, find-and-
+    replace); an Excel export is a fallback, not the path.
+  - **Bulk over cell-by-cell** — one-click autofix + column-wide find-and-replace so a
+    systemic issue is fixed once ("don't fix data 1 cell at a time").
+  - **Each issue is a decision with a recommended default:** duplicates/variants →
+    cluster-and-merge (merge / keep-separate / ignore); missing values → fill or
+    confirm-blank; orphan refs → add the missing parent records or accept-skip;
+    link-to-existing → reconciliation-style matching against the shop's OWN records, with
+    per-edit approval.
+  - **Say what's missing UPFRONT + a readiness verdict** ("ready? / you still need Y"),
+    before the owner invests effort.
+  - **Three never-blurred visual states:** auto-fixed vs. warning (review, still accepted)
+    vs. blocking (must fix) — maps onto the existing severity buckets.
+  - **Plain, no-blame, problem+solution copy, inline at the field, after they finish it
+    (not while typing)** — the human-guide tone encoded as AI copy.
+
+- **AI-fix guardrails — the strongest-evidenced rule (Microsoft Research "Overreliance on
+  AI" review).** This exact audience (non-technical, low-AI-literacy) blindly OVER-trusts AI
+  (≈7× more likely to follow it in one study), and confidence scores / persuasive
+  explanations BACKFIRE — they inflate over-reliance rather than calibrate it. Therefore:
+  - **Never silently apply an AI fix** to business data — every AI suggestion is a
+    confirmable, reversible proposal with an explicit accept/reject.
+  - **Don't sell trust with a confidence badge.** Where the AI explains, it **reveals its
+    limits/uncertainty** ("I'm not sure these are the same — please confirm"), which reduces
+    over-reliance, rather than persuading.
+  - **Cognitive-forcing + human-in-the-loop:** the user decides per fix (decide-before-
+    reveal for ambiguous ones), and the final write is gated behind an explicit "here's
+    exactly what will be created/updated." Tune friction to stakes — forcing carries a
+    satisfaction cost, so obvious fixes stay light and ambiguous/high-impact ones get it.
 
 - **Importing into a non-empty company is an UPSERT, not a load.** When the shop already
   has data, the unified flow gains a **reconciliation step**: match each uploaded row
@@ -315,8 +382,10 @@ endpoint/pytest seam; one E2E through the whole journey).
 
 - **The actual ingestion write (Phase 2).** Phase 1 goes right up to ingestion; the final
   write is deferred to a white-glove/guided step and is not built here.
-- **Inline fix-in-place editing** of flagged rows before import (OpenRefine/Talend style).
-  Phase 1 is report-and-re-upload: the owner fixes in their source files and re-checks.
+- **Inline fix-in-place editing** (the guided-remediation grid, cluster-merge, bulk fix,
+  link-to-existing) is the **Phase 2 target**, not out of scope permanently — see the
+  "Guided remediation" implementation decision + user stories #45–52. **Phase 1** is
+  report-and-re-upload: the owner fixes in their source files and re-checks.
 - **Detection-template / gotcha-rule library and fine-tuning harvesting** (#522, #524
   payoff) — the report schema is kept reuse-ready, but harvesting is a later phase.
 - **Server-side persistence of reports** and any shareable/exported artifact (PDF).
@@ -337,6 +406,27 @@ endpoint/pytest seam; one E2E through the whole journey).
   per-object imports: Salesforce Data Import Wizard + HubSpot import tool. Dependency /
   topological load order for related records: MSSQLTips / Dynamics 365 F&O data-entity
   sequencing.
+- **Guided-remediation research basis (2nd adversarially-verified pass).** Staged flow +
+  inline/bulk fixing + auto-mapping: Flatfile, OneSchema, Nuvo/Ingestro, Dromo.
+  Cluster-and-merge dedup + reconciliation matching: OpenRefine. Inline, at-the-field,
+  no-blame, problem+solution error copy: NN/G. AI over-reliance guardrails (low-literacy
+  users over-trust; confidence scores / persuasive explanations backfire; use
+  cognitive-forcing + human-in-the-loop): Microsoft Research Aether "Overreliance on AI"
+  review.
+- **Honest gaps / open questions (from the research caveats).**
+  - **No verified ROI.** The one "inline fixing → +50% completed imports" stat was refuted
+    (vendor marketing); adopt these patterns as well-attested best practice, not proven ROI.
+  - **Human white-glove playbooks + manufacturing-specific onboarding produced no surviving
+    sources** — the "here's what I'd do / celebrate progress / reassure about not losing
+    data" techniques are *inferred* from the plain-language + human-in-the-loop findings,
+    not directly sourced.
+  - **Linking to the shop's OWN in-app records** is only *analogous* to OpenRefine
+    reconciliation (which links to EXTERNAL databases); the merge/approve UX transfers, but
+    the right default (auto-link high-confidence vs. always-ask, minimizing mis-links vs.
+    fatigue) is an open design question.
+  - **Presenting AI-fix rationale** to a low-literacy user without inducing blind trust:
+    reveal limits/uncertainty rather than confidence scores — the exact UI recipe is
+    unvalidated and should be usability-tested with real owners.
 - **Personas.** Primary: the shop owner/admin (non-technical, 50–60, on desktop or a
   bright-light shop tablet). Secondary: the Jigged white-glove migrator who currently does
   the actual write, for whom the readiness report is the pre-flight.

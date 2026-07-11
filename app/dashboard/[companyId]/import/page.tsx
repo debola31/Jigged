@@ -17,6 +17,8 @@ import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
 import Stack from '@mui/material/Stack';
 import Divider from '@mui/material/Divider';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
@@ -52,6 +54,13 @@ import {
   type ExecuteResponseShape,
   type ImportSummary,
 } from '@/lib/dataImportIngest';
+import {
+  reconcile,
+  filterWorkingByMode,
+  type ExistingIdentities,
+  type ImportMode,
+} from '@/lib/dataImportReconcile';
+import { fetchExistingIdentities } from '@/lib/dataImportExisting';
 import { API_BASE_URL } from '@/lib/api';
 import { getSupabase } from '@/lib/supabase';
 import type {
@@ -136,6 +145,8 @@ export default function ImportDataPage() {
   const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestAvailable, setSuggestAvailable] = useState(true);
+  const [existing, setExisting] = useState<ExistingIdentities | null>(null);
+  const [importMode, setImportMode] = useState<ImportMode>('both');
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -309,7 +320,7 @@ export default function ImportDataPage() {
     setImporting(true);
     try {
       const token = await authToken();
-      const plan = buildImportPlan(working);
+      const plan = buildImportPlan(filterWorkingByMode(working, existing ?? {}, importMode));
       const post = (endpoint: string, body: unknown) =>
         postJson<ExecuteResponseShape>(endpoint, body, token);
       setImportSummary(await runImportPlan(plan, companyId, post));
@@ -357,6 +368,17 @@ export default function ImportDataPage() {
     } finally {
       setSuggestLoading(false);
     }
+  }
+
+  // Review → Import: read what's already in Jigged (for new-vs-existing + create/update modes),
+  // then advance. Best-effort read; the Import step renders immediately and updates when it lands.
+  function goToImport() {
+    setImportSummary(null);
+    setExisting(null);
+    setActiveStep(4);
+    fetchExistingIdentities(companyId)
+      .then(setExisting)
+      .catch(() => setExisting({}));
   }
 
   const activeFile = working[gridIndex];
@@ -542,7 +564,7 @@ export default function ImportDataPage() {
 
               <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
                 <Button onClick={() => setActiveStep(2)}>Back to mapping</Button>
-                <Button variant="contained" size="large" onClick={() => setActiveStep(4)}>
+                <Button variant="contained" size="large" onClick={goToImport}>
                   Continue to import
                 </Button>
               </Box>
@@ -554,6 +576,9 @@ export default function ImportDataPage() {
             <ImportStep
               report={report}
               working={working}
+              existing={existing}
+              importMode={importMode}
+              onModeChange={setImportMode}
               importing={importing}
               summary={importSummary}
               onImport={runImport}
@@ -569,6 +594,9 @@ export default function ImportDataPage() {
 function ImportStep({
   report,
   working,
+  existing,
+  importMode,
+  onModeChange,
   importing,
   summary,
   onImport,
@@ -576,13 +604,20 @@ function ImportStep({
 }: {
   report: ImportReview;
   working: WorkingFile[];
+  existing: ExistingIdentities | null;
+  importMode: ImportMode;
+  onModeChange: (mode: ImportMode) => void;
   importing: boolean;
   summary: ImportSummary | null;
   onImport: () => void;
   onBack: () => void;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const plan = useMemo(() => buildImportPlan(working), [working]);
+  const rec = useMemo(() => reconcile(working, existing ?? {}), [working, existing]);
+  const plan = useMemo(
+    () => buildImportPlan(filterWorkingByMode(working, existing ?? {}, importMode)),
+    [working, existing, importMode],
+  );
   const planByEntity = useMemo(() => {
     const m = new Map<string, number>();
     for (const b of plan) m.set(b.entity, (m.get(b.entity) ?? 0) + b.rows.length);
@@ -643,8 +678,31 @@ function ImportStep({
         <Typography variant="h6" gutterBottom>
           Review what will be created
         </Typography>
+        {rec.hasExisting && (
+          <Box sx={{ mb: 2 }}>
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              <strong>{rec.totalMatched.toLocaleString()}</strong> of your rows match records already
+              in Jigged, and <strong>{rec.totalNew.toLocaleString()}</strong> are new. Choose what to
+              do — existing records update in place; nothing is duplicated.
+            </Alert>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={importMode}
+              onChange={(_, v) => {
+                if (v) onModeChange(v as ImportMode);
+              }}
+              disabled={importing}
+              sx={{ flexWrap: 'wrap' }}
+            >
+              <ToggleButton value="both">Add new + update existing</ToggleButton>
+              <ToggleButton value="create">Add new only</ToggleButton>
+              <ToggleButton value="update">Update existing only</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        )}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          We&apos;ll create these in order, so linked records connect up:
+          Here&apos;s what will import, in order (so linked records connect up):
         </Typography>
         <Stack spacing={1} sx={{ mb: 2 }}>
           {planByEntity.map(([entity, count], i) => (

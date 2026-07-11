@@ -226,9 +226,9 @@ serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / Open
 - **Reused (existing):** each entity's `…/import/execute` (the write); `/structure` (mapping +
   ERP); `/narrative` (prose). Existing conflict/validate logic is reused as-is.
 - **Built:** `/api/data-import/suggest-fixes` (AI proposals, no writes) — guardrail-bound
-  per-finding suggestions (explicit action, uncertainty-not-confidence, never auto-applied).
-  **Remaining (increment 4):** a small read to fetch existing identity values for
-  link-to-existing (or use the typed Supabase client directly under RLS).
+  per-finding suggestions (explicit action, uncertainty-not-confidence, never auto-applied). The
+  non-empty-company reconciliation read is client-side + RLS-scoped (`lib/dataImportExisting.ts`),
+  not a new endpoint.
 - **Unchanged guarantee:** the read/AI endpoints keep the Phase 1 no-domain-write property;
   only the per-entity execute routes write, exactly as they do today.
 
@@ -276,8 +276,11 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
    the existing per-entity executes, ≤500-row batches, `skip_conflicts` (resumable), plan
    preview + confirm dialog + post-import summary. **First real write** — live behind the flag +
    confirm gate; still owes one preview/local E2E run.
-4. ⏳ **Remaining** — upsert modes + link-to-existing (bounded reads + confirm) for the
-   non-empty-company journey.
+4. ✅ **Built** — non-empty-company reconciliation: an RLS-scoped read of existing identity
+   values (`lib/dataImportExisting.ts`) + pure `reconcile` / `filterWorkingByMode`
+   (`lib/dataImportReconcile.ts`) driving a "X new · Y already in Jigged" preview and
+   **create-only / update-only / add+update** modes — implemented client-side by filtering rows
+   to the chosen bucket, so no backend `mode` param was needed.
 5. ✅ **Built** — `suggest-fixes`: guardrail-bound AI proposals fired only on an explicit click
    (plain-language step + honest uncertainty, never a confidence score, never auto-applied — the
    owner applies via the deterministic tools). `POST /api/data-import/suggest-fixes` +

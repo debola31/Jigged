@@ -48,6 +48,7 @@ export const KNOWN_ENTITIES: EntityType[] = [
 export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
   parts: [
     { key: 'part_name', label: 'Part number / name', required: true },
+    { key: 'primary_unit', label: 'Unit of measure', required: true }, // parts can't import without one
     { key: 'preferred_vendor_name', label: 'Preferred vendor', required: false },
     { key: 'cost_per_unit', label: 'Cost / price', required: false },
   ],

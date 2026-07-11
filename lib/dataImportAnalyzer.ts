@@ -44,7 +44,7 @@ const ENTITY_IDENTITY_FIELD: Partial<Record<EntityType, string>> = {
 
 // Required fields per entity (mirrors the Python import-model schemas).
 const ENTITY_REQUIRED_FIELDS: Record<string, string[]> = {
-  parts: ['part_name'],
+  parts: ['part_name', 'primary_unit'], // a part can't be created without a unit of measure
   vendors: ['name'],
   work_centers: ['name'],
   routings: ['part_name'],

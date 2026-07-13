@@ -3,13 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
-import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -22,6 +19,7 @@ import {
   disconnectQuickBooks,
   type QuickBooksStatus,
 } from '@/utils/quickbooksAccess';
+import SettingsSection from '@/components/settings/SettingsSection';
 
 interface QuickBooksIntegrationCardProps {
   companyId: string;
@@ -110,33 +108,26 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
 
   const connected = status?.connected ?? false;
 
+  const statusChip = !loading ? (
+    <>
+      <Chip
+        label={connected ? 'Connected' : 'Not connected'}
+        size="small"
+        color={connected ? 'success' : 'default'}
+        variant={connected ? 'filled' : 'outlined'}
+      />
+      {connected && status?.environment === 'sandbox' && (
+        <Chip label="Sandbox" size="small" color="warning" variant="outlined" />
+      )}
+    </>
+  ) : undefined;
+
   return (
-    <Card elevation={2}>
-      <CardContent sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            QuickBooks Online
-          </Typography>
-          {!loading && (
-            <Chip
-              label={connected ? 'Connected' : 'Not connected'}
-              size="small"
-              color={connected ? 'success' : 'default'}
-              variant={connected ? 'filled' : 'outlined'}
-            />
-          )}
-          {connected && status?.environment === 'sandbox' && (
-            <Chip label="Sandbox" size="small" color="warning" variant="outlined" />
-          )}
-        </Box>
-
-        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-          Connect QuickBooks Online to push converted quotes as invoices. Jigged only
-          sends to QuickBooks — it never changes your QuickBooks data on its own.
-        </Typography>
-
-        <Divider sx={{ mb: 3 }} />
-
+    <SettingsSection
+      title="QuickBooks Online"
+      statusChip={statusChip}
+      description="Connect QuickBooks Online to push converted quotes as invoices. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
+    >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
@@ -184,7 +175,6 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
             </Button>
           </>
         )}
-      </CardContent>
 
       <Dialog open={disconnectOpen} onClose={() => setDisconnectOpen(false)}>
         <DialogTitle>Disconnect QuickBooks?</DialogTitle>
@@ -201,6 +191,6 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
           </Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </SettingsSection>
   );
 }

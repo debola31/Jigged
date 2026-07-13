@@ -3,12 +3,8 @@
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
+import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -17,7 +13,9 @@ import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import AdminGuard from '@/components/auth/AdminGuard';
+import SettingsSection from '@/components/settings/SettingsSection';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
+import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 
 export default function SettingsPage() {
@@ -46,68 +44,61 @@ export default function SettingsPage() {
       {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
 
+      {/* Company-configurable business defaults (quote validity, etc.) */}
+      <AppDefaultsCard companyId={companyId} />
+
       {/* QuickBooks Online connection + invoice push settings */}
       <QuickBooksIntegrationCard companyId={companyId} />
 
-      {/* Demo Mode Section */}
-      <Card elevation={2}>
-        <CardContent sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Demo Mode
-            </Typography>
-            {!isLoading && (
-              <Chip
-                label={isDemoMode ? 'Active' : hasDemoCompany ? 'Available' : 'Not set up'}
-                size="small"
-                color={isDemoMode ? 'warning' : 'default'}
-                variant={isDemoMode ? 'filled' : 'outlined'}
-              />
-            )}
-          </Box>
+      {/* Advanced / rarely-used zone — kept last, visually de-emphasized. */}
+      <SettingsSection
+        title="Demo Mode"
+        variant="advanced"
+        statusChip={
+          !isLoading ? (
+            <Chip
+              label={isDemoMode ? 'Active' : hasDemoCompany ? 'Available' : 'Not set up'}
+              size="small"
+              color={isDemoMode ? 'warning' : 'default'}
+              variant={isDemoMode ? 'filled' : 'outlined'}
+            />
+          ) : undefined
+        }
+        description="Explore Jigged with pre-populated sample data — customers, parts, quotes, jobs, and more. Your real company data is never affected."
+      >
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          {isDemoMode ? (
+            <Button variant="contained" onClick={exitDemoMode}>
+              Back to My Company
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={enterDemoMode}
+              disabled={isCreating || isLoading}
+              startIcon={isCreating ? <CircularProgress size={16} /> : undefined}
+            >
+              {isCreating
+                ? 'Setting up demo…'
+                : hasDemoCompany
+                  ? 'Enter Demo Mode'
+                  : 'Set Up Demo Mode'}
+            </Button>
+          )}
 
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-            Demo mode lets you explore Jigged with pre-populated sample data —
-            customers, parts, quotes, jobs, and more. Your real company data is
-            never affected.
-          </Typography>
-
-          <Divider sx={{ mb: 3 }} />
-
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            {isDemoMode ? (
-              <Button variant="contained" onClick={exitDemoMode}>
-                Back to My Company
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                onClick={enterDemoMode}
-                disabled={isCreating || isLoading}
-                startIcon={isCreating ? <CircularProgress size={16} /> : undefined}
-              >
-                {isCreating
-                  ? 'Setting up demo…'
-                  : hasDemoCompany
-                    ? 'Enter Demo Mode'
-                    : 'Set Up Demo Mode'}
-              </Button>
-            )}
-
-            {hasDemoCompany && (
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={() => setResetDialogOpen(true)}
-                disabled={isResetting}
-                startIcon={isResetting ? <CircularProgress size={16} /> : undefined}
-              >
-                {isResetting ? 'Resetting…' : 'Reset Demo'}
-              </Button>
-            )}
-          </Box>
-        </CardContent>
-      </Card>
+          {hasDemoCompany && (
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={() => setResetDialogOpen(true)}
+              disabled={isResetting}
+              startIcon={isResetting ? <CircularProgress size={16} /> : undefined}
+            >
+              {isResetting ? 'Resetting…' : 'Reset Demo'}
+            </Button>
+          )}
+        </Box>
+      </SettingsSection>
 
       {/* Reset Confirmation Dialog */}
       <Dialog open={resetDialogOpen} onClose={() => setResetDialogOpen(false)}>

@@ -80,7 +80,9 @@ export default function OperatorLayout({
         .single();
 
       if (!operatorAccess) {
-        await supabase.auth.signOut();
+        // Local scope — only clear this device's bad session; don't revoke the
+        // user's sessions on other devices.
+        await supabase.auth.signOut({ scope: 'local' });
         router.push(`/operator/${companyId}/login`);
         return;
       }

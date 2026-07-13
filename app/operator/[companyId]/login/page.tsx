@@ -144,7 +144,9 @@ export default function OperatorLoginPage() {
         .single();
 
       if (opError || !operatorAccess) {
-        await supabase.auth.signOut();
+        // Local scope — only clear this device's session; don't revoke the
+        // user's sessions on other devices.
+        await supabase.auth.signOut({ scope: 'local' });
         throw new Error('You do not have access to this company');
       }
 

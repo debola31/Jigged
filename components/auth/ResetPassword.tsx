@@ -146,8 +146,12 @@ export default function ResetPassword() {
 
       setSuccess(true);
 
-      // Sign out and redirect to login after a short delay
-      await signOut();
+      // Global scope — a password reset must invalidate the user's sessions on
+      // ALL devices (the lost/old device that prompted the reset included), not
+      // just this recovery session. signOut defaults to `local` now, so this
+      // flow passes 'global' explicitly. The flow then redirects to /login for a
+      // fresh sign-in.
+      await signOut('global');
       setTimeout(() => {
         router.push('/login');
       }, 2000);

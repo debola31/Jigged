@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 
 // Awaitable query-builder mock: getTiersForPart awaits
 // `.from().select().eq().order()`, and `await <non-thenable>` resolves to the
@@ -20,24 +19,16 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => mockSupabase,
 }));
 
-// calculateRoutingCost is mocked per-test (null = no routing/BOM → bought-part
-// path; a breakdown = made-part path). calculateTierPricing stays real so the
-// made-part regression test exercises the genuine markup math.
-vi.mock('@/utils/routingCostCalculation', async (importActual) => {
-  const actual = await importActual<typeof import('@/utils/routingCostCalculation')>();
-  return { ...actual, calculateRoutingCost: vi.fn() };
-});
-
+// The one canonical cost engine — every price (made or bought) derives from it,
+// so a tier's price and a quote at that qty can't disagree.
 vi.mock('@/utils/partsAccess', () => ({
   getComputedPartCost: vi.fn(),
   getPartCostExplain: vi.fn(),
 }));
 
-import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import { getTiersWithComputedPrices, getPartPriceAtQty } from '@/utils/partPricingTiersAccess';
 import { getComputedPartCost } from '@/utils/partsAccess';
 
-const mockCalcRoutingCost = vi.mocked(calculateRoutingCost);
 const mockComputedPartCost = vi.mocked(getComputedPartCost);
 
 function tierRow(partial: { id: string; quantity: number; markup_percent: number | null }) {
@@ -53,103 +44,112 @@ function tierRow(partial: { id: string; quantity: number; markup_percent: number
   };
 }
 
-describe('getTiersWithComputedPrices — bought parts (no routing/BOM)', () => {
+describe('getTiersWithComputedPrices — one engine for made and bought', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBuilder.error = null;
   });
 
-  it('prices a bought part as procurement cost × markup (the $55.74 case)', async () => {
+  it('prices each tier as base(tierQty) × markup via the canonical engine', async () => {
     mockBuilder.data = [
       tierRow({ id: 't1', quantity: 1, markup_percent: 122.96 }),
       tierRow({ id: 't10', quantity: 10, markup_percent: 100 }),
     ];
-    mockCalcRoutingCost.mockResolvedValue(null); // bought part: no routing/BOM
-    mockComputedPartCost.mockImplementation(async (_partId, qty) =>
-      qty === 1 ? 25 : 20,
-    );
+    // Base cost is per tier quantity (a step-function part costs less per unit
+    // at higher qty).
+    mockComputedPartCost.mockImplementation(async (_partId, qty) => (qty === 1 ? 25 : 20));
 
     const tiers = await getTiersWithComputedPrices('part-1');
 
     expect(tiers).toHaveLength(2);
-    // 25 × (1 + 122.96/100) = 55.74 — the manually-typed price is now derived.
-    expect(tiers[0].unit_price).toBe(55.74);
-    // 20 × (1 + 100/100) = 40.
-    expect(tiers[1].unit_price).toBe(40);
-    // Base cost is resolved per tier quantity via compute_part_cost_at_qty.
+    expect(tiers[0].unit_price).toBe(55.74); // 25 × (1 + 122.96/100)
+    expect(tiers[1].unit_price).toBe(40); // 20 × (1 + 100/100)
+    // Base cost resolved at EACH tier's own quantity — not a single qty.
     expect(mockComputedPartCost).toHaveBeenCalledWith('part-1', 1);
     expect(mockComputedPartCost).toHaveBeenCalledWith('part-1', 10);
   });
 
-  it('leaves unit_price null when the base cost cannot resolve (no procurement tier)', async () => {
+  it('applies markup then rounds once (single-round cost-plus)', async () => {
+    mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: 100 })];
+    mockComputedPartCost.mockResolvedValue(1.114);
+
+    const tiers = await getTiersWithComputedPrices('part-1');
+
+    // 1.114 × 2 = 2.228 → rounds once to 2.23 (base is NOT pre-rounded).
+    expect(tiers[0].unit_price).toBe(2.23);
+  });
+
+  it('leaves unit_price null when the base cost cannot resolve', async () => {
     mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: 50 })];
-    mockCalcRoutingCost.mockResolvedValue(null);
     mockComputedPartCost.mockResolvedValue(null);
 
     const tiers = await getTiersWithComputedPrices('part-1');
-
     expect(tiers[0].unit_price).toBeNull();
   });
 
-  it('leaves unit_price null when markup is null (no price yet), matching made-part semantics', async () => {
+  it('leaves unit_price null when markup is null (no price yet)', async () => {
     mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: null })];
-    mockCalcRoutingCost.mockResolvedValue(null);
     mockComputedPartCost.mockResolvedValue(25);
 
     const tiers = await getTiersWithComputedPrices('part-1');
-
     expect(tiers[0].unit_price).toBeNull();
   });
 
   it('leaves unit_price null when markup is NaN (guards a corrupt rate)', async () => {
     mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: Number.NaN })];
-    mockCalcRoutingCost.mockResolvedValue(null);
     mockComputedPartCost.mockResolvedValue(25);
 
     const tiers = await getTiersWithComputedPrices('part-1');
-
     expect(tiers[0].unit_price).toBeNull();
-  });
-
-  it('rounds the base cost before applying markup (two-step rounding)', async () => {
-    mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: 100 })];
-    mockCalcRoutingCost.mockResolvedValue(null);
-    mockComputedPartCost.mockResolvedValue(1.114);
-
-    const tiers = await getTiersWithComputedPrices('part-1');
-
-    // base rounds 1.114 -> 1.11 first; 1.11 × 2 = 2.22.
-    // (Without the intermediate round, 1.114 × 2 = 2.228 -> 2.23 — so this
-    // case proves the base is rounded before markup is applied.)
-    expect(tiers[0].unit_price).toBe(2.22);
   });
 });
 
-describe('getTiersWithComputedPrices — made parts (routing/BOM) unchanged', () => {
+describe('getPartPriceAtQty — the single source used by form/line/preview', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBuilder.error = null;
   });
 
-  it('prices made parts from the routing breakdown and never calls compute_part_cost_at_qty', async () => {
-    mockBuilder.data = [tierRow({ id: 't1', quantity: 1, markup_percent: 100 })];
-    const breakdown: RoutingCostBreakdown = {
-      labor_items: [],
-      material_items: [],
-      total_labor_cost: 10,
-      total_setup_cost: 0,
-      total_material_cost: 5,
-      total_cost: 15,
-      materials_complete: true,
-      warnings: [],
-    };
-    mockCalcRoutingCost.mockResolvedValue(breakdown);
+  it('computes base(qty) × the markup tier that applies at qty', async () => {
+    // Tiers: 25% for >=1, 15% for >=100. At qty 50 the 25% tier applies.
+    const tiers = [
+      { id: 't1', quantity: 1, markup_percent: 25 },
+      { id: 't100', quantity: 100, markup_percent: 15 },
+    ];
+    mockComputedPartCost.mockResolvedValue(8);
 
-    const tiers = await getTiersWithComputedPrices('part-1');
+    const p = await getPartPriceAtQty('part-1', 50, tiers);
 
-    // base = 10 + 5 + 0 = 15; 15 × (1 + 100/100) = 30.
-    expect(tiers[0].unit_price).toBe(30);
-    // The made-part path must not touch the procurement cost fallback.
-    expect(mockComputedPartCost).not.toHaveBeenCalled();
+    expect(mockComputedPartCost).toHaveBeenCalledWith('part-1', 50);
+    expect(p.base_cost).toBe(8);
+    expect(p.markup_percent).toBe(25);
+    expect(p.source_tier_id).toBe('t1');
+    expect(p.unit_price).toBe(10); // 8 × 1.25
+    expect(p.below_min).toBe(false);
+  });
+
+  it('uses the higher-qty tier once the order reaches it', async () => {
+    const tiers = [
+      { id: 't1', quantity: 1, markup_percent: 25 },
+      { id: 't100', quantity: 100, markup_percent: 15 },
+    ];
+    mockComputedPartCost.mockResolvedValue(8);
+
+    const p = await getPartPriceAtQty('part-1', 100, tiers);
+
+    expect(p.markup_percent).toBe(15);
+    expect(p.source_tier_id).toBe('t100');
+    expect(p.unit_price).toBe(9.2); // 8 × 1.15
+  });
+
+  it('flags below_min and null-prices when base cannot resolve', async () => {
+    const tiers = [{ id: 't10', quantity: 10, markup_percent: 25 }];
+    mockComputedPartCost.mockResolvedValue(null);
+
+    const p = await getPartPriceAtQty('part-1', 3, tiers);
+
+    expect(p.below_min).toBe(true); // qty 3 < lowest tier 10
+    expect(p.unit_price).toBeNull(); // base null → no price
+    expect(p.markup_percent).toBe(25);
   });
 });

@@ -30,7 +30,6 @@ import TuneIcon from '@mui/icons-material/Tune';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
 import {
   calculateRoutingCost,
-  calculateTierPricing,
   type RoutingCostBreakdown,
 } from '@/utils/routingCostCalculation';
 import {
@@ -38,12 +37,13 @@ import {
   replaceTiersForPart,
   setPartMarkupRate,
 } from '@/utils/partPricingTiersAccess';
+import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 import {
   getAllMarkupRates,
   applyRateToPart,
   applyDefaultRateToPart,
 } from '@/utils/markupRatesAccess';
-import { addPartPricingNote } from '@/utils/partsAccess';
+import { addPartPricingNote, getComputedPartCost } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   type MarkupRate,
@@ -112,13 +112,25 @@ function parseNumber(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): EditRow {
+/**
+ * Recompute a tier row's Base/unit and Unit price from the SINGLE-SOURCE base
+ * cost at that tier's own quantity — `baseCostByQty` holds
+ * `getComputedPartCost(part, qty)` results (the same engine the quote form and
+ * the persisted line use). Base absent from the map = not fetched yet → render
+ * "—" until the async fetch fills it in. Unit price = base × (1 + markup/100).
+ */
+function recomputeRow(row: EditRow, baseCostByQty: Map<number, number | null>): EditRow {
   const qty = parseNumber(row.quantity);
-  if (!breakdown || qty === null || qty <= 0) {
+  if (qty === null || qty <= 0) {
+    return { ...row, baseCostPerUnit: null };
+  }
+  const base = baseCostByQty.has(qty) ? baseCostByQty.get(qty) ?? null : undefined;
+  if (base === undefined) {
     return { ...row, baseCostPerUnit: null };
   }
   const markup = parseNumber(row.markupPercent);
-  const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
+  const baseCostPerUnit = base === null ? null : Math.round(base * 100) / 100;
+  const unitPrice = unitPriceFromBase(base, markup);
   return {
     ...row,
     baseCostPerUnit,
@@ -167,6 +179,16 @@ export default function PartPricing({
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  // Base cost per tier quantity, from the ONE canonical engine
+  // (getComputedPartCost → compute_part_cost_at_qty) — the same source the quote
+  // form and the persisted line use, so a tier's Base/unit and Unit price here
+  // match what a quote at that qty will show. `breakdown` is kept only for the
+  // cost build-up rows + warnings, not for tier pricing.
+  const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
+  const inFlightTierQtys = useRef<Set<number>>(new Set());
+  // Latest costs, so loadAll can price rows from cache without listing
+  // tierBaseCosts as a dep (which would reload tiers on every fetch).
+  const tierBaseCostsRef = useRef(tierBaseCosts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Pricing feeds quotes (financial data), so tier edits are committed via an
@@ -228,13 +250,13 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        // unitPrice is recomputed live by recomputeRow below; the
-        // part_pricing_tiers.unit_price column has been dropped — prices
-        // are always derived from the routing + BOM rollup.
+        // unitPrice + baseCostPerUnit are filled in by the base-cost effect
+        // below (getComputedPartCost per tier qty → base × markup) once the
+        // async costs land; start blank so nothing stale renders.
         unitPrice: '',
-        baseCostPerUnit: 0,
+        baseCostPerUnit: null,
       }));
-      setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
+      setRows(asRows.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
     } finally {
@@ -249,6 +271,65 @@ export default function PartPricing({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
   }, [loadAll, refreshKey]);
+
+  // Keep the ref current for loadAll (see tierBaseCostsRef).
+  useEffect(() => {
+    tierBaseCostsRef.current = tierBaseCosts;
+  }, [tierBaseCosts]);
+
+  // Fetch the single-source base cost for each distinct tier quantity via the
+  // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
+  // one the quote form and the persisted line use. Debounced so editing a tier
+  // qty doesn't refetch on every keystroke. Bought parts don't show a base/unit
+  // column, so skip them. `previewRefresh` (batch-qty edits) invalidates the
+  // cache since the pinned cost changed.
+  useEffect(() => {
+    if (isBought) return;
+    const qtys = [
+      ...new Set(
+        rows
+          .map((r) => parseNumber(r.quantity))
+          .filter((q): q is number => q !== null && q > 0),
+      ),
+    ];
+    const missing = qtys.filter(
+      (q) => !tierBaseCosts.has(q) && !inFlightTierQtys.current.has(q),
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      for (const q of missing) {
+        inFlightTierQtys.current.add(q);
+        getComputedPartCost(partId, q)
+          .catch(() => null)
+          .then((base) => {
+            inFlightTierQtys.current.delete(q);
+            if (cancelled) return;
+            setTierBaseCosts((prev) => new Map(prev).set(q, base));
+          });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [rows, tierBaseCosts, partId, isBought]);
+
+  // A batch-qty (or routing/BOM) change invalidates the cached base costs — the
+  // pinned/rolled-up cost is different now, so clear and let the fetch effect
+  // recompute at the new basis.
+  useEffect(() => {
+    if (previewRefresh === 0) return;
+    inFlightTierQtys.current.clear();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTierBaseCosts(new Map());
+  }, [previewRefresh]);
+
+  // Re-price every tier row when base costs arrive/change (base × markup).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
+  }, [tierBaseCosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -369,9 +450,9 @@ export default function PartPricing({
               quantity: String(t.quantity),
               markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
               unitPrice: '',
-              baseCostPerUnit: 0,
+              baseCostPerUnit: null,
             },
-            breakdown,
+            tierBaseCosts,
           ),
         ),
       );
@@ -390,7 +471,7 @@ export default function PartPricing({
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], quantity: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
       return next;
     });
   };
@@ -399,7 +480,7 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
       return next;
     });
   };
@@ -434,7 +515,7 @@ export default function PartPricing({
         unitPrice: '',
         baseCostPerUnit: 0,
       };
-      return [...prev, recomputeRow(row, breakdown)];
+      return [...prev, recomputeRow(row, tierBaseCosts)];
     });
   };
 
@@ -485,9 +566,9 @@ export default function PartPricing({
           quantity: '1',
           markupPercent: DEFAULT_CUSTOM_MARKUP,
           unitPrice: '',
-          baseCostPerUnit: 0,
+          baseCostPerUnit: null,
         },
-        breakdown,
+        tierBaseCosts,
       ),
     ]);
   };

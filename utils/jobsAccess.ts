@@ -540,7 +540,6 @@ export async function createJobFromPurchaseOrder(
     production_status: 'not_started',
     fulfillment_status: 'unshipped',
     due_date: input.due_date || null,
-    lead_time_days: null,
     customer_po_number: customerPoNumber,
     billing_address_id: billingAddressId,
     shipping_address_id: shippingAddressId,

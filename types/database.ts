@@ -1194,7 +1194,6 @@ export type Database = {
           id: string
           invoicing_status: string
           job_number: string
-          lead_time_days: number | null
           production_status: string
           quote_id: string | null
           ship_to_address: Json | null
@@ -1220,7 +1219,6 @@ export type Database = {
           id?: string
           invoicing_status?: string
           job_number: string
-          lead_time_days?: number | null
           production_status: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -1246,7 +1244,6 @@ export type Database = {
           id?: string
           invoicing_status?: string
           job_number?: string
-          lead_time_days?: number | null
           production_status?: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -1296,44 +1293,6 @@ export type Database = {
             columns: ["shipping_address_id"]
             isOneToOne: false
             referencedRelation: "customer_addresses"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      markup_rates: {
-        Row: {
-          breakpoints: Json
-          company_id: string
-          created_at: string
-          id: string
-          is_default: boolean
-          name: string
-          updated_at: string
-        }
-        Insert: {
-          breakpoints?: Json
-          company_id: string
-          created_at?: string
-          id?: string
-          is_default?: boolean
-          name: string
-          updated_at?: string
-        }
-        Update: {
-          breakpoints?: Json
-          company_id?: string
-          created_at?: string
-          id?: string
-          is_default?: boolean
-          name?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "markup_rates_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -1612,7 +1571,6 @@ export type Database = {
           is_location_tracked: boolean
           is_stocked: boolean
           legacy_id: string | null
-          markup_rate_id: string | null
           part_name: string
           preferred_vendor_id: string | null
           primary_unit: string | null
@@ -1630,7 +1588,6 @@ export type Database = {
           is_location_tracked?: boolean
           is_stocked?: boolean
           legacy_id?: string | null
-          markup_rate_id?: string | null
           part_name: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -1648,7 +1605,6 @@ export type Database = {
           is_location_tracked?: boolean
           is_stocked?: boolean
           legacy_id?: string | null
-          markup_rate_id?: string | null
           part_name?: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -1663,13 +1619,6 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "parts_markup_rate_id_fkey"
-            columns: ["markup_rate_id"]
-            isOneToOne: false
-            referencedRelation: "markup_rates"
             referencedColumns: ["id"]
           },
           {
@@ -2282,9 +2231,7 @@ export type Database = {
           customer_name: string | null
           expiration_date: string | null
           id: string
-          lead_time_days: number | null
-          lead_time_unit: string | null
-          lead_time_value: number | null
+          lead_time_text: string | null
           payment_terms: string | null
           quote_number: string
           ship_to_address: Json | null
@@ -2306,9 +2253,7 @@ export type Database = {
           customer_name?: string | null
           expiration_date?: string | null
           id?: string
-          lead_time_days?: number | null
-          lead_time_unit?: string | null
-          lead_time_value?: number | null
+          lead_time_text?: string | null
           payment_terms?: string | null
           quote_number: string
           ship_to_address?: Json | null
@@ -2330,9 +2275,7 @@ export type Database = {
           customer_name?: string | null
           expiration_date?: string | null
           id?: string
-          lead_time_days?: number | null
-          lead_time_unit?: string | null
-          lead_time_value?: number | null
+          lead_time_text?: string | null
           payment_terms?: string | null
           quote_number?: string
           ship_to_address?: Json | null
@@ -2971,10 +2914,6 @@ export type Database = {
           p_part_id: string
           p_unit: string
         }
-        Returns: Json
-      }
-      bulk_apply_markup_rate: {
-        Args: { p_company_id: string; p_part_ids: string[]; p_rate_id: string }
         Returns: Json
       }
       compute_job_fulfillment_status: {

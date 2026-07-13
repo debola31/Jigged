@@ -49,7 +49,6 @@ class PriceabilityEnv:
     company_id: str
     parent_id: str
     sub_id: str
-    default_rate_id: str
 
 
 def _make_part(admin: Client, company_id: str, name: str) -> str:
@@ -96,18 +95,6 @@ def env(admin: Client):
     )
     company_id = company.data[0]["id"]
 
-    # The companies AFTER INSERT trigger seeds a "Default" markup rate
-    # (is_default=true) — grab its id to apply below.
-    default_rate = (
-        admin.table("markup_rates")
-        .select("id")
-        .eq("company_id", company_id)
-        .eq("is_default", True)
-        .single()
-        .execute()
-    )
-    default_rate_id = default_rate.data["id"]
-
     # Internal work center with a labor rate → routing ops are fully priced.
     wc = (
         admin.table("work_centers")
@@ -134,7 +121,7 @@ def env(admin: Client):
         }
     ).execute()
 
-    yield PriceabilityEnv(company_id, parent_id, sub_id, default_rate_id)
+    yield PriceabilityEnv(company_id, parent_id, sub_id)
 
     # FK-safe teardown (parts_bom / routing_operations cascade from parts/routings
     # in some paths, but delete explicitly so the test is self-contained).
@@ -143,18 +130,21 @@ def env(admin: Client):
     admin.table("part_pricing_tiers").delete().eq("company_id", company_id).execute()
     admin.table("parts").delete().eq("company_id", company_id).execute()
     admin.table("work_centers").delete().eq("company_id", company_id).execute()
-    admin.table("markup_rates").delete().eq("company_id", company_id).execute()
     admin.table("companies").delete().eq("id", company_id).execute()
 
 
 def _apply_default(admin: Client, env: PriceabilityEnv, part_id: str) -> None:
-    admin.rpc(
-        "bulk_apply_markup_rate",
+    """Give a part a single pricing tier with a 25% markup. Each part now owns
+    its markup directly on part_pricing_tiers — there is no shared markup-rate
+    layer — so a filled markup is just a tier row with a non-null markup_percent."""
+    admin.table("part_pricing_tiers").insert(
         {
-            "p_company_id": env.company_id,
-            "p_part_ids": [part_id],
-            "p_rate_id": env.default_rate_id,
-        },
+            "part_id": part_id,
+            "company_id": env.company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "markup_percent": 25,
+        }
     ).execute()
 
 

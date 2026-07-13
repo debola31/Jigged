@@ -120,20 +120,14 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
  * dropped — every read recomputes it live via `getTiersWithComputedPrices`
  * so the stored cache can't drift from the underlying routing + BOM.
  *
- * Also writes parts.markup_rate_id from `opts.rateId`. Two callers, two
- * intents:
- *   - applyRateToPart() passes the rate's id, so the part stays linked to
- *     that rate after the snapshot.
- *   - The PartPricing manual-edit path omits opts.rateId, which writes
- *     markup_rate_id = null and flips the part to "Custom". This guarantees
- *     that any tier write keeps the link state consistent with intent —
- *     impossible to accidentally retain a stale rate link after an edit.
+ * Each part owns its markup directly — there is no shared/named markup-rate
+ * layer. A tier row with a NULL `markup_percent` is an unfilled row (the part
+ * reads as "no markup / not priceable" until the user fills it).
  */
 export async function replaceTiersForPart(
   companyId: string,
   partId: string,
   tiers: PartPricingTierInput[],
-  opts: { rateId?: string | null } = {},
 ): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
 
@@ -147,9 +141,8 @@ export async function replaceTiersForPart(
 
   // Delete the "no longer present" rows BEFORE the insert/update pass. This
   // frees up the (part_id, sequence) unique-constraint slots so a caller that
-  // passes a fresh set of inputs without ids (e.g., applying a markup rate
-  // that replaces all current tiers) doesn't 409 against the rows it's about
-  // to obsolete.
+  // passes a fresh set of inputs without ids (e.g., replacing every tier in
+  // one save) doesn't 409 against the rows it's about to obsolete.
   const keepIds = new Set(
     tiers.map((t) => t.id).filter((id): id is string => Boolean(id)),
   );
@@ -187,37 +180,7 @@ export async function replaceTiersForPart(
     }
   }
 
-  // Sync the part's rate link with the caller's intent. A rate-apply path
-  // passes the rate id; a manual-edit path omits it and the part flips to
-  // Custom (null). Done last so the FK update reflects a successful tier
-  // write — a partial failure leaves the link state matching the row state.
-  const nextRateId = opts.rateId ?? null;
-  const { error: rateLinkErr } = await supabase
-    .from('parts')
-    .update({ markup_rate_id: nextRateId })
-    .eq('id', partId);
-  if (rateLinkErr) throw rateLinkErr;
-
   return getTiersForPart(partId);
-}
-
-/**
- * Update only the part's markup_rate_id without touching its tiers. Used by
- * the PartPricing "Switch to Custom" affordance, which flips the part to
- * Custom while preserving the current tier values as the editable starting
- * point. Pass `null` to clear, or a rate id to link without re-snapshotting
- * (the apply-rate paths in markupRatesAccess already handle re-snapshotting).
- */
-export async function setPartMarkupRate(
-  partId: string,
-  rateId: string | null,
-): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('parts')
-    .update({ markup_rate_id: rateId })
-    .eq('id', partId);
-  if (error) throw error;
 }
 
 /**

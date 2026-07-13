@@ -6,21 +6,6 @@ import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot'
 export type QuoteStatus = 'active' | 'expired';
 
 /**
- * Unit the salesperson states a quote's lead time in. Stored on
- * quotes.lead_time_unit; normalized to a calendar-day count (lead_time_days)
- * via leadTimeToDays at save time.
- */
-export type LeadTimeUnit = 'business_days' | 'calendar_days' | 'weeks';
-
-export const LEAD_TIME_UNITS: ReadonlyArray<{ value: LeadTimeUnit; label: string }> = [
-  { value: 'business_days', label: 'Business days' },
-  { value: 'calendar_days', label: 'Calendar days' },
-  { value: 'weeks', label: 'Weeks' },
-];
-
-export const DEFAULT_LEAD_TIME_UNIT: LeadTimeUnit = 'business_days';
-
-/**
  * Common B2B payment terms offered as presets in the quote form's
  * combobox. The field is free-solo, so shops can also type custom wording
  * like 'Net 30, 1% late charge'.
@@ -36,54 +21,6 @@ export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = [
   'Cash on Delivery',
   '50% Deposit / Balance Net 30',
 ];
-
-/**
- * Normalize a (value, unit) lead time into a calendar-day count — the single
- * source of truth for the lead_time_days column the conversion flow reads.
- *
- *   - weeks         → value × 7
- *   - calendar_days → value
- *   - business_days → ceil(value × 7/5)  (a fixed estimate; we don't have a
- *                     start date here to skip specific weekends/holidays)
- *
- * Returns null for a missing/invalid value so callers can persist NULL.
- */
-export function leadTimeToDays(
-  value: number | null | undefined,
-  unit: LeadTimeUnit,
-): number | null {
-  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) {
-    return null;
-  }
-  switch (unit) {
-    case 'weeks':
-      return value * 7;
-    case 'business_days':
-      return Math.ceil((value * 7) / 5);
-    case 'calendar_days':
-    default:
-      return value;
-  }
-}
-
-/**
- * Human-readable lead time for read-side display, e.g. "6 weeks",
- * "10 business days". Returns null when no value is set.
- */
-const LEAD_TIME_NOUNS: Record<LeadTimeUnit, { one: string; many: string }> = {
-  calendar_days: { one: 'day', many: 'days' },
-  business_days: { one: 'business day', many: 'business days' },
-  weeks: { one: 'week', many: 'weeks' },
-};
-
-export function formatLeadTime(
-  value: number | null | undefined,
-  unit: LeadTimeUnit | null | undefined,
-): string | null {
-  if (value === null || value === undefined) return null;
-  const nouns = LEAD_TIME_NOUNS[unit ?? DEFAULT_LEAD_TIME_UNIT] ?? LEAD_TIME_NOUNS.calendar_days;
-  return `${value} ${value === 1 ? nouns.one : nouns.many}`;
-}
 
 /**
  * Quote header record. Part/quantity/pricing lives on quote_line_items.
@@ -113,13 +50,10 @@ export interface Quote {
   billing_address_id: string | null;
   shipping_address_id: string | null;
   contact_id: string | null;
-  // lead_time_days stays the normalized canonical day count consumed by
-  // convertQuoteToJob; lead_time_value + lead_time_unit are what the user
-  // stated and what the form edits. The access layer recomputes
-  // lead_time_days from (value, unit) on every save.
-  lead_time_days: number | null;
-  lead_time_value: number | null;
-  lead_time_unit: LeadTimeUnit | null;
+  // Free-text lead time exactly as the user typed it (e.g. "2–3 weeks",
+  // "In stock", "Call to confirm"). It no longer drives the job due date —
+  // that's entered manually at conversion.
+  lead_time_text: string | null;
   payment_terms: string | null;
   expiration_date: string | null;
   status: QuoteStatus;
@@ -326,13 +260,10 @@ export interface QuoteFormData {
   billing_address_id: string;
   shipping_address_id: string;
   parts: QuoteFormPartBlock[];
-  // Lead time as the user states it. lead_time_value is a working-copy string
-  // (so the input can be empty mid-edit); the access layer normalizes
-  // (value, unit) into the canonical lead_time_days column on save. The unit
-  // starts as '' (unselected) so a new quote can't silently inherit a wrong
-  // default — the form requires an explicit pick before save.
-  lead_time_value: string;
-  lead_time_unit: LeadTimeUnit | '';
+  // Free-text lead time exactly as the user types it (e.g. "2–3 weeks",
+  // "In stock"). Required by the form (non-empty), but stored verbatim — it no
+  // longer drives the job due date.
+  lead_time_text: string;
   // Payment terms shown on the quote (preset or custom free text). '' = unset.
   payment_terms: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
@@ -363,12 +294,19 @@ export interface CompanyMember {
  * Empty form defaults for NEW quotes only.
  * expiration_date defaults to today + 10 days.
  */
-export const DEFAULT_QUOTE_LEAD_DAYS = 14;
 export const DEFAULT_QUOTE_VALIDITY_DAYS = 10;
 
-export function defaultExpirationDate(): string {
+/**
+ * Expiration date for a NEW quote: today + `validityDays`. The validity window
+ * is company-configurable (companies.settings.defaults.quote_validity_days,
+ * read via readQuoteValidityDays); callers that don't have the company row pass
+ * nothing and get the DEFAULT_QUOTE_VALIDITY_DAYS fallback.
+ */
+export function defaultExpirationDate(
+  validityDays: number = DEFAULT_QUOTE_VALIDITY_DAYS,
+): string {
   const d = new Date();
-  d.setDate(d.getDate() + DEFAULT_QUOTE_VALIDITY_DAYS);
+  d.setDate(d.getDate() + validityDays);
   return d.toISOString().slice(0, 10);
 }
 
@@ -378,8 +316,7 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [],
-  lead_time_value: '',
-  lead_time_unit: '',
+  lead_time_text: '',
   payment_terms: '',
   expiration_date: defaultExpirationDate(),
 };
@@ -417,10 +354,7 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
             }
           : {}),
       })),
-    lead_time_value: quote.lead_time_value !== null ? String(quote.lead_time_value) : '',
-    // Existing quotes always carry a unit; '' only if a legacy row is null, which
-    // re-forces an explicit pick on next save rather than guessing a default.
-    lead_time_unit: (quote.lead_time_unit as LeadTimeUnit | null) ?? '',
+    lead_time_text: quote.lead_time_text ?? '',
     payment_terms: quote.payment_terms ?? '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,

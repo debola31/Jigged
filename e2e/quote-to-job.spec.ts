@@ -83,13 +83,11 @@ test.describe('Quote to Job workflow', () => {
       timeout: 10_000,
     });
 
-    // Lead time value + unit are both required for the Create button to
-    // enable (the unit has no default). Expiration date defaults from
-    // EMPTY_QUOTE_FORM so we don't touch it. Without these the submit button
-    // stays disabled and the next step times out waiting to click.
-    await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
-    await page.getByRole('combobox', { name: 'Unit' }).click();
-    await page.getByRole('option', { name: 'Weeks' }).click();
+    // Lead time is free text and required for the Create button to enable.
+    // Expiration date defaults from EMPTY_QUOTE_FORM so we don't touch it.
+    // Without a lead time the submit button stays disabled and the next step
+    // times out waiting to click.
+    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
 
     // Payment terms are required — pick a preset before submitting.
     await page.getByRole('combobox', { name: /Payment terms/i }).click();
@@ -123,6 +121,10 @@ test.describe('Quote to Job workflow', () => {
     // Customer PO is required to convert — the Create button stays disabled
     // until it's filled. Enter any PO so the conversion can proceed.
     await dialog.getByRole('textbox', { name: /Customer PO/i }).fill('PO-E2E-001');
+
+    // Due date is required (free-text lead time no longer implies one) and may
+    // not be in the past — pick a far-future date so Create enables.
+    await dialog.getByLabel(/Due date/i).fill('2099-12-31');
 
     // The Create button is "Create J-NNNN" (the assigned job number).
     await dialog.getByRole('button', { name: /^Create J-\d+/i }).click();

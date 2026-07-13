@@ -16,7 +16,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 
 **Dependencies:** None (parts are independent company-wide entities)
 
-**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, `part_notes`, and `markup_rates` (named markup rates linked via `parts.markup_rate_id`)
+**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, and `part_notes`
 
 ---
 
@@ -34,7 +34,6 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | Owner/Admin | See a cost breakdown for a part (run labor + one-time setup + materials, summarized on the Pricing card) | I can sanity-check the routing economics without leaving the part |
 | Salesperson | Add multiple quantity tiers (e.g. 1, 2, 4) to a part, each with its own markup % | I can quote price breaks the customer asked for |
 | Salesperson | Type a unit price directly on a tier | The markup back-calculates automatically; I don't have to do the math |
-| Salesperson | Apply a named markup rate to a part (or to many parts at once) | I can reuse the same markup curve across similar parts without retyping |
 | Salesperson | See cost breakdown and tier prices update live as I edit the routing | I trust the numbers without clicking a refresh button |
 | Salesperson | Adjust a price for a single quote (one-off concession) | I can cut a deal without changing the part's standing prices |
 
@@ -56,7 +55,6 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | quantity | Numeric | Yes | On-hand count (default 0); only ever changed through `inventory_transactions`, never the part form |
 | reorder_point | Numeric | No | Low-stock threshold |
 | preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
-| markup_rate_id | UUID (FK) | No | Link to a named `markup_rates` row; null = Custom tiers. `ON DELETE SET NULL` |
 | legacy_id | Text | No | Import cross-reference; unique per company when set |
 | is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
@@ -64,7 +62,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 
 **Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. `(company_id, legacy_id)` is also unique when `legacy_id` is set.
 
-**Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`); their role — a reusable default markup — is now filled by **named markup rates** (`parts.markup_rate_id` → `markup_rates`), which can be applied per part or in bulk from the list.
+**Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`); rather than a shared default, each part now owns its markup directly on its own `part_pricing_tiers` rows.
 
 ### Part Pricing Tiers (`part_pricing_tiers`)
 
@@ -137,7 +135,7 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 - "**Add Part**" button and an "**Import**" button
 
-- Bulk actions when rows are selected: **Set markup (N)** (apply a named markup rate), **Delete (N)**, and Export CSV
+- Bulk actions when rows are selected: **Delete (N)** and Export CSV
 
 - Click row to open the part workspace (`/parts/{id}`)
 
@@ -189,13 +187,7 @@ Cost breakdown and pricing are a **single card** (`PartPricing`) — there are n
 - Cost summary rows: **run labor / unit**, **setup (one-time)** (amortized across tier qty), **materials / unit**. (There are no per-operation / per-material tables and no `@ qty 1` / `@ qty 10` preview rows.)
 - Surfaces routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) inline — a missing-material warning links to the offending BOM child — so data quality issues catch the salesperson's eye before quoting.
 
-The tier table (`part_pricing_tiers`) has three modes:
-
-- **Custom** — editable rows with Qty, Base / unit (derived, read-only), Markup %, Unit price, and a delete icon; header **Add tier** button.
-- **Rate-linked** — read-only display of the linked markup rate's breakpoints, with **Customize pricing** (switch to Custom) and **Edit the rate** actions.
-- **Empty** — a choose-how-to-price prompt (pick a markup rate, or set custom tiers).
-
-> **Markup rates are owned by [Markup Rates](markup-rates.md).** This section only covers how a part *consumes* a rate (link, view rate-linked breakpoints, fork to Custom). For how named rates are defined, edited centrally, set as the company default, and bulk-applied — including the auto-apply-on-create behavior — see that module doc.
+The tier table (`part_pricing_tiers`) is a single, always-editable list of quantity-break tiers — editable rows with Qty, Base / unit (derived, read-only), Markup %, Unit price, and a delete icon; header **Add tier** button. A **new part opens with one unfilled pricing row** (Min qty 1, Markup blank) for the user to fill in — nothing is auto-applied on create, and the part stays not-priceable until a tier carries a markup %.
 
 Editing model — markup % is the source of truth:
 
@@ -203,7 +195,7 @@ Editing model — markup % is the source of truth:
 - Editing **markup %** recomputes the displayed unit price directly.
 - Editing **unit price** back-calculates the markup % and stores it as the new source of truth. There is no lock concept; subsequent routing changes still propagate.
 
-**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button with an "Unsaved changes" hint — mirroring the bought-part Cost card. Saving a rate-linked part forks it to Custom. Each save also auto-logs a `pricing` note to the Activity feed.
+**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button with an "Unsaved changes" hint — mirroring the bought-part Cost card. Each save also auto-logs a `pricing` note to the Activity feed.
 
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing/BOM panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's displayed base cost and unit price against the new cost basis.
 
@@ -317,18 +309,15 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Edit — pricing tiers (edit → save → reload → persists)**
 
-- [ ] **Given** a made part in Custom mode, **when** the user adds/edits tier quantity + markup % and clicks **Save pricing**, **then** the tiers persist (markup % is the stored source of truth; `unit_price`/`base_cost_per_unit` are recomputed live, not stored) and reloading shows them — *write path verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — made parts (routing/BOM) unchanged' > 'prices made parts from the routing breakdown and never calls compute_part_cost_at_qty'`; explicit-Save (not auto-save) + reload E2E automation-pending (`replaceTiersForPart`)*.
+- [ ] **Given** a made part, **when** the user adds/edits tier quantity + markup % and clicks **Save pricing**, **then** the tiers persist (markup % is the stored source of truth; `unit_price`/`base_cost_per_unit` are recomputed live, not stored) and reloading shows them — *write path verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — made parts (routing/BOM) unchanged' > 'prices made parts from the routing breakdown and never calls compute_part_cost_at_qty'`; explicit-Save (not auto-save) + reload E2E automation-pending (`replaceTiersForPart`)*.
 - [ ] **Given** the Pricing card, **when** the user types a unit price, **then** the markup % is back-calculated from the live base cost and stored as the source of truth — *automation-pending (`handleUnitPriceChange` in `PartPricing.tsx` / `calculateMarkupFromUnitPrice`)*.
 - [ ] **Given** the routing changes, **when** the part page bumps `refreshKey`, **then** every tier's displayed base cost and unit price recompute against the new cost basis — *automation-pending (`PartPricing` `refreshKey` reload / `calculateTierPricing`)*.
 - [ ] **Given** a bought part with a procurement tier, **when** a tier is priced, **then** its sell price resolves as `procurement_cost(qty) × (1 + markup/100)` through the shared resolver — *verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — bought parts (no routing/BOM)' > 'prices a bought part as procurement cost × markup (the $55.74 case)'`*.
 - [ ] **Given** a part deletion, **when** the part row is removed, **then** its `part_pricing_tiers` rows are removed by cascade — *manual: `part_pricing_tiers.part_id` FK ON DELETE CASCADE in `supabase/schema.prod.sql`*.
 
-**Markup-rate consumption (part side)**
+**New-part pricing (unfilled row)**
 
-> Rate mechanics — defining rates, the company default, and the bulk "Set markup" apply flow — are covered in [Markup Rates](markup-rates.md); only the part-side interactions are listed here.
-
-- [ ] **Given** a new part, **when** it is created, **then** the company's default markup rate is auto-applied so it starts with a pricing tier rather than a blank markup (intended onboarding behavior; non-fatal if the company has no default rate or the default has no breakpoints) — *automation-pending (`createPart` → `applyDefaultRateToPart`)*.
-- [ ] **Given** a rate-linked part, **when** the user picks "Customize pricing", **then** the part flips to Custom (`markup_rate_id` cleared) with the rate's values as the editable starting point — *automation-pending (`setPartMarkupRate` / `PartPricing.handleSwitchToCustom`)*.
+- [ ] **Given** a newly created part, **when** the Pricing card first renders, **then** it shows one unfilled pricing row (Min qty 1, Markup blank) with nothing auto-applied, and the part stays not-priceable until a tier carries a `markup_percent` — *automation-pending (`createPart`; priceability via `get_priceable_part_ids`)*.
 
 **Cost build-up (inside the Pricing card)**
 

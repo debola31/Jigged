@@ -3,8 +3,8 @@
  *
  * Single home for the validation logic that was previously copy-pasted across
  * forms (the email regex lived in 4 contact forms; number parsers were
- * re-declared in RoutingOperationRowEditor and MarkupRateForm). New forms should
- * import from here rather than re-implementing.
+ * re-declared across several form editors). New forms should import from here
+ * rather than re-implementing.
  */
 
 import { resolveCountryCode } from './geo';

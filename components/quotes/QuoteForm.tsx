@@ -29,8 +29,8 @@ import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import type { QuoteFormData, LeadTimeUnit } from '@/types/quote';
-import { LEAD_TIME_UNITS, PAYMENT_TERM_PRESETS } from '@/types/quote';
+import type { QuoteFormData } from '@/types/quote';
+import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   createQuote,
   updateQuote,
@@ -842,18 +842,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const validationError = useMemo<string | null>(() => {
     if (!formData.customer_id) return 'Pick a customer.';
     if (partBlocks.length === 0) return 'Add at least one part to the quote.';
-    const leadRaw = formData.lead_time_value;
-    const leadNum = Number(leadRaw);
-    if (
-      leadRaw === '' ||
-      !Number.isFinite(leadNum) ||
-      leadNum < 0 ||
-      !Number.isInteger(leadNum)
-    ) {
-      return 'Enter a lead time (whole number).';
-    }
-    if (formData.lead_time_unit === '') {
-      return 'Select a lead time unit.';
+    // Lead time is free text (e.g. "2–3 weeks", "In stock") but required.
+    if (formData.lead_time_text.trim() === '') {
+      return 'Enter a lead time.';
     }
     // Payment terms are required on every quote (the custom "Other" field
     // writes back into payment_terms, so this one check covers both paths).
@@ -1586,60 +1577,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              {/* Two clean fields: a plain number (native spinner arrows
-                  hidden) + a separate unit dropdown. The unit has no default —
-                  it shows a "Select…" placeholder and is required
-                  (validationError), so a quote can't ship with a wrong unit. */}
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  label="Lead time"
-                  type="number"
-                  size="small"
-                  required
-                  value={formData.lead_time_value}
-                  onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
-                  sx={{
-                    width: 120,
-                    // Hide the native number spinner arrows — they crowd the
-                    // unit field and add no value for a small whole number.
-                    '& input[type=number]': { MozAppearance: 'textfield' },
-                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button':
-                      { WebkitAppearance: 'none', margin: 0 },
-                  }}
-                />
-                <FormControl size="small" required sx={{ flex: 1 }}>
-                  <InputLabel id="lead-time-unit-label" shrink>
-                    Unit
-                  </InputLabel>
-                  <Select
-                    labelId="lead-time-unit-label"
-                    label="Unit"
-                    notched
-                    displayEmpty
-                    value={formData.lead_time_unit}
-                    onChange={(e) =>
-                      handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
-                    }
-                    renderValue={(selected) =>
-                      selected ? (
-                        LEAD_TIME_UNITS.find((u) => u.value === selected)?.label
-                      ) : (
-                        <Box component="span" sx={{ color: 'text.secondary' }}>
-                          Select…
-                        </Box>
-                      )
-                    }
-                  >
-                    {LEAD_TIME_UNITS.map((u) => (
-                      <MenuItem key={u.value} value={u.value}>
-                        {u.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
+              {/* Free-text lead time — the shop types whatever fits
+                  ("2–3 weeks", "In stock", "Call to confirm"). Required
+                  (validationError); stored verbatim and no longer drives the
+                  job due date (entered manually at conversion). */}
+              <TextField
+                label="Lead time"
+                size="small"
+                fullWidth
+                required
+                value={formData.lead_time_text}
+                onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
+                helperText={'e.g. “2–3 weeks” or “In stock”'}
+                InputLabelProps={{ shrink: true }}
+              />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField

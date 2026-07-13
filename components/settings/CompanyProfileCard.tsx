@@ -2,14 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid';
 import SaveIcon from '@mui/icons-material/Save';
 import {
@@ -20,6 +16,7 @@ import {
 import CountrySelect from '@/components/common/CountrySelect';
 import StateSelect from '@/components/common/StateSelect';
 import { isValidEmail, isValidPhone, isValidPostalCode } from '@/lib/validators';
+import SettingsSection from '@/components/settings/SettingsSection';
 
 interface CompanyProfileCardProps {
   companyId: string;
@@ -110,18 +107,10 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
   };
 
   return (
-    <Card elevation={2}>
-      <CardContent sx={{ p: 3 }}>
-        <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
-          Company Profile
-        </Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-          Shop contact and address info shown in the FROM block on printed quote
-          PDFs. Leave fields blank to omit them from the PDF.
-        </Typography>
-
-        <Divider sx={{ mb: 3 }} />
-
+    <SettingsSection
+      title="Company Profile"
+      description="Shop contact and address shown on printed quote PDFs. Leave a field blank to omit it."
+    >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
@@ -139,10 +128,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
           </Box>
         ) : (
           <>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
-              Contact
-            </Typography>
-            <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid container spacing={2}>
               <Grid size={{ xs: 12, sm: 4 }}>
                 <TextField
                   label="Phone"
@@ -180,12 +166,6 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   autoComplete="url"
                 />
               </Grid>
-            </Grid>
-
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1.5 }}>
-              Address
-            </Typography>
-            <Grid container spacing={2}>
               <Grid size={{ xs: 12 }}>
                 <TextField
                   label="Address line 1"
@@ -206,7 +186,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   autoComplete="address-line2"
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                 <TextField
                   label="City"
                   value={form.city}
@@ -216,7 +196,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   autoComplete="address-level2"
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                 <StateSelect
                   value={form.state}
                   onChange={(v) => {
@@ -227,7 +207,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   size="small"
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                 <TextField
                   label="ZIP"
                   value={form.postal_code}
@@ -239,7 +219,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   helperText={postalInvalid ? 'Invalid for country' : undefined}
                 />
               </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                 <CountrySelect
                   value={form.country}
                   onChange={(v) => {
@@ -263,7 +243,6 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
             </Box>
           </>
         )}
-      </CardContent>
-    </Card>
+    </SettingsSection>
   );
 }

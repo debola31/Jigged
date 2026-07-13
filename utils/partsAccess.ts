@@ -25,7 +25,7 @@ import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, markup_rate_id, costing_batch_quantity, legacy_id, is_location_tracked, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, legacy_id, is_location_tracked, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -38,7 +38,6 @@ interface PartRow {
   quantity: number;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
-  markup_rate_id: string | null;
   costing_batch_quantity: number | string | null;
   legacy_id: string | null;
   is_location_tracked: boolean;
@@ -61,7 +60,6 @@ function rowToPart(row: PartRow): Part {
     quantity: Number(row.quantity ?? 0),
     reorder_point: row.reorder_point !== null ? Number(row.reorder_point) : null,
     preferred_vendor_id: row.preferred_vendor_id,
-    markup_rate_id: row.markup_rate_id,
     costing_batch_quantity:
       row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
         ? null
@@ -818,16 +816,9 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     throw error;
   }
 
-  // Auto-apply the company's default markup rate so the new part has a
-  // starting pricing tier without the user having to pick one manually.
-  // Failures are non-fatal — the part is created either way.
-  try {
-    const { applyDefaultRateToPart } = await import('@/utils/markupRatesAccess');
-    await applyDefaultRateToPart(companyId, data.id);
-  } catch (autoApplyErr) {
-    console.warn('Default markup rate auto-apply failed for new part:', autoApplyErr);
-  }
-
+  // No pricing is seeded on create — each part owns its markup directly. The
+  // detail page's Pricing card shows a single unfilled tier row for the user
+  // to fill; until they do, the part reads as "no markup / not priceable".
   return rowToPart(data as PartRow);
 }
 

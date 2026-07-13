@@ -41,7 +41,6 @@ page.
 | Quick-create Part | `components/parts/PartFormModal.tsx` | `!part_name` | ✅ |
 | Feedback | `components/feedback/FeedbackDialog.tsx` | empty feedback | ✅ |
 | BOM material row | `components/parts/MaterialRowEditor.tsx` | no part / qty ≤ 0 / no unit | ✅ (per-field) |
-| Bulk apply markup | `components/parts/BulkApplyMarkupRateDialog.tsx` | `!selectedRateId` | ✅ |
 | New custom unit | `components/parts/UnitOfMeasurementSelect.tsx` | empty unit name | ✅ + `required` |
 | Shipping settings | `components/settings/CompanyShippingSettingsCard.tsx` | invalid number format | ✅ |
 | Operator complete | `components/operator/JobCompleteModal.tsx` | `!operatorId` | ✅ |
@@ -96,7 +95,7 @@ inconsistently). We validate shape but do **not** normalize to E.164 on save;
 that's noted as future work below.
 
 ### Numeric
-Deduped the per-file parsers (`RoutingOperationRowEditor`, `MarkupRateForm`) onto
+Deduped the per-file parsers (`RoutingOperationRowEditor`) onto
 `parseOptionalNumber` / `parseOptionalInteger`. Fixed `ShipmentForm`
 weight/package-count to coerce non-numeric input to `null` instead of `NaN`.
 Routed `CompleteOperationModal`, `PartForm`, `WorkCenterForm` through the shared

@@ -6,11 +6,20 @@ import type { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
 import { redirectToSessionExpiry } from '@/lib/supabaseErrors';
 
+/**
+ * Sign-out scope. `local` (default) ends only this device's session; `others`
+ * ends every OTHER session but keeps this one; `global` ends them all. Ordinary
+ * logout is `local` so one device signing out never revokes an operator's
+ * session on their other devices (which showed up as a forced re-login on the
+ * shop floor). The password-reset flow opts into `global` explicitly.
+ */
+type SignOutScope = 'local' | 'global' | 'others';
+
 interface AuthContextType {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  signOut: () => Promise<void>;
+  signOut: (scope?: SignOutScope) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -102,15 +111,16 @@ export default function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [user]);
 
-  const signOut = async () => {
+  const signOut = async (scope: SignOutScope = 'local') => {
     intentionalSignOut.current = true;
     const supabase = getSupabase();
-    // Explicit scope='global' — revokes every session for this user
-    // across all devices. The ResetPassword flow relies on this to
-    // invalidate the lost/old device after an admin-triggered reset.
-    // Do NOT narrow this scope without also updating the password-reset
-    // flow's session-invalidation guarantee.
-    await supabase.auth.signOut({ scope: 'global' });
+    // Default `local` — revokes ONLY this device's session, so logging out on
+    // one device leaves the user signed in everywhere else. Callers that need
+    // to invalidate other devices pass an explicit scope: the password-reset
+    // flow (ResetPassword) passes 'global' to kill lost/old devices, and the
+    // change-password flow calls supabase.auth.signOut({ scope: 'others' })
+    // directly. Do NOT change this default without revisiting those two flows.
+    await supabase.auth.signOut({ scope });
   };
 
   return (

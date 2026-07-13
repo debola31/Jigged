@@ -275,12 +275,17 @@ BEGIN
                    )
            )
     ),
+    -- A part with no priced markup — no tier at all, or only unfilled tiers
+    -- (markup_percent NULL). Requires a non-null markup, matching the tightening
+    -- in 20260713011616 (markup-rates removal) — preserved here since this later
+    -- migration re-defines the function.
     markups AS (
         SELECT tr.part_id, tr.part_name, tr.source, MIN(tr.depth) AS depth
           FROM tree tr
          WHERE NOT EXISTS (
                    SELECT 1 FROM public.part_pricing_tiers pt
                     WHERE pt.part_id = tr.part_id
+                      AND pt.markup_percent IS NOT NULL
                )
          GROUP BY tr.part_id, tr.part_name, tr.source
     ),

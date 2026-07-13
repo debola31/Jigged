@@ -22,14 +22,6 @@ export interface Part {
   quantity: number;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
-  // Live link to a markup rate. NULL means "Custom" (no rate is governing
-  // this part's tiers). Set when the user applies a rate; cleared when they
-  // manually edit a tier or click "Switch to Custom". Edits to a linked
-  // rate cascade into this part's tiers via cascadeRateUpdateToParts.
-  markup_rate_id: string | null;
-  // Populated by joins that LEFT JOIN markup_rates. Undefined when the
-  // caller did not request the join.
-  markup_rate_name?: string | null;
   legacy_id: string | null;
   // When true, parts.quantity is a trigger-maintained rollup of
   // part_location_stock and stock is managed per-location (see InventoryTab).

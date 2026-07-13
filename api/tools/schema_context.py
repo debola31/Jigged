@@ -109,14 +109,6 @@ SCHEMA_CONTEXT = """
 - from_unit: TEXT (unique per part)
 - to_primary_factor: NUMERIC (>0; multiply a from_unit qty by this to get primary_unit qty)
 
-### markup_rates
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- name: TEXT (unique per company)
-- breakpoints: JSONB (array of quantity → markup_percent rows)
-- is_default: BOOLEAN
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-
 ### quotes
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
@@ -417,7 +409,6 @@ ALLOWED_TABLES = frozenset({
     "part_pricing_tiers",
     "parts_bom",
     "parts_unit_conversions",
-    "markup_rates",
     "quotes",
     "quote_line_items",
     "quote_materials",

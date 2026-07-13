@@ -75,7 +75,6 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   due_date: string | null;
-  lead_time_days: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

@@ -3,8 +3,6 @@ import {
   calculateMarkupFromUnitPrice,
   calculateTotalPrice,
   quoteToFormData,
-  leadTimeToDays,
-  formatLeadTime,
 } from '@/types/quote';
 import type { QuoteWithRelations } from '@/types/quote';
 
@@ -136,48 +134,6 @@ describe('calculateTotalPrice', () => {
   });
 });
 
-describe('leadTimeToDays', () => {
-  it('passes calendar days through unchanged', () => {
-    expect(leadTimeToDays(10, 'calendar_days')).toBe(10);
-  });
-
-  it('multiplies weeks by 7', () => {
-    expect(leadTimeToDays(6, 'weeks')).toBe(42);
-  });
-
-  it('converts business days to calendar days (7/5, rounded up)', () => {
-    // 10 business days → 14 calendar days
-    expect(leadTimeToDays(10, 'business_days')).toBe(14);
-    // 1 business day → ceil(1.4) = 2
-    expect(leadTimeToDays(1, 'business_days')).toBe(2);
-  });
-
-  it('returns null for null/invalid/negative values', () => {
-    expect(leadTimeToDays(null, 'weeks')).toBeNull();
-    expect(leadTimeToDays(undefined, 'weeks')).toBeNull();
-    expect(leadTimeToDays(NaN, 'weeks')).toBeNull();
-    expect(leadTimeToDays(-1, 'weeks')).toBeNull();
-  });
-});
-
-describe('formatLeadTime', () => {
-  it('formats plural and singular by unit label', () => {
-    expect(formatLeadTime(6, 'weeks')).toBe('6 weeks');
-    expect(formatLeadTime(1, 'weeks')).toBe('1 week');
-    expect(formatLeadTime(10, 'business_days')).toBe('10 business days');
-    expect(formatLeadTime(1, 'business_days')).toBe('1 business day');
-  });
-
-  it('returns null when no value is set', () => {
-    expect(formatLeadTime(null, 'weeks')).toBeNull();
-    expect(formatLeadTime(undefined, null)).toBeNull();
-  });
-
-  it('falls back to the default unit when unit is missing', () => {
-    expect(formatLeadTime(3, null)).toBe('3 business days');
-  });
-});
-
 describe('quoteToFormData', () => {
   function makeQuote(lineItems: QuoteWithRelations['line_items']): QuoteWithRelations {
     return {
@@ -188,9 +144,7 @@ describe('quoteToFormData', () => {
       billing_address_id: 'addr-1',
       shipping_address_id: 'addr-1',
       contact_id: 'contact-1',
-      lead_time_days: 14,
-      lead_time_value: 14,
-      lead_time_unit: 'calendar_days',
+      lead_time_text: '14 days',
       payment_terms: 'Net 30',
       expiration_date: '2099-12-31',
       status: 'active',

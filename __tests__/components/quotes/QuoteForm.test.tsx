@@ -76,8 +76,7 @@ const initialBlank: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [],
-  lead_time_value: '',
-  lead_time_unit: 'business_days',
+  lead_time_text: '',
   payment_terms: '',
   expiration_date: '',
 };
@@ -88,8 +87,7 @@ const initialPopulated: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
-  lead_time_value: '14',
-  lead_time_unit: 'business_days',
+  lead_time_text: '14 business days',
   // Payment terms are required to submit a quote, so the "populated/complete"
   // fixture carries one.
   payment_terms: 'Net 30',
@@ -155,7 +153,7 @@ describe('QuoteForm', () => {
     render(
       <QuoteForm
         mode="create"
-        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_value: '14' }}
+        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_text: '2 weeks' }}
       />,
     );
     await waitFor(() => {
@@ -203,7 +201,7 @@ describe('QuoteForm', () => {
     const [companyId, payload] = createQuote.mock.calls[0];
     expect(companyId).toBe('test-company-id'); // from test-utils useParams mock
     expect(payload.customer_id).toBe('cust-1');
-    expect(payload.lead_time_value).toBe('14');
+    expect(payload.lead_time_text).toBe('14 business days');
     expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 5 }]);
 
     await waitFor(() => {

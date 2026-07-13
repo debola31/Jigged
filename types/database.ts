@@ -1194,7 +1194,6 @@ export type Database = {
           id: string
           invoicing_status: string
           job_number: string
-          lead_time_days: number | null
           production_status: string
           quote_id: string | null
           ship_to_address: Json | null
@@ -1220,7 +1219,6 @@ export type Database = {
           id?: string
           invoicing_status?: string
           job_number: string
-          lead_time_days?: number | null
           production_status: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -1246,7 +1244,6 @@ export type Database = {
           id?: string
           invoicing_status?: string
           job_number?: string
-          lead_time_days?: number | null
           production_status?: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -2273,9 +2270,7 @@ export type Database = {
           customer_name: string | null
           expiration_date: string | null
           id: string
-          lead_time_days: number | null
-          lead_time_unit: string | null
-          lead_time_value: number | null
+          lead_time_text: string | null
           payment_terms: string | null
           quote_number: string
           ship_to_address: Json | null
@@ -2297,9 +2292,7 @@ export type Database = {
           customer_name?: string | null
           expiration_date?: string | null
           id?: string
-          lead_time_days?: number | null
-          lead_time_unit?: string | null
-          lead_time_value?: number | null
+          lead_time_text?: string | null
           payment_terms?: string | null
           quote_number: string
           ship_to_address?: Json | null
@@ -2321,9 +2314,7 @@ export type Database = {
           customer_name?: string | null
           expiration_date?: string | null
           id?: string
-          lead_time_days?: number | null
-          lead_time_unit?: string | null
-          lead_time_value?: number | null
+          lead_time_text?: string | null
           payment_terms?: string | null
           quote_number?: string
           ship_to_address?: Json | null

@@ -86,9 +86,7 @@ The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_
 | quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, … |
 | legacy_quote_number | Text | No | Original quote number from legacy system (migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| lead_time_days | Integer | No | **Normalized** calendar days, derived from `lead_time_value`/`lead_time_unit` on save; copied to `jobs.lead_time_days` on conversion |
-| lead_time_value | Integer | No | Lead time as the user states it (the number; unit in `lead_time_unit`) |
-| lead_time_unit | Text | No | `business_days` \| `calendar_days` \| `weeks` (default `business_days`) |
+| lead_time_text | TEXT | No | Free-text lead time as stated (e.g. "2–3 weeks", "In stock"); does not drive the job due date |
 | payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Net 30`, `2/10 Net 30`. Required at the form level — every quote carries payment terms |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
@@ -203,7 +201,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 ▸ **Terms**
 
-- Lead time — a whole-number **value** plus a **unit** dropdown (Business days / Calendar days / Weeks; defaults to business days). Required. Normalized to a calendar-day count (`lead_time_days`) on save so quote→job conversion is unaffected.
+- Lead time — a single **required** free-text field (type anything, e.g. "2–3 weeks", "In stock"). No number field, no unit dropdown; stored verbatim as `lead_time_text` and does not drive the job due date.
 - Expiration date (defaults to today + 10 days)
 - Payment terms — a combobox of common presets (Net 15, Net 30, 2/10 Net 30, Net 45/60/90, Due on Receipt, COD, 50% Deposit / Balance Net 30) that also accepts custom free text (e.g. "Net 30, 1% late charge"). Required — the form blocks submission until a preset or custom value is entered.
 
@@ -218,7 +216,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 - A part may appear in only one block (its quantities go in that block's rows).
 - Every quantity row must be a number > 0 (fractional allowed, for parts sold by the dozen / weight / length); quantities must be unique within a part.
 - Each non-override row must resolve to a priced tier, or use a custom price.
-- Lead time is required: a whole-number value (with unit) that normalizes to 0 – 3,650 days.
+- Lead time is required: any non-empty free text.
 
 **Inline address add:** the shipping / billing address selectors include a "+ Add new address" option that opens the `CustomerAddressForm` **inline** (in a `Collapse` below the selector) rather than navigating to the customer page. On save the new address is added to the customer and auto-selected into the field that opened it (and mirrored to billing when "billing same as shipping" is on).
 
@@ -230,7 +228,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Quote number (large)
 - Status pill (Active / Expired)
-- Created date, expires-in, lead time (formatted with its unit, e.g. "6 weeks"), payment terms (always present — **payment terms are required** on every quote). The creator is no longer shown here — a **"Prepared by {name}"** line sits below the line items (mirroring the PDF, now that acceptance is by PO rather than signature).
+- Created date, expires-in, lead time (the raw text as entered, e.g. "2–3 weeks"), payment terms (always present — **payment terms are required** on every quote). The creator is no longer shown here — a **"Prepared by {name}"** line sits below the line items (mirroring the PDF, now that acceptance is by PO rather than signature).
 
 **Content cards:**
 
@@ -279,7 +277,7 @@ Clamp
   100 ea @ $9.00 = $900.00     (single quantity — auto-included)
 ```
 
-Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **Due date** (defaulting to today + the quote's lead time) and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it. An **optional PO PDF** can also be attached; it uploads to the new job after conversion (see [Jobs](jobs.md) → Attachments) and is non-fatal if the upload fails.
+Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **required Due date** — a not-in-the-past date picker that starts **empty** (no prefill; the user types the job's due date, which is no longer derived from lead time) — and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it. An **optional PO PDF** can also be attached; it uploads to the new job after conversion (see [Jobs](jobs.md) → Attachments) and is non-fatal if the upload fails.
 
 **Actions:**
 
@@ -479,8 +477,8 @@ If the salesperson quotes this part at quantities 1, 2, and 4, three `quote_line
 1. Refuse if `converted_at` is already set, or if the quote has no line items.
 2. Resolve which lines to convert: `selectedLineItemIds` when provided (a price-options quote — one chosen line per part), else all lines (a firm quote). **Reject if the resolved set has more than one line for any `part_id`** ("This is a price-options quote. Pick a single quantity per part before converting.").
 3. Pre-flight: every part must have a routing, else fail before any write.
-4. Resolve the due date (explicit override > today + the quote's `lead_time_days` > null). **Reject if no `customer_po_number` is provided** ("Customer PO is required to convert a quote to a job.") — the PO is captured as a required, non-empty value, never coerced to NULL.
-5. Insert **one** `jobs` row (job number Q-NNNN → J-NNNN) carrying `quote_id`, `customer_id`, `due_date`, `lead_time_days`, `customer_po_number`, `production_status = 'not_started'`.
+4. Use the **required** due date passed from the modal — rejected if empty and it must not be in the past. It is written straight to the job and is **no longer derived from lead time**. **Reject if no `customer_po_number` is provided** ("Customer PO is required to convert a quote to a job.") — the PO is captured as a required, non-empty value, never coerced to NULL.
+5. Insert **one** `jobs` row (job number Q-NNNN → J-NNNN) carrying `quote_id`, `customer_id`, `due_date`, `customer_po_number`, `production_status = 'not_started'`.
 6. For each resolved line, insert a `job_parts` row (`part_id`, `quantity = line.quantity`, `source_quote_line_item_id = line.id`) and clone the part's routing via the `create_job_part_operations_from_routing(job_part_id, routing_id)` RPC.
 7. Set `quote.converted_at` (status unchanged); the quote keeps all its line items as the record of every option offered.
 8. Return `{ quote, job: { id, job_number, parts: [{ id, part_id, quantity, source_quote_line_item_id }, …] } }`.
@@ -526,7 +524,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Form blocks submission until every part block has a part selected and at least one valid quantity row (quantities unique within a part) — *(automation-pending)*
 
-- [ ] Quote header is editable (customer, lead time value + unit, payment terms, expiration), and all persist across reload. Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default — *(automation-pending)*
+- [ ] Quote header is editable (customer, lead time, payment terms, expiration), and all persist across reload. Line items are editable via the [Edit policy](#edit-policy-line-item-reconcile-frozen-pricing-drift) below — reconciled on save, prices frozen by default — *(automation-pending)*
 
 - [ ] List page has no Total column (totals live on the detail page / PDF for firm quotes) — *(automation-pending)*
 
@@ -685,7 +683,7 @@ While creating a quote, users can create new entities without leaving the form:
 
 **Quantities:** each block needs at least one quantity row; every quantity must be a number > 0 (fractional allowed — parts sold by the dozen / ounce / pound / length) and unique within the part. Each non-override row must resolve to a priced tier (or use a custom price).
 
-**Lead time:** required — a whole-number value plus a unit (business days / calendar days / weeks); normalizes to 0 – 3,650 days.
+**Lead time:** required — any non-empty free text (e.g. "2–3 weeks", "In stock"); stored verbatim and does not drive the job due date.
 
 **Payment terms:** required — preset or custom free text; submission is blocked until a value is entered.
 

@@ -537,9 +537,9 @@ begin
   select id into v_contact from public.customer_contacts where customer_id = p_customer and is_primary limit 1;
   v_created := now() - (p_created||' days')::interval;
   insert into public.quotes (company_id, quote_number, customer_id, billing_address_id, shipping_address_id, contact_id,
-    status, lead_time_days, lead_time_value, lead_time_unit, payment_terms, expiration_date, created_by, created_at, status_changed_at)
+    status, lead_time_text, payment_terms, expiration_date, created_by, created_at, status_changed_at)
   values ('22222222-2222-2222-2222-222222222222', '', p_customer, v_bill, v_ship, v_contact,
-    p_status, p_lead, p_lead, 'calendar_days', 'Net 30', (now() + (p_exp||' days')::interval)::date,
+    p_status, p_lead || ' days', 'Net 30', (now() + (p_exp||' days')::interval)::date,
     '11111111-1111-1111-1111-111111111111', v_created, v_created)
   returning id into v_id;
   return v_id;
@@ -553,9 +553,9 @@ begin
   perform pg_temp.add_quote_line(q, '60000000-0000-0000-0000-000000000015', 10, 10);
   select quote_number into v_num from public.quotes where id = q;
   v_created := now() - interval '172 days';
-  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, lead_time_days, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
+  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
   select '22222222-2222-2222-2222-222222222222', q, '50000000-0000-0000-0000-000000000001', replace(v_num,'Q-','J-'), 'not_started', 'unshipped',
-         (now() - interval '130 days')::date, 14, 'PO-NW-44120', billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
+         (now() - interval '130 days')::date, 'PO-NW-44120', billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
   from public.quotes where id = q
   returning id into j;
   perform pg_temp.add_job_part(j, ql.part_id, 10, ql.quantity, ql.unit_price, ql.id, v_created)
@@ -593,9 +593,9 @@ declare v_job uuid; v_num text; v_created timestamptz; ql record;
 begin
   v_created := now() - (p_created||' days')::interval;
   select 'J-'||regexp_replace(quote_number,'^Q-','') into v_num from public.quotes where id = p_quote;
-  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, lead_time_days, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
+  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
   select '22222222-2222-2222-2222-222222222222', p_quote, customer_id, v_num, 'not_started', 'unshipped',
-         (now() + (p_due||' days')::interval)::date, 14, p_po, billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
+         (now() + (p_due||' days')::interval)::date, p_po, billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
   from public.quotes where id = p_quote
   returning id into v_job;
   for ql in select id, part_id, quantity, unit_price, sequence from public.quote_line_items where quote_id = p_quote order by sequence loop

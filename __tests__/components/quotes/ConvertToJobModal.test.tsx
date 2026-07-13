@@ -19,9 +19,7 @@ const quote = (): QuoteWithRelations =>
     id: 'q1',
     company_id: 'co1',
     quote_number: 'Q-100',
-    lead_time_days: null,
-    lead_time_value: null,
-    lead_time_unit: null,
+    lead_time_text: null,
     expiration_date: null,
     customers: { name: 'Customer Co' },
     line_items: [
@@ -65,5 +63,21 @@ describe('ConvertToJobModal — reopen resets the Customer PO field', () => {
     rerender(wrap(<ConvertToJobModal {...base} open />));
 
     await waitFor(() => expect(poField().value).toBe(''));
+  });
+});
+
+describe('ConvertToJobModal — no premature error on the empty due date', () => {
+  it('does not show a red "required" error on the untouched due date; Create stays disabled', async () => {
+    const base = { open: true, onClose: vi.fn(), onConverted: vi.fn(), quote: quote() };
+    render(wrap(<ConvertToJobModal {...base} />));
+
+    // The empty required due date must not scream a red "required" error on
+    // open — the disabled Create button already signals it, exactly like the
+    // equally-required Customer PO field (which shows no error either).
+    await waitFor(() => expect(poField().value).toBe(''));
+    expect(screen.queryByText(/due date is required/i)).not.toBeInTheDocument();
+
+    // Both required fields are still empty, so conversion stays gated.
+    expect(screen.getByRole('button', { name: /create j-100/i })).toBeDisabled();
   });
 });

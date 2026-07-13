@@ -18,7 +18,7 @@ import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
-import { isQuoteExpired, formatLeadTime } from '@/types/quote';
+import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob } from '@/utils/quotesAccess';
 import { unitShortLabel } from '@/lib/standardUnits';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
@@ -42,13 +42,9 @@ function formatCurrency(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
-/** Today + N days as an ISO date string (yyyy-mm-dd) for the date input. */
-function defaultDueDateISO(leadTimeDays: number | null): string {
+/** Today as a local ISO date string (yyyy-mm-dd) — the min for the picker. */
+function todayLocalISODate(): string {
   const d = new Date();
-  if (leadTimeDays !== null && !isNaN(leadTimeDays)) {
-    d.setDate(d.getDate() + leadTimeDays);
-  }
-  // toISOString gives UTC; trim to local-date shape.
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -64,9 +60,9 @@ export default function ConvertToJobModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [dueDateInput, setDueDateInput] = useState<string>(
-    defaultDueDateISO(quote.lead_time_days),
-  );
+  // Due date is entered manually — lead time is free text and no longer
+  // implies a date. Starts empty; required + not-in-the-past to convert.
+  const [dueDateInput, setDueDateInput] = useState<string>('');
   // Customer PO is captured at conversion (when the customer has accepted
   // and issued a PO), not at quote-creation. Stored on jobs.customer_po_number
   // (migration 20260526), so the modal always starts empty — the quote
@@ -118,7 +114,7 @@ export default function ConvertToJobModal({
   // Reset the form each time the modal opens (house convention: onEnter,
   // not a reset useEffect, which would trip set-state-in-effect).
   const handleEnter = () => {
-    setDueDateInput(defaultDueDateISO(quote.lead_time_days));
+    setDueDateInput('');
     setCustomerPoInput('');
     setAttachment(null);
     setAttachmentWarning(null);
@@ -131,7 +127,23 @@ export default function ConvertToJobModal({
     setSelectedByPart(initial);
   };
 
-  const dueDateValid = dueDateInput === '' || !isNaN(new Date(dueDateInput).getTime());
+  // Due date is mandatory and may not be in the past — a job created today
+  // can't legitimately be due before today.
+  const today = todayLocalISODate();
+  const dueDateEmpty = dueDateInput === '';
+  const dueDateParseable = !Number.isNaN(new Date(dueDateInput).getTime());
+  const dueDateInPast = !dueDateEmpty && dueDateParseable && dueDateInput < today;
+  const dueDateValid = !dueDateEmpty && dueDateParseable && !dueDateInPast;
+  // Only turn the field red for a genuinely bad *entry* (a past or unparseable
+  // date). An empty field is not an error on open — the disabled Create button
+  // already signals it's required, exactly like the equally-required Customer
+  // PO field, so we don't single the due date out with a premature red state.
+  const dueDateShowError = !dueDateEmpty && (!dueDateParseable || dueDateInPast);
+  const dueDateHelper = dueDateInPast
+    ? "Due date can't be in the past"
+    : !dueDateEmpty && !dueDateParseable
+      ? 'Enter a valid date'
+      : ' ';
   const poValid = customerPoInput.trim() !== '';
 
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
@@ -144,7 +156,7 @@ export default function ConvertToJobModal({
         .map((g) => selectedByPart[g.part_id])
         .filter((id): id is string => !!id);
       const result = await convertQuoteToJob(quote.id, {
-        dueDate: dueDateInput || null,
+        dueDate: dueDateInput,
         customerPoNumber: customerPoInput,
         selectedLineItemIds,
       });
@@ -289,7 +301,7 @@ export default function ConvertToJobModal({
                 Quoted lead time
               </Typography>
               <Typography variant="body1" fontWeight={500}>
-                {formatLeadTime(quote.lead_time_value, quote.lead_time_unit) ?? 'Not specified'}
+                {quote.lead_time_text ?? 'Not specified'}
               </Typography>
             </Box>
             <TextField
@@ -297,13 +309,15 @@ export default function ConvertToJobModal({
               type="date"
               size="small"
               fullWidth
+              required
               value={dueDateInput}
               onChange={(e) => setDueDateInput(e.target.value)}
               disabled={loading}
-              error={!dueDateValid}
-              helperText={!dueDateValid ? 'Enter a valid date' : ' '}
+              error={dueDateShowError}
+              helperText={dueDateHelper}
               slotProps={{
                 inputLabel: { shrink: true },
+                htmlInput: { min: today },
               }}
             />
             <TextField

@@ -113,7 +113,7 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
 
   return (
     <SettingsSection
-      title="Quote & Document Defaults"
+      title="App Default Settings"
       description="Default values applied to new records. Changing one doesn't affect records you've already created."
     >
       {error && (

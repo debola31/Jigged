@@ -251,7 +251,7 @@ template.
   ],
   "quotes": [
     {
-      "_ref": "quote-1", "customer_ref": "cust-1", "status": "active", "lead_time_days": 14,
+      "_ref": "quote-1", "customer_ref": "cust-1", "status": "active", "lead_time_text": "14 days",
       "line_items": [
         { "part_ref": "part-1", "sequence": 10, "quantity": 50, "unit_price": 130.00, "total_price": 6500.00 }
       ]

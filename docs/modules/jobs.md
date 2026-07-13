@@ -78,8 +78,7 @@ Overdue surfaces as:
 | production_status | Text | Yes | `not_started` / `in_progress` / `completed` / `cancelled` — DERIVED from `job_parts.production_status` via `compute_job_production_status()` and the sync triggers; never written directly by the dashboard |
 | fulfillment_status | Text | Yes | `unshipped` / `partially_shipped` / `fully_shipped` — DERIVED from the parts via `compute_job_fulfillment_status()` as shipment records are created |
 | invoicing_status | Text | Yes | `uninvoiced` / `partially_invoiced` / `fully_invoiced` (default `uninvoiced`) — DERIVED from the parts via `compute_job_invoicing_status()` as invoices are created |
-| due_date | Date | No | Date the job is due to ship |
-| lead_time_days | Integer | No | Lead time in days, typically copied from the source quote |
+| due_date | Date | No | Date the job is due to ship — entered manually at conversion (not derived from lead time) |
 | started_at | Timestamp | No | First time any part on the job moved to in_progress |
 | completed_at | Timestamp | No | When all parts hit completed/shipped |
 | shipped_at | Timestamp | No | When all parts moved to shipped |
@@ -101,7 +100,7 @@ Overdue surfaces as:
 
 `job_operations` and `job_materials` carry a `job_part_id` FK so each row belongs to exactly one part of one job. The `(job_part_id, sequence)` unique constraint replaces the old `(job_id, sequence)` so each part has its own independent operations sequence.
 
-**Due date & conversion:** When a quote is converted via `convertQuoteToJob`, the caller can pass `leadTimeDays` to override the quote's value. If a lead time is present, `jobs.due_date = CURRENT_DATE + lead_time_days`. The job's due date is shared by every part — split-shipping deadlines are a future enhancement.
+**Due date & conversion:** When a quote is converted via `convertQuoteToJob`, the due date is entered **manually** in the Convert-to-Job modal (required, not-in-the-past) and written straight to `jobs.due_date`. It is **no longer derived from lead time**, and the job no longer stores a lead-time snapshot. The job's due date is shared by every part — split-shipping deadlines are a future enhancement.
 
 **Editing order quantity:** Customers commonly change quantity (up or down) after a quote converts, so `job_parts.quantity` is editable from the Job detail page (edit icon next to the "Order qty" chip) via `updateJobPartQuantity(jobPartId, newQty, opts?)`. The job — not the now-read-only quote — is the post-conversion source of truth. Behaviour:
 

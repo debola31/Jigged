@@ -62,9 +62,7 @@ test.describe('Fractional quote to job workflow', () => {
       timeout: 10_000,
     });
 
-    await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
-    await page.getByRole('combobox', { name: 'Unit' }).click();
-    await page.getByRole('option', { name: 'Weeks' }).click();
+    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
 
     await page.getByRole('combobox', { name: /Payment terms/i }).click();
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
@@ -83,6 +81,8 @@ test.describe('Fractional quote to job workflow', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/Convert .* to/i)).toBeVisible();
     await dialog.getByRole('textbox', { name: /Customer PO/i }).fill('PO-E2E-FRAC-001');
+    // Due date is now required (not prefilled from lead time) and not-in-past.
+    await dialog.getByLabel(/Due date/i).fill('2099-12-31');
     await dialog.getByRole('button', { name: /^Create J-\d+/i }).click();
 
     await expect(page).toHaveURL(/\/jobs\/[^/]+$/, { timeout: 15_000 });

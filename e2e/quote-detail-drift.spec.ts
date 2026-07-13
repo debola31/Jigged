@@ -119,9 +119,7 @@ async function createQuoteAtBaseline(
   const snapshottedDollar = snapText.match(/\$[\d.,]+/)?.[0];
   expect(snapshottedDollar).toBeTruthy();
 
-  await page.getByRole('spinbutton', { name: /Lead time/i }).fill('14');
-  await page.getByRole('combobox', { name: 'Unit' }).click();
-  await page.getByRole('option', { name: 'Weeks' }).click();
+  await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
   await page.getByRole('combobox', { name: /Payment terms/i }).click();
   await page.getByRole('option', { name: 'Net 30', exact: true }).click();
   await page.getByRole('button', { name: /Create Quote/i }).click();

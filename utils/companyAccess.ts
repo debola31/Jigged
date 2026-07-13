@@ -2,6 +2,7 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
+import type { Json } from '@/types/database';
 
 export interface Company {
   id: string;
@@ -313,5 +314,40 @@ export async function updateCompanyProfile(
   if (error) {
     console.error('Error updating company profile:', error);
     throw new Error(`Failed to update company profile: ${error.message}`);
+  }
+}
+
+/**
+ * Merge numeric business defaults into companies.settings.defaults (jsonb).
+ * Read-modify-write of the whole settings object so the sibling `features`
+ * block (feature flags) is preserved. Keys should be CompanyDefaultKey values;
+ * see lib/companyDefaults.ts for the registry + read helpers.
+ */
+export async function updateCompanyDefaults(
+  companyId: string,
+  patch: Record<string, number>,
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const company = await getCompany(companyId);
+  if (!company) {
+    throw new Error('Company not found.');
+  }
+
+  const settings = (company.settings ?? {}) as Record<string, unknown>;
+  const existingDefaults = (settings.defaults ?? {}) as Record<string, unknown>;
+  const nextSettings = {
+    ...settings,
+    defaults: { ...existingDefaults, ...patch },
+  } as Json;
+
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings: nextSettings, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+
+  if (error) {
+    console.error('Error updating company defaults:', error);
+    throw new Error(`Failed to update company defaults: ${error.message}`);
   }
 }

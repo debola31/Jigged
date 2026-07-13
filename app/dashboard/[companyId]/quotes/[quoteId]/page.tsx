@@ -37,6 +37,7 @@ import {
 import { getJobQuantitiesForQuote } from '@/utils/jobsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
+import { readQuoteValidityDays } from '@/lib/companyDefaults';
 import QuotePdfPreviewDialog from '@/components/quotes/QuotePdfPreviewDialog';
 import {
   quoteToFormData,
@@ -91,6 +92,15 @@ export default function QuoteDetailPage() {
     onError: (err) =>
       setError(err instanceof Error ? err.message : 'Failed to load quote'),
   });
+
+  // Load the company eagerly so reactivating an expired quote can honor the
+  // company's configured quote-validity window, and the PDF preview can reuse
+  // it without a second fetch. Fallback (still loading / failed) is null, which
+  // readQuoteValidityDays resolves to the default validity.
+  const { data: loadedCompany } = useLoad(
+    () => getCompany(companyId),
+    [companyId],
+  );
 
   // Reflect current job quantities on a converted quote (read-only). A quantity
   // edited on the job after conversion shows here as "now N on the job"; the
@@ -183,7 +193,7 @@ export default function QuoteDetailPage() {
     try {
       // Fetch (or reuse) the company so the preview dialog can render the
       // shop header without doing its own data fetch.
-      const c = company ?? (await getCompany(companyId));
+      const c = company ?? loadedCompany ?? (await getCompany(companyId));
       if (!c) {
         throw new Error('Company info unavailable — cannot generate PDF.');
       }
@@ -289,7 +299,9 @@ export default function QuoteDetailPage() {
     // still-past date leaves it expired (updateQuote derives status from it).
     const initialData = quoteToFormData(quote);
     if (expired) {
-      initialData.expiration_date = defaultExpirationDate();
+      initialData.expiration_date = defaultExpirationDate(
+        readQuoteValidityDays(loadedCompany),
+      );
     }
 
     return (

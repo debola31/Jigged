@@ -366,9 +366,17 @@ export interface CompanyMember {
 export const DEFAULT_QUOTE_LEAD_DAYS = 14;
 export const DEFAULT_QUOTE_VALIDITY_DAYS = 10;
 
-export function defaultExpirationDate(): string {
+/**
+ * Expiration date for a NEW quote: today + `validityDays`. The validity window
+ * is company-configurable (companies.settings.defaults.quote_validity_days,
+ * read via readQuoteValidityDays); callers that don't have the company row pass
+ * nothing and get the DEFAULT_QUOTE_VALIDITY_DAYS fallback.
+ */
+export function defaultExpirationDate(
+  validityDays: number = DEFAULT_QUOTE_VALIDITY_DAYS,
+): string {
   const d = new Date();
-  d.setDate(d.getDate() + DEFAULT_QUOTE_VALIDITY_DAYS);
+  d.setDate(d.getDate() + validityDays);
   return d.toISOString().slice(0, 10);
 }
 

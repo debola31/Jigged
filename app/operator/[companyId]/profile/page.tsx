@@ -82,7 +82,10 @@ export default function OperatorProfilePage() {
     // OperatorStationContext uses; sessionStorage is no longer the station's home.
     clearStoredStation();
     const supabase = getSupabase();
-    await supabase.auth.signOut();
+    // Local scope — sign out ONLY this device. An operator logging out here must
+    // not revoke their session on their other devices (which surfaced as a
+    // forced re-login when marking a job complete).
+    await supabase.auth.signOut({ scope: 'local' });
     router.push(`/operator/${companyId}/login`);
   };
 

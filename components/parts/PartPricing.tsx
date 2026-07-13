@@ -190,6 +190,9 @@ export default function PartPricing({
     part.costing_batch_quantity,
   );
   useEffect(() => {
+    // Mirror the persisted prop into local state (derived-state sync — the
+    // documented false-positive class in eslint.config.mjs).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCostingBatchQty(part.costing_batch_quantity);
   }, [part.costing_batch_quantity]);
   const [previewRefresh, setPreviewRefresh] = useState(0);

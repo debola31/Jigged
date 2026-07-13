@@ -50,6 +50,9 @@ export default function CostAtQtyPreview({ partId, refreshKey = 0 }: CostAtQtyPr
   // every keystroke. No AI involved (pure cost math), safe to run on change.
   useEffect(() => {
     if (!qtyValid) {
+      // Debounced data-fetch effect (documented false-positive class in
+      // eslint.config.mjs) — clearing stale state on invalid input is intended.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBreakdown(null);
       return;
     }

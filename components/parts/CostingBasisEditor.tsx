@@ -41,6 +41,9 @@ export default function CostingBasisEditor({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Sync the editable field when the persisted prop changes (derived-state
+    // sync — the documented false-positive class in eslint.config.mjs).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInput(costingBatchQuantity !== null ? String(costingBatchQuantity) : '');
   }, [costingBatchQuantity]);
 

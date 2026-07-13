@@ -146,6 +146,9 @@ export default function MaterialRowEditor({
   // edit mode (wholeUnitsTouched starts true there), so a stored value is kept.
   useEffect(() => {
     if (wholeUnitsTouched) return;
+    // Derived-state sync from the chosen unit (documented false-positive class
+    // in eslint.config.mjs); guarded to a no-op when the default already holds.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setValue((prev) => {
       const next = defaultConsumeWholeUnits(prev.unit);
       return prev.consume_whole_units === next ? prev : { ...prev, consume_whole_units: next };

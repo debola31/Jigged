@@ -45,12 +45,18 @@ in all the CSV exports they have (or just the ones they want); Jigged reads ever
 
 1. **Upload** — drag in the CSVs; they're parsed in the browser (nothing leaves the machine
    yet).
-2. **Map** — Jigged **auto-detects** what each file is (parts, vendors, work centers,
-   routings, BOMs, customers) and maps each raw column to the right Jigged field, then shows
-   it on a **confirm-columns step** so the owner corrects any wrong guess *before* the review
-   runs. Nothing is inferred-and-hidden — the review reflects the mapping they confirmed. (A
-   correction here visibly changes the review, since the analyzer keys its checks on the
-   confirmed roles.)
+2. **Check your files** — Jigged **auto-detects** what each file is (parts, vendors, work
+   centers, routings, BOMs, customers) and maps its columns, then — reframed for a
+   non-technical owner — **tells them what it understood** ("*this looks like your Parts list —
+   8,393 rows, all set*") and asks only about the few things it's unsure of: a low-confidence
+   file type ("*what kind of data is this?*") or a **missing required field** ("*which column
+   has the unit of measure?*", offered as real sample values, not field names). Confident
+   matches are **shown, not re-confirmed**; the full column-by-column grid is tucked behind
+   "see how we matched each column" for the rare power user. Everything stays correctable on
+   the next step, so wrong guesses are recoverable rather than gated. (Research: auto-map at
+   high confidence + surface only the ambiguous — Flatfile/OneSchema/Dromo; confidence-based
+   selective confirmation + assumption-plus-undo for non-technical/older users; and the
+   over-reliance guardrail — surface uncertainty, don't force confirmation of the confident.)
 3. **Review & Fix** — reading everything read-only (nothing written, nothing stored), Jigged
    shows a plain-English **review** that leads with the single most important blocking issue
    and a plain verdict (**"Ready to import" / "1 thing to fix"**), then a prioritized **"What

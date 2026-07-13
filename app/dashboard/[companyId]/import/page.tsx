@@ -74,7 +74,7 @@ import type {
   UploadedFilePayload,
 } from '@/types/data-import';
 
-const STEPS = ["What you'll need", 'Upload your files', 'Map columns', 'Review', 'Import'];
+const STEPS = ["What you'll need", 'Upload your files', 'Check your files', 'Review', 'Import'];
 const SAMPLE_ROWS = 20;
 
 const WHAT_TO_EXPORT = [
@@ -390,15 +390,10 @@ export default function ImportDataPage() {
 
   return (
     <Box>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          Import your data
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Bring your existing shop data into Jigged. We&apos;ll help you check and fix it first, and
-          show you exactly what will come in — nothing is imported until you say so.
-        </Typography>
-      </Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Bring your existing shop data into Jigged. We&apos;ll help you check and fix it first, and
+        show you exactly what will come in — nothing is imported until you say so.
+      </Typography>
 
       <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
         {STEPS.map((label) => (
@@ -480,11 +475,11 @@ export default function ImportDataPage() {
           {activeStep === 2 && (
             <Box>
               <Typography variant="h6" gutterBottom>
-                Check what each file is
+                Here&apos;s what we found in your files
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                We filled in our best guess for what each file is and which column holds what. Fix
-                anything that looks wrong, then continue — the review uses what you confirm here.
+                We read your files and matched everything we could. Just handle the few items
+                flagged below, then continue — you can still change anything on the next step.
               </Typography>
               <ColumnMappingStep
                 files={working}

@@ -15,6 +15,7 @@ export type EditableRow = Record<string, string> & { __rowId: string };
 export interface WorkingFile {
   filename: string;
   entityType: EntityType;
+  entityConfidence?: number; // 0-1 from the AI structure step; 1 once the owner confirms
   columnRoles: Record<string, string>; // canonical_field -> raw_header (from the AI structure step)
   headers: string[];
   rows: EditableRow[];
@@ -60,6 +61,7 @@ export function buildWorkingFiles(
     return {
       filename: f.filename,
       entityType: (fc?.entity_type ?? 'unknown') as EntityType,
+      entityConfidence: fc?.entity_confidence ?? 0,
       columnRoles: fc?.column_roles ?? {},
       headers: f.headers,
       // Stable id = filename + original row index; deterministic (no random).
@@ -103,7 +105,8 @@ export function setWorkingEntity(
   fileIndex: number,
   entityType: EntityType,
 ): WorkingFile[] {
-  return working.map((wf, i) => (i === fileIndex ? { ...wf, entityType } : wf));
+  // The owner just told us what it is → treat as confirmed.
+  return working.map((wf, i) => (i === fileIndex ? { ...wf, entityType, entityConfidence: 1 } : wf));
 }
 
 /** Point a canonical field at a raw header, or clear it when `rawHeader` is empty. */

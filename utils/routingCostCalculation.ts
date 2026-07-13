@@ -49,10 +49,24 @@ export interface LaborItem {
 
 export interface MaterialItem {
   item_name: string;
+  /** Per-parent-unit BOM quantity in `unit` (e.g. 0.05 strips/part). */
   quantity: number;
   unit: string;
+  /** Child cost per its primary unit at the valuation qty (pinned batch or consumed). */
   cost_per_unit: number;
+  /** Per-parent-unit material contribution (ceiling-adjusted when whole-unit). */
   cost: number;
+  /** `quantity` converted to the child's primary unit — per parent unit. */
+  qty_in_primary: number;
+  /** Whether this line ceilings consumption to whole units. */
+  consume_whole_units: boolean;
+  /**
+   * Total units of this material consumed across the whole order at the qty the
+   * breakdown was computed for (`ceil(order_qty × qty_in_primary)` in whole-unit
+   * mode; `order_qty × qty_in_primary` fractional). Null-safe for display of
+   * "this order needs N strips".
+   */
+  units_consumed: number;
 }
 
 export interface RoutingCostBreakdown {
@@ -253,11 +267,25 @@ export async function calculateRoutingCost(
         qtyInPrimary = bomQty;
       }
 
-      const cumulativeQty = safeQty * qtyInPrimary;
+      // Units of the child physically consumed across the parent batch of
+      // safeQty. Whole-unit lines ceiling to discrete stock (a strip you can't
+      // cut a fraction of); fractional lines are exact and equal the prior
+      // cascaded qty.
+      const unitsConsumed = line.consume_whole_units
+        ? Math.ceil(safeQty * qtyInPrimary)
+        : safeQty * qtyInPrimary;
+
+      // A made child with a costing batch qty is valued at that FIXED batch (its
+      // own production economics), decoupled from how many this order draws.
+      // Otherwise value it at what we actually consume (cascade). Mirrors
+      // compute_part_cost_at_qty exactly.
+      const childBatchQty = child.costing_batch_quantity;
+      const pinned = child.source === 'made' && childBatchQty !== null;
+      const childValQty = pinned ? (childBatchQty as number) : unitsConsumed;
 
       let childUnitCost: number | null = null;
       try {
-        childUnitCost = await getComputedPartCost(child.id, cumulativeQty);
+        childUnitCost = await getComputedPartCost(child.id, childValQty);
       } catch (err) {
         const detail = `cost lookup failed (${(err as Error).message})`;
         warnings.push({
@@ -276,15 +304,16 @@ export async function calculateRoutingCost(
       if (childUnitCost === null) {
         // Surface the deepest offending bought leaf via the explain RPC. The
         // BOM panel uses this to render an actionable tooltip with the leaf's
-        // name + a link to its detail page.
+        // name + a link to its detail page. Explain at the same valuation qty
+        // the cost function actually used (batch-pinned or consumed).
         let leafHint = '';
         try {
-          const explain = await getPartCostExplain(child.id, cumulativeQty);
+          const explain = await getPartCostExplain(child.id, childValQty);
           const firstLeaf = explain.missing_leaves[0];
           if (firstLeaf) {
             leafHint =
               firstLeaf.part_id === child.id
-                ? `no priced tier covers qty ${formatQty(cumulativeQty)}`
+                ? `no priced tier covers qty ${formatQty(childValQty)}`
                 : `no priced tier covers qty ${formatQty(firstLeaf.qty_required)} for ${firstLeaf.part_name}`;
           }
         } catch {
@@ -293,7 +322,7 @@ export async function calculateRoutingCost(
         if (!leafHint) {
           leafHint =
             child.source === 'bought'
-              ? `no priced tier covers qty ${formatQty(cumulativeQty)} — add a procurement tier on the child part`
+              ? `no priced tier covers qty ${formatQty(childValQty)} — add a procurement tier on the child part`
               : `no priced tier in the BOM subtree covers the cascaded qty — open the child`;
         }
         warnings.push({
@@ -309,13 +338,23 @@ export async function calculateRoutingCost(
         continue;
       }
 
-      const materialCost = qtyInPrimary * childUnitCost;
+      // Per-parent-unit material contribution. The (fractional && not-pinned)
+      // path is the LEGACY expression, kept textually identical so every
+      // pre-existing BOM line yields a byte-identical cost. Ceiling / pinning
+      // take the general (consumed × unit_cost) / batch form.
+      const materialCost =
+        !line.consume_whole_units && !pinned
+          ? qtyInPrimary * childUnitCost
+          : (unitsConsumed * childUnitCost) / safeQty;
       materialItems.push({
         item_name: itemName,
         quantity: bomQty,
         unit: effectiveBomUnit || '',
         cost_per_unit: Math.round(childUnitCost * 10000) / 10000,
         cost: Math.round(materialCost * 100) / 100,
+        qty_in_primary: qtyInPrimary,
+        consume_whole_units: line.consume_whole_units,
+        units_consumed: unitsConsumed,
       });
     }
   }

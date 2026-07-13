@@ -1605,6 +1605,7 @@ export type Database = {
       parts: {
         Row: {
           company_id: string
+          costing_batch_quantity: number | null
           created_at: string
           description: string | null
           id: string
@@ -1622,6 +1623,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          costing_batch_quantity?: number | null
           created_at?: string
           description?: string | null
           id?: string
@@ -1639,6 +1641,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          costing_batch_quantity?: number | null
           created_at?: string
           description?: string | null
           id?: string
@@ -1681,6 +1684,7 @@ export type Database = {
       parts_bom: {
         Row: {
           child_part_id: string
+          consume_whole_units: boolean
           created_at: string
           id: string
           notes: string | null
@@ -1692,6 +1696,7 @@ export type Database = {
         }
         Insert: {
           child_part_id: string
+          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null
@@ -1703,6 +1708,7 @@ export type Database = {
         }
         Update: {
           child_part_id?: string
+          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null
@@ -2132,6 +2138,7 @@ export type Database = {
           quote_id: string
           sequence: number
           unit: string | null
+          units_consumed: number | null
         }
         Insert: {
           company_id: string
@@ -2146,6 +2153,7 @@ export type Database = {
           quote_id: string
           sequence: number
           unit?: string | null
+          units_consumed?: number | null
         }
         Update: {
           company_id?: string
@@ -2160,6 +2168,7 @@ export type Database = {
           quote_id?: string
           sequence?: number
           unit?: string | null
+          units_consumed?: number | null
         }
         Relationships: [
           {

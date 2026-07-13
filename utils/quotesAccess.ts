@@ -916,6 +916,10 @@ async function writeCostSnapshotsForPart(
       unit: item.unit,
       cost_per_unit: item.cost_per_unit,
       line_cost: item.cost,
+      // Discrete count actually consumed across the order (ceil in whole-unit
+      // mode) so the itemized breakdown can explain a line whose per-part
+      // quantity × cost_per_unit no longer multiplies out to line_cost.
+      units_consumed: item.units_consumed,
     }));
     const { error } = await supabase.from('quote_materials').insert(matRows);
     if (error) throw error;

@@ -84,16 +84,33 @@ beforeEach(() => {
 describe('insertLineItemForPart', () => {
   const tiers = [makeTier({ id: 't10', quantity: 10, markup_percent: 25, unit_price: 33.333 })];
 
-  it('rounds total_price to cents (Math.round(unit*qty*100)/100)', async () => {
-    // 33.333 * 3 = 99.999 -> rounds up to 100.00
+  it('prices at the live base cost × tier markup, rounded to cents (Option A)', async () => {
+    // Option A: unit_price = base(orderQty) × (1 + markup/100), NOT the frozen
+    // tier unit_price — so ceiling/batch material cost (a step function of qty)
+    // reaches the price. base 26.6664 × 1.25 = 33.3330 → rounds to 33.33; the
+    // tier's own 33.333 is ignored for the line price. total = 33.33 × 3 = 99.99.
     resolveTierMock.mockReturnValue({ unit_price: 33.333, source_tier_id: 't10' });
-    getComputedPartCostMock.mockResolvedValue(20);
+    getComputedPartCostMock.mockResolvedValue(26.6664);
     mockQueryBuilder.data = { id: 'li-1' };
 
     await insertLineItemForPart('q1', 'co-1', 'part-1', 3, tiers, 0);
 
     expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ unit_price: 33.333, quantity: 3, total_price: 100 }),
+      expect.objectContaining({ unit_price: 33.33, quantity: 3, total_price: 99.99 }),
+    );
+  });
+
+  it('falls back to the resolved tier price when the live base cost is unavailable', async () => {
+    // If getComputedPartCost returns null (cost can't be computed), the line
+    // must not emit NaN — it falls back to the resolved tier's unit_price.
+    resolveTierMock.mockReturnValue({ unit_price: 42, source_tier_id: 't10' });
+    getComputedPartCostMock.mockResolvedValue(null);
+    mockQueryBuilder.data = { id: 'li-1' };
+
+    await insertLineItemForPart('q1', 'co-1', 'part-1', 2, tiers, 0);
+
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_price: 42, total_price: 84, base_cost_per_unit: null }),
     );
   });
 

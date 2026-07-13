@@ -8,10 +8,10 @@ import type {
 } from '@/types/bom';
 
 const BOM_COLUMNS =
-  'id, parent_part_id, child_part_id, quantity, unit, sequence, created_at, updated_at';
+  'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
-  'id, part_name, description, primary_unit, is_stocked, source';
+  'id, part_name, description, primary_unit, is_stocked, source, costing_batch_quantity';
 
 const PARENT_PART_COLUMNS = 'id, part_name, description';
 
@@ -35,25 +35,17 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
     throw error;
   }
 
+  type ChildPartRow = {
+    id: string;
+    part_name: string;
+    description: string | null;
+    primary_unit: string | null;
+    is_stocked: boolean;
+    source: 'made' | 'bought';
+    costing_batch_quantity: number | string | null;
+  };
   type Row = BomLine & {
-    child_part:
-      | {
-          id: string;
-          part_name: string;
-          description: string | null;
-          primary_unit: string | null;
-          is_stocked: boolean;
-          source: 'made' | 'bought';
-        }
-      | Array<{
-          id: string;
-          part_name: string;
-          description: string | null;
-          primary_unit: string | null;
-          is_stocked: boolean;
-          source: 'made' | 'bought';
-        }>
-      | null;
+    child_part: ChildPartRow | ChildPartRow[] | null;
   };
 
   return ((data || []) as Row[])
@@ -67,9 +59,16 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
         quantity: Number(row.quantity),
         unit: row.unit,
         sequence: row.sequence,
+        consume_whole_units: Boolean(row.consume_whole_units),
         created_at: row.created_at,
         updated_at: row.updated_at,
-        child_part: child,
+        child_part: {
+          ...child,
+          costing_batch_quantity:
+            child.costing_batch_quantity === null || child.costing_batch_quantity === undefined
+              ? null
+              : Number(child.costing_batch_quantity),
+        },
       } as BomLineWithChildPart;
     })
     .filter((row): row is BomLineWithChildPart => row !== null);
@@ -144,6 +143,7 @@ export async function getBomParents(childPartId: string): Promise<BomLineWithPar
         quantity: Number(row.quantity),
         unit: row.unit,
         sequence: row.sequence,
+        consume_whole_units: Boolean(row.consume_whole_units),
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_part: parent,
@@ -271,6 +271,7 @@ export async function addBomLine(
       quantity,
       unit: formData.unit.trim(),
       sequence,
+      consume_whole_units: formData.consume_whole_units,
     })
     .select(BOM_COLUMNS)
     .single();
@@ -327,6 +328,7 @@ export async function updateBomLine(
       child_part_id: formData.child_part_id,
       quantity,
       unit: formData.unit.trim(),
+      consume_whole_units: formData.consume_whole_units,
       updated_at: new Date().toISOString(),
     })
     .eq('id', bomLineId)

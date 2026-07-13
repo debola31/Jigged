@@ -51,37 +51,41 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
 export async function getTiersWithComputedPrices(
   partId: string,
 ): Promise<ComputedPartPricingTier[]> {
-  const [tiers, breakdown] = await Promise.all([
-    getTiersForPart(partId),
-    calculateRoutingCost(partId).catch(() => null),
-  ]);
+  const tiers = await getTiersForPart(partId);
+  if (tiers.length === 0) return [];
 
-  if (!breakdown) {
-    // No routing/BOM (e.g. bought parts): the base cost comes from the part's
-    // procurement tiers via `compute_part_cost_at_qty`, not a parent routing.
-    // Sell price is still the same cost-plus model — base × (1 + markup/100) —
-    // so bought parts price in every read path that uses this resolver (quote
-    // form preview, quote PDF, quote line items). Matches `calculateTierPricing`
-    // semantics exactly: a null markup yields a null price ("no price yet"), and
-    // a tier whose base cost can't resolve (no procurement tier covers its qty)
-    // keeps unit_price = null so the "no usable tier" check still fires.
-    return Promise.all(
-      tiers.map(async (t) => {
-        const rawBase = await getComputedPartCost(partId, t.quantity).catch(() => null);
-        if (rawBase === null || t.markup_percent == null || Number.isNaN(t.markup_percent)) {
-          return { ...t, unit_price: null };
-        }
-        const baseCostPerUnit = Math.round(rawBase * 100) / 100;
-        const unitPrice = Math.round(baseCostPerUnit * (1 + t.markup_percent / 100) * 100) / 100;
+  // Compute each tier's base cost AT THAT TIER'S OWN QUANTITY (not a single
+  // qty=1 breakdown reused across tiers). This matters once a BOM line uses
+  // whole-unit (ceiling) consumption or a batch-pinned child: material cost is
+  // then a step function of qty, so a qty=1 base would misprice every tier
+  // (issue: a yield part read at qty=1 ceilings to 1 whole strip → ~20× the
+  // real per-part material cost). Made parts go through the routing+BOM
+  // breakdown; parts with no routing/BOM (bought) fall back to the
+  // procurement-cost RPC. Both are the same cost-plus model — base × (1 +
+  // markup/100) — and a null markup or unresolvable base yields unit_price =
+  // null so the "no usable tier" check still fires.
+  //
+  // NOTE: the actual quote LINE price is recomputed at the real order qty in
+  // quoteLineItemsAccess (Option A) — this per-tier list is the preview/PDF
+  // ladder and the source of the resolved markup %, so it must be
+  // self-consistent per tier, but between-breakpoint orders are priced by the
+  // line path, not by reading a breakpoint here.
+  return Promise.all(
+    tiers.map(async (t) => {
+      const breakdown = await calculateRoutingCost(partId, t.quantity).catch(() => null);
+      if (breakdown) {
+        const { unitPrice } = calculateTierPricing(breakdown, t.quantity, t.markup_percent);
         return { ...t, unit_price: unitPrice };
-      }),
-    );
-  }
-
-  return tiers.map((t) => {
-    const { unitPrice } = calculateTierPricing(breakdown, t.quantity, t.markup_percent);
-    return { ...t, unit_price: unitPrice };
-  });
+      }
+      const rawBase = await getComputedPartCost(partId, t.quantity).catch(() => null);
+      if (rawBase === null || t.markup_percent == null || Number.isNaN(t.markup_percent)) {
+        return { ...t, unit_price: null };
+      }
+      const baseCostPerUnit = Math.round(rawBase * 100) / 100;
+      const unitPrice = Math.round(baseCostPerUnit * (1 + t.markup_percent / 100) * 100) / 100;
+      return { ...t, unit_price: unitPrice };
+    }),
+  );
 }
 
 /**

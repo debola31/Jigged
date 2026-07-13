@@ -304,6 +304,7 @@ export default function PartBomPanel({
       child_part_id: value.childPart.id,
       quantity: value.quantity,
       unit: value.unit,
+      consume_whole_units: value.consume_whole_units,
     };
 
     setEditorError(null);
@@ -383,6 +384,7 @@ export default function PartBomPanel({
         } satisfies PartSelectOption,
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
+        consume_whole_units: editingRow.consume_whole_units,
       }
     : undefined;
 
@@ -451,6 +453,17 @@ export default function PartBomPanel({
             const missingCost =
               ladderLoaded &&
               (ladder.length === 0 || ladder.every((t) => t.costPerUnit === null));
+            // Fixed batch this made child is valued at when consumed here (null
+            // = valued at the cascaded consumed qty). Only meaningful for made
+            // children.
+            const pinnedBatch =
+              child.source === 'made' ? child.costing_batch_quantity : null;
+            // Scoped hint: a made child valued at cascaded qty whose per-part
+            // consumption is fractional (the strip-to-blank / yield signature)
+            // is the case where the cascaded-qty surprise bites. Don't nag on
+            // 1:1 build-to-order sub-assemblies where cascade is already right.
+            const showPinHint =
+              child.source === 'made' && pinnedBatch === null && row.quantity < 1;
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -508,10 +521,16 @@ export default function PartBomPanel({
                       <ChevronRightIcon sx={{ fontSize: 16 }} />
                     </Link>
                   </Box>
-                  <Box sx={{ minWidth: 110, textAlign: 'right' }}>
+                  <Box sx={{ minWidth: 130, textAlign: 'right' }}>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
                       {formatQuantity(row.quantity)} {row.unit}
                     </Typography>
+                    {(row.consume_whole_units || pinnedBatch !== null) && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {row.consume_whole_units ? 'whole units' : 'fractional'}
+                        {pinnedBatch !== null ? ` · batch ${formatQuantity(pinnedBatch)}` : ''}
+                      </Typography>
+                    )}
                   </Box>
                   {!readOnly && (
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
@@ -590,6 +609,38 @@ export default function PartBomPanel({
                       material so it can be costed.
                     </Typography>
                   </Box>
+                )}
+                {/* Pinned child: the ladder above is the child's OWN qty-break
+                    costs, which differ from the fixed batch cost this BOM
+                    values it at. Label so the two numbers aren't read as a
+                    contradiction. */}
+                {pinnedBatch !== null && ladder.length > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
+                    here it&apos;s valued at its fixed batch of {formatQuantity(pinnedBatch)}{' '}
+                    (set on its Pricing card).
+                  </Typography>
+                )}
+                {/* Cascaded-qty surprise guard: only fires on fractional
+                    (yield-style) made children with no batch pin. */}
+                {showPinHint && (
+                  <Typography variant="caption" color="text.secondary">
+                    Valued at the cascaded consumed qty. To pin a fixed per-{row.unit}{' '}
+                    cost (e.g. a batch of 25), set a costing batch qty on{' '}
+                    <Link
+                      component={NextLink}
+                      href={buildPartHref({
+                        companyId,
+                        targetPartId: child.id,
+                        chain: pushPartToChain(currentChain, partId, child.id),
+                      })}
+                      underline="always"
+                      color="primary.main"
+                    >
+                      {child.part_name}
+                    </Link>
+                    .
+                  </Typography>
                 )}
               </Box>
             );

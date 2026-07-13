@@ -55,6 +55,8 @@ import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
+import CostAtQtyPreview from '@/components/parts/CostAtQtyPreview';
+import CostingBasisEditor from '@/components/parts/CostingBasisEditor';
 
 interface PartPricingProps {
   companyId: string;
@@ -180,6 +182,17 @@ export default function PartPricing({
   useEffect(() => {
     setLinkedRateId(part.markup_rate_id);
   }, [part.markup_rate_id]);
+
+  // Local mirror of the costing batch quantity so the CostingBasisEditor's save
+  // reflects instantly; `previewRefresh` re-runs the Cost-at-qty preview and the
+  // tier base recompute (both depend on this part's own valuation basis).
+  const [costingBatchQty, setCostingBatchQty] = useState<number | null>(
+    part.costing_batch_quantity,
+  );
+  useEffect(() => {
+    setCostingBatchQty(part.costing_batch_quantity);
+  }, [part.costing_batch_quantity]);
+  const [previewRefresh, setPreviewRefresh] = useState(0);
 
   const [rateMenuAnchor, setRateMenuAnchor] = useState<HTMLElement | null>(null);
   const [userRates, setUserRates] = useState<MarkupRate[]>([]);
@@ -626,7 +639,29 @@ export default function PartPricing({
             )}
           </Box>
 
-          <Divider sx={{ mb: 2 }} />
+          {/* Cost-at-qty preview: shows the step-function material cost (whole-
+              unit ceiling / batch pinning) at a user-entered order qty, so a
+              yield part's real per-part cost is visible where the tier table
+              can't express it. */}
+          <CostAtQtyPreview partId={partId} refreshKey={refreshKey + previewRefresh} />
+
+          {/* Costing basis: pin how THIS made part is valued when consumed as a
+              material (e.g. a batch of 25 → fixed $/unit). */}
+          <CostingBasisEditor
+            partId={partId}
+            primaryUnit={part.primary_unit}
+            costingBatchQuantity={costingBatchQty}
+            onSaved={(v) => {
+              setCostingBatchQty(v);
+              setPreviewRefresh((n) => n + 1);
+              // Tier base costs can depend on this part's own valuation basis;
+              // refresh the parent (workspace banner) or reload locally.
+              if (onPricingChanged) onPricingChanged();
+              else loadAll();
+            }}
+          />
+
+          <Divider sx={{ mt: 2, mb: 2 }} />
         </>
       )}
 

@@ -503,22 +503,35 @@ pnpm install                                       # node deps for THIS worktree
 conda run -n jigged python -m pytest tests/unit/   # backend tests, jigged env
 ```
 
-**The local Supabase stack follows the _primary_ checkout's branch, not your
-worktree.** `supabase start` / `supabase db reset` replay the migrations on the
-branch checked out in the **primary** working tree (the first entry in
-`git worktree list`) — a linked worktree's un-merged migrations are **not** on
-the local stack. So when working from a worktree:
+**The local Supabase stack is a machine-wide singleton, shared by every
+worktree — it is NOT per-worktree.** There is one Postgres container set per
+machine. `supabase start` / `supabase db reset` replay migrations from whatever
+directory invokes them into that one shared DB, so a `db reset` from any
+worktree **replaces the stack for every other worktree** too. It does not track
+a branch; it holds whatever was last replayed into it — in practice the
+primary's, since that's where resets usually run. So when working from a
+worktree:
 
-- **No migration changes in your branch?** The local stack is a valid substrate
-  — run `pnpm dev`, unit tests, and E2E against it from the worktree normally.
-  This is why a UI/logic-only change can be fully verified locally from a
-  worktree (the schema it needs already exists).
-- **Your branch adds or edits migrations?** Verify them on the PR's Supabase
-  **preview branch**, which applies the migration to its own isolated DB —
-  that's the gate. Do **not** try to reproduce them on the local stack from a
-  worktree: checking the branch out in the primary tree or `db reset`-ing to
-  pick them up just confuses what the local stack represents (and mutates the
-  primary's checkout). Keep migration verification on the preview branch.
+- **No migration changes in your branch?** The shared local stack is a valid
+  substrate — run `pnpm dev`, unit tests, and E2E against it from the worktree
+  normally (the schema it needs already exists).
+- **Your branch adds or edits migrations?** **Verify them on the PR's Supabase
+  preview branch**, which applies the migration to its own isolated DB — that's
+  the gate. Do **not** `db reset` the shared stack from a worktree to pick up
+  your migrations: with concurrent worktree agents it clobbers the DB the others
+  depend on, and even solo it just confuses what the stack represents. **The
+  rule: worktree migrations go to the preview branch, never the shared local
+  stack.**
+- **Need `types/database.ts` regenerated for a worktree migration?** `pnpm
+  gen:db-types` introspects the shared `--local` stack, so it has the same
+  hazard. Prefer letting **CI regenerate + diff-check** types on the PR (the
+  backend job already fails on a mismatch), or regenerate against a throwaway
+  DB — don't `db reset` the shared stack mid-flight just to gen types. A
+  hand-edited `types/database.ts` is a valid stopgap that CI will validate.
+- **Merge → local:** merging to `main` auto-applies the migration to **prod**
+  (branching pipeline), but your **local** stack only picks it up when you
+  `git pull` in the primary and `supabase db reset` again. Merge→prod is
+  automatic; merge→local is a manual replay.
 
 ### E2E gotchas
 

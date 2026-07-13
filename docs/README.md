@@ -17,7 +17,6 @@ Welcome to the Jigged documentation. Jigged is a data platform for small precisi
 See [modules/](modules/) for detailed specifications:
 - [Customers](modules/customers.md)
 - [Parts](modules/parts.md)
-- [Markup Rates](modules/markup-rates.md)
 - [Quotes](modules/quotes.md)
 - [Jobs](modules/jobs.md)
 - [Routings](modules/routings.md)

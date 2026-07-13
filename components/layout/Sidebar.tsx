@@ -19,7 +19,6 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import FactoryIcon from '@mui/icons-material/Factory';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
-import PercentIcon from '@mui/icons-material/Percent';
 import GroupIcon from '@mui/icons-material/Group';
 import SettingsIcon from '@mui/icons-material/Settings';
 import FeedbackIcon from '@mui/icons-material/Feedback';
@@ -53,7 +52,6 @@ const menuItems: MenuItem[] = [
   { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
-  { name: 'Markup Rates', path: '/markup-rates', icon: PercentIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
   { name: 'Team', path: '/team', icon: GroupIcon, adminOnly: true },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, adminOnly: true },

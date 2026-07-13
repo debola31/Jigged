@@ -30,7 +30,7 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import { getComputedPartCost, updatePartCostingBatchQuantity } from '@/utils/partsAccess';
 import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
@@ -333,6 +333,13 @@ export default function PartBomPanel({
         // cycle check needed — qty/unit changes can't introduce a cycle.
         await updateBomLine(existing.id, formData);
       }
+      // Persist the child's costing batch qty when the editor surfaced it (a
+      // made child consumed as a fraction). It lives on the CHILD part — this
+      // is the one write-through from the material line. `undefined` = the
+      // field didn't apply, so leave the child untouched.
+      if (value.childCostingBatchQuantity !== undefined) {
+        await updatePartCostingBatchQuantity(value.childPart.id, value.childCostingBatchQuantity);
+      }
       closeEditor();
       await fetchRows();
       onChanged?.();
@@ -385,6 +392,7 @@ export default function PartBomPanel({
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
         consume_whole_units: editingRow.consume_whole_units,
+        childCostingBatchQuantity: editingRow.child_part.costing_batch_quantity,
       }
     : undefined;
 
@@ -617,29 +625,16 @@ export default function PartBomPanel({
                 {pinnedBatch !== null && ladder.length > 0 && (
                   <Typography variant="caption" color="text.secondary">
                     Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
-                    here it&apos;s valued at its fixed batch of {formatQuantity(pinnedBatch)}{' '}
-                    (set on its Pricing card).
+                    here it&apos;s valued at its fixed batch of {formatQuantity(pinnedBatch)}.
                   </Typography>
                 )}
                 {/* Cascaded-qty surprise guard: only fires on fractional
-                    (yield-style) made children with no batch pin. */}
-                {showPinHint && (
+                    (yield-style) made children with no batch pin. The batch is
+                    set inline via this row's Edit. */}
+                {showPinHint && !readOnly && (
                   <Typography variant="caption" color="text.secondary">
-                    Valued at the cascaded consumed qty. To pin a fixed per-{row.unit}{' '}
-                    cost (e.g. a batch of 25), set a costing batch qty on{' '}
-                    <Link
-                      component={NextLink}
-                      href={buildPartHref({
-                        companyId,
-                        targetPartId: child.id,
-                        chain: pushPartToChain(currentChain, partId, child.id),
-                      })}
-                      underline="always"
-                      color="primary.main"
-                    >
-                      {child.part_name}
-                    </Link>
-                    .
+                    Valued at the quantity each order draws. Edit this line to cost{' '}
+                    {child.part_name} at a fixed batch instead.
                   </Typography>
                 )}
               </Box>

@@ -7,10 +7,13 @@ import MaterialRowEditor, {
   type PartSelectOption,
 } from '@/components/parts/MaterialRowEditor';
 
-// getPartUnitConversions is called when a child is selected; no secondary
-// units by default so the unit stays the child's primary_unit.
+// getPartUnitConversions runs on child selection (no secondary units here, so
+// the unit stays the child's primary). getPart loads the child's current batch
+// qty on selecting a made child; getComputedPartCost derives the batch cost.
 vi.mock('@/utils/partsAccess', () => ({
   getPartUnitConversions: vi.fn().mockResolvedValue([]),
+  getPart: vi.fn().mockResolvedValue({ id: 'child-1', costing_batch_quantity: null }),
+  getComputedPartCost: vi.fn().mockResolvedValue(109),
 }));
 
 // Stub PartAutocomplete: a button that selects a preset option. The preset is
@@ -65,7 +68,7 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
       />,
     );
 
-    const yieldField = (await screen.findByLabelText(/Yield \(parts/i)) as HTMLInputElement;
+    const yieldField = (await screen.findByLabelText(/Yield/i)) as HTMLInputElement;
     expect(yieldField.value).toBe('20');
   });
 
@@ -88,7 +91,7 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
     );
 
     // Re-type the yield explicitly to prove the handler stores 1/yield.
-    const yieldField = await screen.findByLabelText(/Yield \(parts/i);
+    const yieldField = await screen.findByLabelText(/Yield/i);
     await user.clear(yieldField);
     await user.type(yieldField, '20');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
@@ -127,5 +130,61 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
       expect(sw).not.toBeNull();
       expect(sw.checked).toBe(false);
     });
+  });
+
+  it('surfaces the batch cost basis for a made child consumed as a fraction and returns it on save', async () => {
+    const onSave = vi.fn();
+    const initial: MaterialEditorValue = {
+      childPart: makeOption(), // made child
+      quantity: '0.05', // fractional → yield 20
+      unit: 'each',
+      consume_whole_units: true,
+      childCostingBatchQuantity: 25,
+    };
+    render(
+      <MaterialRowEditor
+        companyId="co-1"
+        initial={initial}
+        lockChildPart
+        onSave={onSave}
+        onCancel={() => undefined}
+      />,
+    );
+
+    // The batch-qty field is shown, seeded from the child's stored value.
+    const batchField = (await screen.findByLabelText(/Batch qty/i)) as HTMLInputElement;
+    expect(batchField.value).toBe('25');
+
+    await user.clear(batchField);
+    await user.type(batchField, '10');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    const saved = onSave.mock.calls[0][0] as MaterialEditorValue;
+    expect(saved.childCostingBatchQuantity).toBe(10);
+  });
+
+  it('does not touch the child batch qty when consumption is not fractional', async () => {
+    const onSave = vi.fn();
+    const initial: MaterialEditorValue = {
+      childPart: makeOption(),
+      quantity: '2', // whole units per part → not fractional → no batch field
+      unit: 'each',
+      consume_whole_units: false,
+    };
+    render(
+      <MaterialRowEditor
+        companyId="co-1"
+        initial={initial}
+        lockChildPart
+        onSave={onSave}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/Batch qty/i)).toBeNull();
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    const saved = onSave.mock.calls[0][0] as MaterialEditorValue;
+    expect(saved.childCostingBatchQuantity).toBeUndefined();
   });
 });

@@ -55,8 +55,6 @@ import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
-import CostAtQtyPreview from '@/components/parts/CostAtQtyPreview';
-import CostingBasisEditor from '@/components/parts/CostingBasisEditor';
 
 interface PartPricingProps {
   companyId: string;
@@ -205,20 +203,6 @@ export default function PartPricing({
     setLinkedRateId(part.markup_rate_id);
   }, [part.markup_rate_id]);
 
-  // Local mirror of the costing batch quantity so the CostingBasisEditor's save
-  // reflects instantly; `previewRefresh` re-runs the Cost-at-qty preview and the
-  // tier base recompute (both depend on this part's own valuation basis).
-  const [costingBatchQty, setCostingBatchQty] = useState<number | null>(
-    part.costing_batch_quantity,
-  );
-  useEffect(() => {
-    // Mirror the persisted prop into local state (derived-state sync — the
-    // documented false-positive class in eslint.config.mjs).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCostingBatchQty(part.costing_batch_quantity);
-  }, [part.costing_batch_quantity]);
-  const [previewRefresh, setPreviewRefresh] = useState(0);
-
   const [rateMenuAnchor, setRateMenuAnchor] = useState<HTMLElement | null>(null);
   const [userRates, setUserRates] = useState<MarkupRate[]>([]);
   const [applyingRateName, setApplyingRateName] = useState<string | null>(null);
@@ -281,8 +265,7 @@ export default function PartPricing({
   // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
   // one the quote form and the persisted line use. Debounced so editing a tier
   // qty doesn't refetch on every keystroke. Bought parts don't show a base/unit
-  // column, so skip them. `previewRefresh` (batch-qty edits) invalidates the
-  // cache since the pinned cost changed.
+  // column, so skip them.
   useEffect(() => {
     if (isBought) return;
     const qtys = [
@@ -315,15 +298,14 @@ export default function PartPricing({
     };
   }, [rows, tierBaseCosts, partId, isBought]);
 
-  // A batch-qty (or routing/BOM) change invalidates the cached base costs — the
-  // pinned/rolled-up cost is different now, so clear and let the fetch effect
-  // recompute at the new basis.
+  // A routing / BOM / child-batch change (signaled via refreshKey) invalidates
+  // the cached base costs — the rolled-up cost is different now, so clear and
+  // let the fetch effect recompute at the new basis.
   useEffect(() => {
-    if (previewRefresh === 0) return;
     inFlightTierQtys.current.clear();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTierBaseCosts(new Map());
-  }, [previewRefresh]);
+  }, [refreshKey]);
 
   // Re-price every tier row when base costs arrive/change (base × markup).
   useEffect(() => {
@@ -723,29 +705,7 @@ export default function PartPricing({
             )}
           </Box>
 
-          {/* Cost-at-qty preview: shows the step-function material cost (whole-
-              unit ceiling / batch pinning) at a user-entered order qty, so a
-              yield part's real per-part cost is visible where the tier table
-              can't express it. */}
-          <CostAtQtyPreview partId={partId} refreshKey={refreshKey + previewRefresh} />
-
-          {/* Costing basis: pin how THIS made part is valued when consumed as a
-              material (e.g. a batch of 25 → fixed $/unit). */}
-          <CostingBasisEditor
-            partId={partId}
-            primaryUnit={part.primary_unit}
-            costingBatchQuantity={costingBatchQty}
-            onSaved={(v) => {
-              setCostingBatchQty(v);
-              setPreviewRefresh((n) => n + 1);
-              // Tier base costs can depend on this part's own valuation basis;
-              // refresh the parent (workspace banner) or reload locally.
-              if (onPricingChanged) onPricingChanged();
-              else loadAll();
-            }}
-          />
-
-          <Divider sx={{ mt: 2, mb: 2 }} />
+          <Divider sx={{ mb: 2 }} />
         </>
       )}
 

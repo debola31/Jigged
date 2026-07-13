@@ -65,11 +65,12 @@ export async function getTiersWithComputedPrices(
   // markup/100) — and a null markup or unresolvable base yields unit_price =
   // null so the "no usable tier" check still fires.
   //
-  // NOTE: the actual quote LINE price is recomputed at the real order qty in
-  // quoteLineItemsAccess (Option A) — this per-tier list is the preview/PDF
-  // ladder and the source of the resolved markup %, so it must be
-  // self-consistent per tier, but between-breakpoint orders are priced by the
-  // line path, not by reading a breakpoint here.
+  // The quote LINE resolves its price from this same per-tier list
+  // (resolveTier picks the tier ≤ order qty), so form preview and persisted
+  // line stay consistent. An order that falls BETWEEN a ceiling part's tier
+  // breakpoints is therefore priced at the nearest breakpoint ≤ its qty (an
+  // approximation); the exact per-order-qty cost is shown in the Pricing
+  // card's "Cost at qty N" preview.
   return Promise.all(
     tiers.map(async (t) => {
       const breakdown = await calculateRoutingCost(partId, t.quantity).catch(() => null);

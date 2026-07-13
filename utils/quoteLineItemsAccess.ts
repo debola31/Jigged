@@ -10,18 +10,6 @@ import {
 import { getComputedPartCost } from '@/utils/partsAccess';
 
 /**
- * Cost-plus selling price: base × (1 + markup/100), rounded to cents. Returns
- * null when the base cost or markup is unavailable so callers fall back to a
- * frozen tier/snapshot price rather than emitting a wrong number. Shared by the
- * insert, quantity-edit, and reprice paths so Option-A pricing (price at the
- * real order qty, not a frozen tier breakpoint) is applied identically.
- */
-function priceFromBase(base: number | null, markup: number | null | undefined): number | null {
-  if (base === null || !Number.isFinite(base) || markup == null || Number.isNaN(markup)) return null;
-  return Math.round(base * (1 + markup / 100) * 100) / 100;
-}
-
-/**
  * Load line items for a quote (ordered by sequence) with the part joined in.
  */
 export async function getLineItemsForQuote(quoteId: string): Promise<QuoteLineItem[]> {
@@ -81,21 +69,6 @@ export async function insertLineItemForPart(
 ): Promise<QuoteLineItem> {
   const supabase = getSupabase();
 
-  // Snapshot the base cost live at the order quantity. The SQL function
-  // cascades through the BOM at cumulative qty per sub-assembly, so this
-  // matches what `quote_line_items.base_cost_per_unit` should freeze for
-  // the historical record. Tier rows no longer carry base_cost_per_unit.
-  // It also drives the Option-A selling price below.
-  let baseCost: number | null;
-  try {
-    baseCost = await getComputedPartCost(partId, orderQuantity);
-  } catch {
-    // Cost RAISES on missing labor rates / external pricing / unit
-    // conversions. Snapshot a null so the breakdown view can fall through
-    // to its computed-live fallback rather than persisting wrong data.
-    baseCost = null;
-  }
-
   let unitPrice: number;
   let markupPercent: number | null;
   let sourceTierId: string | null;
@@ -112,16 +85,24 @@ export async function insertLineItemForPart(
         'Cannot create quote line item: this part has no priced pricing tiers. Add tiers on the part page first.',
       );
     }
+    unitPrice = resolved.unit_price;
     sourceTierId = resolved.source_tier_id;
     const matchedTier = tiers.find((t) => t.id === resolved.source_tier_id);
     markupPercent = matchedTier?.markup_percent ?? null;
-    // Option A: price at the ACTUAL order qty, not the tier's breakpoint-frozen
-    // unit_price. Material cost with whole-unit ceiling / batch pinning is a
-    // step function of the order qty (order 20 → 1 strip → $5.45; order 21 → 2
-    // strips → $10.38), which the per-breakpoint tier list can't represent. The
-    // tier supplies the markup %; the base is the live cost at orderQty. Fall
-    // back to the resolved tier price only when the live cost can't compute.
-    unitPrice = priceFromBase(baseCost, markupPercent) ?? resolved.unit_price;
+  }
+
+  // Snapshot the base cost live at the order quantity. The SQL function
+  // cascades through the BOM at cumulative qty per sub-assembly, so this
+  // matches what `quote_line_items.base_cost_per_unit` should freeze for
+  // the historical record. Tier rows no longer carry base_cost_per_unit.
+  let baseCost: number | null;
+  try {
+    baseCost = await getComputedPartCost(partId, orderQuantity);
+  } catch {
+    // Cost RAISES on missing labor rates / external pricing / unit
+    // conversions. Snapshot a null so the breakdown view can fall through
+    // to its computed-live fallback rather than persisting wrong data.
+    baseCost = null;
   }
 
   const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;
@@ -196,20 +177,8 @@ export async function updateLineItemQuantity(
     if (snapshot && !row.basis_unknown) {
       const resolved = resolveTierFromSnapshot(snapshot, newQuantity);
       if (resolved) {
+        newUnitPrice = resolved.unit_price;
         newSourceTierId = resolved.source_tier_id;
-        // Option A: recompute the base cost live at the NEW qty; the markup %
-        // stays frozen from the resolved snapshot tier (selling policy). Falls
-        // back to the snapshot's frozen unit_price when the live cost can't
-        // compute. Base cost is inherently qty-dependent (ceiling/batch is a
-        // step function), so a qty change must re-cost, not read a breakpoint.
-        const matched = snapshot.tiers.find((t) => t.id === resolved.source_tier_id);
-        let base: number | null;
-        try {
-          base = await getComputedPartCost(row.part_id, newQuantity);
-        } catch {
-          base = null;
-        }
-        newUnitPrice = priceFromBase(base, matched?.markup_percent) ?? resolved.unit_price;
       }
     }
     // basis_unknown rows keep the stored unit_price — there's no
@@ -273,28 +242,17 @@ export async function repriceLineItemToCurrent(
   const matchedTier = currentTiers.find((t) => t.id === resolved.source_tier_id);
   const newMarkup = matchedTier?.markup_percent ?? null;
 
-  // Option A: reprice at the line's own qty using the live base cost × the
-  // current tier's markup (not the tier's breakpoint-frozen unit_price), so a
-  // ceiling/batch part reprices to its true per-order-qty cost.
-  let base: number | null;
-  try {
-    base = await getComputedPartCost(row.part_id, row.quantity);
-  } catch {
-    base = null;
-  }
-  const newUnitPrice = priceFromBase(base, newMarkup) ?? resolved.unit_price;
-
   const newSnapshot = buildPricingBasisSnapshot(
     currentTiers,
     row.quantity,
     resolved.source_tier_id,
   );
-  const newTotal = Math.round(newUnitPrice * row.quantity * 100) / 100;
+  const newTotal = Math.round(resolved.unit_price * row.quantity * 100) / 100;
 
   const { data, error } = await supabase
     .from('quote_line_items')
     .update({
-      unit_price: newUnitPrice,
+      unit_price: resolved.unit_price,
       source_tier_id: resolved.source_tier_id,
       markup_percent: newMarkup,
       total_price: newTotal,

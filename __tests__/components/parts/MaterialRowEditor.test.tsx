@@ -101,13 +101,18 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
     expect(parseFloat(saved.quantity)).toBeCloseTo(0.05, 10);
   });
 
-  it('defaults whole-unit ON for a count unit on a new line', async () => {
+  it('defaults whole-unit ON for a count unit once consumption is fractional (yield)', async () => {
     nextPickOption = makeOption({ primary_unit: 'each' });
     const { container } = render(
       <MaterialRowEditor companyId="co-1" onSave={() => undefined} onCancel={() => undefined} />,
     );
 
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
+
+    // Count unit → the field opens in yield framing. The round-up toggle is only
+    // shown once consumption is fractional, so enter a yield to reveal it.
+    const yieldField = await screen.findByLabelText(/Yield/i);
+    await user.type(yieldField, '20'); // → 0.05 ea per part (fractional)
 
     // The consume-whole-units switch is a checkbox input; count unit → checked.
     await waitFor(() => {
@@ -117,7 +122,7 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
     });
   });
 
-  it('defaults whole-unit OFF for a length unit on a new line', async () => {
+  it('defaults whole-unit OFF for a length unit once consumption is fractional', async () => {
     nextPickOption = makeOption({ primary_unit: 'inches' });
     const { container } = render(
       <MaterialRowEditor companyId="co-1" onSave={() => undefined} onCancel={() => undefined} />,
@@ -125,11 +130,36 @@ describe('MaterialRowEditor — yield / whole-unit', () => {
 
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
 
+    // Length unit → amount-per-part framing; a fractional amount reveals the toggle.
+    const qtyField = await screen.findByLabelText(/per part/i);
+    await user.type(qtyField, '0.5');
+
     await waitFor(() => {
       const sw = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
       expect(sw).not.toBeNull();
       expect(sw.checked).toBe(false);
     });
+  });
+
+  it('hides the whole-unit toggle for whole-number consumption (ceiling is a no-op)', async () => {
+    // qty 1 per part → ceil(N×1)=N, so rounding changes nothing → no toggle shown.
+    const initial: MaterialEditorValue = {
+      childPart: makeOption(),
+      quantity: '1',
+      unit: 'each',
+      consume_whole_units: true,
+    };
+    render(
+      <MaterialRowEditor
+        companyId="co-1"
+        initial={initial}
+        lockChildPart
+        onSave={() => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('surfaces the batch cost basis for a made child consumed as a fraction and returns it on save', async () => {

@@ -10,7 +10,6 @@ import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
 import Switch from '@mui/material/Switch';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import MuiLink from '@mui/material/Link';
 import Link from 'next/link';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
@@ -224,6 +223,10 @@ export default function MaterialRowEditor({
 
   const unitShort = unitShortLabel(value.unit) ?? (value.unit || 'unit');
   const perPartQty = parseNum(value.quantity);
+  // Rounding to whole units only changes the cost when consumption is fractional
+  // (a yield, or a non-integer per-part amount): ceil(N×q) = N×q for integer q.
+  // So the whole-unit control is only meaningful — and only shown — then.
+  const isFractionalConsumption = perPartQty !== null && !Number.isInteger(perPartQty);
   // A made child consumed as a fraction (< 1 per part) is exactly when the
   // batch-cost basis matters — surface the field then and only then.
   const showBatchBasis = value.childPart?.source === 'made' && perPartQty !== null && perPartQty < 1;
@@ -332,9 +335,9 @@ export default function MaterialRowEditor({
 
         {/* Consumption: a single field framed by the material's unit — a yield
             for discrete/count stock, an amount-per-part for bulk material — with
-            a quiet link to switch. `value.quantity` stays the canonical per-part
-            value regardless of framing. */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, minWidth: 200 }}>
+            a legible action to switch framing. `value.quantity` stays the
+            canonical per-part value regardless of framing. */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 220 }}>
           {inputMode === 'yield' ? (
             <TextField
               label={`Yield — parts per ${unitShort}`}
@@ -346,7 +349,7 @@ export default function MaterialRowEditor({
               inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
               size="small"
               disabled={saving}
-              sx={{ width: 210 }}
+              sx={{ width: 230 }}
               helperText={
                 perPartQty !== null
                   ? `Uses ${Number(perPartQty.toFixed(4))} ${unitShort} per part`
@@ -364,48 +367,58 @@ export default function MaterialRowEditor({
               inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
               size="small"
               disabled={saving}
-              sx={{ width: 210 }}
+              sx={{ width: 230 }}
               helperText="Material used to make one part"
             />
           )}
-          <MuiLink
-            component="button"
-            type="button"
-            variant="caption"
-            underline="hover"
+          {/* Yield is the reason this feature exists (many parts from one
+              discrete unit) — surface it as a legible action, not a faint link. */}
+          <Button
+            variant="text"
+            size="small"
             onClick={() => switchMode(inputMode === 'yield' ? 'per_part' : 'yield')}
             disabled={saving}
-            sx={{ alignSelf: 'flex-start', color: 'text.secondary' }}
+            sx={{ alignSelf: 'flex-start', textTransform: 'none', px: 0.75, fontWeight: 600 }}
           >
             {inputMode === 'yield'
-              ? 'Enter amount per part instead'
-              : `Cut several parts from one ${unitShort}? Enter as a yield`}
-          </MuiLink>
+              ? '← Switch to amount per part'
+              : `Cut several parts from one ${unitShort}? Switch to yield →`}
+          </Button>
         </Box>
       </Box>
 
-      {/* Whole-unit (ceiling) consumption — defaulted from the unit category. */}
-      <Box sx={{ mt: 0.5, ml: 0.5 }}>
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={value.consume_whole_units}
-              onChange={(e) => {
-                setWholeUnitsTouched(true);
-                setValue((prev) => ({ ...prev, consume_whole_units: e.target.checked }));
-              }}
-              disabled={saving}
-            />
-          }
-          label={
-            <Typography variant="caption" color="text.secondary">
-              Round up to whole {unitShort} per job — for discrete stock you can&apos;t use a
-              fraction of
-            </Typography>
-          }
-        />
-      </Box>
+      {/* Whole-unit (ceiling) consumption. Only meaningful — and only shown —
+          when consumption is fractional (a yield, or a non-integer per-part
+          amount); for whole-number consumption ceil(N×q)=N×q, so it is a no-op.
+          Defaulted from the unit category (count → on); overridable. */}
+      {isFractionalConsumption && (
+        <Box sx={{ mt: 1, ml: 0.5 }}>
+          <FormControlLabel
+            sx={{ mr: 0 }}
+            control={
+              <Switch
+                size="small"
+                checked={value.consume_whole_units}
+                onChange={(e) => {
+                  setWholeUnitsTouched(true);
+                  setValue((prev) => ({ ...prev, consume_whole_units: e.target.checked }));
+                }}
+                disabled={saving}
+              />
+            }
+            label={
+              <Typography variant="body2">
+                {`Round up to whole ${unitShort} per job`}
+              </Typography>
+            }
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 6 }}>
+            {value.consume_whole_units
+              ? `Discrete stock — a job can't use part of one ${unitShort}, so it rounds up.`
+              : `Continuous material — a job can use a fraction of one ${unitShort}.`}
+          </Typography>
+        </Box>
+      )}
 
       {/* Batch cost basis — shown only for a made child consumed as a fraction,
           which is exactly when a made part's setup-amortized cost needs a fixed
@@ -423,7 +436,7 @@ export default function MaterialRowEditor({
             flexWrap: 'wrap',
           }}
         >
-          <Typography variant="caption" color="text.secondary" sx={{ flexBasis: '100%' }}>
+          <Typography variant="body2" sx={{ flexBasis: '100%' }}>
             <strong>{value.childPart?.part_name}</strong> is made — cost it at the batch you
             produce it in (setup spreads across the batch). Applies wherever it&apos;s used.
           </Typography>
@@ -439,7 +452,7 @@ export default function MaterialRowEditor({
             disabled={saving}
             sx={{ width: 150 }}
           />
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ fontWeight: batchQty === null ? 400 : 600 }}>
             {batchQty === null
               ? 'valued at the quantity each order draws'
               : batchCost === 'loading'

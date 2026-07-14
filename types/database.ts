@@ -1518,7 +1518,6 @@ export type Database = {
           part_id: string
           quoted_at: string | null
           updated_at: string
-          vendor_id: string | null
         }
         Insert: {
           cost_per_unit: number
@@ -1530,7 +1529,6 @@ export type Database = {
           part_id: string
           quoted_at?: string | null
           updated_at?: string
-          vendor_id?: string | null
         }
         Update: {
           cost_per_unit?: number
@@ -1542,7 +1540,6 @@ export type Database = {
           part_id?: string
           quoted_at?: string | null
           updated_at?: string
-          vendor_id?: string | null
         }
         Relationships: [
           {
@@ -1550,13 +1547,6 @@ export type Database = {
             columns: ["part_id"]
             isOneToOne: false
             referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "part_procurement_tiers_vendor_id_fkey"
-            columns: ["vendor_id"]
-            isOneToOne: false
-            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]

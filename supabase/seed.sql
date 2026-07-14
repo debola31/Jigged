@@ -233,16 +233,18 @@ insert into public.parts (id, company_id, part_name, description, source, is_sto
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'in',0,null,null)
 on conflict (id) do nothing;
 
--- Procurement tiers for bought parts (so compute_part_cost_at_qty resolves a cost).
-insert into public.part_procurement_tiers (part_id, vendor_id, min_quantity, cost_per_unit) values
-  ('60000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,6.4),
-  ('60000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001',1,4.1),
-  ('60000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000001',1,7.85),
-  ('60000000-0000-0000-0000-000000000004','30000000-0000-0000-0000-000000000004',1,1.25),
-  ('60000000-0000-0000-0000-000000000005','30000000-0000-0000-0000-000000000002',1,0.18),
-  ('60000000-0000-0000-0000-000000000006','30000000-0000-0000-0000-000000000002',1,0.07),
-  ('60000000-0000-0000-0000-000000000007','30000000-0000-0000-0000-000000000002',1,0.09),
-  ('60000000-0000-0000-0000-000000000008','30000000-0000-0000-0000-000000000005',1,14.5)
+-- Part-level procurement tiers for bought parts (so compute_part_cost_at_qty
+-- resolves a cost). Vendor is a supplier label on the part
+-- (parts.preferred_vendor_id, set above), not a dimension of the cost tiers.
+insert into public.part_procurement_tiers (part_id, min_quantity, cost_per_unit) values
+  ('60000000-0000-0000-0000-000000000001',1,6.4),
+  ('60000000-0000-0000-0000-000000000002',1,4.1),
+  ('60000000-0000-0000-0000-000000000003',1,7.85),
+  ('60000000-0000-0000-0000-000000000004',1,1.25),
+  ('60000000-0000-0000-0000-000000000005',1,0.18),
+  ('60000000-0000-0000-0000-000000000006',1,0.07),
+  ('60000000-0000-0000-0000-000000000007',1,0.09),
+  ('60000000-0000-0000-0000-000000000008',1,14.5)
 on conflict do nothing;
 
 -- BOM edges (parent_part_id → child_part_id, qty, sequence 10/20/…; unit 'ea').

@@ -1,24 +1,19 @@
 /**
- * Procurement tier sheets for bought parts — `part_procurement_tiers` table.
+ * Procurement tier sheet for bought parts — `part_procurement_tiers` table.
  *
- * Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor's
- * tier sheet for a specific part. `vendor_id` may be NULL to represent an
- * import/internal-estimate row — a sketch cost added before sourcing is
- * finalized (or, in practice, populated by parts CSV import).
+ * One **part-level** tier sheet per part: each row is a
+ * (min_quantity, cost_per_unit) point. Vendor is NOT a dimension of the sheet —
+ * it lives on the part as `parts.preferred_vendor_id`, a supplier ("who we PO
+ * from") label that never gates cost.
  *
- * Tier ordering within a vendor's sheet is derived from `min_quantity`
- * ascending (no separate `sequence` column on the table — see the migration
- * header).
- *
- * Resolved at read time via the `get_procurement_cost(part_id, qty)` RPC,
- * which picks the cheapest non-expired tier where `min_quantity <= qty`,
- * preferring vendor-specific tiers over NULL-vendor ones when both match.
- * Returns zero rows when nothing matches (no fallback to a parts column).
+ * Resolved at read time via `get_procurement_cost(part_id, qty)`, which picks
+ * the cheapest non-expired tier where `min_quantity <= qty`. Returns zero rows
+ * when nothing matches (no fallback to a parts column); `compute_part_cost_at_qty`
+ * additionally floors to the lowest tier when qty is below every break.
  */
 export interface ProcurementTier {
   id: string;
   part_id: string;
-  vendor_id: string | null;
   min_quantity: number;
   cost_per_unit: number;
   quoted_at: string | null;
@@ -35,7 +30,6 @@ export interface ProcurementTier {
  */
 export interface ProcurementTierFormData {
   part_id: string;
-  vendor_id: string | null;
   min_quantity: string;
   cost_per_unit: string;
   quoted_at: string | null;
@@ -45,7 +39,6 @@ export interface ProcurementTierFormData {
 
 export const EMPTY_PROCUREMENT_TIER_FORM: ProcurementTierFormData = {
   part_id: '',
-  vendor_id: null,
   min_quantity: '',
   cost_per_unit: '',
   quoted_at: null,
@@ -58,7 +51,6 @@ export function procurementTierToFormData(
 ): ProcurementTierFormData {
   return {
     part_id: tier.part_id,
-    vendor_id: tier.vendor_id,
     min_quantity: String(tier.min_quantity),
     cost_per_unit: String(tier.cost_per_unit),
     quoted_at: tier.quoted_at,
@@ -70,39 +62,16 @@ export function procurementTierToFormData(
 /**
  * Return shape of the `get_procurement_cost(p_part_id, p_qty)` RPC.
  *
- * - The RPC returns at most one row (`source='tier'`) when a live,
- *   non-expired tier matched. `vendor_id` and `tier_id` identify which tier
- *   won. Vendor-specific tiers win over NULL-vendor tiers when both match.
- * - When nothing matches, the RPC returns zero rows. The TS wrapper
- *   normalises that to a `null` result; callers must handle the null.
+ * - The RPC returns at most one row (`source='tier'`) when a live, non-expired
+ *   tier matched. `tier_id` identifies which tier won. `vendor_id` is the
+ *   part's preferred-vendor **label** (display only) — cost is part-level and
+ *   vendor-independent.
+ * - When nothing matches, the RPC returns zero rows. The TS wrapper normalises
+ *   that to a `null` result; callers must handle the null.
  */
 export interface ProcurementCostResult {
   unit_cost: number | null;
   vendor_id: string | null;
   tier_id: string | null;
   source: 'tier';
-}
-
-/**
- * UI-side grouping. The access layer groups raw `part_procurement_tiers`
- * rows by `vendor_id` (NULL grouped under "Internal estimate") and presents
- * each group as a single "tier sheet" the panel renders.
- *
- * `quoted_at` / `expires_at` are derived from the rows in the group:
- * - `quoted_at` is the most recent non-null quoted_at across the group's
- *   tiers.
- * - `expires_at` is the earliest non-null expires_at across the group's
- *   tiers (so the badge shows the closest expiry).
- * - `is_expiring` / `is_expired` are computed from `expires_at` + today.
- *
- * Tiers within the group are ordered by `min_quantity ASC`.
- */
-export interface ProcurementTierGroup {
-  vendor_id: string | null;
-  vendor_name: string;
-  quoted_at: string | null;
-  expires_at: string | null;
-  is_expiring: boolean;
-  is_expired: boolean;
-  tiers: ProcurementTier[];
 }

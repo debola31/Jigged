@@ -337,6 +337,30 @@ insert into public.part_pricing_tiers (part_id, company_id, sequence, quantity, 
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222',2,36,55)
 on conflict do nothing;
 
+-- Every part in a BOM tree needs its own markup to be quotable (each part owns
+-- its markup — the company-wide default-rate layer was removed in
+-- 20260713011616, and get_priceable_part_ids/compute_part_cost_explain now
+-- require a non-null markup_percent). Give the bought parts and sub-assemblies
+-- a single default tier so the sellable products above resolve as priceable.
+insert into public.part_pricing_tiers (part_id, company_id, sequence, quantity, markup_percent) values
+  -- Bought parts (sold on directly at times, and required for tree priceability).
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222',1,1,35),
+  -- Sub-assemblies / made intermediates.
+  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222',1,1,45)
+on conflict do nothing;
+
 -- ── Inventory receipts (one dated addition per stocked part, ~120 days ago) ──
 -- Live on-hand is already set on parts.quantity above; these give the ledger a
 -- receipt row so the inventory history view isn't empty.

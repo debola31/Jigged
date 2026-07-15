@@ -35,9 +35,9 @@ export const PAIN = {
   heading: 'Sound familiar?',
   points: [
     'Your best setups live in one machinist’s head — and walk out the door the day he retires.',
-    'Quote, floor, shipping, invoicing — a different tool for each, and none of them talk.',
-    'Your systems log the numbers. How the parts sit in the fixture, the finesse in the setup — that never gets written down.',
-    'An ERP, a stack of spreadsheets, a few homegrown tools — and none of it fits how you run.',
+    'An ERP, a stack of spreadsheets, a few homegrown tools — a different one for every step, and none of them talk.',
+    'Your systems log the numbers, but how the parts sit in the fixture and the finesse in the setup never get written down.',
+    'Software built for a 500-person plant expects a planner and a full-time admin. You’ve got a shop to run.',
   ],
   closer:
     'Owners run the whole shop across an ERP, spreadsheets, and homegrown tools nobody else could use. We’re building Jigged to do it all in one place — everything they need, nothing they don’t.',
@@ -90,7 +90,7 @@ export const SHOP_FLOOR = {
   subhead:
     'Operators work from a tablet at their station — no paper travelers, no hunting for the latest revision.',
   points: [
-    'Scan the QR on the traveler and land on the exact job and step.',
+    'Operators sign in, pick their station, and see only the jobs waiting on them.',
     'The current drawing and work instructions, right there at the machine.',
     'One tap to mark a step complete — no timers, no training.',
     'Runs on any tablet or phone. Nothing to install.',
@@ -135,15 +135,12 @@ export const STEPS: Step[] = [
   },
 ];
 
-export const EARLY_ACCESS = {
-  heading: 'We’re building this with our founding shops.',
-  body: 'We’re taking on a small group of precision shops as founding partners — they shape where Jigged goes, and get in before we open it up. Request access and we’ll talk.',
-};
-
+// The founding-shops beat lives here, folded into the single closing CTA — a separate
+// "early access" band above it just repeated the same message before the same button.
 export const FINAL_CTA = {
   heading: 'Ready to stop fighting your software?',
   subhead:
-    'We’re working closely with a small group of founding shops. Request access and we’ll reach out.',
+    'We’re taking on a small group of precision shops as founding partners — they shape where Jigged goes, and get in before we open it up.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   emailLabel: 'Or request early access and we’ll reach out:',
 };

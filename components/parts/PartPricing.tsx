@@ -480,7 +480,10 @@ export default function PartPricing({
       await updatePartCostingBatchQuantity(partId, costingQty);
       setCostingSaveState('saved');
       setCostingDirty(false);
-      onPricingChanged?.();
+      // Deliberately NOT calling onPricingChanged: the batch size doesn't affect
+      // this part's own pricing tiers (their base is at the order qty) or its
+      // priceability — only its value as a component on OTHER parts' pages. A
+      // refresh here would just re-fetch the same numbers and flicker.
     } catch (err) {
       setCostingSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save costing quantity');

@@ -9,16 +9,24 @@ export const SHOP_SIZES = [
 ];
 
 export const MARKETING_META = {
-  title: 'Jigged — Your shop floor, finally under control',
+  // Mirrors the hero headline — keep the two in step.
+  title: 'Jigged — Your whole shop, in one place',
   description:
     'Paperless shop-floor software for precision machine shops. See where every job stands, and capture the notes and photos your operators take at the machine — no paper travelers, no tribal knowledge walking out the door.',
 };
 
 export const HERO = {
   eyebrow: 'Paperless operations for precision machine shops',
-  // Two display lines: the control promise, then the reassurance.
-  headlineLead: 'Your shop floor,',
-  headlineEmphasis: 'finally under control.',
+  // Two display lines. The headline states WHAT WE OFFER (StoryBrand's grunt test);
+  // the subhead below carries HOW IT MAKES LIFE BETTER — which is where the
+  // know-how/capture story belongs, both by the framework and because leading with
+  // "we capture your operations" reads as taking the thing a shop holds dear.
+  // "Your shop floor, finally under control" stated a feeling, not an offer; it also
+  // positioned against disorder rather than against the real alternative (an ERP + a
+  // stack of spreadsheets + homegrown tools), and undersold a product that now runs
+  // quote → floor → shipping → invoicing.
+  headlineLead: 'Your whole shop,',
+  headlineEmphasis: 'in one place.',
   subhead:
     'Go paperless from quote to done. Jigged shows you where every job stands without walking the floor — and captures the notes and photos your operators take at the machine, so the fix your best guy figured out is still there next time you run the part.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },

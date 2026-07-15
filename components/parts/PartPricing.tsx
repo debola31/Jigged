@@ -488,7 +488,12 @@ export default function PartPricing({
   };
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
-  const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
+  // total_setup_cost is the one-time setup; amortize it over the batch here so
+  // the row is per-unit and changes live with the quantity (calculateRoutingCost
+  // keeps setup un-amortized — the tier layer / this card divide it).
+  const setupPerUnit = breakdown
+    ? Math.round((breakdown.total_setup_cost / costingQty) * 100) / 100
+    : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
   // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
   const materialPerUnit: number | null = breakdown
@@ -496,11 +501,11 @@ export default function PartPricing({
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
-  // The three lines sum to the part's unit cost at the costing quantity.
+  // The three lines sum to the part's unit cost at the batch size.
   const costPerUnit: number | null =
     materialPerUnit === null
       ? null
-      : Math.round((runPerUnit + setupBatch + materialPerUnit) * 100) / 100;
+      : Math.round((runPerUnit + setupPerUnit + materialPerUnit) * 100) / 100;
 
   const warningsAlert =
     !isBought && breakdown && breakdown.warnings.length > 0 ? (
@@ -580,7 +585,7 @@ export default function PartPricing({
               </Typography>
               <Box sx={{ flex: 1 }} />
               <TextField
-                label={`Cost at quantity (${costingUnit})`}
+                label={`Batch size (${costingUnit})`}
                 value={costingQtyStr}
                 onChange={(e) => {
                   setCostingQtyStr(e.target.value);
@@ -630,7 +635,7 @@ export default function PartPricing({
             {breakdown && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                 <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-                <SummaryRow label="Setup / unit" value={formatCurrency(setupBatch)} />
+                <SummaryRow label="Setup / unit" value={formatCurrency(setupPerUnit)} />
                 {(materialPerUnit === null || materialPerUnit > 0) && (
                   <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
                 )}

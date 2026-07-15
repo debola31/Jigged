@@ -159,8 +159,8 @@ export default function PartBomPanel({
   // child + the cost at each (via compute_part_cost_at_qty). These are the
   // exact numbers that feed the parent's rollup at each qty, so rendering
   // them inline lets the user trace the math. Bought children pull qty
-  // break points from procurement tiers under the preferred vendor; made
-  // children pull them from their own pricing tiers.
+  // break points from their part-level procurement tiers; made children
+  // pull them from their own pricing tiers.
   useEffect(() => {
     let cancelled = false;
 
@@ -175,10 +175,8 @@ export default function PartBomPanel({
 
       // Discover each child's qty break points in a fixed number of queries
       // (was ~2 per child — a per-row fan-out that scaled with BOM size).
-      // Bought children take break points from their PREFERRED vendor's
-      // procurement tiers (compute_part_cost_at_qty restricts the rollup to
-      // preferred_vendor_id, so other vendors' tiers don't apply); made
-      // children take them from their own pricing tiers.
+      // Bought children take break points from their part-level procurement
+      // tiers; made children take them from their own pricing tiers.
       const boughtIds = rows
         .filter((r) => r.child_part.source === 'bought')
         .map((r) => r.child_part.id);
@@ -189,32 +187,18 @@ export default function PartBomPanel({
       const breakpointsByChild = new Map<string, number[]>();
       try {
         if (boughtIds.length > 0) {
-          // Preferred vendor per bought child.
-          const { data: vendorRows } = await supabase
-            .from('parts')
-            .select('id, preferred_vendor_id')
-            .in('id', boughtIds);
-          const preferredByChild = new Map<string, string | null>();
-          for (const r of (vendorRows ?? []) as Array<{
-            id: string;
-            preferred_vendor_id: string | null;
-          }>) {
-            preferredByChild.set(r.id, r.preferred_vendor_id ?? null);
-          }
-
-          // All bought children's procurement tiers in one query; keep only
-          // the rows under each child's preferred vendor.
+          // All bought children's part-level procurement tiers in one query.
+          // Procurement tiers are part-level now (vendor is a label, not a cost
+          // filter), so every tier's break point applies.
           const { data: procRows } = await supabase
             .from('part_procurement_tiers')
-            .select('part_id, vendor_id, min_quantity')
+            .select('part_id, min_quantity')
             .in('part_id', boughtIds);
           const qtysByChild = new Map<string, number[]>();
           for (const t of (procRows ?? []) as Array<{
             part_id: string;
-            vendor_id: string;
             min_quantity: number | string;
           }>) {
-            if (preferredByChild.get(t.part_id) !== t.vendor_id) continue;
             const arr = qtysByChild.get(t.part_id) ?? [];
             arr.push(Number(t.min_quantity));
             qtysByChild.set(t.part_id, arr);

@@ -244,7 +244,7 @@ export default function MaterialRowEditor({
             value below 1 is a yield; the caption confirms the reciprocal. */}
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, minWidth: 200 }}>
           <TextField
-            label={value.unit ? `${unitShort} per part` : 'Qty per part'}
+            label="Quantity per part"
             value={value.quantity}
             onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
             required
@@ -260,7 +260,7 @@ export default function MaterialRowEditor({
                 ? 'Enter a whole number, decimal, or fraction (e.g. 1/20)'
                 : showYieldReciprocal
                   ? `= ${formatYield(1 / perPartQty!)} parts from one ${unitShort}`
-                  : 'Material used to make one part — a fraction like 1/20 is a yield'
+                  : undefined
             }
           />
         </Box>

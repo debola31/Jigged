@@ -88,7 +88,6 @@ function tempId(): string {
 export default function PartProcurementPricingPanel({
   partId,
   companyId,
-  primaryUnit,
   preferredVendorId,
   onSaved,
 }: PartProcurementPricingPanelProps) {
@@ -259,8 +258,6 @@ export default function PartProcurementPricingPanel({
   };
 
   // Render -----------------------------------------------------------------
-
-  const unit = primaryUnit && primaryUnit.trim() ? primaryUnit : 'unit';
 
   /**
    * Pick the preferred vendor: sets `parts.preferred_vendor_id` (the supplier
@@ -481,12 +478,6 @@ export default function PartProcurementPricingPanel({
               </Button>
             </Box>
           </Box>
-
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            Costs are per {unit}. These tiers drive the BOM cost regardless of
-            vendor. Changes are saved when you click <strong>Save costs</strong>.
-            Quotes use the cheapest applicable tier.
-          </Typography>
         </>
       )}
     </Box>

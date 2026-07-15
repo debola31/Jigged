@@ -61,7 +61,7 @@ export default function Features() {
         <SectionHeading
           index="What you get"
           heading="Everything the floor needs. None of the enterprise weight."
-          subhead="Quoting, job tracking, inventory, and the shop floor — the parts of the job you touch every day."
+          subhead="Quoting, job tracking, invoicing, and the shop floor — the parts of the job you touch every day."
         />
       </Reveal>
 

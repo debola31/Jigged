@@ -25,6 +25,10 @@ export default function PainPoints() {
                   height: '100%',
                   p: { xs: 3.5, md: 4 },
                   borderRadius: 2,
+                  // The accent rule reads these as callouts — things owners say — rather than
+                  // app chrome. (Tried the product's glass-card language here; it was the only
+                  // brand colour in an all-dark section, and losing it flattened the grid. The
+                  // app's card styling belongs on app UI, not on editorial pull-quotes.)
                   bgcolor: 'rgba(17, 20, 57, 0.4)',
                   border: '1px solid rgba(255, 255, 255, 0.07)',
                   borderLeft: '3px solid',

@@ -17,6 +17,8 @@ import TableContainer from '@mui/material/TableContainer';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
+import CostingBatchField from '@/components/parts/CostingBatchField';
+import { unitShortLabel } from '@/lib/standardUnits';
 import {
   calculateRoutingCost,
   type RoutingCostBreakdown,
@@ -527,6 +529,20 @@ export default function PartPricing({
               <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
             )}
           </Box>
+
+          {/* Costing batch — only meaningful when there's setup to amortize.
+              Lets this part be valued at a fixed production run when it's
+              consumed as a material elsewhere (a property of the part). */}
+          {setupBatch !== null && setupBatch > 0 && (
+            <Box sx={{ mb: 2 }}>
+              <CostingBatchField
+                partId={partId}
+                initialBatch={part.costing_batch_quantity ?? null}
+                unitLabel={unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit')}
+                onSaved={onPricingChanged}
+              />
+            </Box>
+          )}
 
           <Divider sx={{ mb: 2 }} />
         </>

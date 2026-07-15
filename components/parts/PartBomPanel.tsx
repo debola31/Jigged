@@ -30,11 +30,7 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import {
-  getComputedPartCost,
-  updatePartCostingBatchQuantity,
-  ensurePartUnitConversion,
-} from '@/utils/partsAccess';
+import { getComputedPartCost, ensurePartUnitConversion } from '@/utils/partsAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
@@ -351,13 +347,6 @@ export default function PartBomPanel({
         // cycle pre-check internally when the child differs.
         await updateBomLine(existing.id, formData);
       }
-      // Persist the child's costing batch qty when the editor surfaced it (a
-      // made child consumed as a fraction). It lives on the CHILD part — this
-      // is the one write-through from the material line. `undefined` = the
-      // field didn't apply, so leave the child untouched.
-      if (value.childCostingBatchQuantity !== undefined) {
-        await updatePartCostingBatchQuantity(value.childPart.id, value.childCostingBatchQuantity);
-      }
       closeEditor();
       await fetchRows();
       onChanged?.();
@@ -395,8 +384,8 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        // child-part picker is locked in edit mode, so has_routing/quantity
-        // are display-only fillers — synthesize the option from the BOM row.
+        // has_routing/quantity are display-only fillers — synthesize the option
+        // from the BOM row.
         childPart: {
           id: editingRow.child_part.id,
           part_name: editingRow.child_part.part_name,
@@ -410,7 +399,6 @@ export default function PartBomPanel({
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
         consume_whole_units: editingRow.consume_whole_units,
-        childCostingBatchQuantity: editingRow.child_part.costing_batch_quantity,
       }
     : undefined;
 
@@ -646,12 +634,12 @@ export default function PartBomPanel({
                   </Typography>
                 )}
                 {/* Cascaded-qty surprise guard: only fires on fractional
-                    (yield-style) made children with no batch pin. The batch is
-                    set inline via this row's Edit. */}
+                    (yield-style) made children with no batch pin. The batch is a
+                    property of the child, set on the child's own page. */}
                 {showPinHint && !readOnly && (
                   <Typography variant="caption" color="text.secondary">
-                    Valued at the quantity each order draws. Edit this line to cost{' '}
-                    {child.part_name} at a fixed batch instead.
+                    Valued at the quantity each order draws. Set a costing batch on{' '}
+                    {child.part_name}&apos;s page to pin its cost.
                   </Typography>
                 )}
               </Box>

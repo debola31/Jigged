@@ -5,13 +5,13 @@ import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
-import Typography from '@mui/material/Typography';
 import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
 import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
-import { getPartUnitConversions, getPart, getComputedPartCost } from '@/utils/partsAccess';
+import { getPartUnitConversions } from '@/utils/partsAccess';
 import { defaultConsumeWholeUnits, unitShortLabel } from '@/lib/standardUnits';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 
@@ -24,14 +24,6 @@ export interface MaterialEditorValue {
   unit: string;
   /** Ceiling consumption to whole units at the order qty (discrete stock). */
   consume_whole_units: boolean;
-  /**
-   * The made child's costing batch quantity, to write to the CHILD part on save.
-   * `number` = set it, `null` = clear (revert to default), `undefined` = leave
-   * untouched. Only surfaced (and thus only ≠ undefined) for a made child
-   * consumed as a fraction — the case where a made part's setup-amortized cost
-   * needs a fixed batch to be valued against.
-   */
-  childCostingBatchQuantity?: number | null;
 }
 
 /** Format a yield ratio for display — collapse near-integers to a clean int. */
@@ -64,9 +56,6 @@ function parseQty(s: string): number | null {
   return Number.isFinite(n) && n > 0 && /^[0-9.]+$/.test(t) ? n : null;
 }
 
-const currency = (n: number): string =>
-  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
-
 export interface MaterialRowEditorProps {
   companyId: string;
   /** Part IDs to hide from the child-part picker (e.g. the parent itself). */
@@ -94,9 +83,9 @@ const EMPTY_VALUE: MaterialEditorValue = {
  * part field. The quantity accepts a whole number, a decimal, or a simple
  * fraction ("1/20") — a value below 1 is a yield (many parts from one unit), so
  * there is no separate yield mode. Whether discrete stock is drawn in whole
- * units is derived automatically from the unit (count → whole). A made child
- * consumed as a fraction additionally surfaces its batch-cost basis, because
- * that's the only place a made part's setup-amortized cost can be pinned.
+ * units is derived automatically from the unit (count → whole). A made child's
+ * costing batch (for setup amortization) is set on that child's own page, not
+ * here.
  */
 export default function MaterialRowEditor({
   companyId,
@@ -109,25 +98,17 @@ export default function MaterialRowEditor({
 }: MaterialRowEditorProps) {
   const [value, setValue] = useState<MaterialEditorValue>(initial ?? EMPTY_VALUE);
 
-  // Batch qty for the made child (string field), + its derived unit cost.
-  const [batchQtyStr, setBatchQtyStr] = useState<string>(
-    initial?.childCostingBatchQuantity != null ? String(initial.childCostingBatchQuantity) : '',
-  );
-  const [batchCost, setBatchCost] = useState<number | null | 'loading'>(null);
-
   const [conversionUnits, setConversionUnits] = useState<string[]>([]);
   const [conversionsLoading, setConversionsLoading] = useState(false);
 
   // Reset when initial changes (cancel-add then edit a different row).
   useEffect(() => {
-    const next = initial ?? EMPTY_VALUE;
-    setValue(next);
-    setBatchQtyStr(next.childCostingBatchQuantity != null ? String(next.childCostingBatchQuantity) : '');
+    setValue(initial ?? EMPTY_VALUE);
   }, [initial]);
 
   const isCountUnit = defaultConsumeWholeUnits(value.unit);
 
-  // Load the child's secondary units + current batch qty on selection.
+  // Load the child's secondary units on selection.
   useEffect(() => {
     const child = value.childPart;
     if (!child?.id) {
@@ -140,22 +121,10 @@ export default function MaterialRowEditor({
       .then((rows) => !cancelled && setConversionUnits(rows.map((r) => r.from_unit)))
       .catch(() => !cancelled && setConversionUnits([]))
       .finally(() => !cancelled && setConversionsLoading(false));
-
-    // Pull the child's stored batch qty so editing it here starts from truth.
-    // Only for made children (bought parts have no batch-cost basis). Skipped
-    // in edit mode, where `initial.childCostingBatchQuantity` already seeded it.
-    if (!initial && child.source === 'made') {
-      getPart(child.id)
-        .then((p) => {
-          if (cancelled || !p) return;
-          setBatchQtyStr(p.costing_batch_quantity != null ? String(p.costing_batch_quantity) : '');
-        })
-        .catch(() => undefined);
-    }
     return () => {
       cancelled = true;
     };
-  }, [value.childPart, initial]);
+  }, [value.childPart]);
 
   // Unit options: the child's primary, plus standard same-dimension units (feet,
   // meters, … for an inches part — known conversion factors, materialized on
@@ -188,34 +157,9 @@ export default function MaterialRowEditor({
   // A count material consumed as a fraction reads as a yield — show the
   // reciprocal so "0.05 per ea" is confirmed as "20 parts per ea".
   const showYieldReciprocal = isCountUnit && perPartQty !== null && perPartQty < 1;
-  // A made child consumed as a fraction (< 1 per part) is exactly when the
-  // batch-cost basis matters — surface the field then and only then.
-  const showBatchBasis = value.childPart?.source === 'made' && perPartQty !== null && perPartQty < 1;
-  const batchQty = parseQty(batchQtyStr);
-
-  // Derive the child's unit cost at the entered batch, so "batch of 25" reads
-  // as the concrete "$109 / strip" the shop cares about.
-  useEffect(() => {
-    if (!showBatchBasis || !value.childPart?.id || batchQty === null) {
-      setBatchCost(null);
-      return;
-    }
-    let cancelled = false;
-    setBatchCost('loading');
-    const handle = setTimeout(() => {
-      getComputedPartCost(value.childPart!.id, batchQty)
-        .then((c) => !cancelled && setBatchCost(c))
-        .catch(() => !cancelled && setBatchCost(null));
-    }, 350);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [showBatchBasis, value.childPart, batchQty]);
 
   const handlePartChange = (option: PartSelectOption | null) => {
     setValue((prev) => ({ ...prev, childPart: option, unit: option?.primary_unit ?? '' }));
-    setBatchQtyStr('');
   };
 
   const canSave =
@@ -233,9 +177,6 @@ export default function MaterialRowEditor({
       // Whole-unit consumption is derived from the unit, not a manual toggle:
       // count/discrete stock rounds up, continuous material is fractional.
       consume_whole_units: defaultConsumeWholeUnits(value.unit),
-      // Only touch the child's batch qty when the field applied (made + fractional);
-      // undefined tells PartBomPanel to leave it alone otherwise.
-      childCostingBatchQuantity: showBatchBasis ? batchQty : undefined,
     });
   };
 
@@ -324,50 +265,6 @@ export default function MaterialRowEditor({
           />
         </Box>
       </Box>
-
-      {/* Batch cost basis — shown only for a made child consumed as a fraction,
-          which is exactly when a made part's setup-amortized cost needs a fixed
-          batch to be valued against. Writes to the child part. */}
-      {showBatchBasis && (
-        <Box
-          sx={{
-            mt: 1,
-            p: 1.25,
-            borderRadius: 1,
-            border: (theme) => `1px solid ${theme.palette.divider}`,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1.5,
-            flexWrap: 'wrap',
-          }}
-        >
-          <Typography variant="body2" sx={{ flexBasis: '100%' }}>
-            <strong>{value.childPart?.part_name}</strong> is made — cost it at the batch you
-            produce it in (setup spreads across the batch). Applies wherever it&apos;s used.
-          </Typography>
-          <TextField
-            label={`Batch qty (${unitShort})`}
-            type="number"
-            value={batchQtyStr}
-            onChange={(e) => setBatchQtyStr(e.target.value)}
-            placeholder="Default"
-            InputLabelProps={{ shrink: true }}
-            inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
-            size="small"
-            disabled={saving}
-            sx={{ width: 150 }}
-          />
-          <Typography variant="body2" sx={{ fontWeight: batchQty === null ? 400 : 600 }}>
-            {batchQty === null
-              ? 'valued at the quantity each order draws'
-              : batchCost === 'loading'
-                ? '…'
-                : batchCost != null
-                  ? `= ${currency(batchCost)} / ${unitShort}`
-                  : ''}
-          </Typography>
-        </Box>
-      )}
 
       {error && (
         <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.75, ml: 1 }}>

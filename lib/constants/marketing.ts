@@ -39,8 +39,16 @@ export const HERO = {
   // quote → floor → shipping → invoicing.
   headlineLead: 'Your whole shop,',
   headlineEmphasis: 'in one place.',
+  // Unpacks the headline rather than repeating it: "whole shop" is abstract, so this says
+  // what it actually spans, then delivers the two benefits (grunt test: subhead = how it
+  // makes life better). Opened "Go paperless" before — the narrow pitch we cut from the
+  // eyebrow, and paperless is a mechanism anyway (the shop-floor section sells it).
+  // "Jigged shows you" made Jigged the actor; the customer is the hero. "Captures the
+  // notes your operators take" → "stay with the part": same fact, the shop's side of the
+  // table. "Next time someone needs it" (not "you run the part") is availability, not just
+  // the owner's own recall.
   subhead:
-    'Go paperless from quote to done. Jigged shows you where every job stands without walking the floor — and captures the notes and photos your operators take at the machine, so the fix your best guy figured out is still there next time you run the part.',
+    'Quoting to invoicing and everything between. See where every job stands without walking the floor — and the notes and photos your operators take at the machine stay with the part, so the fix your best guy figured out is there next time someone needs it.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   secondaryCta: { label: 'See how it works', href: '#how-it-works' },
 };

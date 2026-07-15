@@ -8,6 +8,84 @@ export interface ResolvedTier {
   below_min: boolean;
 }
 
+export interface ResolvedMarkup {
+  markup_percent: number;
+  source_tier_id: string;
+  matched_tier_quantity: number;
+  below_min: boolean;
+}
+
+/**
+ * SINGLE SOURCE OF TRUTH for a part's price at a quantity.
+ *
+ * Every surface (Pricing card tier rows, the Pricing "Cost at qty" preview, the
+ * quote form's live price, and the persisted quote line) computes price the same
+ * way: a base cost from the ONE canonical engine `compute_part_cost_at_qty`
+ * (via `getComputedPartCost`) at the ACTUAL quantity, times the markup of the
+ * tier that applies at that quantity. The markup ladder is a step function of
+ * qty; the base cost is exact at qty — so the price is exact at every qty and
+ * identical across screens (no per-breakpoint approximation, no TS/SQL engine
+ * split on the money path).
+ *
+ * `resolveMarkupAtQty` picks the markup; `unitPriceFromBase` applies it.
+ */
+
+/**
+ * Resolve the markup % that applies at `qty` — the tier with the largest
+ * `quantity <= qty`, or (if below the lowest) the lowest tier with `below_min`.
+ * Only tiers that carry a markup are considered. Returns null when the part has
+ * no markup tier at all (unpriced).
+ */
+export function resolveMarkupAtQty(
+  tiers: ReadonlyArray<{ id: string; quantity: number; markup_percent: number | null }>,
+  qty: number,
+): ResolvedMarkup | null {
+  if (!Number.isFinite(qty)) return null;
+  const withMarkup = tiers
+    .filter(
+      (t): t is { id: string; quantity: number; markup_percent: number } =>
+        t.markup_percent !== null && Number.isFinite(t.markup_percent),
+    )
+    .sort((a, b) => a.quantity - b.quantity);
+  if (withMarkup.length === 0) return null;
+
+  const lowest = withMarkup[0];
+  if (qty < lowest.quantity) {
+    return {
+      markup_percent: lowest.markup_percent,
+      source_tier_id: lowest.id,
+      matched_tier_quantity: lowest.quantity,
+      below_min: true,
+    };
+  }
+  let match = lowest;
+  for (const t of withMarkup) {
+    if (t.quantity <= qty) match = t;
+    else break;
+  }
+  return {
+    markup_percent: match.markup_percent,
+    source_tier_id: match.id,
+    matched_tier_quantity: match.quantity,
+    below_min: false,
+  };
+}
+
+/**
+ * Cost-plus price: base × (1 + markup/100), rounded to cents. Returns null when
+ * base or markup is unavailable, so callers render "—" rather than a wrong or
+ * NaN number.
+ */
+export function unitPriceFromBase(
+  base: number | null,
+  markup: number | null | undefined,
+): number | null {
+  if (base === null || !Number.isFinite(base) || markup == null || Number.isNaN(markup)) {
+    return null;
+  }
+  return Math.round(base * (1 + markup / 100) * 100) / 100;
+}
+
 /**
  * Resolve which pricing tier applies for a given order quantity.
  *

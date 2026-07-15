@@ -6,9 +6,10 @@ import type { Part } from '@/types/part';
  * Derived purely from the part's structure plus the same priceability verdict
  * the data layer uses. `compute_part_cost_explain.is_priceable` (detail) and
  * `get_priceable_part_ids` (list) now enforce the *identical* structural rule —
- * every part in the BOM tree has a markup, every op is priced, every purchased
- * leaf has a vendor cost — so the workspace and the parts-list ✓/⚠ column can
- * never disagree (locked by an agreement test).
+ * the part itself has a markup, every op is priced, and every purchased leaf in
+ * the BOM tree has a vendor cost (a material's own markup is NOT required) — so
+ * the workspace and the parts-list ✓/⚠ column can never disagree (locked by an
+ * agreement test).
  *
  * Honest by construction (per the no-silent-fallback principle): we never
  * invent a reason a part can't be priced — `isPriceable` is ground truth, and
@@ -73,7 +74,7 @@ export function getPartSetupStatus(
   const nextStep =
     part.source === 'bought'
       ? null
-      : 'This part isn’t priceable yet — a sub-part markup, operation rate, or material cost still needs setting up.';
+      : 'This part isn’t priceable yet — its markup, an operation rate, or a material cost still needs setting up.';
 
   return {
     state: 'needs_cost',

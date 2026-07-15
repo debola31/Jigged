@@ -147,17 +147,14 @@ export default function WorkspaceTab({
         {showRoutingPanel ? (
           <>
             <Grid size={{ xs: 12, md: 7 }}>
-              <Card elevation={2} sx={{ height: '100%' }}>
-                <CardContent>
-                  <PartPricing
-                    companyId={companyId}
-                    part={part}
-                    refreshKey={refreshKey}
-                    currentChain={currentChain}
-                    onPricingChanged={refreshAfterMutation}
-                  />
-                </CardContent>
-              </Card>
+              {/* PartPricing renders its own Cost + Pricing cards. */}
+              <PartPricing
+                companyId={companyId}
+                part={part}
+                refreshKey={refreshKey}
+                currentChain={currentChain}
+                onPricingChanged={refreshAfterMutation}
+              />
             </Grid>
 
             <Grid size={{ xs: 12, md: 5 }}>
@@ -234,17 +231,15 @@ export default function WorkspaceTab({
             )}
 
             <Grid size={{ xs: 12 }}>
-              <Card elevation={2}>
-                <CardContent>
-                  <PartPricing
-                    companyId={companyId}
-                    part={part}
-                    refreshKey={refreshKey}
-                    currentChain={currentChain}
-                    onPricingChanged={refreshAfterMutation}
-                  />
-                </CardContent>
-              </Card>
+              {/* PartPricing renders its own Pricing card (bought parts: just
+                  the markup tiers; the Cost card is the procurement panel above). */}
+              <PartPricing
+                companyId={companyId}
+                part={part}
+                refreshKey={refreshKey}
+                currentChain={currentChain}
+                onPricingChanged={refreshAfterMutation}
+              />
             </Grid>
           </>
         )}

@@ -554,7 +554,7 @@ export default function JobDetailPage() {
                           </Typography>
                         )}
                         <Box sx={{ mt: 2 }}>
-                          <JobPartMaterialsCard partId={part.part_id} />
+                          <JobPartMaterialsCard partId={part.part_id} orderQuantity={part.quantity} />
                         </Box>
                       </Box>
                     );

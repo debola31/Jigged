@@ -541,9 +541,9 @@ def load_parts(
 
     Bought-part costs are NOT written to parts.cost_per_unit (column dropped in the
     cost-rollup migration). Instead, this function collects costs for bought parts
-    and inserts them as part_procurement_tiers rows with vendor_id=NULL after the
-    parts table insert completes. The cost engine treats NULL-vendor tiers as the
-    fallback when no vendor-specific tier matches the qty.
+    and inserts them as part-level part_procurement_tiers rows (min_quantity=1)
+    after the parts table insert completes. Tiers are part-level — vendor is a
+    supplier label on the part (preferred_vendor_id), not a tier dimension.
     """
     log("\nLoading parts...")
     rows = read_csv(PARTS_CSV)
@@ -603,7 +603,7 @@ def load_parts(
             source,
         ))
 
-        # Bought parts with a positive cost get a NULL-vendor procurement tier at
+        # Bought parts with a positive cost get a part-level procurement tier at
         # min_quantity=1. Made parts have their cost computed from routing+BOM by
         # compute_part_cost_at_qty — no tier row needed.
         # part_procurement_tiers schema requires cost > 0 (CHECK constraint).
@@ -611,7 +611,6 @@ def load_parts(
             procurement_tier_records.append((
                 str(uuid.uuid4()),
                 pid,
-                None,        # vendor_id NULL (cost known, vendor not attributed)
                 1,           # min_quantity = 1
                 cost,
             ))
@@ -636,14 +635,14 @@ def load_parts(
             cur,
             """
             INSERT INTO part_procurement_tiers
-                (id, part_id, vendor_id, min_quantity, cost_per_unit)
+                (id, part_id, min_quantity, cost_per_unit)
             VALUES %s
             """,
             procurement_tier_records,
             page_size=BATCH_SIZE,
         )
         log(
-            f"inserted part_procurement_tiers (NULL-vendor, qty=1): "
+            f"inserted part_procurement_tiers (part-level, qty=1): "
             f"{len(procurement_tier_records)}",
             indent=1,
         )

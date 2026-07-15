@@ -49,7 +49,6 @@ import type { ProcurementTierFormData } from '@/types/procurementTier';
 
 const FORM_DEFAULTS: ProcurementTierFormData = {
   part_id: 'part-1',
-  vendor_id: 'vendor-1',
   min_quantity: '100',
   cost_per_unit: '0.85',
   quoted_at: '2026-01-01',
@@ -78,65 +77,47 @@ describe('procurementTiersAccess', () => {
   });
 
   describe('getTiersForPart', () => {
-    it('groups rows by vendor and orders tiers by min_quantity ascending', async () => {
-      // Two vendors, plus one internal-estimate row, deliberately not sorted.
+    it('returns a flat part-level tier list, querying by part_id ordered by min_quantity', async () => {
+      // Part-level sheet — no vendor dimension. PostgREST serializes numeric as
+      // strings; assert they are coerced to numbers.
       mockQueryBuilder.data = [
         {
-          id: 'tier-vA-1000',
+          id: 'tier-1',
           part_id: 'part-1',
-          vendor_id: 'vendor-a',
-          min_quantity: 1000,
-          cost_per_unit: 0.75,
-          quoted_at: '2026-01-15',
-          expires_at: '2026-12-31',
-          notes: null,
-          created_at: '2026-01-15T00:00:00Z',
-          updated_at: '2026-01-15T00:00:00Z',
-          vendor: { id: 'vendor-a', name: 'Acme Steel' },
-        },
-        {
-          id: 'tier-vA-100',
-          part_id: 'part-1',
-          vendor_id: 'vendor-a',
-          min_quantity: 100,
-          cost_per_unit: 0.85,
-          quoted_at: '2026-01-15',
-          expires_at: '2026-12-31',
-          notes: null,
-          created_at: '2026-01-15T00:00:00Z',
-          updated_at: '2026-01-15T00:00:00Z',
-          vendor: { id: 'vendor-a', name: 'Acme Steel' },
-        },
-        {
-          id: 'tier-vB-50',
-          part_id: 'part-1',
-          vendor_id: 'vendor-b',
-          min_quantity: 50,
-          cost_per_unit: 0.95,
-          quoted_at: '2026-02-01',
-          expires_at: '2026-06-30',
-          notes: null,
-          created_at: '2026-02-01T00:00:00Z',
-          updated_at: '2026-02-01T00:00:00Z',
-          vendor: { id: 'vendor-b', name: 'Beta Mill Supply' },
-        },
-        {
-          id: 'tier-internal-1',
-          part_id: 'part-1',
-          vendor_id: null,
-          min_quantity: 1,
-          cost_per_unit: 1.1,
+          min_quantity: '1',
+          cost_per_unit: '1.1',
           quoted_at: null,
           expires_at: null,
           notes: 'sketch',
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
-          vendor: null,
+        },
+        {
+          id: 'tier-100',
+          part_id: 'part-1',
+          min_quantity: '100',
+          cost_per_unit: '0.85',
+          quoted_at: '2026-01-15',
+          expires_at: '2026-12-31',
+          notes: null,
+          created_at: '2026-01-15T00:00:00Z',
+          updated_at: '2026-01-15T00:00:00Z',
+        },
+        {
+          id: 'tier-1000',
+          part_id: 'part-1',
+          min_quantity: '1000',
+          cost_per_unit: '0.75',
+          quoted_at: '2026-01-15',
+          expires_at: '2026-12-31',
+          notes: null,
+          created_at: '2026-01-15T00:00:00Z',
+          updated_at: '2026-01-15T00:00:00Z',
         },
       ];
       mockQueryBuilder.error = null;
 
-      const groups = await getTiersForPart('part-1');
+      const tiers = await getTiersForPart('part-1');
 
       expect(mockSupabase.from).toHaveBeenCalledWith('part_procurement_tiers');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('part_id', 'part-1');
@@ -144,39 +125,22 @@ describe('procurementTiersAccess', () => {
         ascending: true,
       });
 
-      // Real vendors come first (alphabetized by name), then internal estimate.
-      expect(groups.map((g) => g.vendor_name)).toEqual([
-        'Acme Steel',
-        'Beta Mill Supply',
-        'Internal estimate',
-      ]);
-
-      const acme = groups[0];
-      expect(acme.vendor_id).toBe('vendor-a');
-      // Within a group: ordered by min_quantity ASC.
-      expect(acme.tiers.map((t) => t.min_quantity)).toEqual([100, 1000]);
-      expect(acme.tiers.map((t) => t.cost_per_unit)).toEqual([0.85, 0.75]);
-      // Group-level dates: quoted=most-recent, expires=earliest.
-      expect(acme.quoted_at).toBe('2026-01-15');
-      expect(acme.expires_at).toBe('2026-12-31');
-
-      const beta = groups[1];
-      expect(beta.tiers).toHaveLength(1);
-      expect(beta.tiers[0].min_quantity).toBe(50);
-
-      const internal = groups[2];
-      expect(internal.vendor_id).toBeNull();
-      expect(internal.vendor_name).toBe('Internal estimate');
-      expect(internal.tiers).toHaveLength(1);
-      expect(internal.tiers[0].notes).toBe('sketch');
+      // Flat list, order preserved from the query.
+      expect(tiers.map((t) => t.id)).toEqual(['tier-1', 'tier-100', 'tier-1000']);
+      expect(tiers.map((t) => t.min_quantity)).toEqual([1, 100, 1000]);
+      expect(tiers.map((t) => t.cost_per_unit)).toEqual([1.1, 0.85, 0.75]);
+      expect(typeof tiers[0].min_quantity).toBe('number');
+      // No vendor dimension on the flat tier.
+      expect(tiers[0]).not.toHaveProperty('vendor_id');
+      expect(tiers[0].notes).toBe('sketch');
     });
 
     it('returns empty array when there are no tiers', async () => {
       mockQueryBuilder.data = [];
       mockQueryBuilder.error = null;
 
-      const groups = await getTiersForPart('part-without-tiers');
-      expect(groups).toEqual([]);
+      const tiers = await getTiersForPart('part-without-tiers');
+      expect(tiers).toEqual([]);
     });
 
     it('throws when Supabase returns an error', async () => {
@@ -191,83 +155,13 @@ describe('procurementTiersAccess', () => {
         code: '42501',
       });
     });
-
-    it('handles vendor join returned as an array (PostgREST shape)', async () => {
-      mockQueryBuilder.data = [
-        {
-          id: 'tier-1',
-          part_id: 'part-1',
-          vendor_id: 'vendor-a',
-          min_quantity: 10,
-          cost_per_unit: 1.0,
-          quoted_at: null,
-          expires_at: null,
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          vendor: [{ id: 'vendor-a', name: 'Acme Steel' }],
-        },
-      ];
-      mockQueryBuilder.error = null;
-
-      const groups = await getTiersForPart('part-1');
-      expect(groups).toHaveLength(1);
-      expect(groups[0].vendor_name).toBe('Acme Steel');
-    });
-
-    it('flags expired and expiring tier groups', async () => {
-      const today = new Date();
-      const longAgo = new Date(today);
-      longAgo.setDate(longAgo.getDate() - 30);
-      const soon = new Date(today);
-      soon.setDate(soon.getDate() + 7);
-      const isoOf = (d: Date) => d.toISOString().slice(0, 10);
-
-      mockQueryBuilder.data = [
-        {
-          id: 'tier-expired',
-          part_id: 'part-1',
-          vendor_id: 'vendor-old',
-          min_quantity: 1,
-          cost_per_unit: 1.0,
-          quoted_at: null,
-          expires_at: isoOf(longAgo),
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          vendor: { id: 'vendor-old', name: 'Old Vendor' },
-        },
-        {
-          id: 'tier-soon',
-          part_id: 'part-1',
-          vendor_id: 'vendor-soon',
-          min_quantity: 1,
-          cost_per_unit: 1.0,
-          quoted_at: null,
-          expires_at: isoOf(soon),
-          notes: null,
-          created_at: '2026-01-01T00:00:00Z',
-          updated_at: '2026-01-01T00:00:00Z',
-          vendor: { id: 'vendor-soon', name: 'Soon Vendor' },
-        },
-      ];
-      mockQueryBuilder.error = null;
-
-      const groups = await getTiersForPart('part-1');
-      const old = groups.find((g) => g.vendor_id === 'vendor-old');
-      const soonG = groups.find((g) => g.vendor_id === 'vendor-soon');
-      expect(old?.is_expired).toBe(true);
-      expect(soonG?.is_expiring).toBe(true);
-      expect(soonG?.is_expired).toBe(false);
-    });
   });
 
   describe('addTier', () => {
-    it('inserts and returns the normalized tier', async () => {
+    it('inserts a part-level tier (no vendor) and returns the normalized tier', async () => {
       mockQueryBuilder.data = {
         id: 'tier-new',
         part_id: 'part-1',
-        vendor_id: 'vendor-1',
         min_quantity: 100,
         cost_per_unit: 0.85,
         quoted_at: '2026-01-01',
@@ -284,13 +178,16 @@ describe('procurementTiersAccess', () => {
       expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
         expect.objectContaining({
           part_id: 'part-1',
-          vendor_id: 'vendor-1',
           min_quantity: 100,
           cost_per_unit: 0.85,
           quoted_at: '2026-01-01',
           expires_at: '2026-12-31',
           notes: null,
         }),
+      );
+      // Vendor is no longer a tier dimension.
+      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+        expect.not.objectContaining({ vendor_id: expect.anything() }),
       );
       expect(result.id).toBe('tier-new');
       expect(result.min_quantity).toBe(100);
@@ -301,11 +198,11 @@ describe('procurementTiersAccess', () => {
       mockQueryBuilder.error = {
         code: '23505',
         message:
-          'duplicate key value violates unique constraint "part_procurement_tiers_part_id_vendor_id_min_quantity_key"',
+          'duplicate key value violates unique constraint "part_procurement_tiers_part_id_min_quantity_key"',
       };
 
       await expect(addTier(FORM_DEFAULTS)).rejects.toThrow(
-        /A tier already exists at this break for this vendor/,
+        /A tier already exists at this break/,
       );
     });
 
@@ -333,35 +230,6 @@ describe('procurementTiersAccess', () => {
       ).rejects.toThrow(/Expiration date must be on or after the quote date/);
       expect(mockQueryBuilder.insert).not.toHaveBeenCalled();
     });
-
-    it('allows a null vendor_id (internal estimate)', async () => {
-      mockQueryBuilder.data = {
-        id: 'tier-internal',
-        part_id: 'part-1',
-        vendor_id: null,
-        min_quantity: 1,
-        cost_per_unit: 1.0,
-        quoted_at: null,
-        expires_at: null,
-        notes: null,
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-      };
-      mockQueryBuilder.error = null;
-
-      await addTier({
-        ...FORM_DEFAULTS,
-        vendor_id: null,
-        min_quantity: '1',
-        cost_per_unit: '1.0',
-        quoted_at: null,
-        expires_at: null,
-      });
-
-      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
-        expect.objectContaining({ vendor_id: null }),
-      );
-    });
   });
 
   describe('updateTier', () => {
@@ -369,7 +237,6 @@ describe('procurementTiersAccess', () => {
       mockQueryBuilder.data = {
         id: 'tier-1',
         part_id: 'part-1',
-        vendor_id: 'vendor-1',
         min_quantity: 200,
         cost_per_unit: 0.8,
         quoted_at: '2026-01-01',
@@ -406,7 +273,7 @@ describe('procurementTiersAccess', () => {
       };
 
       await expect(updateTier('tier-1', FORM_DEFAULTS)).rejects.toThrow(
-        /A tier already exists at this break for this vendor/,
+        /A tier already exists at this break/,
       );
     });
   });
@@ -429,6 +296,7 @@ describe('procurementTiersAccess', () => {
 
   describe('getProcurementCost', () => {
     it('calls the RPC with the right params and returns a single result', async () => {
+      // vendor_id in the result is the part's preferred-vendor label (display).
       (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         data: [
           {

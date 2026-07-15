@@ -3,17 +3,19 @@ Single source of truth for "is this part ready to quote?".
 
 The parts LIST uses the set-based RPC `get_priceable_part_ids`; the part DETAIL
 page uses `compute_part_cost_explain(...).is_priceable`. They must never
-disagree — a part flagged Incomplete on the list must not read "ready" on its
-detail page (the #12 FB CBD-ALT .025R bug: a made sub-part with no markup of its
-own still let the parent compute a cost, so the detail page showed nothing to
-fix while the list correctly flagged it).
+disagree.
 
-This test builds the minimal reproduction — a made PARENT whose made sub-part
-SUB has a resolvable cost but no markup — and asserts:
+The rule (standard-costing model): a part is quotable iff its cost RESOLVES
+(bought: procurement tier; made: every op priced and every BOM child costable)
+AND the part ITSELF has a markup. A material's own markup is NOT required — the
+parent marks up the rolled-up cost, so a child's markup is never used. (This
+re-resolves the old #12 agreement, which had required a markup on every tree
+node, in the correct direction.)
 
-  * the parent's cost DOES resolve (unit_cost is not None), yet
-  * BOTH views agree it is NOT ready (SUB needs a markup), and
-  * once SUB gets a markup, BOTH views agree it IS ready.
+The tests use a made PARENT consuming a made SUB and assert:
+  * child SUB lacking a markup does NOT block PARENT (both views: ready);
+  * PARENT lacking a markup IS blocked, and only PARENT (the root) is flagged;
+  * both views agree in every case.
 
 Run:
     cd api && pytest -m integration tests/integration/test_priceability_agreement.py
@@ -161,36 +163,51 @@ def _detail_explain(admin: Client, part_id: str) -> dict[str, Any]:
     return res.data[0]
 
 
-def test_list_and_detail_agree_when_subpart_lacks_markup(admin: Client, env: PriceabilityEnv):
-    # PARENT gets the Default markup; SUB is deliberately left without one —
-    # the exact #12 shape.
+def test_child_markup_does_not_block_parent(admin: Client, env: PriceabilityEnv):
+    # PARENT gets a markup; SUB (its made child) is deliberately left without
+    # one. A material's markup is never used inside a parent (the parent marks
+    # up the rolled-up cost), so this must NOT block quoting the parent.
     _apply_default(admin, env, env.parent_id)
 
     explain = _detail_explain(admin, env.parent_id)
     list_priceable = _list_priceable(admin, env.company_id)
 
-    # The parent's cost resolves — this is why the OLD detail page (unit_cost
-    # != null) wrongly said "ready".
+    # The parent's cost resolves, and it IS ready — the child's missing markup
+    # is irrelevant. Detail and list agree.
     assert explain["unit_cost"] is not None
+    assert explain["is_priceable"] is True
+    assert env.parent_id in list_priceable
+    # No markup gaps flagged: only the root would be, and it has one.
+    assert explain["missing_markups"] == []
+    # SUB isn't sellable on its own (no markup), but that doesn't block PARENT.
+    assert env.sub_id not in list_priceable
 
-    # But it is NOT ready: SUB has no markup. Detail and list must agree.
-    assert explain["is_priceable"] is False
+
+def test_root_without_markup_is_not_priceable(admin: Client, env: PriceabilityEnv):
+    # Neither PARENT nor SUB has a markup. The part being QUOTED (parent) needs
+    # one; its material (sub) does not.
+    explain = _detail_explain(admin, env.parent_id)
+    list_priceable = _list_priceable(admin, env.company_id)
+
+    assert explain["unit_cost"] is not None  # cost still resolves
+    assert explain["is_priceable"] is False  # parent itself has no markup
     assert env.parent_id not in list_priceable
 
-    # And the detail explainer names the offending sub-part so the UI can link it.
+    # Only the ROOT (parent) is flagged for markup — never the sub.
     missing_markup_ids = {g["part_id"] for g in explain["missing_markups"]}
-    assert env.sub_id in missing_markup_ids
+    assert env.parent_id in missing_markup_ids
+    assert env.sub_id not in missing_markup_ids
 
 
 def test_list_and_detail_agree_when_everything_has_markup(admin: Client, env: PriceabilityEnv):
-    # Give BOTH the parent and the sub-part the Default markup.
+    # Give BOTH the parent and the sub-part a markup.
     _apply_default(admin, env, env.parent_id)
     _apply_default(admin, env, env.sub_id)
 
     explain = _detail_explain(admin, env.parent_id)
     list_priceable = _list_priceable(admin, env.company_id)
 
-    # Now ready on BOTH views.
+    # Ready on BOTH views (parent has a markup; the sub's is now irrelevant).
     assert explain["is_priceable"] is True
     assert explain["missing_markups"] == []
     assert env.parent_id in list_priceable

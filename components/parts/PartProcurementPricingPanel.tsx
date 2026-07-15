@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -28,7 +28,7 @@ import {
 } from '@/utils/procurementTiersAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
 import { updatePartPreferredVendor } from '@/utils/partsAccess';
-import type { ProcurementTierGroup } from '@/types/procurementTier';
+import type { ProcurementTier } from '@/types/procurementTier';
 import type { Vendor } from '@/types/vendor';
 
 interface PartProcurementPricingPanelProps {
@@ -69,37 +69,38 @@ function tempId(): string {
 /**
  * Cost section of the bought-part Pricing card.
  *
- * Renders a "Cost" header + a vendor picker + a single tier table for the
- * selected vendor's tier sheet. The picker lists every vendor; ones with
- * an existing sheet on this part are flagged with a tier-count caption,
- * so the user sees at a glance who they already have rates from.
+ * Renders a "Cost" header + a vendor picker + a single **part-level** tier
+ * table. Cost tiers are a property of the part, independent of vendor — the
+ * cost engine (`compute_part_cost_at_qty` / `get_procurement_cost`) reads them
+ * directly. The vendor picker sets `parts.preferred_vendor_id`, a supplier
+ * ("who we PO from") label that drives the Vendors-page role but never gates
+ * cost, so switching vendor does NOT swap or discard the tier sheet.
  *
- * Cost source contract: only the part's preferred vendor's sheet drives
- * cost (in `compute_part_cost_at_qty` and `get_procurement_cost`). Picking
- * a vendor in this panel sets it as preferred AND switches the displayed
- * sheet — keeping the two concepts unified. Sheets under non-preferred
- * vendors and `vendor_id=NULL` "Internal estimate" rows remain editable for
- * reference but never feed rollup.
+ * (Multi-vendor cost sheets / RFQ / POs are deferred to a future purchasing
+ * module — see the drop-per-vendor-tiers migration.)
  *
  * Cost edits are financial data, so — like the made-part Pricing card — they
  * are committed via an explicit **Save** button (not auto-saved on blur);
- * `dirty` tracks unsaved edits. When the selected vendor has no priced tier
- * yet, the table shows a single empty starter row highlighted red (instead of
- * a separate yellow banner) so the user fills the cost in directly.
+ * `dirty` tracks unsaved edits. When the part has no priced tier yet, the table
+ * shows a single empty starter row highlighted red (instead of a separate
+ * yellow banner) so the user fills the cost in directly.
  */
 export default function PartProcurementPricingPanel({
   partId,
   companyId,
-  primaryUnit,
   preferredVendorId,
   onSaved,
 }: PartProcurementPricingPanelProps) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [groups, setGroups] = useState<ProcurementTierGroup[]>([]);
+  const [tiers, setTiers] = useState<ProcurementTier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  // The vendor is a pure supplier label now (parts.preferred_vendor_id); it no
+  // longer selects a tier sheet. Seed from the prop at mount.
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(
+    preferredVendorId ?? null,
+  );
   const [rows, setRows] = useState<EditRow[]>([]);
 
   // Cost edits commit via an explicit Save (financial data — no silent
@@ -109,15 +110,6 @@ export default function PartProcurementPricingPanel({
   const [dirty, setDirty] = useState(false);
   const saving = saveState === 'saving';
 
-  // Tracks parts.preferred_vendor_id as it currently is in the DB. Distinct
-  // from the prop (the value at mount) and from selectedVendorId (the picker's
-  // local selection). compute_part_cost_at_qty filters tiers by
-  // parts.preferred_vendor_id; saveRow/handleSave re-assert it just before
-  // saving so a tier can't end up under a vendor the SQL filter then ignores.
-  const [effectivePreferredVendorId, setEffectivePreferredVendorId] = useState<
-    string | null
-  >(preferredVendorId ?? null);
-
   const markDirty = () => {
     setDirty(true);
     setSaveState('idle');
@@ -126,12 +118,12 @@ export default function PartProcurementPricingPanel({
   const initialLoad = useCallback(async () => {
     try {
       setLoading(true);
-      const [tierGroups, vendorList] = await Promise.all([
+      const [tierList, vendorList] = await Promise.all([
         getTiersForPart(partId),
         getAllVendors(companyId),
       ]);
       setVendors(vendorList);
-      setGroups(tierGroups);
+      setTiers(tierList);
       setError(null);
     } catch (err) {
       setError(
@@ -150,38 +142,11 @@ export default function PartProcurementPricingPanel({
     initialLoad();
   }, [initialLoad]);
 
-  // Pick an initial vendor on first load: preferred vendor first (whether
-  // or not it has a sheet yet), then the first vendor that does have one,
-  // else the first vendor period. The user can always switch.
+  // Sync the working-copy rows whenever the persisted part-level tiers change
+  // (initial load, or a reload after Save). No saved tier seeds ONE empty
+  // starter row so the user fills the cost in directly (rendered red below).
+  // Resets `dirty` — these rows mirror the DB.
   useEffect(() => {
-    if (selectedVendorId) return;
-    if (loading) return;
-    if (preferredVendorId) {
-      setSelectedVendorId(preferredVendorId);
-      return;
-    }
-    const firstWithSheet = groups.find((g) => g.vendor_id !== null);
-    if (firstWithSheet?.vendor_id) {
-      setSelectedVendorId(firstWithSheet.vendor_id);
-      return;
-    }
-    if (vendors[0]) {
-      setSelectedVendorId(vendors[0].id);
-    }
-  }, [loading, groups, preferredVendorId, selectedVendorId, vendors]);
-
-  // Sync the working-copy rows whenever the selected vendor or persisted
-  // groups change (vendor switch, or a reload after Save). A vendor with no
-  // saved tier seeds ONE empty starter row so the user fills the cost in
-  // directly (rendered red below). Resets `dirty` — these rows mirror the DB.
-  useEffect(() => {
-    if (!selectedVendorId) {
-      setRows([]);
-      setDirty(false);
-      return;
-    }
-    const group = groups.find((g) => g.vendor_id === selectedVendorId);
-    const tiers = group?.tiers ?? [];
     if (tiers.length === 0) {
       setRows([{ tempKey: tempId(), quantity: '', cost: '' }]);
     } else {
@@ -194,31 +159,14 @@ export default function PartProcurementPricingPanel({
       );
     }
     setDirty(false);
-  }, [selectedVendorId, groups]);
-
-  const sheetCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const g of groups) {
-      if (g.vendor_id) map.set(g.vendor_id, g.tiers.length);
-    }
-    return map;
-  }, [groups]);
+  }, [tiers]);
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId) ?? null;
 
-  // True when the selected vendor has no SAVED tier yet → the part can't be
-  // priced. Drives the red starter-tier styling + prompt. Recomputes from
-  // `groups` (persisted), so it clears the instant a Save reloads the sheet.
-  const needsCost = useMemo(() => {
-    if (!selectedVendorId) return false;
-    const group = groups.find((g) => g.vendor_id === selectedVendorId);
-    return (group?.tiers.length ?? 0) === 0;
-  }, [selectedVendorId, groups]);
-
-  const vendorOptionLabel = (v: Vendor): string => {
-    const count = sheetCounts.get(v.id);
-    return count ? `${v.name} (${count} tier${count === 1 ? '' : 's'})` : v.name;
-  };
+  // True when the part has no SAVED tier yet → it can't be priced. Drives the
+  // red starter-tier styling + prompt. Recomputes from `tiers` (persisted), so
+  // it clears the instant a Save reloads the sheet.
+  const needsCost = tiers.length === 0;
 
   // Row editing -----------------------------------------------------------
 
@@ -227,7 +175,6 @@ export default function PartProcurementPricingPanel({
   };
 
   const addRow = () => {
-    if (!selectedVendorId) return;
     setRowsAt((prev) => [...prev, { tempKey: tempId(), quantity: '', cost: '' }]);
     markDirty();
   };
@@ -240,7 +187,6 @@ export default function PartProcurementPricingPanel({
   };
 
   const handleSave = async () => {
-    if (!selectedVendorId) return;
     // Fully-empty rows (both fields blank) are "not filled in yet" — drop them
     // rather than erroring, so an extra blank Add-tier row never blocks Save.
     const nonEmpty = rows.filter(
@@ -258,16 +204,7 @@ export default function PartProcurementPricingPanel({
     setSaveState('saving');
     setError(null);
     try {
-      // Re-assert the preferred vendor if the picked vendor isn't yet the DB's
-      // (e.g. auto-selected on mount). Without this, compute_part_cost_at_qty
-      // filters on parts.preferred_vendor_id and silently returns NULL.
-      if (effectivePreferredVendorId !== selectedVendorId) {
-        await updatePartPreferredVendor(partId, selectedVendorId);
-        setEffectivePreferredVendorId(selectedVendorId);
-      }
-
-      const persisted =
-        groups.find((g) => g.vendor_id === selectedVendorId)?.tiers ?? [];
+      const persisted = tiers;
       const keptIds = new Set(
         nonEmpty.map((r) => r.id).filter((id): id is string => Boolean(id)),
       );
@@ -287,7 +224,6 @@ export default function PartProcurementPricingPanel({
           if (changed) {
             await updateTierApi(r.id, {
               part_id: partId,
-              vendor_id: selectedVendorId,
               min_quantity: r.quantity,
               cost_per_unit: r.cost,
               quoted_at: null,
@@ -298,7 +234,6 @@ export default function PartProcurementPricingPanel({
         } else {
           await addTierApi({
             part_id: partId,
-            vendor_id: selectedVendorId,
             min_quantity: r.quantity,
             cost_per_unit: r.cost,
             quoted_at: null,
@@ -309,9 +244,9 @@ export default function PartProcurementPricingPanel({
       }
 
       // Reload the sheet — the sync effect re-syncs rows + clears `dirty`, and
-      // `needsCost` recomputes from the fresh groups.
+      // `needsCost` recomputes from the fresh tiers.
       const fresh = await getTiersForPart(partId);
-      setGroups(fresh);
+      setTiers(fresh);
       setSaveState('saved');
       // Let the parent re-derive priceability so the "Needs cost" chip clears
       // immediately (no reload).
@@ -324,14 +259,11 @@ export default function PartProcurementPricingPanel({
 
   // Render -----------------------------------------------------------------
 
-  const unit = primaryUnit && primaryUnit.trim() ? primaryUnit : 'unit';
-
   /**
-   * Pick a vendor: switch the displayed tier sheet AND set the picked vendor
-   * as preferred. The picker doubles as both setter and selector so users only
-   * think about one vendor concept per part. Optimistic local switch; failures
-   * revert and surface in the error alert. Unsaved tier edits on the previous
-   * sheet are discarded — the sync effect reloads rows for the new vendor.
+   * Pick the preferred vendor: sets `parts.preferred_vendor_id` (the supplier
+   * label). Decoupled from the tier sheet — the part-level cost tiers are
+   * untouched, so unsaved tier edits are preserved. Optimistic local switch;
+   * failures revert and surface in the error alert.
    */
   const handleVendorPick = async (vendor: Vendor | null) => {
     const nextId = vendor ? vendor.id : null;
@@ -341,8 +273,8 @@ export default function PartProcurementPricingPanel({
     setSelectedVendorId(nextId);
     try {
       await updatePartPreferredVendor(partId, nextId);
-      setEffectivePreferredVendorId(nextId);
-      // Preferred vendor drives priceability, so refresh the parent's chip.
+      // The supplier role on the Vendors page is derived from this, so refresh
+      // the parent.
       onSaved?.();
     } catch (err) {
       setSelectedVendorId(prevId);
@@ -354,9 +286,9 @@ export default function PartProcurementPricingPanel({
 
   return (
     <Box>
-      {/* Section header: "Cost" h6 + save status. The vendor picker below
-          doubles as the preferred-vendor setter and the cost-tier-sheet
-          selector. */}
+      {/* Section header: "Cost" h6 + save status. The vendor picker below sets
+          the preferred supplier; the tier table is part-level and independent
+          of it. */}
       <Box
         sx={{
           display: 'flex',
@@ -382,30 +314,7 @@ export default function PartProcurementPricingPanel({
         options={vendors}
         value={selectedVendor}
         onChange={(_e, next) => handleVendorPick(next)}
-        getOptionLabel={vendorOptionLabel}
-        renderOption={(props, option) => {
-          const count = sheetCounts.get(option.id);
-          const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & {
-            key?: React.Key;
-          };
-          return (
-            <Box
-              component="li"
-              {...rest}
-              key={key as React.Key}
-              sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}
-            >
-              <Typography variant="body2" sx={{ fontWeight: count ? 500 : 400 }}>
-                {option.name}
-              </Typography>
-              {count !== undefined && (
-                <Typography variant="caption" color="text.secondary">
-                  {count} tier{count === 1 ? '' : 's'} on file
-                </Typography>
-              )}
-            </Box>
-          );
-        }}
+        getOptionLabel={(v) => v.name}
         isOptionEqualToValue={(opt, val) => opt.id === val.id}
         size="small"
         sx={{ mb: 2, maxWidth: 480 }}
@@ -413,8 +322,8 @@ export default function PartProcurementPricingPanel({
           <TextField
             {...params}
             label="Preferred vendor"
-            placeholder="Pick a vendor"
-            helperText="Sets the default supplier and drives the BOM cost from this sheet."
+            placeholder="Pick a supplier (optional)"
+            helperText="The default supplier for this part. Cost tiers below apply regardless of vendor."
           />
         )}
       />
@@ -423,11 +332,6 @@ export default function PartProcurementPricingPanel({
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
           <CircularProgress size={24} />
         </Box>
-      ) : !selectedVendorId ? (
-        <Alert severity="error">
-          No vendors yet — add a vendor first, then set a cost tier so this part
-          can be priced and quoted.
-        </Alert>
       ) : (
         <>
           {/* Red inline prompt when there's no saved cost yet — replaces the
@@ -574,12 +478,6 @@ export default function PartProcurementPricingPanel({
               </Button>
             </Box>
           </Box>
-
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-            Costs are per {unit}. Changes are saved when you click <strong>Save
-            costs</strong>. Quotes use the cheapest applicable tier under the
-            preferred vendor.
-          </Typography>
         </>
       )}
     </Box>

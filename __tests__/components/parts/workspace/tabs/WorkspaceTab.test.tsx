@@ -65,17 +65,32 @@ const renderTab = (
   );
 
 describe('WorkspaceTab completeness banner', () => {
-  it('names a sub-part that has no markup and links to it', () => {
+  it('names a sub-part with no vendor cost and links to it', () => {
+    // Cost gaps CAN be on a child (a bought material with no vendor price) and
+    // link to it. (Markup gaps, by contrast, are only ever the root now.)
     renderTab(notReadyStatus, {
-      missing_markups: [{ part_id: 'sub1', part_name: 'SUB-COVER', depth: 1, source: 'made' }],
+      missing_markups: [],
       missing_op_rates: [],
-      missing_leaves: [],
+      missing_leaves: [{ part_id: 'sub1', part_name: 'SUB-COVER', depth: 1, qty_required: 1 }],
     });
 
     expect(screen.getByText(/isn’t ready to quote yet/i)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'SUB-COVER' });
     expect(link).toHaveAttribute('href', '/dashboard/co1/parts/sub1');
+    expect(screen.getByText(/has no vendor cost/i)).toBeInTheDocument();
+  });
+
+  it('phrases a missing markup on the part itself as "This part …" with no link', () => {
+    // Markup gaps only ever apply to the root (the part being quoted) — a
+    // material's markup is never used inside a parent.
+    renderTab(notReadyStatus, {
+      missing_markups: [{ part_id: 'parent1', part_name: 'PARENT', depth: 0, source: 'made' }],
+      missing_op_rates: [],
+      missing_leaves: [],
+    });
+
     expect(screen.getByText(/has no markup applied/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'PARENT' })).not.toBeInTheDocument();
   });
 
   it('phrases a gap on the part itself as "This part …" with no link', () => {

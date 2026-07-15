@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
-import Divider from '@mui/material/Divider';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
@@ -17,13 +18,18 @@ import TableContainer from '@mui/material/TableContainer';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
+import { unitShortLabel } from '@/lib/standardUnits';
 import {
   calculateRoutingCost,
-  calculateTierPricing,
   type RoutingCostBreakdown,
 } from '@/utils/routingCostCalculation';
 import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAccess';
-import { addPartPricingNote } from '@/utils/partsAccess';
+import { unitPriceFromBase } from '@/utils/quotePricingResolver';
+import {
+  addPartPricingNote,
+  getComputedPartCost,
+  updatePartCostingBatchQuantity,
+} from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
@@ -83,13 +89,25 @@ function parseNumber(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): EditRow {
+/**
+ * Recompute a tier row's Base/unit and Unit price from the SINGLE-SOURCE base
+ * cost at that tier's own quantity — `baseCostByQty` holds
+ * `getComputedPartCost(part, qty)` results (the same engine the quote form and
+ * the persisted line use, so a tier's price here matches a quote at that qty).
+ * Base absent from the map = not fetched yet → render "—" until it lands.
+ */
+function recomputeRow(row: EditRow, baseCostByQty: Map<number, number | null>): EditRow {
   const qty = parseNumber(row.quantity);
-  if (!breakdown || qty === null || qty <= 0) {
+  if (qty === null || qty <= 0) {
+    return { ...row, baseCostPerUnit: null };
+  }
+  const base = baseCostByQty.has(qty) ? baseCostByQty.get(qty) ?? null : undefined;
+  if (base === undefined) {
     return { ...row, baseCostPerUnit: null };
   }
   const markup = parseNumber(row.markupPercent);
-  const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
+  const baseCostPerUnit = base === null ? null : Math.round(base * 100) / 100;
+  const unitPrice = unitPriceFromBase(base, markup);
   return {
     ...row,
     baseCostPerUnit,
@@ -153,25 +171,43 @@ export default function PartPricing({
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  // Base cost per tier quantity, from the ONE canonical engine
+  // (getComputedPartCost → compute_part_cost_at_qty) — the same source the quote
+  // form and the persisted line use, so a tier's Base/unit + Unit price match a
+  // quote at that qty. `breakdown` is kept only for the cost build-up + warnings.
+  const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
+  const inFlightTierQtys = useRef<Set<number>>(new Set());
+  const tierBaseCostsRef = useRef(tierBaseCosts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [dirty, setDirty] = useState(false);
   const saving = saveState === 'saving';
 
+  // Costing lot size — the production run this part's cost amortizes over, and
+  // the quantity it's valued at when consumed as a component. Drives the live
+  // Cost breakdown below (setup / N). Made parts only.
+  const [costingQtyStr, setCostingQtyStr] = useState<string>(
+    String(part.costing_batch_quantity ?? 1),
+  );
+  const [costingDirty, setCostingDirty] = useState(false);
+  const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
+  const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
+  const costingSaving = costingSaveState === 'saving';
+  const costingQty = (() => {
+    const n = parseFloat(costingQtyStr);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  })();
+  const costingUnit = unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit');
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Bought parts have no routing — skip the calculateRoutingCost call
-      // (it would just return null) and load only the persisted tiers. The
-      // procurement subsection embedded above the markup table provides the
-      // cost source instead.
-      const [tiers, routingBreakdown] = await Promise.all([
-        getTiersForPart(partId),
-        isBought ? Promise.resolve(null) : calculateRoutingCost(partId),
-      ]);
-      setBreakdown(routingBreakdown);
+      // Only the persisted markup tiers load here. The cost breakdown is owned
+      // by the costing-qty effect below (it re-amortizes at the chosen lot
+      // size); bought parts have no routing breakdown at all.
+      const tiers = await getTiersForPart(partId);
 
       // baseCostPerUnit is purely a UI display value (computed live from the
       // breakdown + tier qty). The column was dropped from part_pricing_tiers
@@ -182,16 +218,16 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        // unitPrice is recomputed live by recomputeRow below; the
-        // part_pricing_tiers.unit_price column has been dropped — prices
-        // are always derived from the routing + BOM rollup.
+        // unitPrice + baseCostPerUnit are filled in by the base-cost effect
+        // (getComputedPartCost per tier qty → base × markup) once the async
+        // costs land; start blank so nothing stale renders.
         unitPrice: '',
-        baseCostPerUnit: 0,
+        baseCostPerUnit: null,
       }));
       // A never-configured part shows a single unfilled row to fill in — NOT
       // dirty, so Save stays disabled until the user actually edits it.
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
-      setRows(seeded.map((r) => recomputeRow(r, routingBreakdown)));
+      setRows(seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
       setDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
@@ -207,6 +243,99 @@ export default function PartPricing({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
   }, [loadAll, refreshKey]);
+
+  // Keep the ref current for loadAll (see tierBaseCostsRef).
+  useEffect(() => {
+    tierBaseCostsRef.current = tierBaseCosts;
+  }, [tierBaseCosts]);
+
+  // Re-seed the costing-qty field when the persisted part value changes.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCostingQtyStr(String(part.costing_batch_quantity ?? 1));
+    setCostingDirty(false);
+    setCostingSaveState('idle');
+  }, [part.costing_batch_quantity]);
+
+  // The Cost breakdown, computed at the costing lot size (setup amortized over
+  // it; bought-child tiers resolve at the resulting consumption). Debounced so
+  // typing a qty doesn't spam the engine; old values stay visible during the
+  // recompute (no spinner flash). Bought parts have no routing breakdown.
+  useEffect(() => {
+    if (isBought) {
+      setBreakdown(null);
+      setBreakdownLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBreakdownLoading(true);
+    const handle = setTimeout(() => {
+      calculateRoutingCost(partId, costingQty)
+        .then((b) => {
+          if (cancelled) return;
+          setBreakdown(b);
+          setBreakdownLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBreakdown(null);
+          setBreakdownLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [partId, isBought, costingQty, refreshKey]);
+
+  // Fetch the single-source base cost for each distinct tier quantity via the
+  // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
+  // one the quote form and the persisted line use. Debounced so editing a tier
+  // qty doesn't refetch on every keystroke. Bought parts don't show a base/unit
+  // column, so skip them.
+  useEffect(() => {
+    if (isBought) return;
+    const qtys = [
+      ...new Set(
+        rows
+          .map((r) => parseNumber(r.quantity))
+          .filter((q): q is number => q !== null && q > 0),
+      ),
+    ];
+    const missing = qtys.filter((q) => !tierBaseCosts.has(q) && !inFlightTierQtys.current.has(q));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      for (const q of missing) {
+        inFlightTierQtys.current.add(q);
+        getComputedPartCost(partId, q)
+          .catch(() => null)
+          .then((base) => {
+            inFlightTierQtys.current.delete(q);
+            if (cancelled) return;
+            setTierBaseCosts((prev) => new Map(prev).set(q, base));
+          });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [rows, tierBaseCosts, partId, isBought]);
+
+  // A routing / BOM / child-batch change (refreshKey) invalidates the cached
+  // base costs — the rolled-up cost is different now, so clear and refetch.
+  useEffect(() => {
+    inFlightTierQtys.current.clear();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTierBaseCosts(new Map());
+  }, [refreshKey]);
+
+  // Re-price every tier row when base costs arrive/change (base × markup).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
+  }, [tierBaseCosts]);
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
@@ -268,9 +397,9 @@ export default function PartPricing({
               quantity: String(t.quantity),
               markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
               unitPrice: '',
-              baseCostPerUnit: 0,
+              baseCostPerUnit: null,
             },
-            breakdown,
+            tierBaseCosts,
           ),
         ),
       );
@@ -292,7 +421,7 @@ export default function PartPricing({
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], quantity: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
       return next;
     });
   };
@@ -301,7 +430,7 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
       return next;
     });
   };
@@ -336,7 +465,7 @@ export default function PartPricing({
         unitPrice: '',
         baseCostPerUnit: 0,
       };
-      return [...prev, recomputeRow(row, breakdown)];
+      return [...prev, recomputeRow(row, tierBaseCosts)];
     });
   };
 
@@ -344,8 +473,29 @@ export default function PartPricing({
     updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const handleCostingSave = async (): Promise<void> => {
+    setCostingSaveState('saving');
+    try {
+      await updatePartCostingBatchQuantity(partId, costingQty);
+      setCostingSaveState('saved');
+      setCostingDirty(false);
+      // Deliberately NOT calling onPricingChanged: the batch size doesn't affect
+      // this part's own pricing tiers (their base is at the order qty) or its
+      // priceability — only its value as a component on OTHER parts' pages. A
+      // refresh here would just re-fetch the same numbers and flicker.
+    } catch (err) {
+      setCostingSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
+    }
+  };
+
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
-  const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
+  // total_setup_cost is the one-time setup; amortize it over the batch here so
+  // the row is per-unit and changes live with the quantity (calculateRoutingCost
+  // keeps setup un-amortized — the tier layer / this card divide it).
+  const setupPerUnit = breakdown
+    ? Math.round((breakdown.total_setup_cost / costingQty) * 100) / 100
+    : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
   // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
   const materialPerUnit: number | null = breakdown
@@ -353,118 +503,184 @@ export default function PartPricing({
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
+  // The three lines sum to the part's unit cost at the batch size.
+  const costPerUnit: number | null =
+    materialPerUnit === null
+      ? null
+      : Math.round((runPerUnit + setupPerUnit + materialPerUnit) * 100) / 100;
+
+  const warningsAlert =
+    !isBought && breakdown && breakdown.warnings.length > 0 ? (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          Heads up:
+        </Typography>
+        {breakdown.warnings.map((w, i) => {
+          // missing_material_cost warnings expose `child_part_name` +
+          // `detail` so the part name itself can be the link (no
+          // trailing "Open child →"). Other warning types fall back
+          // to the bare `message` string with no link, since they
+          // don't point at a navigable target.
+          const isLinkable = !!w.child_part_id && !!w.child_part_name;
+          return (
+            <Typography key={i} variant="body2">
+              {'• '}
+              {isLinkable ? (
+                <>
+                  <Link
+                    href={buildPartHref({
+                      companyId,
+                      targetPartId: w.child_part_id as string,
+                      chain: pushPartToChain(
+                        currentChain,
+                        part.id,
+                        w.child_part_id as string,
+                      ),
+                    })}
+                    style={{
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {w.child_part_name} ›
+                  </Link>{' '}
+                  {w.detail ?? ''}
+                </>
+              ) : (
+                w.message
+              )}
+            </Typography>
+          );
+        })}
+      </Alert>
+    ) : null;
+
+  const spinner = (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+      <CircularProgress size={24} />
+    </Box>
+  );
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          Pricing
-        </Typography>
-        <SaveStatus state={saveState} />
-      </Box>
-
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Made parts: routing breakdown gates the rest. Bought parts skip
-          this entirely (the cost source above is the procurement panel). */}
-      {!isBought && !loading && breakdown && breakdown.warnings.length > 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Heads up:
-          </Typography>
-          {breakdown.warnings.map((w, i) => {
-            // missing_material_cost warnings expose `child_part_name` +
-            // `detail` so the part name itself can be the link (no
-            // trailing "Open child →"). Other warning types fall back
-            // to the bare `message` string with no link, since they
-            // don't point at a navigable target.
-            const isLinkable = !!w.child_part_id && !!w.child_part_name;
-            return (
-              <Typography key={i} variant="body2">
-                {'• '}
-                {isLinkable ? (
-                  <>
-                    <Link
-                      href={buildPartHref({
-                        companyId,
-                        targetPartId: w.child_part_id as string,
-                        chain: pushPartToChain(
-                          currentChain,
-                          part.id,
-                          w.child_part_id as string,
-                        ),
-                      })}
-                      style={{
-                        color: 'inherit',
-                        textDecoration: 'underline',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {w.child_part_name} ›
-                    </Link>{' '}
-                    {w.detail ?? ''}
-                  </>
-                ) : (
-                  w.message
-                )}
+      {/* COST card — made parts only. A bought part's cost lives in the
+          procurement (Cost) panel rendered alongside this one, so the page
+          reads the same for both: Cost card, then Pricing card. */}
+      {!isBought && (
+        <Card elevation={2}>
+          <CardContent>
+            {/* Header + the costing lot size. Changing it re-amortizes setup and
+                updates the build-up live; it's also the qty this part is valued
+                at when consumed as a material in another part. */}
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, flexWrap: 'wrap' }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Cost
               </Typography>
-            );
-          })}
-        </Alert>
-      )}
+              <Box sx={{ flex: 1 }} />
+              <TextField
+                label={`Batch size (${costingUnit})`}
+                value={costingQtyStr}
+                onChange={(e) => {
+                  setCostingQtyStr(e.target.value);
+                  setCostingDirty(true);
+                  setCostingSaveState('idle');
+                }}
+                type="number"
+                size="small"
+                inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
+                sx={{ width: 170 }}
+              />
+              <SaveStatus state={costingSaveState} />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleCostingSave}
+                disabled={!costingDirty || costingSaving}
+              >
+                Save
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Setup spreads across the run this part is made in. This quantity is
+              also what it&apos;s valued at when used as a material in another part.
+            </Typography>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={24} />
-        </Box>
-      )}
+            {breakdownLoading && !breakdown && spinner}
 
-      {/* Made parts only: routing-not-set-up empty state. */}
-      {!isBought && !loading && !breakdown && (
-        <Box
-          sx={{
-            py: 4,
-            px: 2,
-            textAlign: 'center',
-            border: (theme) => `1px dashed ${theme.palette.divider}`,
-            borderRadius: 1,
-          }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            Add operations or materials to calculate pricing
-          </Typography>
-        </Box>
-      )}
-
-      {/* Made parts: cost build-up rows above the divider. */}
-      {!isBought && !loading && breakdown && (
-        <>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
-            <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-            <SummaryRow
-              label="Setup (one-time)"
-              value={formatCurrency(setupBatch)}
-              hint="amortized across tier qty"
-            />
-            {(materialPerUnit === null || materialPerUnit > 0) && (
-              <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
+            {!breakdownLoading && !breakdown && (
+              <Box
+                sx={{
+                  py: 4,
+                  px: 2,
+                  textAlign: 'center',
+                  border: (theme) => `1px dashed ${theme.palette.divider}`,
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Add operations or materials to calculate cost
+                </Typography>
+              </Box>
             )}
+
+            {warningsAlert}
+
+            {breakdown && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
+                <SummaryRow label="Setup / unit" value={formatCurrency(setupPerUnit)} />
+                {(materialPerUnit === null || materialPerUnit > 0) && (
+                  <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
+                )}
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    mt: 1,
+                    pt: 1,
+                    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    Cost / unit
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {formatCurrency(costPerUnit)}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* PRICING card — markup tiers (bought + made). */}
+      <Card elevation={2}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Pricing
+            </Typography>
+            <SaveStatus state={saveState} />
           </Box>
 
-          <Divider sx={{ mb: 2 }} />
-        </>
-      )}
+          {loading && spinner}
 
-      {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
-          and Unit price (those are quote-time values; cost depends on which
-          vendor wins at the actual order qty). */}
-      {!loading && (isBought || breakdown) && (
-        <>
-          <TableContainer>
+          {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
+              and Unit price (those are quote-time values; cost depends on which
+              vendor wins at the actual order qty). */}
+          {!loading && (isBought || breakdown) && (
+            <>
+              <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -555,8 +771,10 @@ export default function PartPricing({
               </Button>
             </Box>
           </Box>
-        </>
-      )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </Box>
   );
 }

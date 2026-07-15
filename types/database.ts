@@ -1518,7 +1518,6 @@ export type Database = {
           part_id: string
           quoted_at: string | null
           updated_at: string
-          vendor_id: string | null
         }
         Insert: {
           cost_per_unit: number
@@ -1530,7 +1529,6 @@ export type Database = {
           part_id: string
           quoted_at?: string | null
           updated_at?: string
-          vendor_id?: string | null
         }
         Update: {
           cost_per_unit?: number
@@ -1542,7 +1540,6 @@ export type Database = {
           part_id?: string
           quoted_at?: string | null
           updated_at?: string
-          vendor_id?: string | null
         }
         Relationships: [
           {
@@ -1552,18 +1549,12 @@ export type Database = {
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "part_procurement_tiers_vendor_id_fkey"
-            columns: ["vendor_id"]
-            isOneToOne: false
-            referencedRelation: "vendors"
-            referencedColumns: ["id"]
-          },
         ]
       }
       parts: {
         Row: {
           company_id: string
+          costing_batch_quantity: number
           created_at: string
           description: string | null
           id: string
@@ -1580,6 +1571,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          costing_batch_quantity?: number
           created_at?: string
           description?: string | null
           id?: string
@@ -1596,6 +1588,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          costing_batch_quantity?: number
           created_at?: string
           description?: string | null
           id?: string
@@ -1630,6 +1623,7 @@ export type Database = {
       parts_bom: {
         Row: {
           child_part_id: string
+          consume_whole_units: boolean
           created_at: string
           id: string
           notes: string | null
@@ -1641,6 +1635,7 @@ export type Database = {
         }
         Insert: {
           child_part_id: string
+          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null
@@ -1652,6 +1647,7 @@ export type Database = {
         }
         Update: {
           child_part_id?: string
+          consume_whole_units?: boolean
           created_at?: string
           id?: string
           notes?: string | null
@@ -2081,6 +2077,7 @@ export type Database = {
           quote_id: string
           sequence: number
           unit: string | null
+          units_consumed: number | null
         }
         Insert: {
           company_id: string
@@ -2095,6 +2092,7 @@ export type Database = {
           quote_id: string
           sequence: number
           unit?: string | null
+          units_consumed?: number | null
         }
         Update: {
           company_id?: string
@@ -2109,6 +2107,7 @@ export type Database = {
           quote_id?: string
           sequence?: number
           unit?: string | null
+          units_consumed?: number | null
         }
         Relationships: [
           {

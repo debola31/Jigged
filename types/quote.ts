@@ -480,6 +480,13 @@ export interface QuoteMaterialSnapshot {
   unit: string | null;
   cost_per_unit: number | null;
   line_cost: number | null;
+  /**
+   * Total units of this material consumed across the quoted order (the discrete
+   * count in whole-unit mode). Reconciles `quantity` (per-part, e.g. 0.05) with
+   * `line_cost` when ceiling makes them not multiply out. NULL = legacy/
+   * fractional row where `quantity` is the literal per-unit value.
+   */
+  units_consumed: number | null;
   created_at: string;
 }
 

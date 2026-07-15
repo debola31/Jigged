@@ -25,7 +25,7 @@ import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, legacy_id, is_location_tracked, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, legacy_id, is_location_tracked, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -38,6 +38,7 @@ interface PartRow {
   quantity: number;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
+  costing_batch_quantity: number | string | null;
   legacy_id: string | null;
   is_location_tracked: boolean;
   created_at: string;
@@ -59,6 +60,10 @@ function rowToPart(row: PartRow): Part {
     quantity: Number(row.quantity ?? 0),
     reorder_point: row.reorder_point !== null ? Number(row.reorder_point) : null,
     preferred_vendor_id: row.preferred_vendor_id,
+    costing_batch_quantity:
+      row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
+        ? null
+        : Number(row.costing_batch_quantity),
     legacy_id: row.legacy_id,
     is_location_tracked: row.is_location_tracked ?? false,
     created_at: row.created_at,
@@ -872,6 +877,32 @@ export async function updatePartPreferredVendor(
   }
 }
 
+/**
+ * Set a made part's costing (standard lot size) quantity — the run its cost is
+ * amortized over, and the qty it's valued at when consumed as a BOM material.
+ * Always a positive number (the column is NOT NULL, default 1).
+ */
+export async function updatePartCostingBatchQuantity(
+  partId: string,
+  batchQuantity: number,
+): Promise<void> {
+  if (!Number.isFinite(batchQuantity) || batchQuantity <= 0) {
+    throw new Error('Costing quantity must be greater than zero.');
+  }
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('parts')
+    .update({
+      costing_batch_quantity: batchQuantity,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', partId);
+  if (error) {
+    console.error('Error updating costing batch quantity:', error);
+    throw error;
+  }
+}
+
 export async function deletePart(partId: string): Promise<void> {
   const supabase = getSupabase();
 
@@ -998,6 +1029,46 @@ export async function replacePartUnitConversions(
   }
 }
 
+/**
+ * Ensure a single unit-conversion row exists for a part, without touching the
+ * others. Used when a BOM line picks a standard same-dimension unit (e.g. feet
+ * for an inches part): the cost engine bridges only via `parts_unit_conversions`,
+ * so the row must exist at rest for `compute_part_cost_at_qty` to convert. The
+ * factor is the known standard ratio (`getSuggestedConversionFactor`). No-op if
+ * a row already exists (a duplicate insert race is swallowed).
+ */
+export async function ensurePartUnitConversion(
+  partId: string,
+  fromUnit: string,
+  toPrimaryFactor: number,
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { data: existing, error: selError } = await supabase
+    .from('parts_unit_conversions')
+    .select('id')
+    .eq('part_id', partId)
+    .eq('from_unit', fromUnit)
+    .maybeSingle();
+
+  if (selError) {
+    console.error('Error checking part unit conversion:', selError);
+    throw selError;
+  }
+  if (existing) return;
+
+  const { error: insError } = await supabase
+    .from('parts_unit_conversions')
+    .insert({ part_id: partId, from_unit: fromUnit, to_primary_factor: toPrimaryFactor });
+
+  if (insError) {
+    // 23505 = the row was created concurrently; it exists either way.
+    if ((insError as { code?: string }).code === '23505') return;
+    console.error('Error ensuring part unit conversion:', insError);
+    throw insError;
+  }
+}
+
 // ============================================================
 // LIVE COST LOOKUP
 // ============================================================
@@ -1081,8 +1152,9 @@ export interface PartPricingStatus {
  * Structural pricing status for a part: its best-effort `unit_cost`, an
  * `is_priceable` verdict, and three gap arrays describing exactly why a part
  * isn't ready to quote — bought leaves with no procurement tier
- * (`missing_leaves`), any tree node with no markup (`missing_markups`), and
- * made nodes with an unpriced op (`missing_op_rates`).
+ * (`missing_leaves`), the part itself with no markup (`missing_markups` — a
+ * material's own markup is never required), and made nodes with an unpriced op
+ * (`missing_op_rates`).
  *
  * Each array is skinny: `{ part_id, part_name, depth, … }`, one row per
  * offending part (a diamond BOM occurrence collapses to its shallowest depth).

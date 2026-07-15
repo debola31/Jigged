@@ -30,8 +30,9 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import { getComputedPartCost } from '@/utils/partsAccess';
-import { getSupabase } from '@/lib/supabase';
+import { getComputedPartCost, ensurePartUnitConversion } from '@/utils/partsAccess';
+import { getSuggestedConversionFactor } from '@/lib/unitPresets';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
@@ -158,8 +159,8 @@ export default function PartBomPanel({
   // child + the cost at each (via compute_part_cost_at_qty). These are the
   // exact numbers that feed the parent's rollup at each qty, so rendering
   // them inline lets the user trace the math. Bought children pull qty
-  // break points from procurement tiers under the preferred vendor; made
-  // children pull them from their own pricing tiers.
+  // break points from their part-level procurement tiers; made children
+  // pull them from their own pricing tiers.
   useEffect(() => {
     let cancelled = false;
 
@@ -174,10 +175,8 @@ export default function PartBomPanel({
 
       // Discover each child's qty break points in a fixed number of queries
       // (was ~2 per child — a per-row fan-out that scaled with BOM size).
-      // Bought children take break points from their PREFERRED vendor's
-      // procurement tiers (compute_part_cost_at_qty restricts the rollup to
-      // preferred_vendor_id, so other vendors' tiers don't apply); made
-      // children take them from their own pricing tiers.
+      // Bought children take break points from their part-level procurement
+      // tiers; made children take them from their own pricing tiers.
       const boughtIds = rows
         .filter((r) => r.child_part.source === 'bought')
         .map((r) => r.child_part.id);
@@ -188,32 +187,18 @@ export default function PartBomPanel({
       const breakpointsByChild = new Map<string, number[]>();
       try {
         if (boughtIds.length > 0) {
-          // Preferred vendor per bought child.
-          const { data: vendorRows } = await supabase
-            .from('parts')
-            .select('id, preferred_vendor_id')
-            .in('id', boughtIds);
-          const preferredByChild = new Map<string, string | null>();
-          for (const r of (vendorRows ?? []) as Array<{
-            id: string;
-            preferred_vendor_id: string | null;
-          }>) {
-            preferredByChild.set(r.id, r.preferred_vendor_id ?? null);
-          }
-
-          // All bought children's procurement tiers in one query; keep only
-          // the rows under each child's preferred vendor.
+          // All bought children's part-level procurement tiers in one query.
+          // Procurement tiers are part-level now (vendor is a label, not a cost
+          // filter), so every tier's break point applies.
           const { data: procRows } = await supabase
             .from('part_procurement_tiers')
-            .select('part_id, vendor_id, min_quantity')
+            .select('part_id, min_quantity')
             .in('part_id', boughtIds);
           const qtysByChild = new Map<string, number[]>();
           for (const t of (procRows ?? []) as Array<{
             part_id: string;
-            vendor_id: string;
             min_quantity: number | string;
           }>) {
-            if (preferredByChild.get(t.part_id) !== t.vendor_id) continue;
             const arr = qtysByChild.get(t.part_id) ?? [];
             arr.push(Number(t.min_quantity));
             qtysByChild.set(t.part_id, arr);
@@ -304,11 +289,25 @@ export default function PartBomPanel({
       child_part_id: value.childPart.id,
       quantity: value.quantity,
       unit: value.unit,
+      consume_whole_units: value.consume_whole_units,
     };
 
     setEditorError(null);
     setSaving(true);
     try {
+      // If the line uses a standard same-dimension unit (e.g. feet on an inches
+      // part), the cost engine bridges to the child's primary via
+      // parts_unit_conversions — materialize that row with the known factor so
+      // the conversion exists at rest. Existing/custom conversions are untouched.
+      const primaryUnit = value.childPart.primary_unit;
+      if (primaryUnit && value.unit && value.unit !== primaryUnit) {
+        await ensurePartUnitConversion(
+          value.childPart.id,
+          value.unit,
+          getSuggestedConversionFactor(value.unit, primaryUnit),
+        );
+      }
+
       if (editorState.mode === 'add') {
         // Cycle pre-check before insert. The DB trigger is the ultimate
         // guard; the pre-check just gives a friendlier path-traced error.
@@ -328,8 +327,8 @@ export default function PartBomPanel({
           setSaving(false);
           return;
         }
-        // Child is locked in edit mode (delete + re-add to swap), so no
-        // cycle check needed — qty/unit changes can't introduce a cycle.
+        // The child part can be changed in edit mode; updateBomLine re-runs the
+        // cycle pre-check internally when the child differs.
         await updateBomLine(existing.id, formData);
       }
       closeEditor();
@@ -369,8 +368,8 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        // child-part picker is locked in edit mode, so has_routing/quantity
-        // are display-only fillers — synthesize the option from the BOM row.
+        // has_routing/quantity are display-only fillers — synthesize the option
+        // from the BOM row.
         childPart: {
           id: editingRow.child_part.id,
           part_name: editingRow.child_part.part_name,
@@ -383,6 +382,7 @@ export default function PartBomPanel({
         } satisfies PartSelectOption,
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
+        consume_whole_units: editingRow.consume_whole_units,
       }
     : undefined;
 
@@ -451,6 +451,16 @@ export default function PartBomPanel({
             const missingCost =
               ladderLoaded &&
               (ladder.length === 0 || ladder.every((t) => t.costPerUnit === null));
+            // Fixed batch this made child is valued at when consumed here (null
+            // Made children are valued at their standard costing lot size. Show
+            // the batch only when it's a non-trivial run (>1) — a lot size of 1
+            // is the default and not worth annotating.
+            const pinnedBatch =
+              child.source === 'made' &&
+              child.costing_batch_quantity != null &&
+              child.costing_batch_quantity > 1
+                ? child.costing_batch_quantity
+                : null;
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -460,7 +470,6 @@ export default function PartBomPanel({
                   companyId={companyId}
                   excludeIds={[partId]}
                   initial={editingInitial}
-                  lockChildPart
                   saving={saving}
                   error={editorError}
                   onSave={handleEditorSave}
@@ -508,10 +517,16 @@ export default function PartBomPanel({
                       <ChevronRightIcon sx={{ fontSize: 16 }} />
                     </Link>
                   </Box>
-                  <Box sx={{ minWidth: 110, textAlign: 'right' }}>
+                  <Box sx={{ minWidth: 130, textAlign: 'right' }}>
                     <Typography variant="body2" sx={{ fontWeight: 500 }}>
                       {formatQuantity(row.quantity)} {row.unit}
                     </Typography>
+                    {(row.consume_whole_units || pinnedBatch !== null) && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {row.consume_whole_units ? 'whole units' : 'fractional'}
+                        {pinnedBatch !== null ? ` · batch ${formatQuantity(pinnedBatch)}` : ''}
+                      </Typography>
+                    )}
                   </Box>
                   {!readOnly && (
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
@@ -590,6 +605,16 @@ export default function PartBomPanel({
                       material so it can be costed.
                     </Typography>
                   </Box>
+                )}
+                {/* Non-trivial lot size: the ladder above is the child's OWN
+                    qty-break costs, which differ from the fixed batch cost this
+                    BOM values it at. Label so the two aren't read as a
+                    contradiction. */}
+                {pinnedBatch !== null && ladder.length > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
+                    here it&apos;s valued at its costing lot size of {formatQuantity(pinnedBatch)}.
+                  </Typography>
                 )}
               </Box>
             );

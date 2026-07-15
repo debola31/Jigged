@@ -22,6 +22,11 @@ export interface Part {
   quantity: number;
   reorder_point: number | null;
   preferred_vendor_id: string | null;
+  // Batch qty this (made) part's cost is amortized over when it's consumed as
+  // a BOM material — pins a fixed per-unit cost (e.g. $109/strip at a batch of
+  // 25) instead of re-amortizing over however many a consuming order draws.
+  // NULL = value at the cascaded consumed qty (default). Ignored for bought.
+  costing_batch_quantity: number | null;
   legacy_id: string | null;
   // When true, parts.quantity is a trigger-maintained rollup of
   // part_location_stock and stock is managed per-location (see InventoryTab).

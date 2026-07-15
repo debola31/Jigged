@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../test-utils';
 import PartProcurementPricingPanel from '@/components/parts/PartProcurementPricingPanel';
-import type { ProcurementTierGroup } from '@/types/procurementTier';
+import type { ProcurementTier } from '@/types/procurementTier';
 import type { Vendor } from '@/types/vendor';
 
 const mockGetTiersForPart = vi.fn();
@@ -28,12 +28,12 @@ vi.mock('@/utils/partsAccess', () => ({
 
 const vendor: Vendor = { id: 'v1', name: 'Acme Supply' } as Vendor;
 
-describe('PartProcurementPricingPanel — explicit save + red no-cost state', () => {
+describe('PartProcurementPricingPanel — part-level tiers, explicit save', () => {
   const user = userEvent.setup();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetTiersForPart.mockResolvedValue([] as ProcurementTierGroup[]);
+    mockGetTiersForPart.mockResolvedValue([] as ProcurementTier[]);
     mockGetAllVendors.mockResolvedValue([vendor]);
     mockUpdatePartPreferredVendor.mockResolvedValue(undefined);
     mockAddTier.mockResolvedValue({ id: 't1', min_quantity: 10, cost_per_unit: 2.5 });
@@ -44,7 +44,7 @@ describe('PartProcurementPricingPanel — explicit save + red no-cost state', ()
       <PartProcurementPricingPanel partId="p1" companyId="c1" primaryUnit="each" />,
     );
 
-    // The vendor auto-selects; with no saved tier the red prompt appears.
+    // With no saved tier the red part-level prompt appears (independent of vendor).
     expect(
       await screen.findByText(/Add at least one cost tier so this part can be priced/i),
     ).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe('PartProcurementPricingPanel — explicit save + red no-cost state', ()
     expect(save).toBeDisabled();
   });
 
-  it('saves a typed tier via the Save button (not on blur) and fires onSaved', async () => {
+  it('saves a typed part-level tier via the Save button (no vendor dimension) and fires onSaved', async () => {
     const onSaved = vi.fn();
     render(
       <PartProcurementPricingPanel
@@ -86,13 +86,51 @@ describe('PartProcurementPricingPanel — explicit save + red no-cost state', ()
     await user.click(save);
 
     await waitFor(() => {
+      // Part-level payload — no vendor_id.
       expect(mockAddTier).toHaveBeenCalledWith(
-        expect.objectContaining({ vendor_id: 'v1', min_quantity: '10', cost_per_unit: '2.5' }),
+        expect.objectContaining({
+          part_id: 'p1',
+          min_quantity: '10',
+          cost_per_unit: '2.5',
+        }),
       );
     });
-    // Preferred vendor is re-asserted before the tier write.
-    expect(mockUpdatePartPreferredVendor).toHaveBeenCalledWith('p1', 'v1');
+    expect(mockAddTier).toHaveBeenCalledWith(
+      expect.not.objectContaining({ vendor_id: expect.anything() }),
+    );
+    // Saving cost tiers no longer touches the preferred vendor (decoupled).
+    expect(mockUpdatePartPreferredVendor).not.toHaveBeenCalled();
     // Parent is told to re-derive priceability so the "Needs cost" chip clears.
     expect(onSaved).toHaveBeenCalled();
+  });
+
+  it('picking a vendor sets it preferred without reloading or discarding unsaved tier edits', async () => {
+    render(
+      <PartProcurementPricingPanel partId="p1" companyId="c1" primaryUnit="each" />,
+    );
+
+    await screen.findByText(/Add at least one cost tier/i);
+    const inputs = await screen.findAllByRole('textbox');
+    await user.type(inputs[0], '10');
+    await user.type(inputs[1], '2.5');
+
+    // One fetch so far (initial load).
+    expect(mockGetTiersForPart).toHaveBeenCalledTimes(1);
+
+    // Pick the vendor from the combobox.
+    const combo = screen.getByRole('combobox', { name: /Preferred vendor/i });
+    await user.click(combo);
+    await user.click(await screen.findByText('Acme Supply'));
+
+    await waitFor(() => {
+      expect(mockUpdatePartPreferredVendor).toHaveBeenCalledWith('p1', 'v1');
+    });
+
+    // The tier sheet was NOT reloaded (still one fetch) and the unsaved edits
+    // are preserved.
+    expect(mockGetTiersForPart).toHaveBeenCalledTimes(1);
+    const after = screen.getAllByRole('textbox');
+    expect((after[0] as HTMLInputElement).value).toBe('10');
+    expect((after[1] as HTMLInputElement).value).toBe('2.5');
   });
 });

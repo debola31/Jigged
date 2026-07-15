@@ -27,6 +27,9 @@ vi.mock('@/utils/quotesAccess', () => ({
 const getPartsForSelectByIds = vi.fn();
 vi.mock('@/utils/partsAccess', () => ({
   getPartsForSelectByIds: (...args: unknown[]) => getPartsForSelectByIds(...args),
+  // The form prices each row at base(orderQty) × markup; base comes from here.
+  // 40 × 25% markup = $50, matching the resolver stub below.
+  getComputedPartCost: vi.fn(async () => 40),
 }));
 
 // Customers: dropdown + defaults
@@ -45,12 +48,24 @@ vi.mock('@/utils/partPricingTiersAccess', () => ({
 }));
 
 vi.mock('@/utils/quotePricingResolver', () => ({
-  // Always-resolves stub so validation only blocks on the cases this file tests.
+  // Always-resolves stubs so validation only blocks on the cases this file tests.
   resolveTier: vi.fn(() => ({
     qty_break: 1,
     markup_percent: 25,
     unit_price: 50,
+    matched_tier_quantity: 1,
+    below_min: false,
   })),
+  resolveMarkupAtQty: vi.fn(() => ({
+    markup_percent: 25,
+    source_tier_id: 't1',
+    matched_tier_quantity: 1,
+    below_min: false,
+  })),
+  // Real cost-plus so base(40) × 25% = $50 shows in the row.
+  unitPriceFromBase: vi.fn((base: number | null, markup: number | null) =>
+    base === null || markup === null ? null : Math.round(base * (1 + markup / 100) * 100) / 100,
+  ),
 }));
 
 // Modal/autocomplete children — render nothing so the surface stays clean.

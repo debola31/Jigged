@@ -11,12 +11,24 @@ export const SHOP_SIZES = [
 export const MARKETING_META = {
   // Mirrors the hero headline — keep the two in step.
   title: 'Jigged — Your whole shop, in one place',
+  // KEEP THIS UNDER ~155 CHARS. Google truncates the snippet around there (it's really
+  // a ~920px budget), and the previous 220-char version was cut at "...take at the
+  // machine" — so its whole payoff ("no tribal knowledge walking out the door") was
+  // invisible in search results. Front-load the offer; the segment is folded into it so
+  // "precision machine shop" still matches what an owner searches.
   description:
-    'Paperless shop-floor software for precision machine shops. See where every job stands, and capture the notes and photos your operators take at the machine — no paper travelers, no tribal knowledge walking out the door.',
+    'Run your whole precision machine shop in one place — quoting, the floor, shipping, invoicing. The fix your best guy figured out is there next time.',
 };
 
 export const HERO = {
-  eyebrow: 'Paperless operations for precision machine shops',
+  // Category + segment (the frame of reference). "Paperless operations" claimed the wrong
+  // category — that's the operator-view pitch, and it already lives in the subhead. Pick
+  // the frame deliberately: left unstated, a shop owner files us under "another ERP",
+  // which is the worst shelf given our own pain line about 500-person plants. Segment
+  // stays "precision machine shops" (who someone IS) rather than "precision
+  // manufacturing" (an industry abstraction) — narrow beachhead, and it matches the
+  // capability strip + footer.
+  eyebrow: 'Shop software for precision machine shops',
   // Two display lines. The headline states WHAT WE OFFER (StoryBrand's grunt test);
   // the subhead below carries HOW IT MAKES LIFE BETTER — which is where the
   // know-how/capture story belongs, both by the framework and because leading with

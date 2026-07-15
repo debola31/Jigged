@@ -308,7 +308,7 @@ export default function MaterialRowEditor({
             onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
             required
             error={qtyInvalid}
-            placeholder="e.g. 1, 0.5, or 1/20"
+            placeholder="Whole number or fraction"
             InputLabelProps={{ shrink: true }}
             inputProps={{ inputMode: 'text' }}
             size="small"
@@ -319,7 +319,7 @@ export default function MaterialRowEditor({
                 ? 'Enter a whole number, decimal, or fraction (e.g. 1/20)'
                 : showYieldReciprocal
                   ? `= ${formatYield(1 / perPartQty!)} parts from one ${unitShort}`
-                  : 'Material used to make one part'
+                  : 'Material used to make one part — a fraction like 1/20 is a yield'
             }
           />
         </Box>

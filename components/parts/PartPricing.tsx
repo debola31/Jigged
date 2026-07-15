@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
-import Divider from '@mui/material/Divider';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
@@ -429,131 +430,149 @@ export default function PartPricing({
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
 
-  return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          Pricing
+  const warningsAlert =
+    !isBought && !loading && breakdown && breakdown.warnings.length > 0 ? (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          Heads up:
         </Typography>
-        <SaveStatus state={saveState} />
-      </Box>
+        {breakdown.warnings.map((w, i) => {
+          // missing_material_cost warnings expose `child_part_name` +
+          // `detail` so the part name itself can be the link (no
+          // trailing "Open child →"). Other warning types fall back
+          // to the bare `message` string with no link, since they
+          // don't point at a navigable target.
+          const isLinkable = !!w.child_part_id && !!w.child_part_name;
+          return (
+            <Typography key={i} variant="body2">
+              {'• '}
+              {isLinkable ? (
+                <>
+                  <Link
+                    href={buildPartHref({
+                      companyId,
+                      targetPartId: w.child_part_id as string,
+                      chain: pushPartToChain(
+                        currentChain,
+                        part.id,
+                        w.child_part_id as string,
+                      ),
+                    })}
+                    style={{
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {w.child_part_name} ›
+                  </Link>{' '}
+                  {w.detail ?? ''}
+                </>
+              ) : (
+                w.message
+              )}
+            </Typography>
+          );
+        })}
+      </Alert>
+    ) : null;
 
+  const spinner = (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+      <CircularProgress size={24} />
+    </Box>
+  );
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Made parts: routing breakdown gates the rest. Bought parts skip
-          this entirely (the cost source above is the procurement panel). */}
-      {!isBought && !loading && breakdown && breakdown.warnings.length > 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Heads up:
-          </Typography>
-          {breakdown.warnings.map((w, i) => {
-            // missing_material_cost warnings expose `child_part_name` +
-            // `detail` so the part name itself can be the link (no
-            // trailing "Open child →"). Other warning types fall back
-            // to the bare `message` string with no link, since they
-            // don't point at a navigable target.
-            const isLinkable = !!w.child_part_id && !!w.child_part_name;
-            return (
-              <Typography key={i} variant="body2">
-                {'• '}
-                {isLinkable ? (
-                  <>
-                    <Link
-                      href={buildPartHref({
-                        companyId,
-                        targetPartId: w.child_part_id as string,
-                        chain: pushPartToChain(
-                          currentChain,
-                          part.id,
-                          w.child_part_id as string,
-                        ),
-                      })}
-                      style={{
-                        color: 'inherit',
-                        textDecoration: 'underline',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {w.child_part_name} ›
-                    </Link>{' '}
-                    {w.detail ?? ''}
-                  </>
-                ) : (
-                  w.message
-                )}
-              </Typography>
-            );
-          })}
-        </Alert>
-      )}
+      {/* COST card — made parts only. A bought part's cost lives in the
+          procurement (Cost) panel rendered alongside this one, so the page
+          reads the same for both: Cost card, then Pricing card. */}
+      {!isBought && (
+        <Card elevation={2}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+              Cost
+            </Typography>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={24} />
-        </Box>
-      )}
+            {loading && spinner}
 
-      {/* Made parts only: routing-not-set-up empty state. */}
-      {!isBought && !loading && !breakdown && (
-        <Box
-          sx={{
-            py: 4,
-            px: 2,
-            textAlign: 'center',
-            border: (theme) => `1px dashed ${theme.palette.divider}`,
-            borderRadius: 1,
-          }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            Add operations or materials to calculate pricing
-          </Typography>
-        </Box>
-      )}
-
-      {/* Made parts: cost build-up rows above the divider. */}
-      {!isBought && !loading && breakdown && (
-        <>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
-            <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-            <SummaryRow
-              label="Setup (one-time)"
-              value={formatCurrency(setupBatch)}
-              hint="amortized across tier qty"
-            />
-            {(materialPerUnit === null || materialPerUnit > 0) && (
-              <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
+            {!loading && !breakdown && (
+              <Box
+                sx={{
+                  py: 4,
+                  px: 2,
+                  textAlign: 'center',
+                  border: (theme) => `1px dashed ${theme.palette.divider}`,
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  Add operations or materials to calculate cost
+                </Typography>
+              </Box>
             )}
+
+            {warningsAlert}
+
+            {!loading && breakdown && (
+              <>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
+                  <SummaryRow
+                    label="Setup (one-time)"
+                    value={formatCurrency(setupBatch)}
+                    hint="amortized across tier qty"
+                  />
+                  {(materialPerUnit === null || materialPerUnit > 0) && (
+                    <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
+                  )}
+                </Box>
+
+                {/* Costing batch — only meaningful when there's setup to
+                    amortize. Values this part at a fixed production run when
+                    it's consumed as a material elsewhere (a property of the
+                    part). */}
+                {setupBatch !== null && setupBatch > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <CostingBatchField
+                      partId={partId}
+                      initialBatch={part.costing_batch_quantity ?? null}
+                      unitLabel={unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit')}
+                      onSaved={onPricingChanged}
+                    />
+                  </Box>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* PRICING card — markup tiers (bought + made). */}
+      <Card elevation={2}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Pricing
+            </Typography>
+            <SaveStatus state={saveState} />
           </Box>
 
-          {/* Costing batch — only meaningful when there's setup to amortize.
-              Lets this part be valued at a fixed production run when it's
-              consumed as a material elsewhere (a property of the part). */}
-          {setupBatch !== null && setupBatch > 0 && (
-            <Box sx={{ mb: 2 }}>
-              <CostingBatchField
-                partId={partId}
-                initialBatch={part.costing_batch_quantity ?? null}
-                unitLabel={unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit')}
-                onSaved={onPricingChanged}
-              />
-            </Box>
-          )}
+          {loading && spinner}
 
-          <Divider sx={{ mb: 2 }} />
-        </>
-      )}
-
-      {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
-          and Unit price (those are quote-time values; cost depends on which
-          vendor wins at the actual order qty). */}
-      {!loading && (isBought || breakdown) && (
-        <>
-          <TableContainer>
+          {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
+              and Unit price (those are quote-time values; cost depends on which
+              vendor wins at the actual order qty). */}
+          {!loading && (isBought || breakdown) && (
+            <>
+              <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -644,8 +663,10 @@ export default function PartPricing({
               </Button>
             </Box>
           </Box>
-        </>
-      )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </Box>
   );
 }

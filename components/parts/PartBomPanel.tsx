@@ -32,7 +32,7 @@ import {
 } from '@/utils/bomAccess';
 import { getComputedPartCost, ensurePartUnitConversion } from '@/utils/partsAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,

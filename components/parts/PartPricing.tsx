@@ -268,7 +268,6 @@ export default function PartPricing({
       return;
     }
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBreakdownLoading(true);
     const handle = setTimeout(() => {
       calculateRoutingCost(partId, costingQty)

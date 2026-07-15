@@ -1152,8 +1152,9 @@ export interface PartPricingStatus {
  * Structural pricing status for a part: its best-effort `unit_cost`, an
  * `is_priceable` verdict, and three gap arrays describing exactly why a part
  * isn't ready to quote — bought leaves with no procurement tier
- * (`missing_leaves`), any tree node with no markup (`missing_markups`), and
- * made nodes with an unpriced op (`missing_op_rates`).
+ * (`missing_leaves`), the part itself with no markup (`missing_markups` — a
+ * material's own markup is never required), and made nodes with an unpriced op
+ * (`missing_op_rates`).
  *
  * Each array is skinny: `{ part_id, part_name, depth, … }`, one row per
  * offending part (a diamond BOM occurrence collapses to its shallowest depth).

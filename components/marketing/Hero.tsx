@@ -23,7 +23,11 @@ export default function Hero() {
     height: '100%',
     objectFit: 'cover',
     objectPosition: 'center bottom',
-    opacity: 0.18,
+    // The scene is the one piece of shop-floor character in the hero; at 0.18 it was
+    // so faint it paid no rent. The radial mask below already keeps it out of the
+    // centre (where the headline sits), so it can carry more without touching text —
+    // it's `screen`, so this lightens the edges only.
+    opacity: 0.32,
     mixBlendMode: 'screen',
     maskImage:
       'radial-gradient(ellipse 65% 60% at 50% 42%, transparent 0%, black 100%)',

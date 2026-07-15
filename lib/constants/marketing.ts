@@ -65,11 +65,13 @@ export const FEATURES: Feature[] = [
   },
   {
     key: 'quotes',
+    // "Set markups by part category" described the markup-rates module, which was removed
+    // (#569 — each part now owns its own pricing). Copy follows the product.
     headline: 'Quote faster, win more work',
     description:
-      'Build cost-plus quotes in minutes. Set markups by part category and Jigged does the math the same way every time.',
+      'Build cost-plus quotes in minutes. Every part carries its own pricing, so the math comes out the same every time — and Jigged flags any line whose cost moved since you quoted.',
     image: '/screenshots/feature-quotes.png',
-    alt: 'Jigged quote showing base cost, markup, and unit price for a part',
+    alt: 'A Jigged quote — line items, unit prices and total, ready to convert to a job',
   },
   {
     key: 'invoicing',

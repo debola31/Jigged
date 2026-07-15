@@ -25,10 +25,14 @@ export default function PainPoints() {
                   height: '100%',
                   p: { xs: 3.5, md: 4 },
                   borderRadius: 2,
-                  bgcolor: 'rgba(17, 20, 57, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.07)',
-                  borderLeft: '3px solid',
-                  borderLeftColor: 'primary.main',
+                  // The product's own card language (lib/theme.ts MuiCard): a deep glass
+                  // panel sealed by a crisp hairline. This replaces an accent bar down the
+                  // left edge — a stock template default that reads as an AI-UI tell, and
+                  // wasn't ours. Echoing the real app is a brand tie; a coloured sliver isn't.
+                  bgcolor: 'rgba(32, 38, 82, 0.78)',
+                  backdropFilter: 'blur(15px)',
+                  WebkitBackdropFilter: 'blur(15px)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
                 }}
               >
                 <Typography

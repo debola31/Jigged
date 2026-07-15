@@ -5,7 +5,7 @@ import Typography from '@mui/material/Typography';
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import Section from './Section';
 import Reveal from './Reveal';
-import DeviceFrame from './DeviceFrame';
+import PhoneShot from './PhoneShot';
 import { SHOP_FLOOR } from '@/lib/constants/marketing';
 import { eyebrowSx, EYEBROW_COLOR, DISPLAY_FONT } from './marketingStyles';
 
@@ -119,17 +119,17 @@ export default function ShopFloorShowcase() {
               gap: { xs: 1.5, md: 2.5 },
             }}
           >
-            <DeviceFrame
+            <PhoneShot
               src={SHOP_FLOOR.images[0]}
               alt={SHOP_FLOOR.alt}
-              maxWidth={232}
+              maxWidth={244}
               glow="rgba(70, 130, 180, 0.22)"
             />
             <Box sx={{ mt: { xs: 3, md: 7 } }}>
-              <DeviceFrame
+              <PhoneShot
                 src={SHOP_FLOOR.images[1]}
                 alt={SHOP_FLOOR.alt}
-                maxWidth={232}
+                maxWidth={244}
                 glow="rgba(43, 188, 179, 0.20)"
               />
             </Box>

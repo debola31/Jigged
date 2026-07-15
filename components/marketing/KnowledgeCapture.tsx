@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Section from './Section';
 import Reveal from './Reveal';
-import DeviceFrame from './DeviceFrame';
+import PhoneShot from './PhoneShot';
 import { KNOWLEDGE } from '@/lib/constants/marketing';
 import { eyebrowSx, DISPLAY_FONT, EYEBROW_COLOR } from './marketingStyles';
 
@@ -72,7 +72,7 @@ export default function KnowledgeCapture() {
           distance={40}
           sx={{ flex: { md: '1 1 auto' }, width: '100%', display: 'flex', justifyContent: 'center' }}
         >
-          <DeviceFrame src={KNOWLEDGE.image} alt={KNOWLEDGE.alt} maxWidth={340} />
+          <PhoneShot src={KNOWLEDGE.image} alt={KNOWLEDGE.alt} maxWidth={322} />
         </Reveal>
       </Box>
     </Section>

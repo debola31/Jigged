@@ -34,13 +34,13 @@ export const PAIN = {
   eyebrow: 'The daily reality',
   heading: 'Sound familiar?',
   points: [
-    'The know-how that makes your hardest parts run right lives in a few people’s heads — and walks out the door when they retire.',
-    'Quoting, the floor, shipping, invoicing — each lives in a different tool, and none of them talk.',
-    'A job comes back around and the setup, the speeds, the fix from last time are gone. You solve it from scratch again.',
-    'You’ve stitched together an ERP, a stack of spreadsheets, and homegrown tools — and it still doesn’t fit how your shop runs.',
+    'Your best setups live in one machinist’s head — and walk out the door the day he retires.',
+    'Quote, floor, shipping, invoicing — a different tool for each, and none of them talk.',
+    'Your systems log the numbers. How the parts sit in the fixture, the finesse in the setup — that never gets written down.',
+    'An ERP, a stack of spreadsheets, a few homegrown tools — and none of it fits how you run.',
   ],
   closer:
-    'Shop owners keep telling us the same thing: they’re running the whole operation across an ERP, a pile of spreadsheets, and homegrown tools nobody else could use. We’re building Jigged to do the whole job in one place — tailored to how a precision shop actually works. Everything they need, nothing they don’t.',
+    'Owners run the whole shop across an ERP, spreadsheets, and homegrown tools nobody else could use. We’re building Jigged to do it all in one place — everything they need, nothing they don’t.',
 };
 
 export type Feature = {

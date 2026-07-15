@@ -17,7 +17,7 @@ export const MARKETING_META = {
   // invisible in search results. Front-load the offer; the segment is folded into it so
   // "precision machine shop" still matches what an owner searches.
   description:
-    'Run your machine shop in one place — quote to invoice and everything between. The tricks your best guys figured out are there when someone needs them.',
+    'Run your machine shop in one place — quote to invoice and everything between. Tricks your best guys figured out are there next time someone needs them.',
 };
 
 export const HERO = {

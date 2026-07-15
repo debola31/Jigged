@@ -1554,7 +1554,7 @@ export type Database = {
       parts: {
         Row: {
           company_id: string
-          costing_batch_quantity: number | null
+          costing_batch_quantity: number
           created_at: string
           description: string | null
           id: string
@@ -1571,7 +1571,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
-          costing_batch_quantity?: number | null
+          costing_batch_quantity?: number
           created_at?: string
           description?: string | null
           id?: string
@@ -1588,7 +1588,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
-          costing_batch_quantity?: number | null
+          costing_batch_quantity?: number
           created_at?: string
           description?: string | null
           id?: string

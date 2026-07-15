@@ -878,16 +878,16 @@ export async function updatePartPreferredVendor(
 }
 
 /**
- * Set (or clear) a made part's costing batch quantity — the qty its cost is
- * amortized over when consumed as a BOM material. Pass null to clear (revert to
- * cascaded-consumed-qty valuation). Callers update their own local state.
+ * Set a made part's costing (standard lot size) quantity — the run its cost is
+ * amortized over, and the qty it's valued at when consumed as a BOM material.
+ * Always a positive number (the column is NOT NULL, default 1).
  */
 export async function updatePartCostingBatchQuantity(
   partId: string,
-  batchQuantity: number | null,
+  batchQuantity: number,
 ): Promise<void> {
-  if (batchQuantity !== null && (!Number.isFinite(batchQuantity) || batchQuantity <= 0)) {
-    throw new Error('Costing batch quantity must be greater than zero.');
+  if (!Number.isFinite(batchQuantity) || batchQuantity <= 0) {
+    throw new Error('Costing quantity must be greater than zero.');
   }
   const supabase = getSupabase();
   const { error } = await supabase

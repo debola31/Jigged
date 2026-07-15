@@ -18,7 +18,6 @@ import TableContainer from '@mui/material/TableContainer';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
-import CostingBatchField from '@/components/parts/CostingBatchField';
 import { unitShortLabel } from '@/lib/standardUnits';
 import {
   calculateRoutingCost,
@@ -26,7 +25,11 @@ import {
 } from '@/utils/routingCostCalculation';
 import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAccess';
 import { unitPriceFromBase } from '@/utils/quotePricingResolver';
-import { addPartPricingNote, getComputedPartCost } from '@/utils/partsAccess';
+import {
+  addPartPricingNote,
+  getComputedPartCost,
+  updatePartCostingBatchQuantity,
+} from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
@@ -181,19 +184,30 @@ export default function PartPricing({
   const [dirty, setDirty] = useState(false);
   const saving = saveState === 'saving';
 
+  // Costing lot size — the production run this part's cost amortizes over, and
+  // the quantity it's valued at when consumed as a component. Drives the live
+  // Cost breakdown below (setup / N). Made parts only.
+  const [costingQtyStr, setCostingQtyStr] = useState<string>(
+    String(part.costing_batch_quantity ?? 1),
+  );
+  const [costingDirty, setCostingDirty] = useState(false);
+  const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
+  const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
+  const costingSaving = costingSaveState === 'saving';
+  const costingQty = (() => {
+    const n = parseFloat(costingQtyStr);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  })();
+  const costingUnit = unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit');
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Bought parts have no routing — skip the calculateRoutingCost call
-      // (it would just return null) and load only the persisted tiers. The
-      // procurement subsection embedded above the markup table provides the
-      // cost source instead.
-      const [tiers, routingBreakdown] = await Promise.all([
-        getTiersForPart(partId),
-        isBought ? Promise.resolve(null) : calculateRoutingCost(partId),
-      ]);
-      setBreakdown(routingBreakdown);
+      // Only the persisted markup tiers load here. The cost breakdown is owned
+      // by the costing-qty effect below (it re-amortizes at the chosen lot
+      // size); bought parts have no routing breakdown at all.
+      const tiers = await getTiersForPart(partId);
 
       // baseCostPerUnit is purely a UI display value (computed live from the
       // breakdown + tier qty). The column was dropped from part_pricing_tiers
@@ -234,6 +248,46 @@ export default function PartPricing({
   useEffect(() => {
     tierBaseCostsRef.current = tierBaseCosts;
   }, [tierBaseCosts]);
+
+  // Re-seed the costing-qty field when the persisted part value changes.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCostingQtyStr(String(part.costing_batch_quantity ?? 1));
+    setCostingDirty(false);
+    setCostingSaveState('idle');
+  }, [part.costing_batch_quantity]);
+
+  // The Cost breakdown, computed at the costing lot size (setup amortized over
+  // it; bought-child tiers resolve at the resulting consumption). Debounced so
+  // typing a qty doesn't spam the engine; old values stay visible during the
+  // recompute (no spinner flash). Bought parts have no routing breakdown.
+  useEffect(() => {
+    if (isBought) {
+      setBreakdown(null);
+      setBreakdownLoading(false);
+      return;
+    }
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBreakdownLoading(true);
+    const handle = setTimeout(() => {
+      calculateRoutingCost(partId, costingQty)
+        .then((b) => {
+          if (cancelled) return;
+          setBreakdown(b);
+          setBreakdownLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBreakdown(null);
+          setBreakdownLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [partId, isBought, costingQty, refreshKey]);
 
   // Fetch the single-source base cost for each distinct tier quantity via the
   // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
@@ -420,6 +474,19 @@ export default function PartPricing({
     updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const handleCostingSave = async (): Promise<void> => {
+    setCostingSaveState('saving');
+    try {
+      await updatePartCostingBatchQuantity(partId, costingQty);
+      setCostingSaveState('saved');
+      setCostingDirty(false);
+      onPricingChanged?.();
+    } catch (err) {
+      setCostingSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
+    }
+  };
+
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
@@ -429,9 +496,14 @@ export default function PartPricing({
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
+  // The three lines sum to the part's unit cost at the costing quantity.
+  const costPerUnit: number | null =
+    materialPerUnit === null
+      ? null
+      : Math.round((runPerUnit + setupBatch + materialPerUnit) * 100) / 100;
 
   const warningsAlert =
-    !isBought && !loading && breakdown && breakdown.warnings.length > 0 ? (
+    !isBought && breakdown && breakdown.warnings.length > 0 ? (
       <Alert severity="warning" sx={{ mb: 2 }}>
         <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
           Heads up:
@@ -497,13 +569,47 @@ export default function PartPricing({
       {!isBought && (
         <Card elevation={2}>
           <CardContent>
-            <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-              Cost
+            {/* Header + the costing lot size. Changing it re-amortizes setup and
+                updates the build-up live; it's also the qty this part is valued
+                at when consumed as a material in another part. */}
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, flexWrap: 'wrap' }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Cost
+              </Typography>
+              <Box sx={{ flex: 1 }} />
+              <TextField
+                label={`Cost at quantity (${costingUnit})`}
+                value={costingQtyStr}
+                onChange={(e) => {
+                  setCostingQtyStr(e.target.value);
+                  setCostingDirty(true);
+                  setCostingSaveState('idle');
+                }}
+                type="number"
+                size="small"
+                inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
+                sx={{ width: 170 }}
+              />
+              <SaveStatus state={costingSaveState} />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleCostingSave}
+                disabled={!costingDirty || costingSaving}
+              >
+                Save
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Setup spreads across the run this part is made in. This quantity is
+              also what it&apos;s valued at when used as a material in another part.
             </Typography>
 
-            {loading && spinner}
+            {breakdownLoading && !breakdown && spinner}
 
-            {!loading && !breakdown && (
+            {!breakdownLoading && !breakdown && (
               <Box
                 sx={{
                   py: 4,
@@ -521,35 +627,30 @@ export default function PartPricing({
 
             {warningsAlert}
 
-            {!loading && breakdown && (
-              <>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                  <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-                  <SummaryRow
-                    label="Setup (one-time)"
-                    value={formatCurrency(setupBatch)}
-                    hint="amortized across tier qty"
-                  />
-                  {(materialPerUnit === null || materialPerUnit > 0) && (
-                    <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
-                  )}
-                </Box>
-
-                {/* Costing batch — only meaningful when there's setup to
-                    amortize. Values this part at a fixed production run when
-                    it's consumed as a material elsewhere (a property of the
-                    part). */}
-                {setupBatch !== null && setupBatch > 0 && (
-                  <Box sx={{ mt: 2 }}>
-                    <CostingBatchField
-                      partId={partId}
-                      initialBatch={part.costing_batch_quantity ?? null}
-                      unitLabel={unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit')}
-                      onSaved={onPricingChanged}
-                    />
-                  </Box>
+            {breakdown && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
+                <SummaryRow label="Setup / unit" value={formatCurrency(setupBatch)} />
+                {(materialPerUnit === null || materialPerUnit > 0) && (
+                  <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
                 )}
-              </>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    mt: 1,
+                    pt: 1,
+                    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    Cost / unit
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {formatCurrency(costPerUnit)}
+                  </Typography>
+                </Box>
+              </Box>
             )}
           </CardContent>
         </Card>

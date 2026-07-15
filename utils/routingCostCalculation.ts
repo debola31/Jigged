@@ -275,13 +275,12 @@ export async function calculateRoutingCost(
         ? Math.ceil(safeQty * qtyInPrimary)
         : safeQty * qtyInPrimary;
 
-      // A made child with a costing batch qty is valued at that FIXED batch (its
-      // own production economics), decoupled from how many this order draws.
-      // Otherwise value it at what we actually consume (cascade). Mirrors
-      // compute_part_cost_at_qty exactly.
-      const childBatchQty = child.costing_batch_quantity;
-      const pinned = child.source === 'made' && childBatchQty !== null;
-      const childValQty = pinned ? (childBatchQty as number) : unitsConsumed;
+      // A MADE child is valued at its standard costing lot size (the run its
+      // cost amortizes over), fixed regardless of how many this order draws. A
+      // BOUGHT child is valued at what we actually consume (procurement tier /
+      // floor). Mirrors compute_part_cost_at_qty exactly.
+      const pinned = child.source === 'made';
+      const childValQty = pinned ? (child.costing_batch_quantity ?? 1) : unitsConsumed;
 
       let childUnitCost: number | null = null;
       try {

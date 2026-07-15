@@ -842,10 +842,10 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
     expect(mockGetComputedPartCost).toHaveBeenCalledWith('child-bar', 140);
   });
 
-  it('(h) backward-compat: unpinned + fractional equals the legacy cascade formula', async () => {
-    // Model setup amortization so child cost varies with qty; the legacy path
-    // must value at the CONSUMED (cascaded) qty and multiply qty_in_primary × u.
-    const costByQty = (q: number) => 100 / q + 5; // e.g. q=20 → 10
+  it('made child with no explicit lot size is valued at 1 (standard costing default)', async () => {
+    // Standard costing has no cascade: a made child is valued at its costing lot
+    // size, defaulting to 1 (full setup) until a real batch is set.
+    const costByQty = (q: number) => 100 / q + 5; // q=1 → 105
     mockGetBomForPart.mockResolvedValue([
       makeBomLine({
         childId: 'child-sub',
@@ -862,9 +862,11 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
 
     const bd = await calculateRoutingCost('part-1', 20);
 
-    // Consumed = 20 × 1 = 20; u = costByQty(20) = 10; legacy = qty_in_primary(1) × 10.
-    expect(mockGetComputedPartCost).toHaveBeenCalledWith('child-sub', 20);
-    expect(bd!.material_items[0].cost).toBeCloseTo(10, 4);
+    // Valued at the lot size (default 1), NOT the cascaded consumed qty (20).
+    expect(mockGetComputedPartCost).toHaveBeenCalledWith('child-sub', 1);
+    expect(mockGetComputedPartCost).not.toHaveBeenCalledWith('child-sub', 20);
+    // contribution = (consumed 20 × u(105)) / 20 = 105.
+    expect(bd!.material_items[0].cost).toBeCloseTo(105, 2);
   });
 
   it('changing the batch qty changes the pinned per-part cost predictably', async () => {

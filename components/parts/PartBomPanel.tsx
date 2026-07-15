@@ -452,16 +452,15 @@ export default function PartBomPanel({
               ladderLoaded &&
               (ladder.length === 0 || ladder.every((t) => t.costPerUnit === null));
             // Fixed batch this made child is valued at when consumed here (null
-            // = valued at the cascaded consumed qty). Only meaningful for made
-            // children.
+            // Made children are valued at their standard costing lot size. Show
+            // the batch only when it's a non-trivial run (>1) — a lot size of 1
+            // is the default and not worth annotating.
             const pinnedBatch =
-              child.source === 'made' ? child.costing_batch_quantity : null;
-            // Scoped hint: a made child valued at cascaded qty whose per-part
-            // consumption is fractional (the strip-to-blank / yield signature)
-            // is the case where the cascaded-qty surprise bites. Don't nag on
-            // 1:1 build-to-order sub-assemblies where cascade is already right.
-            const showPinHint =
-              child.source === 'made' && pinnedBatch === null && row.quantity < 1;
+              child.source === 'made' &&
+              child.costing_batch_quantity != null &&
+              child.costing_batch_quantity > 1
+                ? child.costing_batch_quantity
+                : null;
 
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
@@ -607,23 +606,14 @@ export default function PartBomPanel({
                     </Typography>
                   </Box>
                 )}
-                {/* Pinned child: the ladder above is the child's OWN qty-break
-                    costs, which differ from the fixed batch cost this BOM
-                    values it at. Label so the two numbers aren't read as a
+                {/* Non-trivial lot size: the ladder above is the child's OWN
+                    qty-break costs, which differ from the fixed batch cost this
+                    BOM values it at. Label so the two aren't read as a
                     contradiction. */}
                 {pinnedBatch !== null && ladder.length > 0 && (
                   <Typography variant="caption" color="text.secondary">
                     Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
-                    here it&apos;s valued at its fixed batch of {formatQuantity(pinnedBatch)}.
-                  </Typography>
-                )}
-                {/* Cascaded-qty surprise guard: only fires on fractional
-                    (yield-style) made children with no batch pin. The batch is a
-                    property of the child, set on the child's own page. */}
-                {showPinHint && !readOnly && (
-                  <Typography variant="caption" color="text.secondary">
-                    Valued at the quantity each order draws. Set a costing batch on{' '}
-                    {child.part_name}&apos;s page to pin its cost.
+                    here it&apos;s valued at its costing lot size of {formatQuantity(pinnedBatch)}.
                   </Typography>
                 )}
               </Box>

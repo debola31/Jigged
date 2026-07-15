@@ -114,24 +114,28 @@ export const KNOWLEDGE = {
 
 export type Step = { number: string; headline: string; description: string };
 
+// A real sequence — quote → track → ship and invoice — so the 01/02/03 numbering
+// encodes something true. (03 used to be "Run your shop, not your software," which
+// was a benefit, not a step, and said the same thing as the closing CTA right below
+// it. The no-rollout objection it carried now sits in 01, next to "15 minutes.")
 export const STEPS: Step[] = [
   {
     number: '01',
     headline: 'Set up your shop',
     description:
-      'Add your team, part categories, and markup defaults. About 15 minutes.',
+      'Add your team, part categories, and markup defaults. About 15 minutes — no consultants, no six-month rollout.',
   },
   {
     number: '02',
     headline: 'Quote and track',
     description:
-      'Create quotes, turn them into jobs, and follow everything from one place.',
+      'Create quotes, turn them into jobs, and follow every step from one place.',
   },
   {
     number: '03',
-    headline: 'Run your shop, not your software',
+    headline: 'Ship and get paid',
     description:
-      'No implementation consultants. No six-month rollout. Jigged stays out of the way.',
+      'Log what goes out the door, then push the invoice straight to QuickBooks. No re-keying.',
   },
 ];
 

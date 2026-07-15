@@ -34,13 +34,13 @@ export const PAIN = {
   eyebrow: 'The daily reality',
   heading: 'Sound familiar?',
   points: [
-    'You quoted a job from memory because opening the ERP was slower than doing the math yourself.',
-    'You lost track of a job’s status and had to walk the floor to find out.',
-    'Your inventory says you have material. Your shelf says otherwise.',
-    'You bought software built for 500-person plants and your 12-person shop uses 10% of it.',
+    'The know-how that makes your hardest parts run right lives in a few people’s heads — and walks out the door when they retire.',
+    'Quoting, the floor, shipping, invoicing — each lives in a different tool, and none of them talk.',
+    'A job comes back around and the setup, the speeds, the fix from last time are gone. You solve it from scratch again.',
+    'You’ve stitched together an ERP, a stack of spreadsheets, and homegrown tools — and it still doesn’t fit how your shop runs.',
   ],
   closer:
-    'We built Jigged because shop owners kept telling us the same thing: nothing out there fits how they actually work.',
+    'Shop owners keep telling us the same thing: they’re running the whole operation across an ERP, a pile of spreadsheets, and homegrown tools nobody else could use. We’re building Jigged to do the whole job in one place — tailored to how a precision shop actually works. Everything they need, nothing they don’t.',
 };
 
 export type Feature = {
@@ -51,8 +51,9 @@ export type Feature = {
   alt: string;
 };
 
-// Job status leads. The DAG "routing workflow" shot is gone; the operator shot is
-// the complete-only flow (no timer). See lib/constants comment + issue #489.
+// Three desktop tools in flow order: job status leads, then quoting, then the
+// QuickBooks invoicing integration (replaced the inventory row — inventory isn't
+// demo-ready yet). The operator/mobile story is its own section (ShopFloorShowcase).
 export const FEATURES: Feature[] = [
   {
     key: 'jobs',
@@ -71,12 +72,12 @@ export const FEATURES: Feature[] = [
     alt: 'Jigged quote showing base cost, markup, and unit price for a part',
   },
   {
-    key: 'inventory',
-    headline: 'Inventory in the units you actually use',
+    key: 'invoicing',
+    headline: 'Invoicing, wired straight to QuickBooks',
     description:
-      'Count stock in feet, sheets, or pieces — whatever’s on the shelf. Tie material to jobs so you know what’s allocated and what’s free.',
-    image: '/screenshots/feature-inventory.png',
-    alt: 'Jigged inventory transaction converting feet to inches when removing stock',
+      'Jigged is directly integrated with QuickBooks. Bill the quantities that shipped and Jigged creates the invoice in QuickBooks for you — no re-keying, no double entry. Your books stay the system of record.',
+    image: '/screenshots/feature-invoicing-quickbooks.png',
+    alt: 'Creating a QuickBooks invoice from a Jigged job — billing shipped quantities, synced to QuickBooks',
   },
 ];
 
@@ -135,14 +136,14 @@ export const STEPS: Step[] = [
 ];
 
 export const EARLY_ACCESS = {
-  heading: 'Free during early access.',
-  body: 'We’re onboarding a small group of shops and building exactly what they need. No card, no contract.',
+  heading: 'We’re building this with our founding shops.',
+  body: 'We’re taking on a small group of precision shops as founding partners — they shape where Jigged goes, and get in before we open it up. Request access and we’ll talk.',
 };
 
 export const FINAL_CTA = {
   heading: 'Ready to stop fighting your software?',
   subhead:
-    'Free during early access. We’re working closely with a small group of shops.',
+    'We’re working closely with a small group of founding shops. Request access and we’ll reach out.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   emailLabel: 'Or request early access and we’ll reach out:',
 };

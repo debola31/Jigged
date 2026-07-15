@@ -25,14 +25,14 @@ export default function PainPoints() {
                   height: '100%',
                   p: { xs: 3.5, md: 4 },
                   borderRadius: 2,
-                  // The product's own card language (lib/theme.ts MuiCard): a deep glass
-                  // panel sealed by a crisp hairline. This replaces an accent bar down the
-                  // left edge — a stock template default that reads as an AI-UI tell, and
-                  // wasn't ours. Echoing the real app is a brand tie; a coloured sliver isn't.
-                  bgcolor: 'rgba(32, 38, 82, 0.78)',
-                  backdropFilter: 'blur(15px)',
-                  WebkitBackdropFilter: 'blur(15px)',
-                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  // The accent rule reads these as callouts — things owners say — rather than
+                  // app chrome. (Tried the product's glass-card language here; it was the only
+                  // brand colour in an all-dark section, and losing it flattened the grid. The
+                  // app's card styling belongs on app UI, not on editorial pull-quotes.)
+                  bgcolor: 'rgba(17, 20, 57, 0.4)',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  borderLeft: '3px solid',
+                  borderLeftColor: 'primary.main',
                 }}
               >
                 <Typography

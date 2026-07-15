@@ -69,7 +69,7 @@ export const FEATURES: Feature[] = [
     // (#569 — each part now owns its own pricing). Copy follows the product.
     headline: 'Quote faster, win more work',
     description:
-      'Build cost-plus quotes in minutes. Every part carries its own pricing, so the math comes out the same every time — and Jigged flags any line whose cost moved since you quoted.',
+      'Build cost-plus quotes in minutes. Every part carries its own pricing, so the math comes out the same every time.',
     image: '/screenshots/feature-quotes.png',
     alt: 'A Jigged quote — line items, unit prices and total, ready to convert to a job',
   },

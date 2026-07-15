@@ -1029,6 +1029,46 @@ export async function replacePartUnitConversions(
   }
 }
 
+/**
+ * Ensure a single unit-conversion row exists for a part, without touching the
+ * others. Used when a BOM line picks a standard same-dimension unit (e.g. feet
+ * for an inches part): the cost engine bridges only via `parts_unit_conversions`,
+ * so the row must exist at rest for `compute_part_cost_at_qty` to convert. The
+ * factor is the known standard ratio (`getSuggestedConversionFactor`). No-op if
+ * a row already exists (a duplicate insert race is swallowed).
+ */
+export async function ensurePartUnitConversion(
+  partId: string,
+  fromUnit: string,
+  toPrimaryFactor: number,
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { data: existing, error: selError } = await supabase
+    .from('parts_unit_conversions')
+    .select('id')
+    .eq('part_id', partId)
+    .eq('from_unit', fromUnit)
+    .maybeSingle();
+
+  if (selError) {
+    console.error('Error checking part unit conversion:', selError);
+    throw selError;
+  }
+  if (existing) return;
+
+  const { error: insError } = await supabase
+    .from('parts_unit_conversions')
+    .insert({ part_id: partId, from_unit: fromUnit, to_primary_factor: toPrimaryFactor });
+
+  if (insError) {
+    // 23505 = the row was created concurrently; it exists either way.
+    if ((insError as { code?: string }).code === '23505') return;
+    console.error('Error ensuring part unit conversion:', insError);
+    throw insError;
+  }
+}
+
 // ============================================================
 // LIVE COST LOOKUP
 // ============================================================

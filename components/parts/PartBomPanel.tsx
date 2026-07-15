@@ -30,7 +30,12 @@ import {
   updateBomLine,
   checkBomCycle,
 } from '@/utils/bomAccess';
-import { getComputedPartCost, updatePartCostingBatchQuantity } from '@/utils/partsAccess';
+import {
+  getComputedPartCost,
+  updatePartCostingBatchQuantity,
+  ensurePartUnitConversion,
+} from '@/utils/partsAccess';
+import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
 import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
 import MaterialRowEditor, {
@@ -310,6 +315,19 @@ export default function PartBomPanel({
     setEditorError(null);
     setSaving(true);
     try {
+      // If the line uses a standard same-dimension unit (e.g. feet on an inches
+      // part), the cost engine bridges to the child's primary via
+      // parts_unit_conversions — materialize that row with the known factor so
+      // the conversion exists at rest. Existing/custom conversions are untouched.
+      const primaryUnit = value.childPart.primary_unit;
+      if (primaryUnit && value.unit && value.unit !== primaryUnit) {
+        await ensurePartUnitConversion(
+          value.childPart.id,
+          value.unit,
+          getSuggestedConversionFactor(value.unit, primaryUnit),
+        );
+      }
+
       if (editorState.mode === 'add') {
         // Cycle pre-check before insert. The DB trigger is the ultimate
         // guard; the pre-check just gives a friendlier path-traced error.
@@ -329,8 +347,8 @@ export default function PartBomPanel({
           setSaving(false);
           return;
         }
-        // Child is locked in edit mode (delete + re-add to swap), so no
-        // cycle check needed — qty/unit changes can't introduce a cycle.
+        // The child part can be changed in edit mode; updateBomLine re-runs the
+        // cycle pre-check internally when the child differs.
         await updateBomLine(existing.id, formData);
       }
       // Persist the child's costing batch qty when the editor surfaced it (a
@@ -481,7 +499,6 @@ export default function PartBomPanel({
                   companyId={companyId}
                   excludeIds={[partId]}
                   initial={editingInitial}
-                  lockChildPart
                   saving={saving}
                   error={editorError}
                   onSave={handleEditorSave}

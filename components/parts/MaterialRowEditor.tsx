@@ -8,13 +8,12 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
-import Switch from '@mui/material/Switch';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Link from 'next/link';
+import Tooltip from '@mui/material/Tooltip';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartUnitConversions, getPart, getComputedPartCost } from '@/utils/partsAccess';
 import { defaultConsumeWholeUnits, unitShortLabel } from '@/lib/standardUnits';
+import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 
 export type { PartSelectOption };
 
@@ -42,10 +41,31 @@ function formatYield(y: number): string {
   return Math.abs(y - rounded) < 1e-9 ? String(rounded) : String(Number(y.toFixed(4)));
 }
 
-function parseNum(s: string): number | null {
-  const n = parseFloat(s);
-  return Number.isFinite(n) && n > 0 ? n : null;
+/**
+ * Parse a per-part quantity that may be a whole number, a decimal, or a simple
+ * fraction ("1/20"). Returns a positive number, or null when empty/invalid.
+ * The fraction form lets a machinist enter "one strip makes 20" as `1/20`
+ * without doing the 0.05 division by hand.
+ */
+function parseQty(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const frac = t.match(/^(\d*\.?\d+)\s*\/\s*(\d*\.?\d+)$/);
+  if (frac) {
+    const num = parseFloat(frac[1]);
+    const den = parseFloat(frac[2]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den > 0) {
+      const v = num / den;
+      return v > 0 ? v : null;
+    }
+    return null;
+  }
+  const n = parseFloat(t);
+  return Number.isFinite(n) && n > 0 && /^[0-9.]+$/.test(t) ? n : null;
 }
+
+const currency = (n: number): string =>
+  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
 export interface MaterialRowEditorProps {
   companyId: string;
@@ -53,8 +73,6 @@ export interface MaterialRowEditorProps {
   excludeIds?: string[];
   /** When provided, the editor is in edit mode for an existing material row. */
   initial?: MaterialEditorValue;
-  /** When true, the child-part picker is disabled (edit mode). */
-  lockChildPart?: boolean;
   saving?: boolean;
   /** Inline error to display under the row (e.g. cycle precheck failure). */
   error?: string | null;
@@ -70,54 +88,26 @@ const EMPTY_VALUE: MaterialEditorValue = {
 };
 
 /**
- * Which way the consumption field reads. A stored per-part quantity below 1
- * (e.g. 0.05 strips/part) is the "yield" pattern — many parts cut from one
- * material unit — so edit mode shows it as a yield. New lines default their
- * framing from the material's unit category instead (see the mode effect).
- */
-function deriveMode(quantity: string): { mode: 'per_part' | 'yield'; yieldStr: string } {
-  const q = parseFloat(quantity);
-  if (Number.isFinite(q) && q > 0 && q < 1) {
-    return { mode: 'yield', yieldStr: formatYield(1 / q) };
-  }
-  return { mode: 'per_part', yieldStr: '' };
-}
-
-const currency = (n: number): string =>
-  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
-
-/**
  * Inline editor for a single Materials row on the part detail page.
  *
- * The whole material-yield experience lives here (no spillover onto the Pricing
- * card): how much of a material a part consumes — entered as a plain per-part
- * quantity, or as a yield ("20 parts per strip") when the material is discrete
- * stock — whether it's drawn in whole units, and, for a made child consumed as
- * a fraction, the batch it's costed at.
+ * Three fields, nothing else: the material part, its unit, and one quantity-per-
+ * part field. The quantity accepts a whole number, a decimal, or a simple
+ * fraction ("1/20") — a value below 1 is a yield (many parts from one unit), so
+ * there is no separate yield mode. Whether discrete stock is drawn in whole
+ * units is derived automatically from the unit (count → whole). A made child
+ * consumed as a fraction additionally surfaces its batch-cost basis, because
+ * that's the only place a made part's setup-amortized cost can be pinned.
  */
 export default function MaterialRowEditor({
   companyId,
   excludeIds,
   initial,
-  lockChildPart = false,
   saving = false,
   error,
   onSave,
   onCancel,
 }: MaterialRowEditorProps) {
   const [value, setValue] = useState<MaterialEditorValue>(initial ?? EMPTY_VALUE);
-
-  // `value.quantity` is always the canonical per-part figure; `yieldStr` is the
-  // raw yield-field text when the field is showing the yield framing.
-  const [inputMode, setInputMode] = useState<'per_part' | 'yield'>(
-    () => deriveMode((initial ?? EMPTY_VALUE).quantity).mode,
-  );
-  const [yieldStr, setYieldStr] = useState<string>(
-    () => deriveMode((initial ?? EMPTY_VALUE).quantity).yieldStr,
-  );
-  // Manual overrides latch so the unit-category defaults don't clobber a choice.
-  const [modeTouched, setModeTouched] = useState<boolean>(!!initial);
-  const [wholeUnitsTouched, setWholeUnitsTouched] = useState<boolean>(!!initial);
 
   // Batch qty for the made child (string field), + its derived unit cost.
   const [batchQtyStr, setBatchQtyStr] = useState<string>(
@@ -132,42 +122,10 @@ export default function MaterialRowEditor({
   useEffect(() => {
     const next = initial ?? EMPTY_VALUE;
     setValue(next);
-    const derived = deriveMode(next.quantity);
-    setInputMode(derived.mode);
-    setYieldStr(derived.yieldStr);
-    setModeTouched(!!initial);
-    setWholeUnitsTouched(!!initial);
     setBatchQtyStr(next.childCostingBatchQuantity != null ? String(next.childCostingBatchQuantity) : '');
   }, [initial]);
 
   const isCountUnit = defaultConsumeWholeUnits(value.unit);
-
-  // Default the consumption framing + whole-unit switch from the unit category,
-  // until the user overrides either. Count/discrete stock reads as a yield and
-  // draws in whole units; bulk material reads as amount-per-part and fractional.
-  useEffect(() => {
-    if (!value.unit) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValue((prev) => {
-      if (wholeUnitsTouched) return prev;
-      const nextWhole = defaultConsumeWholeUnits(prev.unit);
-      return prev.consume_whole_units === nextWhole
-        ? prev
-        : { ...prev, consume_whole_units: nextWhole };
-    });
-    if (!modeTouched) {
-      const desired = isCountUnit ? 'yield' : 'per_part';
-      if (desired !== inputMode) {
-        if (desired === 'yield') {
-          const q = parseFloat(value.quantity);
-          setYieldStr(Number.isFinite(q) && q > 0 ? formatYield(1 / q) : '');
-        }
-        setInputMode(desired);
-      }
-    }
-    // inputMode / value.quantity are read only to seed the switch; unit drives this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.unit, wholeUnitsTouched, modeTouched, isCountUnit]);
 
   // Load the child's secondary units + current batch qty on selection.
   useEffect(() => {
@@ -199,19 +157,22 @@ export default function MaterialRowEditor({
     };
   }, [value.childPart, initial]);
 
+  // Unit options: the child's primary, plus standard same-dimension units (feet,
+  // meters, … for an inches part — known conversion factors, materialized on
+  // save), plus any custom conversions already defined on the child.
   const unitOptions = useMemo<string[]>(() => {
     const child = value.childPart;
-    if (!child) return [];
-    const list: string[] = [];
-    if (child.primary_unit) list.push(child.primary_unit);
+    if (!child?.primary_unit) return [];
+    const primary = child.primary_unit;
+    const list: string[] = [primary];
+    for (const u of getStandardUnitsForUnit(primary)) if (!list.includes(u)) list.push(u);
     for (const u of conversionUnits) if (!list.includes(u)) list.push(u);
     return list;
   }, [value.childPart, conversionUnits]);
 
-  const onlyPrimaryAvailable =
-    !!value.childPart && !!value.childPart.primary_unit && conversionUnits.length === 0;
+  const onlyPrimaryAvailable = !!value.childPart?.primary_unit && unitOptions.length <= 1;
 
-  // Snap the unit to the child's primary when the typed one isn't valid.
+  // Snap the unit to the child's primary when the current one isn't valid.
   useEffect(() => {
     if (conversionsLoading) return;
     const child = value.childPart;
@@ -222,15 +183,15 @@ export default function MaterialRowEditor({
   }, [unitOptions, conversionsLoading]);
 
   const unitShort = unitShortLabel(value.unit) ?? (value.unit || 'unit');
-  const perPartQty = parseNum(value.quantity);
-  // Rounding to whole units only changes the cost when consumption is fractional
-  // (a yield, or a non-integer per-part amount): ceil(N×q) = N×q for integer q.
-  // So the whole-unit control is only meaningful — and only shown — then.
-  const isFractionalConsumption = perPartQty !== null && !Number.isInteger(perPartQty);
+  const perPartQty = parseQty(value.quantity);
+  const qtyInvalid = value.quantity.trim() !== '' && perPartQty === null;
+  // A count material consumed as a fraction reads as a yield — show the
+  // reciprocal so "0.05 per ea" is confirmed as "20 parts per ea".
+  const showYieldReciprocal = isCountUnit && perPartQty !== null && perPartQty < 1;
   // A made child consumed as a fraction (< 1 per part) is exactly when the
   // batch-cost basis matters — surface the field then and only then.
   const showBatchBasis = value.childPart?.source === 'made' && perPartQty !== null && perPartQty < 1;
-  const batchQty = parseNum(batchQtyStr);
+  const batchQty = parseQty(batchQtyStr);
 
   // Derive the child's unit cost at the entered batch, so "batch of 25" reads
   // as the concrete "$109 / strip" the shop cares about.
@@ -257,21 +218,6 @@ export default function MaterialRowEditor({
     setBatchQtyStr('');
   };
 
-  const switchMode = (next: 'per_part' | 'yield') => {
-    setModeTouched(true);
-    if (next === 'yield') {
-      const q = parseFloat(value.quantity);
-      setYieldStr(Number.isFinite(q) && q > 0 ? formatYield(1 / q) : '');
-    }
-    setInputMode(next);
-  };
-
-  const handleYieldChange = (s: string) => {
-    setYieldStr(s);
-    const y = parseFloat(s);
-    setValue((prev) => ({ ...prev, quantity: Number.isFinite(y) && y > 0 ? String(1 / y) : '' }));
-  };
-
   const canSave =
     !!value.childPart &&
     perPartQty !== null &&
@@ -279,10 +225,18 @@ export default function MaterialRowEditor({
     unitOptions.includes(value.unit);
 
   const submit = () => {
-    if (!canSave) return;
-    // Only touch the child's batch qty when the field applied (made + fractional);
-    // undefined tells PartBomPanel to leave it alone otherwise.
-    onSave({ ...value, childCostingBatchQuantity: showBatchBasis ? batchQty : undefined });
+    if (!canSave || perPartQty === null) return;
+    onSave({
+      ...value,
+      // Canonicalize the quantity (a fraction like "1/20" → "0.05").
+      quantity: String(perPartQty),
+      // Whole-unit consumption is derived from the unit, not a manual toggle:
+      // count/discrete stock rounds up, continuous material is fractional.
+      consume_whole_units: defaultConsumeWholeUnits(value.unit),
+      // Only touch the child's batch qty when the field applied (made + fractional);
+      // undefined tells PartBomPanel to leave it alone otherwise.
+      childCostingBatchQuantity: showBatchBasis ? batchQty : undefined,
+    });
   };
 
   return (
@@ -294,131 +248,82 @@ export default function MaterialRowEditor({
             value={value.childPart}
             onChange={handlePartChange}
             excludeIds={excludeIds}
-            disabled={lockChildPart || saving}
+            disabled={saving}
             label="Material part"
             required
-            autoFocus={!lockChildPart}
+            autoFocus={!initial}
           />
         </Box>
 
-        <TextField
-          select
-          label="Unit"
-          value={value.childPart && unitOptions.includes(value.unit) ? value.unit : ''}
-          onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
-          required
-          size="small"
-          disabled={saving || !value.childPart || conversionsLoading || onlyPrimaryAvailable}
-          sx={{ width: 130 }}
-          slotProps={{
-            input: {
-              endAdornment: conversionsLoading ? (
-                <InputAdornment position="end">
-                  <CircularProgress size={14} />
-                </InputAdornment>
-              ) : undefined,
-            },
-          }}
+        <Tooltip
+          title={
+            onlyPrimaryAvailable
+              ? `Only ${unitShort} is available for this part. Add a unit conversion on the child part to use other units.`
+              : ''
+          }
+          disableHoverListener={!onlyPrimaryAvailable}
         >
-          {unitOptions.length === 0 && (
-            <MenuItem value="" disabled>
-              {value.childPart ? 'No units available' : 'Pick a part first'}
-            </MenuItem>
-          )}
-          {unitOptions.map((u) => (
-            <MenuItem key={u} value={u}>
-              {u}
-              {value.childPart?.primary_unit === u ? ' (primary)' : ''}
-            </MenuItem>
-          ))}
-        </TextField>
+          {/* span so the tooltip still fires when the Select is disabled */}
+          <span>
+            <TextField
+              select
+              label="Unit"
+              value={value.childPart && unitOptions.includes(value.unit) ? value.unit : ''}
+              onChange={(e) => setValue((prev) => ({ ...prev, unit: e.target.value }))}
+              required
+              size="small"
+              disabled={saving || !value.childPart || conversionsLoading || onlyPrimaryAvailable}
+              sx={{ width: 150 }}
+              slotProps={{
+                input: {
+                  endAdornment: conversionsLoading ? (
+                    <InputAdornment position="end">
+                      <CircularProgress size={14} />
+                    </InputAdornment>
+                  ) : undefined,
+                },
+              }}
+            >
+              {unitOptions.length === 0 && (
+                <MenuItem value="" disabled>
+                  {value.childPart ? 'No units available' : 'Pick a part first'}
+                </MenuItem>
+              )}
+              {unitOptions.map((u) => (
+                <MenuItem key={u} value={u}>
+                  {u}
+                  {value.childPart?.primary_unit === u ? ' (primary)' : ''}
+                </MenuItem>
+              ))}
+            </TextField>
+          </span>
+        </Tooltip>
 
-        {/* Consumption: a single field framed by the material's unit — a yield
-            for discrete/count stock, an amount-per-part for bulk material — with
-            a legible action to switch framing. `value.quantity` stays the
-            canonical per-part value regardless of framing. */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 220 }}>
-          {inputMode === 'yield' ? (
-            <TextField
-              label={`Yield — parts per ${unitShort}`}
-              type="number"
-              value={yieldStr}
-              onChange={(e) => handleYieldChange(e.target.value)}
-              required
-              InputLabelProps={{ shrink: true }}
-              inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
-              size="small"
-              disabled={saving}
-              sx={{ width: 230 }}
-              helperText={
-                perPartQty !== null
-                  ? `Uses ${Number(perPartQty.toFixed(4))} ${unitShort} per part`
-                  : `How many parts you get from one ${unitShort}`
-              }
-            />
-          ) : (
-            <TextField
-              label={value.unit ? `${unitShort} per part` : 'Qty per part'}
-              type="number"
-              value={value.quantity}
-              onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
-              required
-              InputLabelProps={{ shrink: true }}
-              inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
-              size="small"
-              disabled={saving}
-              sx={{ width: 230 }}
-              helperText="Material used to make one part"
-            />
-          )}
-          {/* Yield is the reason this feature exists (many parts from one
-              discrete unit) — surface it as a legible action, not a faint link. */}
-          <Button
-            variant="text"
+        {/* One quantity field: whole number, decimal, or fraction ("1/20"). A
+            value below 1 is a yield; the caption confirms the reciprocal. */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, minWidth: 200 }}>
+          <TextField
+            label={value.unit ? `${unitShort} per part` : 'Qty per part'}
+            value={value.quantity}
+            onChange={(e) => setValue((prev) => ({ ...prev, quantity: e.target.value }))}
+            required
+            error={qtyInvalid}
+            placeholder="e.g. 1, 0.5, or 1/20"
+            InputLabelProps={{ shrink: true }}
+            inputProps={{ inputMode: 'text' }}
             size="small"
-            onClick={() => switchMode(inputMode === 'yield' ? 'per_part' : 'yield')}
             disabled={saving}
-            sx={{ alignSelf: 'flex-start', textTransform: 'none', px: 0.75, fontWeight: 600 }}
-          >
-            {inputMode === 'yield'
-              ? '← Switch to amount per part'
-              : `Cut several parts from one ${unitShort}? Switch to yield →`}
-          </Button>
+            sx={{ width: 230 }}
+            helperText={
+              qtyInvalid
+                ? 'Enter a whole number, decimal, or fraction (e.g. 1/20)'
+                : showYieldReciprocal
+                  ? `= ${formatYield(1 / perPartQty!)} parts from one ${unitShort}`
+                  : 'Material used to make one part'
+            }
+          />
         </Box>
       </Box>
-
-      {/* Whole-unit (ceiling) consumption. Only meaningful — and only shown —
-          when consumption is fractional (a yield, or a non-integer per-part
-          amount); for whole-number consumption ceil(N×q)=N×q, so it is a no-op.
-          Defaulted from the unit category (count → on); overridable. */}
-      {isFractionalConsumption && (
-        <Box sx={{ mt: 1, ml: 0.5 }}>
-          <FormControlLabel
-            sx={{ mr: 0 }}
-            control={
-              <Switch
-                size="small"
-                checked={value.consume_whole_units}
-                onChange={(e) => {
-                  setWholeUnitsTouched(true);
-                  setValue((prev) => ({ ...prev, consume_whole_units: e.target.checked }));
-                }}
-                disabled={saving}
-              />
-            }
-            label={
-              <Typography variant="body2">
-                {`Round up to whole ${unitShort} per job`}
-              </Typography>
-            }
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 6 }}>
-            {value.consume_whole_units
-              ? `Discrete stock — a job can't use part of one ${unitShort}, so it rounds up.`
-              : `Continuous material — a job can use a fraction of one ${unitShort}.`}
-          </Typography>
-        </Box>
-      )}
 
       {/* Batch cost basis — shown only for a made child consumed as a fraction,
           which is exactly when a made part's setup-amortized cost needs a fixed
@@ -464,30 +369,6 @@ export default function MaterialRowEditor({
         </Box>
       )}
 
-      {value.childPart?.primary_unit &&
-        value.unit?.trim() &&
-        value.unit !== value.childPart.primary_unit && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
-            Child&apos;s primary unit: {value.childPart.primary_unit}. The cost calculation uses the
-            matching conversion to bridge.
-          </Typography>
-        )}
-
-      {onlyPrimaryAvailable && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
-          Only the child&apos;s primary unit ({value.childPart?.primary_unit}) is available. To use a
-          different unit,{' '}
-          <Link
-            href={`/dashboard/${companyId}/parts/${value.childPart?.id ?? ''}`}
-            target="_blank"
-            style={{ textDecoration: 'underline', color: 'inherit' }}
-          >
-            add a unit conversion on the child part
-          </Link>
-          .
-        </Typography>
-      )}
-
       {error && (
         <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
           {error}
@@ -514,7 +395,7 @@ export default function MaterialRowEditor({
           disabled={!canSave || saving}
           startIcon={saving ? <CircularProgress size={14} color="inherit" /> : null}
         >
-          {lockChildPart ? 'Save changes' : 'Add to BOM'}
+          {initial ? 'Save changes' : 'Add to BOM'}
         </Button>
       </Box>
 

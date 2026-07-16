@@ -15,6 +15,19 @@ export interface CanonicalField {
   required: boolean; // needed to import this entity at all
 }
 
+/**
+ * Identity matching for names, everywhere. The orphan check, the "create the missing ones"
+ * list, and the duplicate check MUST agree on what counts as the same name — otherwise the
+ * review says 47 are missing and the fix creates 46. One normalization, one truth.
+ */
+export const norm = (v: string | undefined | null): string => (v ?? '').trim().toLowerCase();
+
+/** Plain label for a canonical field, for copy an owner reads ('primary_unit' → 'unit of
+ *  measure'). Falls back to the raw key for fields outside the Map catalog. */
+export function fieldLabel(entity: EntityType, key: string): string {
+  return ENTITY_FIELDS[entity]?.find((f) => f.key === key)?.label.toLowerCase() ?? key;
+}
+
 /** Friendly names for the "this file is…" picker (covers every EntityType). */
 export const ENTITY_LABELS: Record<EntityType, string> = {
   parts: 'Parts',

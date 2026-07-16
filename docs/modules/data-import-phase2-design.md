@@ -52,6 +52,14 @@ Everything is derived: mutate rows/decisions → re-run `analyzeBundle` → reco
 
 ## 4. Guided-remediation mechanics
 
+> **The rule every mechanic below obeys: never route the owner out of the tool.** A finding may
+> only ask for something the owner can do *here* — edit a cell, fill blanks, merge look-alikes,
+> create the missing records, or upload another file. "Correct the values in your CSV" is
+> banned copy: they exported those files from a system they may no longer run, and a shop owner
+> is not going to hand-edit 6,565 rows in Excel and re-upload. If we can't offer an in-app
+> action for a finding, the finding is telling them something they can only *know*, not *do* —
+> word it as information, not an instruction.
+
 ### 4a. Editable grid + live re-analysis
 A spreadsheet-like grid per file (or per finding, scoped): double-click-to-edit, sort/filter,
 hide/freeze columns. Each edit mutates the working dataset and re-runs the analyzer
@@ -74,6 +82,35 @@ the canonical + which look like true dupes, phrased as uncertainty** ("these mig
 For missing required values (`MISSING_COLUMN` / `DATA_GAP` findings), inline fill in the grid,
 a bulk "set default for all blanks," or an explicit **"leave blank — intentional"** that
 downgrades the finding (so "no problems" never hides an unmade decision).
+
+### 4d-bis. Create the missing parents (orphan references) — **built**
+The single biggest source of blocking findings: routings naming a work center the
+work-centers export never had. The fix is **not** "add the missing records, or correct the
+values" (what the finding used to say — an instruction pointing outside the tool). It is:
+
+- **Show the list.** `findMissingParents()` (`lib/dataImportLinks.ts`) returns the distinct
+  unmatched names + how many child rows use each, sorted by reference count. It uses the
+  analyzer's `norm()` — the *same* normalization the orphan finding counts with, so the review
+  can't say "47 missing" while the fix creates 46. `REFERENTIAL_LINKS` lives in this module and
+  the analyzer imports it: **one registry**, so the check and the fix can't drift.
+- **Only lookup-shaped parents.** `isAutoCreatable()` allows work centers / vendors / customers
+  — a record that essentially *is* its name, so creating one from a reference invents nothing.
+  **Parts are excluded on purpose:** a part needs a unit and a cost, so a missing part is
+  answered by uploading the parts file, never by fabricating a stub.
+- **The owner confirms; nothing is created silently** (§7d, and the over-reliance guardrail).
+  `CreateMissingDialog` lists every name with an include checkbox.
+- **Internal vs. outsourced is a labelled guess.** `guessKind()` reads company/process-shaped
+  names ("PerformCoat of Michigan LLC", "…Plating") as outside shops, and the dialog *says* it's
+  a guess with a one-tap toggle — rather than a confidence score, which this audience over-trusts.
+- **The outsourced cascade.** The work-centers importer rejects `kind=external` unless a vendor
+  of that name already exists, so marking one "outside shop" also creates the vendor. Safe by
+  construction: `WRITE_TIERS` puts `vendors` before `work_centers` in tier 0, and `runImportPlan`
+  posts sequentially — the vendor commits before the work center that references it.
+- **It's an `EditOp` like every other fix** — it lands on the undo journal, undoes as one unit,
+  and re-analyzes. This required extending the op from "a batch of cell edits" to also carry
+  `addRecords` (see §7b): rows, any column it had to introduce (`kind`, `vendor_name`), and a
+  whole file when the owner never uploaded one for that entity. `invertOp` derives the exact
+  inverse from the op itself (no snapshot) because the builder records what it had to add.
 
 ### 4e. Link to existing records (non-empty company)
 A bounded, read-only fetch of existing identity values for the target entities (RLS-safe,
@@ -169,8 +206,22 @@ agent call the *same* contracts; the model **never mutates the backend directly*
 a call, the app executes it. (A tool is "a contract between deterministic systems and
 non-deterministic agents" that can pick the wrong tool or wrong params — design for the agent,
 not as thin CRUD wrappers.) The increment 2–4 actions become the contracts: `bulk_replace` ·
-`merge_group` · `fill_gap` · `link_to_existing` · `import_bundle`. [Anthropic, *Writing tools
-for agents*; *Bounded Autonomy for Enterprise AI* — architectural core only, see 7f]
+`merge_group` · `fill_gap` · `create_missing_parents` · `link_to_existing` · `import_bundle`.
+[Anthropic, *Writing tools for agents*; *Bounded Autonomy for Enterprise AI* — architectural
+core only, see 7f]
+
+Today that layer is `EditOp` — every action (button-driven now, agent-proposed later) is a pure
+function `(working, args) → EditOp`, and the wizard is the only thing that applies one. `EditOp`
+carries two kinds of change:
+
+- `edits: CellEdit[]` — value changes, addressed by stable `__rowId` (survives sort/filter).
+- `addRecords: AddRecordsOp[]` — records created in-app (§4d-bis), plus any column or file they
+  required. Self-describing, so `invertOp` produces the exact inverse without snapshotting the
+  dataset (which would mean copying every row on every op).
+
+Undo/redo asymmetry worth knowing: undo applies `invertOp(op)`, redo re-applies the **original**
+op — so an inverse never needs its own inverse, which is why `removeRecords` is only ever
+produced by `invertOp` and never authored directly.
 
 ### 7c. Consolidate, keep it small, describe it well
 - **Intent-level, not CRUD** — one `merge_group` that clusters + rewrites, not raw row-update
@@ -285,3 +336,9 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
    (plain-language step + honest uncertainty, never a confidence score, never auto-applied — the
    owner applies via the deterministic tools). `POST /api/data-import/suggest-fixes` +
    `SuggestFixesPanel`. Deterministic fixes (1–2) landed first, by design.
+6. ✅ **Built** — **every finding resolves in-app** (§4 rule, §4d-bis): `lib/dataImportLinks.ts`
+   + `CreateMissingDialog` turn the orphan-reference blocker into "here are the 47 names we
+   couldn't match — add them?" (with an in-house/outside-shop guess and the vendor cascade), and
+   every `recommended_action` was rewritten to name an action the owner can take here. The
+   verdict stopped saying "Not ready to import — 1 blocking issue" (a dead end, and it reads as
+   the owner's fault) and now names the work: "1 thing to sort out before we import."

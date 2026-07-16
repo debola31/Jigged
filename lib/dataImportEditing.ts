@@ -30,24 +30,112 @@ export interface CellEdit {
 }
 
 /**
- * One undoable remediation step = a labeled batch of cell edits. A single grid edit is a
- * batch of one; a bulk find-replace / fill / merge is a batch of many that undoes as a unit.
- * The label is the "we changed this for you" audit line. This is the shape the (future)
- * agent proposes and the UI applies — one action layer.
+ * Records the owner creates *inside* Jigged rather than going back to their source system —
+ * e.g. the work centers their routings mention that never made it into the work-centers
+ * export. Self-describing so {@link invertOp} can undo it without a snapshot: the builder
+ * reads the current working set and records exactly what it had to introduce (a whole file,
+ * some new headers, the rows), and undo removes precisely that much.
+ */
+export interface AddRecordsOp {
+  filename: string; // target file — existing, or created when `createFile`
+  entityType: EntityType;
+  createFile: boolean; // no file held this entity, so the op introduces one
+  addHeaders: string[]; // headers absent from the target file today
+  addRoles: Record<string, string>; // canonical_field -> raw_header, only the NEW roles
+  rows: EditableRow[];
+}
+
+/** The inverse of an {@link AddRecordsOp} — only ever produced by {@link invertOp}. */
+export interface RemoveRecordsOp {
+  filename: string;
+  removeFile: boolean;
+  removeHeaders: string[];
+  removeRoleKeys: string[];
+  rowIds: string[];
+}
+
+/**
+ * One undoable remediation step = a labeled batch of cell edits, plus (optionally) records
+ * created in-app. A single grid edit is a batch of one; a bulk find-replace / fill / merge /
+ * create-missing is a batch of many that undoes as a unit. The label is the "we changed this
+ * for you" audit line. This is the shape the (future) agent proposes and the UI applies —
+ * one action layer.
  */
 export interface EditOp {
   label: string;
   edits: CellEdit[];
+  addRecords?: AddRecordsOp[];
+  removeRecords?: RemoveRecordsOp[];
 }
 
-/** Apply a batch of edits in order. */
+/** Apply a batch of edits, then any structural add/remove, in order. */
 export function applyOp(working: WorkingFile[], op: EditOp): WorkingFile[] {
-  return op.edits.reduce((w, e) => applyEdit(w, e), working);
+  let w = op.edits.reduce((acc, e) => applyEdit(acc, e), working);
+  for (const a of op.addRecords ?? []) w = applyAddRecords(w, a);
+  for (const r of op.removeRecords ?? []) w = applyRemoveRecords(w, r);
+  return w;
 }
 
-/** Invert a batch for undo/redo (reverse order, each edit inverted). */
+/**
+ * Invert a batch for undo/redo (reverse order, each edit inverted; adds become removes).
+ * Redo re-applies the ORIGINAL op, so a `removeRecords` never needs inverting.
+ */
 export function invertOp(op: EditOp): EditOp {
-  return { label: op.label, edits: [...op.edits].reverse().map(invertEdit) };
+  return {
+    label: op.label,
+    edits: [...op.edits].reverse().map(invertEdit),
+    removeRecords: (op.addRecords ?? []).map((a) => ({
+      filename: a.filename,
+      removeFile: a.createFile,
+      removeHeaders: a.addHeaders,
+      removeRoleKeys: Object.keys(a.addRoles),
+      rowIds: a.rows.map((r) => r.__rowId),
+    })),
+  };
+}
+
+function applyAddRecords(working: WorkingFile[], a: AddRecordsOp): WorkingFile[] {
+  const idx = working.findIndex((wf) => wf.filename === a.filename);
+  if (idx === -1) {
+    return [
+      ...working,
+      {
+        filename: a.filename,
+        entityType: a.entityType,
+        entityConfidence: 1, // the owner explicitly asked for these records
+        columnRoles: { ...a.addRoles },
+        headers: [...a.addHeaders],
+        rows: [...a.rows],
+      },
+    ];
+  }
+  return working.map((wf, i) =>
+    i !== idx
+      ? wf
+      : {
+          ...wf,
+          headers: [...wf.headers, ...a.addHeaders.filter((h) => !wf.headers.includes(h))],
+          columnRoles: { ...wf.columnRoles, ...a.addRoles },
+          rows: [...wf.rows, ...a.rows],
+        },
+  );
+}
+
+function applyRemoveRecords(working: WorkingFile[], r: RemoveRecordsOp): WorkingFile[] {
+  if (r.removeFile) return working.filter((wf) => wf.filename !== r.filename);
+  const ids = new Set(r.rowIds);
+  const heads = new Set(r.removeHeaders);
+  return working.map((wf) => {
+    if (wf.filename !== r.filename) return wf;
+    const columnRoles = { ...wf.columnRoles };
+    for (const k of r.removeRoleKeys) delete columnRoles[k];
+    return {
+      ...wf,
+      headers: wf.headers.filter((h) => !heads.has(h)),
+      columnRoles,
+      rows: wf.rows.filter((row) => !ids.has(row.__rowId)),
+    };
+  });
 }
 
 /** Build the editable working set from the uploaded files + the AI structure classification. */

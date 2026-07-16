@@ -19,8 +19,10 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import type { Finding, ImportReview, Severity } from '@/types/data-import';
 import { summarize } from '@/lib/dataImportReview';
+import { autoCreateLinkFor } from '@/lib/dataImportLinks';
 
 // Severity is encoded with THREE channels (icon + text label + color), never color alone
 // — WCAG 1.4.1 + IBM Carbon. Info is deliberately low-key (no "green noise").
@@ -35,7 +37,23 @@ function SeverityChip({ severity }: { severity: Severity }) {
   return <Chip size="small" color={s.color} icon={<s.Icon sx={{ fontSize: 16 }} />} label={s.label} sx={{ fontWeight: 600 }} />;
 }
 
-function ActionRow({ finding }: { finding: Finding }) {
+/**
+ * The in-app fix for a finding, when one exists. Today that's "create the missing lookups";
+ * the shape generalizes to whatever the agent proposes next. When a finding has a real
+ * button, the button IS the recommendation — we don't also print prose telling them to do it.
+ */
+function FixButton({ finding, onCreateMissing }: { finding: Finding; onCreateMissing?: (f: Finding) => void }) {
+  const link = autoCreateLinkFor(finding.id);
+  if (!link || !onCreateMissing) return null;
+  return (
+    <Button variant="contained" size="small" startIcon={<AddCircleOutlineIcon />} onClick={() => onCreateMissing(finding)}>
+      Review &amp; add the missing {finding.id.includes('vendor') ? 'vendors' : 'work centers'}
+    </Button>
+  );
+}
+
+function ActionRow({ finding, onCreateMissing }: { finding: Finding; onCreateMissing?: (f: Finding) => void }) {
+  const hasFix = !!autoCreateLinkFor(finding.id) && !!onCreateMissing;
   return (
     <Card variant="outlined" sx={{ mb: 1 }}>
       <CardContent sx={{ py: 1.5 }}>
@@ -61,13 +79,19 @@ function ActionRow({ finding }: { finding: Finding }) {
             ))}
           </Box>
         )}
-        {finding.recommended_action && (
-          <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <Box sx={{ fontWeight: 700 }}>→</Box>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {finding.recommended_action}
-            </Typography>
+        {hasFix ? (
+          <Box sx={{ mt: 1.5 }}>
+            <FixButton finding={finding} onCreateMissing={onCreateMissing} />
           </Box>
+        ) : (
+          finding.recommended_action && (
+            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box sx={{ fontWeight: 700 }}>→</Box>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                {finding.recommended_action}
+              </Typography>
+            </Box>
+          )
         )}
       </CardContent>
     </Card>
@@ -80,7 +104,15 @@ const REL_STATUS: Record<'ok' | 'broken' | 'unverified', { color: 'success' | 'e
   unverified: { color: 'warning', Icon: HelpOutlineIcon },
 };
 
-export default function ImportReviewView({ report, onUploadMore }: { report: ImportReview; onUploadMore?: () => void }) {
+export default function ImportReviewView({
+  report,
+  onUploadMore,
+  onCreateMissing,
+}: {
+  report: ImportReview;
+  onUploadMore?: () => void;
+  onCreateMissing?: (finding: Finding) => void;
+}) {
   const [showDetails, setShowDetails] = useState(false);
   const s = summarize(report);
   const v = s.verdict;
@@ -107,31 +139,41 @@ export default function ImportReviewView({ report, onUploadMore }: { report: Imp
           </Typography>
         </Box>
         {v.level !== 'ready' && (
-          <Typography variant="body1" sx={{ mt: 1 }}>
-            Start here: <strong>{v.lead}</strong>
-          </Typography>
+          <>
+            <Typography variant="body1" sx={{ mt: 1 }}>
+              Start here: <strong>{v.lead}</strong>
+            </Typography>
+            {/* The fix for the top issue, one click from the verdict — the owner should never
+                have to hunt down the list for the thing we just told them to start with. */}
+            {v.leadFinding && (
+              <Box sx={{ mt: 1.5 }}>
+                <FixButton finding={v.leadFinding} onCreateMissing={onCreateMissing} />
+              </Box>
+            )}
+          </>
         )}
         <Box sx={{ mt: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           {v.counts.critical > 0 && (
-            <Chip color="error" icon={<BlockIcon sx={{ fontSize: 16 }} />} label={`${v.counts.critical} blocking`} />
+            <Chip color="error" icon={<BlockIcon sx={{ fontSize: 16 }} />} label={`${v.counts.critical} to sort out`} />
           )}
           {v.counts.warning > 0 && (
-            <Chip color="warning" icon={<WarningAmberIcon sx={{ fontSize: 16 }} />} label={`${v.counts.warning} to review`} />
+            <Chip color="warning" icon={<WarningAmberIcon sx={{ fontSize: 16 }} />} label={`${v.counts.warning} to look at`} />
           )}
           {v.counts.info > 0 && (
-            <Chip variant="outlined" icon={<InfoOutlinedIcon sx={{ fontSize: 16 }} />} label={`${v.counts.info} info`} />
+            <Chip variant="outlined" icon={<InfoOutlinedIcon sx={{ fontSize: 16 }} />} label={`${v.counts.info} to know`} />
           )}
         </Box>
       </Paper>
 
-      {/* 2 — Fix-first checklist */}
+      {/* 2 — Fix-first checklist. Each row carries its own in-app fix; nothing here should
+          ever send the owner back to their spreadsheet. */}
       {s.actions.length > 0 && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            What to fix
+            What we suggest
           </Typography>
           {s.actions.map((f) => (
-            <ActionRow key={f.id} finding={f} />
+            <ActionRow key={f.id} finding={f} onCreateMissing={onCreateMissing} />
           ))}
         </Box>
       )}

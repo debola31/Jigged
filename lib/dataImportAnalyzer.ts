@@ -11,6 +11,8 @@
  * `part_name`; vendors/work_centers/customers by `name`).
  */
 
+import { isAutoCreatable, REFERENTIAL_LINKS } from '@/lib/dataImportLinks';
+import { ENTITY_LABELS, fieldLabel, norm } from '@/lib/dataImportSchema';
 import type { EntityType, Finding, Severity } from '@/types/data-import';
 
 export interface AnalyzedFile {
@@ -53,17 +55,7 @@ const ENTITY_REQUIRED_FIELDS: Record<string, string[]> = {
 };
 
 // Cross-file links: [childEntity, childField, parentEntity, parentField].
-const REFERENTIAL_LINKS: [EntityType, string, EntityType, string][] = [
-  ['parts', 'preferred_vendor_name', 'vendors', 'name'],
-  ['work_centers', 'vendor_name', 'vendors', 'name'],
-  ['routings', 'work_center_name', 'work_centers', 'name'],
-  ['routings', 'part_name', 'parts', 'part_name'],
-  ['bom', 'parent_part_name', 'parts', 'part_name'],
-  ['bom', 'child_part_name', 'parts', 'part_name'],
-];
-
 // --------------------------------------------------------------------------- helpers
-const norm = (v: string | undefined | null): string => (v ?? '').trim().toLowerCase();
 
 export function aggressiveNorm(v: string | undefined | null): string {
   let s = norm(v).replace(/[^a-z0-9]+/g, '');
@@ -85,7 +77,9 @@ const cell = (row: Record<string, string>, col: string | undefined): string =>
   col ? row[col] ?? '' : '';
 const filesOf = (files: AnalyzedFile[], entity: EntityType) =>
   files.filter((af) => af.entityType === entity);
-const entityLabel = (entity: EntityType): string => entity.replace('_', ' ');
+/** Plain, owner-facing entity words ('bom' → 'bill of materials'), shared with the Map step. */
+const entityLabel = (entity: EntityType): string =>
+  entity === 'unknown' ? 'unrecognized' : ENTITY_LABELS[entity].toLowerCase();
 const headerToken = (h: string): string => norm(h).replace(/[^a-z0-9_]+/g, '');
 
 // --------------------------------------------------------------------------- checks
@@ -128,12 +122,12 @@ function withinFileDuplicates(af: AnalyzedFile): Finding[] {
     severity: 'warning',
     entity_type: af.entityType,
     title: `${dupKeys.length} duplicate ${identity} value(s) in ${af.filename}`,
-    detail: `${affected} rows share a ${identity} with another row (case/space-insensitive). Duplicate identities collide on import — merge or disambiguate them.`,
+    detail: `${affected.toLocaleString()} rows share a name with another row (ignoring case and spacing). Each name becomes one record, so the repeats won't come in twice.`,
     count: affected,
     examples: dupKeys.slice(0, MAX_EXAMPLES).map((k) => originals.get(k)!),
     source_files: [af.filename],
     verified: true,
-    recommended_action: `Deduplicate the ${identity} column before import.`,
+    recommended_action: `That's usually right — if any are meant to be separate, rename them in the table below.`,
   }];
 }
 
@@ -153,7 +147,7 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
       examples: [],
       source_files: [af.filename],
       verified: true,
-      recommended_action: "Confirm this file's type and column headers.",
+      recommended_action: 'Go back to "Check your files" and tell us what this file holds.',
     }];
   }
   const out: Finding[] = [];
@@ -166,13 +160,13 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
         category: 'missing_column',
         severity: 'critical',
         entity_type: af.entityType,
-        title: `Required field '${key}' not found in ${af.filename}`,
-        detail: `No column in ${af.filename} maps to the required field '${key}'.`,
+        title: `We couldn't find the ${fieldLabel(af.entityType, key)} in ${af.filename}`,
+        detail: `Every ${entityLabel(af.entityType).replace(/s$/, '')} needs one, and no column in this file looks like it.`,
         count: 0,
         examples: [],
         source_files: [af.filename],
         verified: true,
-        recommended_action: `Add or map a column for '${key}'.`,
+        recommended_action: `Go back to "Check your files" and point us at the right column — or add a file that has it.`,
       });
       continue;
     }
@@ -183,13 +177,13 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
         category: 'missing_column',
         severity: 'critical',
         entity_type: af.entityType,
-        title: `Required field '${key}' is entirely blank in ${af.filename}`,
-        detail: `The column mapped to '${key}' has no values in any row.`,
+        title: `No ${entityLabel(af.entityType)} in ${af.filename} have a ${fieldLabel(af.entityType, key)}`,
+        detail: `We found the column, but every row is blank — and we can't bring these in without it.`,
         count: total,
         examples: [],
         source_files: [af.filename],
         verified: true,
-        recommended_action: `Populate the '${key}' column before import.`,
+        recommended_action: `Use "Fill blanks" below to set one value for every row.`,
       });
     } else if (blanks) {
       out.push({
@@ -197,13 +191,13 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
         category: 'data_gap',
         severity: 'warning',
         entity_type: af.entityType,
-        title: `${blanks} of ${total} rows missing '${key}' in ${af.filename}`,
-        detail: `'${key}' is required but blank in ${blanks} row(s).`,
+        title: `${blanks.toLocaleString()} of ${total.toLocaleString()} ${entityLabel(af.entityType)} have no ${fieldLabel(af.entityType, key)}`,
+        detail: `We need one for each of them before they can come in.`,
         count: blanks,
         examples: [],
         source_files: [af.filename],
         verified: true,
-        recommended_action: `Fill in the missing '${key}' values.`,
+        recommended_action: `Use "Fill blanks" below to set the empty ones all at once.`,
       });
     }
   }
@@ -228,7 +222,7 @@ function notChecked(linkId: string, entity: EntityType, title: string, detail: s
 
 function crossFileOrphans(files: AnalyzedFile[]): Finding[] {
   const out: Finding[] = [];
-  for (const [childEntity, childField, parentEntity, parentField] of REFERENTIAL_LINKS) {
+  for (const { childEntity, childField, parentEntity, parentField } of REFERENTIAL_LINKS) {
     const childFiles = filesOf(files, childEntity);
     if (!childFiles.length) continue;
     const linkId = `${childEntity}.${childField}`;
@@ -267,7 +261,8 @@ function crossFileOrphans(files: AnalyzedFile[]): Finding[] {
 
     let orphanCount = 0;
     const orphanExamples: string[] = [];
-    const seenExamples = new Set<string>();
+    // Distinct names, not rows — the missing RECORDS are what the owner acts on.
+    const distinctOrphans = new Set<string>();
     for (const af of childFiles) {
       const ccol = childCols.get(af.filename);
       if (!ccol) continue;
@@ -277,26 +272,32 @@ function crossFileOrphans(files: AnalyzedFile[]): Finding[] {
         if (!v) continue;
         if (!parentValues.has(v)) {
           orphanCount += 1;
-          if (!seenExamples.has(v) && orphanExamples.length < MAX_EXAMPLES) {
-            orphanExamples.push(raw.trim());
-            seenExamples.add(v);
+          if (!distinctOrphans.has(v)) {
+            distinctOrphans.add(v);
+            if (orphanExamples.length < MAX_EXAMPLES) orphanExamples.push(raw.trim());
           }
         }
       }
     }
     if (orphanCount) {
+      const parentLabel = entityLabel(parentEntity);
+      const childLabel = entityLabel(childEntity);
+      const distinct = distinctOrphans.size;
       out.push({
         id: `orphan.${linkId}`,
         category: 'orphan_reference',
         severity: 'critical',
         entity_type: childEntity,
-        title: `${orphanCount} ${entityLabel(childEntity)} row(s) reference a ${entityLabel(parentEntity)} that isn't in the upload`,
-        detail: `The ${childField} value on these rows has no matching ${parentField} in the ${entityLabel(parentEntity)} file. These references will break on import.`,
+        // Lead with what's MISSING (a short, fixable list) rather than how many rows break.
+        title: `${distinct} ${parentLabel} your ${childLabel} use aren't in your ${parentLabel}`,
+        detail: `${orphanCount.toLocaleString()} ${childLabel} row(s) point to them, so those rows have nothing to connect to yet.`,
         count: orphanCount,
         examples: orphanExamples,
         source_files: childFiles.filter((af) => childCols.get(af.filename)).map((af) => af.filename),
         verified: true,
-        recommended_action: `Add the missing ${entityLabel(parentEntity)} records, or correct the ${childField} values.`,
+        recommended_action: isAutoCreatable(parentEntity)
+          ? `We can add these ${distinct} ${parentLabel} for you — have a look and confirm.`
+          : `Add the file with these ${parentLabel} and we'll connect the rows up.`,
       });
     }
   }
@@ -318,12 +319,13 @@ function costCoverage(files: AnalyzedFile[]): Finding[] {
       severity: pct >= 10 ? 'warning' : 'info',
       entity_type: 'parts',
       title: `${pct}% of parts in ${af.filename} have no cost/price`,
-      detail: `${missing} of ${total} parts have no value in the cost column. Parts without a cost can't be quoted or costed accurately.`,
+      detail: `${missing.toLocaleString()} of ${total.toLocaleString()} parts have nothing in the cost column. You can quote them once they have one.`,
       count: missing,
       examples: [],
       source_files: [af.filename],
       verified: true,
-      recommended_action: 'Fill in unit costs where available before import.',
+      // Cost isn't required to import — say so, rather than implying a blocker.
+      recommended_action: 'Add costs in the table below if you have them — or bring these in now and price them in Jigged later.',
     });
   }
   return out;
@@ -358,7 +360,7 @@ function nameVariants(files: AnalyzedFile[]): Finding[] {
         examples: variantGroups.slice(0, MAX_EXAMPLES).map((g) => g.join(' / ')),
         source_files: [af.filename],
         verified: true,
-        recommended_action: 'Standardize each name to a single spelling before import.',
+        recommended_action: 'Use "Merge look-alikes" below to combine each group into one.',
       });
     }
   }
@@ -387,12 +389,12 @@ function inactiveFlags(af: AnalyzedFile): Finding[] {
     severity: 'info',
     entity_type: af.entityType,
     title: `${inactive} inactive/archived record(s) in ${af.filename}`,
-    detail: `The '${match}' column marks ${inactive} row(s) as inactive. Decide whether to import these historical records or leave them behind.`,
+    detail: `The '${match}' column marks ${inactive.toLocaleString()} row(s) as inactive — old records you may not need day to day.`,
     count: inactive,
     examples: [],
     source_files: [af.filename],
     verified: true,
-    recommended_action: 'Confirm whether inactive records should be migrated.',
+    recommended_action: "They'll come in with everything else — that's usually fine, and you can archive them in Jigged any time.",
   }];
 }
 

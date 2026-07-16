@@ -34,6 +34,7 @@ export interface ReviewSummary {
     level: 'blocking' | 'review' | 'ready';
     headline: string;
     lead: string; // the single most important issue, plain language
+    leadFinding: Finding | null; // so the view can offer its fix right in the verdict
     counts: SeverityCounts;
   };
   actions: Finding[]; // prioritized, excludes pure record-count facts
@@ -87,24 +88,32 @@ export function summarize(report: ImportReview): ReviewSummary {
     .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.count - a.count || a.id.localeCompare(b.id));
 
   // Verdict — lead with the single most important issue (highest severity, then highest count).
-  const topCritical = actions.find((f) => f.severity === 'critical');
-  const topWarning = actions.find((f) => f.severity === 'warning');
+  // Framing rule: name the WORK, never the failure. "Not ready to import" is a verdict a
+  // non-technical owner can't act on and reads as their fault; every one of these is a
+  // decision we can walk them through in-app, so the headline says how many decisions there
+  // are and the lead points at the first one.
+  const topCritical = actions.find((f) => f.severity === 'critical') ?? null;
+  const topWarning = actions.find((f) => f.severity === 'warning') ?? null;
   let level: 'blocking' | 'review' | 'ready';
   let headline: string;
   let lead: string;
+  let leadFinding: Finding | null;
   if (counts.critical > 0) {
     level = 'blocking';
-    headline =
-      counts.critical === 1 ? 'Not ready to import — 1 blocking issue' : `Not ready to import — ${counts.critical} blocking issues`;
-    lead = topCritical ? topCritical.title : 'A blocking issue needs fixing before import.';
+    headline = counts.critical === 1 ? '1 thing to sort out before we import' : `${counts.critical} things to sort out before we import`;
+    lead = topCritical ? topCritical.title : 'One thing needs your input first.';
+    leadFinding = topCritical;
   } else if (counts.warning > 0) {
     level = 'review';
-    headline = counts.warning === 1 ? 'Almost ready — 1 thing to review' : `Almost ready — ${counts.warning} things to review`;
-    lead = topWarning ? topWarning.title : 'A few things are worth cleaning up before import.';
+    // Warnings never block the write — say "ready" and mean it.
+    headline = counts.warning === 1 ? 'Ready to import — 1 thing worth a look' : `Ready to import — ${counts.warning} things worth a look`;
+    lead = topWarning ? topWarning.title : 'A few things are worth a look first.';
+    leadFinding = topWarning;
   } else {
     level = 'ready';
     headline = 'Ready to import';
-    lead = 'No blocking issues found in your files.';
+    lead = 'Everything lines up — nothing needs fixing first.';
+    leadFinding = null;
   }
 
   // Outlook — record counts per entity from the classified files.
@@ -163,7 +172,7 @@ export function summarize(report: ImportReview): ReviewSummary {
     (f) => TO_FINISH_CATEGORIES.has(f.category) || f.id.startsWith('classification_uncertain.'),
   );
 
-  return { verdict: { level, headline, lead, counts }, actions, outlook, relationships, toFinish };
+  return { verdict: { level, headline, lead, leadFinding, counts }, actions, outlook, relationships, toFinish };
 }
 
 export { ENTITY_LABEL };

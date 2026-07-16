@@ -141,6 +141,13 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     references something I didn't include, so that I can complete the picture in one sitting.
 23. As a shop owner, I never want a check to silently pass when it couldn't actually run, so
     that "no problems" always means "we looked and it's fine."
+23a. As a shop owner, when my routings name work centers that aren't in my work-centers file,
+    I want to see that list and have Jigged create them for me, so that I don't have to go
+    hand-edit a spreadsheet exported from a system I'm leaving.
+23b. As a shop owner, I want to say which of those are my own machines vs. outside shops, so
+    that my outsourced work is set up correctly from day one.
+23c. As a shop owner, I never want to be told to go fix my data somewhere else — every
+    suggestion should be something I can do right here, or a file I can upload.
 
 **Review & import**
 24. As a shop owner, I want to review a clear summary of exactly what will be created before

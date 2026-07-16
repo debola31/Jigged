@@ -47,6 +47,8 @@ import {
   type WorkingFile,
 } from '@/lib/dataImportEditing';
 import { bulkReplace, fillBlanks, mergeVariants } from '@/lib/dataImportActions';
+import { autoCreateLinkFor, createMissingParents, findMissingParents } from '@/lib/dataImportLinks';
+import CreateMissingDialog from '@/components/data-import/CreateMissingDialog';
 import { ENTITY_IDENTITY_FIELD } from '@/lib/dataImportSchema';
 import {
   buildImportPlan,
@@ -140,6 +142,8 @@ export default function ImportDataPage() {
   const [redoStack, setRedoStack] = useState<EditOp[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
   const [mergeOpen, setMergeOpen] = useState(false);
+  // The orphan finding the owner asked to fix — drives the "add the missing ones" dialog.
+  const [createFinding, setCreateFinding] = useState<Finding | null>(null);
   const [importing, setImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
@@ -147,6 +151,14 @@ export default function ImportDataPage() {
   const [suggestAvailable, setSuggestAvailable] = useState(true);
   const [existing, setExisting] = useState<ExistingIdentities | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>('both');
+
+  // The names behind an orphan finding, recomputed from the working set — so after the owner
+  // adds some (or edits a name in the grid), the dialog reflects what's ACTUALLY still missing.
+  const createLink = useMemo(() => (createFinding ? (autoCreateLinkFor(createFinding.id) ?? null) : null), [createFinding]);
+  const missingParents = useMemo(
+    () => (createLink ? findMissingParents(working, createLink) : []),
+    [createLink, working],
+  );
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -276,7 +288,7 @@ export default function ImportDataPage() {
   // journal as one unit and re-runs the analyzer. This is the single path the grid, the
   // bulk toolbar, and the merge dialog all go through.
   function applyRemediation(op: EditOp) {
-    if (op.edits.length === 0) return;
+    if (op.edits.length === 0 && !op.addRecords?.length) return;
     const next = applyOp(working, op);
     setWorking(next);
     setJournal((j) => [...j, op]);
@@ -498,7 +510,23 @@ export default function ImportDataPage() {
           {/* Step 3 — Review + fix (live re-analyze) */}
           {activeStep === 3 && report && (
             <Box>
-              <ImportReviewView report={report} onUploadMore={() => setActiveStep(1)} />
+              <ImportReviewView
+                report={report}
+                onUploadMore={() => setActiveStep(1)}
+                onCreateMissing={setCreateFinding}
+              />
+              {createLink && missingParents.length > 0 && (
+                <CreateMissingDialog
+                  key={createFinding?.id}
+                  link={createLink}
+                  missing={missingParents}
+                  onClose={() => setCreateFinding(null)}
+                  onConfirm={(entries) => {
+                    applyRemediation(createMissingParents(working, createLink, entries));
+                    setCreateFinding(null);
+                  }}
+                />
+              )}
 
               {working.length > 0 && (
                 <>

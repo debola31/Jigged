@@ -16,15 +16,15 @@ import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
 import Stack from '@mui/material/Stack';
-import Divider from '@mui/material/Divider';
+import Collapse from '@mui/material/Collapse';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
-import UndoIcon from '@mui/icons-material/Undo';
-import RedoIcon from '@mui/icons-material/Redo';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
 import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
 import ColumnMappingStep from '@/components/data-import/ColumnMappingStep';
@@ -72,7 +72,6 @@ import type {
   Finding,
   FixSuggestion,
   ImportReview,
-  NarrativeResponse,
   StructureResponse,
   SuggestFixesResponse,
   UploadedFilePayload,
@@ -90,36 +89,26 @@ const WHAT_TO_EXPORT = [
   { name: 'Customers', hint: 'optional, if you have them' },
 ];
 
-/** Compose the review from structure + freshly-computed findings + the (stable) AI narrative. */
-function composeReport(
-  structure: StructureResponse,
-  deterministic: Finding[],
-  narrative: NarrativeResponse | null,
-  generatedAt: string,
-): ImportReview {
-  const gotchas: Finding[] = (narrative?.gotchas ?? []).map((g, i) => ({
-    id: `gotcha.${i}`,
-    category: 'erp_gotcha',
-    severity: 'info',
-    entity_type: 'unknown',
-    title: g.title || 'Worth verifying',
-    detail: g.detail || '',
-    count: 0,
-    examples: [],
-    source_files: [],
-    verified: false,
-    recommended_action: g.recommended_action || '',
-  }));
+/**
+ * Compose the review from structure + the freshly-computed DETERMINISTIC findings.
+ *
+ * No AI narrative: the redesigned review is fully deterministic. The old "gotchas" it produced
+ * were vague, out-of-tool advice ("do a VLOOKUP in Excel", "check your platform's setup guide")
+ * that contradicted the fix-it-in-app premise and duplicated the real orphan checks — so we
+ * stopped generating them, and with nothing left consuming the narrative call, stopped making it
+ * (an AI cost with no visible output, and the Map→Review step's only network failure point).
+ */
+function composeReport(structure: StructureResponse, deterministic: Finding[], generatedAt: string): ImportReview {
   return {
     schema_version: 1,
     erp_detection: structure.erp_detection,
     files: structure.files,
-    findings: [...deterministic, ...gotchas],
-    summary: narrative?.narrative_available ? narrative.summary : '',
-    recommendations: narrative?.recommendations ?? [],
-    narrative_available: narrative?.narrative_available ?? false,
-    ai_provider: narrative?.ai_provider ?? '',
-    ai_model: narrative?.ai_model ?? '',
+    findings: deterministic,
+    summary: '',
+    recommendations: [],
+    narrative_available: false,
+    ai_provider: '',
+    ai_model: '',
     generated_at: generatedAt,
   };
 }
@@ -136,14 +125,14 @@ export default function ImportDataPage() {
 
   // Working dataset threaded through Map → Review: editable entity + column mapping, then
   // editable rows. Edits re-run the analyzer client-side (no server round-trip), so the
-  // review updates live. The AI narrative is computed once (on Map confirm) and reused.
+  // review updates live.
   const [structure, setStructure] = useState<StructureResponse | null>(null);
-  const [narrative, setNarrative] = useState<NarrativeResponse | null>(null);
   const [working, setWorking] = useState<WorkingFile[]>([]);
   const [journal, setJournal] = useState<EditOp[]>([]);
   const [redoStack, setRedoStack] = useState<EditOp[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [showAllData, setShowAllData] = useState(false);
   // The one task the owner opened. One thing per screen, inside the task.
   const [openTask, setOpenTask] = useState<Finding | null>(null);
   const [importing, setImporting] = useState(false);
@@ -252,53 +241,22 @@ export default function ImportDataPage() {
     }
   }
 
-  // Map → Review: run the deterministic analyzer on the CONFIRMED mapping, then the grounded
-  // AI narrative once. The confirmed classification replaces the AI's guess in the review.
-  async function confirmMapping() {
+  // Map → Review: run the deterministic analyzer on the CONFIRMED mapping. No network — the
+  // review is fully client-side now, so the transition is instant (and can't fail).
+  function confirmMapping() {
     if (!structure) return;
     setError(null);
-    setBusy(true);
-    try {
-      const token = await authToken();
-      const findings = analyzeBundle(workingToAnalyzed(working));
-      const narrativeResult = await postJson<NarrativeResponse>(
-        '/api/data-import/narrative',
-        {
-          company_id: companyId,
-          erp_detection: structure.erp_detection,
-          findings: findings.map((f) => ({
-            id: f.id,
-            category: f.category,
-            severity: f.severity,
-            title: f.title,
-            detail: f.detail,
-            count: f.count,
-            examples: f.examples.slice(0, 3),
-          })),
-          file_summaries: working.map((wf) => ({
-            filename: wf.filename,
-            entity_type: wf.entityType,
-            row_count: wf.rows.length,
-          })),
-        },
-        token,
-      );
-      const confirmed: StructureResponse = {
-        erp_detection: structure.erp_detection,
-        files: workingToClassification(working),
-      };
-      setStructure(confirmed);
-      setNarrative(narrativeResult);
-      setJournal([]);
-      setRedoStack([]);
-      setGridIndex(0);
-      setReport(composeReport(confirmed, findings, narrativeResult, new Date().toISOString()));
-      setActiveStep(3);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
-    } finally {
-      setBusy(false);
-    }
+    const findings = analyzeBundle(workingToAnalyzed(working));
+    const confirmed: StructureResponse = {
+      erp_detection: structure.erp_detection,
+      files: workingToClassification(working),
+    };
+    setStructure(confirmed);
+    setJournal([]);
+    setRedoStack([]);
+    setGridIndex(0);
+    setReport(composeReport(confirmed, findings, new Date().toISOString()));
+    setActiveStep(3);
   }
 
   function handleEntityChange(fileIndex: number, entityType: EntityType) {
@@ -313,9 +271,7 @@ export default function ImportDataPage() {
   function recompute(next: WorkingFile[]) {
     if (!structure) return;
     const findings = analyzeBundle(workingToAnalyzed(next));
-    setReport((prev) =>
-      composeReport(structure, findings, narrative, prev?.generated_at ?? new Date().toISOString()),
-    );
+    setReport((prev) => composeReport(structure, findings, prev?.generated_at ?? new Date().toISOString()));
   }
 
   // Apply one remediation op (a single cell edit or a bulk batch): it lands on the undo
@@ -456,13 +412,7 @@ export default function ImportDataPage() {
       )}
 
       {busy ? (
-        <AIAnalysisLoading
-          description={
-            activeStep === 1
-              ? 'Reading your files and detecting the source system…'
-              : 'Checking your data and writing the summary…'
-          }
-        />
+        <AIAnalysisLoading description="Reading your files and detecting the source system…" />
       ) : (
         <>
           {/* Step 0 — What you'll need */}
@@ -549,6 +499,10 @@ export default function ImportDataPage() {
                 impact={impact}
                 onUploadMore={() => setActiveStep(1)}
                 onOpenTask={setOpenTask}
+                canUndo={journal.length > 0}
+                canRedo={redoStack.length > 0}
+                onUndo={undo}
+                onRedo={redo}
               />
 
               {/* The fix for a task lives WITH the task — never "use the toolbar below". */}
@@ -592,61 +546,60 @@ export default function ImportDataPage() {
                 />
               )}
 
+              {/* The escape hatch: everything above is the guided path, but a power user (or an
+                  issue we didn't surface as a task) can still open the full data and edit anything.
+                  Collapsed by default so it never competes with "What to sort out". */}
               {working.length > 0 && (
-                <>
-                  <Divider sx={{ my: 4 }} />
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                    <Typography variant="h6" sx={{ flex: 1 }}>
-                      Fix your data
+                <Box sx={{ mt: 4, borderTop: 1, borderColor: 'divider', pt: 2 }}>
+                  <Button
+                    onClick={() => setShowAllData((v) => !v)}
+                    endIcon={showAllData ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  >
+                    {showAllData ? 'Hide the full data' : 'See or edit all your data'}
+                  </Button>
+                  <Collapse in={showAllData}>
+                    <Typography variant="body2" color="text.secondary" sx={{ my: 1.5 }}>
+                      Edit any value directly, fix a whole column at once, or let AI suggest fixes.
+                      Everything above updates as you change things here.
                     </Typography>
-                    <Button size="small" startIcon={<UndoIcon />} disabled={journal.length === 0} onClick={undo}>
-                      Undo
-                    </Button>
-                    <Button size="small" startIcon={<RedoIcon />} disabled={redoStack.length === 0} onClick={redo}>
-                      Redo
-                    </Button>
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Fix a whole column at once below, or double-click any cell to edit. The review
-                    above updates as you go — no spreadsheet needed.
-                  </Typography>
-                  <SuggestFixesPanel
-                    suggestions={suggestions}
-                    loading={suggestLoading}
-                    available={suggestAvailable}
-                    onRequest={requestSuggestions}
-                  />
-                  {activeFile && (
-                    <FixToolbar
-                      key={activeFile.filename}
-                      file={activeFile}
-                      onBulkReplace={(colId, find, replace) =>
-                        applyRemediation(bulkReplace(working, gridIndex, colId, find, replace))
-                      }
-                      onFillBlanks={(colId, value) =>
-                        applyRemediation(fillBlanks(working, gridIndex, colId, value))
-                      }
-                      onOpenMerge={() => setMergeOpen(true)}
+                    <SuggestFixesPanel
+                      suggestions={suggestions}
+                      loading={suggestLoading}
+                      available={suggestAvailable}
+                      onRequest={requestSuggestions}
                     />
-                  )}
-                  <EditableDataGrid
-                    files={working}
-                    activeIndex={gridIndex}
-                    onActiveIndexChange={setGridIndex}
-                    onCellEdit={handleCellEdit}
-                  />
-                  {activeFile && (
-                    <MergeVariantsDialog
-                      open={mergeOpen}
-                      onClose={() => setMergeOpen(false)}
-                      file={activeFile}
-                      defaultColId={mergeDefaultCol}
-                      onMerge={(colId, canonical, variants) =>
-                        applyRemediation(mergeVariants(working, gridIndex, colId, canonical, variants))
-                      }
+                    {activeFile && (
+                      <FixToolbar
+                        key={activeFile.filename}
+                        file={activeFile}
+                        onBulkReplace={(colId, find, replace) =>
+                          applyRemediation(bulkReplace(working, gridIndex, colId, find, replace))
+                        }
+                        onFillBlanks={(colId, value) =>
+                          applyRemediation(fillBlanks(working, gridIndex, colId, value))
+                        }
+                        onOpenMerge={() => setMergeOpen(true)}
+                      />
+                    )}
+                    <EditableDataGrid
+                      files={working}
+                      activeIndex={gridIndex}
+                      onActiveIndexChange={setGridIndex}
+                      onCellEdit={handleCellEdit}
                     />
-                  )}
-                </>
+                    {activeFile && (
+                      <MergeVariantsDialog
+                        open={mergeOpen}
+                        onClose={() => setMergeOpen(false)}
+                        file={activeFile}
+                        defaultColId={mergeDefaultCol}
+                        onMerge={(colId, canonical, variants) =>
+                          applyRemediation(mergeVariants(working, gridIndex, colId, canonical, variants))
+                        }
+                      />
+                    )}
+                  </Collapse>
+                </Box>
               )}
 
               <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>

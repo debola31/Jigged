@@ -122,7 +122,7 @@ function withinFileDuplicates(af: AnalyzedFile): Finding[] {
     examples: dupKeys.slice(0, MAX_EXAMPLES).map((k) => originals.get(k)!),
     source_files: [af.filename],
     verified: true,
-    recommended_action: `That's usually right — if any are meant to be separate, rename them in the table below.`,
+    recommended_action: `Each name becomes one record — usually what you want. To keep any separate, rename them in your data below.`,
   }];
 }
 
@@ -180,7 +180,7 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
         examples: [],
         source_files: [af.filename],
         verified: true,
-        recommended_action: `Use "Fill blanks" below to set one value for every row.`,
+        recommended_action: `Set one value for every row at once.`,
       });
     } else if (blanks) {
       out.push({
@@ -198,7 +198,7 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
         examples: [],
         source_files: [af.filename],
         verified: true,
-        recommended_action: `Use "Fill blanks" below to set the empty ones all at once.`,
+        recommended_action: `Set the empty ones all at once.`,
       });
     }
   }
@@ -326,7 +326,7 @@ function costCoverage(files: AnalyzedFile[]): Finding[] {
       source_files: [af.filename],
       verified: true,
       // Cost isn't required to import — say so, rather than implying a blocker.
-      recommended_action: 'Add costs in the table below if you have them — or bring these in now and price them in Jigged later.',
+      recommended_action: 'This one is optional — bring these parts in now and add prices in Jigged whenever you are ready.',
     });
   }
   return out;
@@ -361,7 +361,7 @@ function nameVariants(files: AnalyzedFile[]): Finding[] {
         examples: variantGroups.slice(0, MAX_EXAMPLES).map((g) => g.join(' / ')),
         source_files: [af.filename],
         verified: true,
-        recommended_action: 'Use "Merge look-alikes" below to combine each group into one.',
+        recommended_action: 'Combine each group into one.',
       });
     }
   }

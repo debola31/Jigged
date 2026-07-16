@@ -188,6 +188,16 @@ a toolbar "below":
   ("Set units", "Add them", "Review"); an optional/no-fix item is a quiet plain row. That visual
   split is the priority signal (Norman's signifiers; the flat list that preceded it tested as "I
   can't tell these are clickable"). The consequence sub-line is a directive, not a passive count.
+- **Both sides of the outcome, and the progress.** The header shows what *won't* come in AND a
+  "what will" readout with a bar ("17,417 of 32,375 rows will come in · 54%") that fills as fixes
+  land — the positive frame + a real completeness signal (not step-counting, which the research
+  found unhelpful).
+- **Identity renames cascade — the invariant that keeps an *optional* fix from creating a
+  *blocking* one.** Merging spellings (or any rewrite of a parent identity) must also rewrite the
+  child references, or the merge orphans every BOM/routing row that used the old spelling. This is
+  exactly how a merge once flipped the review from "everything comes in" back to a wall of
+  un-fixable orphans. `mergeVariants` cascades via `REFERENTIAL_LINKS` in the same undoable op;
+  the regression test asserts a merge yields **zero** new orphan findings.
 - **`ConfirmVariantsDialog`** replaces the old merge dialog for duplicates. Per MSR Aether —
   *"explanations increase blind trust rather than appropriate reliance,"* worst in novices — it
   shows **no confidence score and no reasoning**. Both records sit side by side with the other

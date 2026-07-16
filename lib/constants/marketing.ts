@@ -48,7 +48,7 @@ export const HERO = {
   // table. "Next time someone needs it" (not "you run the part") is availability, not just
   // the owner's own recall.
   subhead:
-    'Quoting to invoicing and everything between. See where every job stands without walking the floor — and the notes and photos your operators take at the machine stay with the part, so the fix your best guy figured out is there next time someone needs it.',
+    'Quoting to invoicing and everything in between. See where every job stands without walking the floor — and the notes and photos your operators take at the machine stay with the part, so the fix your best guy figured out is there next time someone needs it.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   secondaryCta: { label: 'See how it works', href: '#how-it-works' },
 };

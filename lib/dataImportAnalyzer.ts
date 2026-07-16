@@ -12,7 +12,7 @@
  */
 
 import { isAutoCreatable, REFERENTIAL_LINKS } from '@/lib/dataImportLinks';
-import { ENTITY_LABELS, fieldLabel, norm } from '@/lib/dataImportSchema';
+import { ENTITY_FIELDS, ENTITY_LABELS, fieldLabel, norm } from '@/lib/dataImportSchema';
 import type { EntityType, Finding, Severity } from '@/types/data-import';
 
 export interface AnalyzedFile {
@@ -44,17 +44,12 @@ const ENTITY_IDENTITY_FIELD: Partial<Record<EntityType, string>> = {
   customers: 'name',
 };
 
-// Required fields per entity (mirrors the Python import-model schemas).
-const ENTITY_REQUIRED_FIELDS: Record<string, string[]> = {
-  parts: ['part_name', 'primary_unit'], // a part can't be created without a unit of measure
-  vendors: ['name'],
-  work_centers: ['name'],
-  routings: ['part_name'],
-  bom: ['parent_part_name', 'child_part_name', 'quantity', 'unit'],
-  customers: ['name'],
-};
+/** Derived from the Map catalog rather than restated — the two agreeing is the whole
+ *  point, and `parts.primary_unit` is exactly the kind of entry that drifts. Mirrors the
+ *  Python import-model schemas; `parts` also has a DB-level CHECK for the unit. */
+const requiredFields = (entity: EntityType): string[] =>
+  (ENTITY_FIELDS[entity] ?? []).filter((f) => f.required).map((f) => f.key);
 
-// Cross-file links: [childEntity, childField, parentEntity, parentField].
 // --------------------------------------------------------------------------- helpers
 
 export function aggressiveNorm(v: string | undefined | null): string {
@@ -132,17 +127,19 @@ function withinFileDuplicates(af: AnalyzedFile): Finding[] {
 }
 
 function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
-  const required = ENTITY_REQUIRED_FIELDS[af.entityType];
-  if (!required || !required.length) return [];
+  const required = requiredFields(af.entityType);
+  if (!required.length) return [];
   const identified = required.filter((k) => roleCol(af, k));
   if (!identified.length) {
     return [{
       id: `classification_uncertain.${af.filename}`,
       category: 'not_checked',
-      severity: 'warning',
+      // Nothing in this file can be created until we know what it is — that's the
+      // whole file lost, so it can't read as a soft 'review'.
+      severity: 'critical',
       entity_type: af.entityType,
-      title: `Could not confidently read ${af.filename} as ${entityLabel(af.entityType)}`,
-      detail: `None of the required ${entityLabel(af.entityType)} columns (${required.join(', ')}) were identified in this file. It may be a different kind of data, or use headers we couldn't map. Detailed checks were skipped to avoid misleading results.`,
+      title: `We couldn't read ${af.filename} as ${entityLabel(af.entityType)}`,
+      detail: `None of the columns we need (${required.map((k) => fieldLabel(af.entityType, k)).join(', ')}) turned up in this file. It might hold something else, or use headings we don't know yet — so we've left it alone rather than guess.`,
       count: 0,
       examples: [],
       source_files: [af.filename],
@@ -189,7 +186,11 @@ function missingOrEmptyRequired(af: AnalyzedFile): Finding[] {
       out.push({
         id: `gap.${af.entityType}.${key}`,
         category: 'data_gap',
-        severity: 'warning',
+        // A blank REQUIRED value costs the row — the importer skips it, same as a
+        // missing column costs the file. It read as 'warning' next to genuinely
+        // harmless things like "no cost", so "4 to review" covered both "91% of your
+        // parts will be dropped" and "cosmetic". Severity means consequence now.
+        severity: 'critical',
         entity_type: af.entityType,
         title: `${blanks.toLocaleString()} of ${total.toLocaleString()} ${entityLabel(af.entityType)} have no ${fieldLabel(af.entityType, key)}`,
         detail: `We need one for each of them before they can come in.`,

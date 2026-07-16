@@ -34,7 +34,7 @@ import FixToolbar from '@/components/data-import/FixToolbar';
 import MergeVariantsDialog from '@/components/data-import/MergeVariantsDialog';
 import SuggestFixesPanel from '@/components/data-import/SuggestFixesPanel';
 import { analyzeBundle } from '@/lib/dataImportAnalyzer';
-import { summarize } from '@/lib/dataImportReview';
+import { lossPhrase, rowsAtRisk } from '@/lib/dataImportImpact';
 import {
   applyOp,
   buildWorkingFiles,
@@ -49,6 +49,8 @@ import {
 import { bulkReplace, fillBlanks, mergeVariants } from '@/lib/dataImportActions';
 import { autoCreateLinkFor, createMissingParents, findMissingParents } from '@/lib/dataImportLinks';
 import CreateMissingDialog from '@/components/data-import/CreateMissingDialog';
+import FillGapDialog from '@/components/data-import/FillGapDialog';
+import ConfirmVariantsDialog from '@/components/data-import/ConfirmVariantsDialog';
 import { ENTITY_IDENTITY_FIELD } from '@/lib/dataImportSchema';
 import {
   buildImportPlan,
@@ -142,8 +144,8 @@ export default function ImportDataPage() {
   const [redoStack, setRedoStack] = useState<EditOp[]>([]);
   const [gridIndex, setGridIndex] = useState(0);
   const [mergeOpen, setMergeOpen] = useState(false);
-  // The orphan finding the owner asked to fix — drives the "add the missing ones" dialog.
-  const [createFinding, setCreateFinding] = useState<Finding | null>(null);
+  // The one task the owner opened. One thing per screen, inside the task.
+  const [openTask, setOpenTask] = useState<Finding | null>(null);
   const [importing, setImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
@@ -152,13 +154,45 @@ export default function ImportDataPage() {
   const [existing, setExisting] = useState<ExistingIdentities | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>('both');
 
+  // What the owner loses if they import as things stand — the Review step's headline, and
+  // the same sentence the Import step repeats. Recomputed from the working set, so every fix
+  // moves the number immediately.
+  const impact = useMemo(() => rowsAtRisk(working), [working]);
+
+  const closeTask = () => setOpenTask(null);
+
+  /** The file a task is about (tasks name their source file; filenames contain dots, so
+   *  never parse the finding id for it). */
+  const taskFileIndex = useMemo(
+    () => (openTask ? working.findIndex((w) => w.filename === openTask.source_files[0]) : -1),
+    [openTask, working],
+  );
+
+  // --- which fix does this task open? -------------------------------------
   // The names behind an orphan finding, recomputed from the working set — so after the owner
   // adds some (or edits a name in the grid), the dialog reflects what's ACTUALLY still missing.
-  const createLink = useMemo(() => (createFinding ? (autoCreateLinkFor(createFinding.id) ?? null) : null), [createFinding]);
+  const createLink = useMemo(() => (openTask ? (autoCreateLinkFor(openTask.id) ?? null) : null), [openTask]);
   const missingParents = useMemo(
     () => (createLink ? findMissingParents(working, createLink) : []),
     [createLink, working],
   );
+
+  const gapTask = useMemo(() => {
+    if (!openTask || openTask.category !== 'data_gap' || taskFileIndex < 0) return null;
+    // id is `gap.<entity>.<field>` — the field is the tail, the entity is fixed-width.
+    const fieldKey = openTask.id.split('.').slice(2).join('.');
+    const file = working[taskFileIndex];
+    if (!fieldKey || !file.columnRoles[fieldKey]) return null;
+    return { file, fileIndex: taskFileIndex, fieldKey };
+  }, [openTask, working, taskFileIndex]);
+
+  const variantTask = useMemo(() => {
+    if (!openTask || openTask.category !== 'name_variant' || taskFileIndex < 0) return null;
+    const file = working[taskFileIndex];
+    const identity = ENTITY_IDENTITY_FIELD[file.entityType];
+    const colId = identity ? file.columnRoles[identity] : undefined;
+    return colId ? { file, fileIndex: taskFileIndex, colId } : null;
+  }, [openTask, working, taskFileIndex]);
 
   async function authToken(): Promise<string> {
     const supabase = getSupabase();
@@ -512,19 +546,49 @@ export default function ImportDataPage() {
             <Box>
               <ImportReviewView
                 report={report}
+                impact={impact}
                 onUploadMore={() => setActiveStep(1)}
-                onCreateMissing={setCreateFinding}
+                onOpenTask={setOpenTask}
               />
+
+              {/* The fix for a task lives WITH the task — never "use the toolbar below". */}
               {createLink && missingParents.length > 0 && (
                 <CreateMissingDialog
-                  key={createFinding?.id}
+                  key={openTask?.id}
                   link={createLink}
                   missing={missingParents}
-                  onClose={() => setCreateFinding(null)}
+                  onClose={closeTask}
                   onConfirm={(entries) => {
                     applyRemediation(createMissingParents(working, createLink, entries));
-                    setCreateFinding(null);
+                    closeTask();
                   }}
+                />
+              )}
+              {gapTask && (
+                <FillGapDialog
+                  key={openTask?.id}
+                  file={gapTask.file}
+                  fieldKey={gapTask.fieldKey}
+                  onClose={closeTask}
+                  onEditByHand={() => {
+                    setGridIndex(gapTask.fileIndex);
+                    closeTask();
+                  }}
+                  onFill={(colId, value) => {
+                    applyRemediation(fillBlanks(working, gapTask.fileIndex, colId, value));
+                    closeTask();
+                  }}
+                />
+              )}
+              {variantTask && (
+                <ConfirmVariantsDialog
+                  key={openTask?.id}
+                  file={variantTask.file}
+                  colId={variantTask.colId}
+                  onClose={closeTask}
+                  onMerge={(colId, canonical, variants) =>
+                    applyRemediation(mergeVariants(working, variantTask.fileIndex, colId, canonical, variants))
+                  }
                 />
               )}
 
@@ -597,7 +661,6 @@ export default function ImportDataPage() {
           {/* Step 4 — Import (pre-commit plan → confirm → dependency-ordered write → summary) */}
           {activeStep === 4 && report && (
             <ImportStep
-              report={report}
               working={working}
               existing={existing}
               importMode={importMode}
@@ -615,7 +678,6 @@ export default function ImportDataPage() {
 }
 
 function ImportStep({
-  report,
   working,
   existing,
   importMode,
@@ -625,7 +687,6 @@ function ImportStep({
   onImport,
   onBack,
 }: {
-  report: ImportReview;
   working: WorkingFile[];
   existing: ExistingIdentities | null;
   importMode: ImportMode;
@@ -646,7 +707,9 @@ function ImportStep({
     for (const b of plan) m.set(b.entity, (m.get(b.entity) ?? 0) + b.rows.length);
     return [...m.entries()];
   }, [plan]);
-  const blocking = summarize(report).verdict.counts.critical;
+  // Same sentence the Review step leads with — the owner should never meet a different
+  // story about what they're about to lose just because they moved forward a step.
+  const lost = lossPhrase(rowsAtRisk(working));
 
   if (summary) {
     return (
@@ -741,11 +804,10 @@ function ImportStep({
           ))}
         </Stack>
 
-        {blocking > 0 && (
+        {lost !== '' && (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            You still have <strong>{blocking} blocking issue{blocking === 1 ? '' : 's'}</strong>. Rows
-            that can&apos;t be resolved will be skipped (and reported) — fix them on the Review step
-            for a complete import.
+            <strong>{lost}</strong> won&apos;t come in — those rows get skipped, and we&apos;ll tell you
+            which. You can import the rest now and sort them out later, or go back and fix them first.
           </Alert>
         )}
 

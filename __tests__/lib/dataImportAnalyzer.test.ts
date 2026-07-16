@@ -123,14 +123,16 @@ describe('required columns', () => {
     expect(byCat(findings, 'missing_column')).toHaveLength(0);
   });
 
-  it('partial blank required -> data_gap', () => {
+  it('partial blank required -> data_gap, and it BLOCKS (the row is lost)', () => {
     const parts = af('parts.csv', 'parts', { part_name: 'PartNo' }, [
       { PartNo: 'A' }, { PartNo: '' }, { PartNo: 'C' },
     ]);
     const gaps = byCat(analyzeBundle([parts]), 'data_gap');
     expect(gaps).toHaveLength(1);
     expect(gaps[0].count).toBe(1);
-    expect(gaps[0].severity).toBe('warning');
+    // Was 'warning', which put "these rows will be dropped" in the same bucket as
+    // "no cost, harmless". A blank required value costs the row, so it's critical.
+    expect(gaps[0].severity).toBe('critical');
   });
 
   it('bom missing one required among several', () => {

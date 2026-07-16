@@ -3,300 +3,221 @@
 import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
-import Divider from '@mui/material/Divider';
 import Paper from '@mui/material/Paper';
-import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import BlockIcon from '@mui/icons-material/Block';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import type { Finding, ImportReview, Severity } from '@/types/data-import';
-import { summarize } from '@/lib/dataImportReview';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import type { Finding, ImportReview } from '@/types/data-import';
+import type { EntityImpact } from '@/lib/dataImportImpact';
+import { summarize, type ReviewTask } from '@/lib/dataImportReview';
 import { autoCreateLinkFor } from '@/lib/dataImportLinks';
 
-// Severity is encoded with THREE channels (icon + text label + color), never color alone
-// — WCAG 1.4.1 + IBM Carbon. Info is deliberately low-key (no "green noise").
-const SEV: Record<Severity, { label: string; color: 'error' | 'warning' | 'info'; Icon: typeof BlockIcon }> = {
-  critical: { label: 'Blocking', color: 'error', Icon: BlockIcon },
-  warning: { label: 'Review', color: 'warning', Icon: WarningAmberIcon },
-  info: { label: 'Info', color: 'info', Icon: InfoOutlinedIcon },
-};
-
-function SeverityChip({ severity }: { severity: Severity }) {
-  const s = SEV[severity];
-  return <Chip size="small" color={s.color} icon={<s.Icon sx={{ fontSize: 16 }} />} label={s.label} sx={{ fontWeight: 600 }} />;
+interface ImportReviewViewProps {
+  report: ImportReview;
+  impact?: EntityImpact[];
+  onUploadMore?: () => void;
+  /** Open the focused fix for a finding. The row IS the affordance — no per-row buttons. */
+  onOpenTask?: (finding: Finding) => void;
 }
 
 /**
- * The in-app fix for a finding, when one exists. Today that's "create the missing lookups";
- * the shape generalizes to whatever the agent proposes next. When a finding has a real
- * button, the button IS the recommendation — we don't also print prose telling them to do it.
+ * The Review step.
+ *
+ * Deliberately subtractive vs. what this was: no verdict banner, no severity count chips, no
+ * per-row severity badges, no record-count/relationship panel (that belongs on the Import
+ * step, where it's about to matter). Exactly ONE saturated element is on screen — what you
+ * lose if you import now — because if everything is emphasized, nothing is. Everything else
+ * earns attention through position and plain words.
  */
-function FixButton({ finding, onCreateMissing }: { finding: Finding; onCreateMissing?: (f: Finding) => void }) {
-  const link = autoCreateLinkFor(finding.id);
-  if (!link || !onCreateMissing) return null;
-  return (
-    <Button variant="contained" size="small" startIcon={<AddCircleOutlineIcon />} onClick={() => onCreateMissing(finding)}>
-      Review &amp; add the missing {finding.id.includes('vendor') ? 'vendors' : 'work centers'}
-    </Button>
-  );
-}
-
-function ActionRow({ finding, onCreateMissing }: { finding: Finding; onCreateMissing?: (f: Finding) => void }) {
-  const hasFix = !!autoCreateLinkFor(finding.id) && !!onCreateMissing;
-  return (
-    <Card variant="outlined" sx={{ mb: 1 }}>
-      <CardContent sx={{ py: 1.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <SeverityChip severity={finding.severity} />
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1 }}>
-            {finding.title}
-          </Typography>
-          {!finding.verified && <Chip size="small" variant="outlined" label="AI-inferred" />}
-        </Box>
-        {finding.detail && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {finding.detail}
-          </Typography>
-        )}
-        {finding.examples.length > 0 && (
-          <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.secondary">
-              e.g.
-            </Typography>
-            {finding.examples.map((ex, i) => (
-              <Chip key={i} size="small" variant="outlined" label={ex} sx={{ maxWidth: 340 }} />
-            ))}
-          </Box>
-        )}
-        {hasFix ? (
-          <Box sx={{ mt: 1.5 }}>
-            <FixButton finding={finding} onCreateMissing={onCreateMissing} />
-          </Box>
-        ) : (
-          finding.recommended_action && (
-            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.75 }}>
-              <Box sx={{ fontWeight: 700 }}>→</Box>
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                {finding.recommended_action}
-              </Typography>
-            </Box>
-          )
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-const REL_STATUS: Record<'ok' | 'broken' | 'unverified', { color: 'success' | 'error' | 'warning'; Icon: typeof BlockIcon }> = {
-  ok: { color: 'success', Icon: CheckCircleOutlineIcon },
-  broken: { color: 'error', Icon: BlockIcon },
-  unverified: { color: 'warning', Icon: HelpOutlineIcon },
-};
-
 export default function ImportReviewView({
   report,
+  impact = [],
   onUploadMore,
-  onCreateMissing,
-}: {
-  report: ImportReview;
-  onUploadMore?: () => void;
-  onCreateMissing?: (finding: Finding) => void;
-}) {
-  const [showDetails, setShowDetails] = useState(false);
-  const s = summarize(report);
-  const v = s.verdict;
-  const verdictColor = v.level === 'blocking' ? 'error' : v.level === 'review' ? 'warning' : 'success';
-  const VerdictIcon = v.level === 'blocking' ? BlockIcon : v.level === 'review' ? WarningAmberIcon : CheckCircleOutlineIcon;
+  onOpenTask,
+}: ImportReviewViewProps) {
+  const [showNoticed, setShowNoticed] = useState(false);
+  const s = summarize(report, impact);
+  const blocking = s.tasks.filter((t) => t.blocking);
+  const anythingLost = s.lossPhrase !== '';
 
   return (
     <Box>
-      {/* 1 — Verdict (inverted pyramid: lead with the conclusion + the single top issue) */}
+      {/* 1 — The one loud thing: the truth about importing right now. */}
       <Paper
         elevation={0}
         sx={{
           p: 2.5,
-          mb: 3,
-          borderLeft: 6,
-          borderColor: `${verdictColor}.main`,
-          bgcolor: (t) => t.palette.action.hover,
+          mb: 4,
+          display: 'flex',
+          gap: 1.75,
+          alignItems: 'flex-start',
+          border: 1,
+          borderColor: anythingLost ? 'error.main' : 'success.main',
+          bgcolor: (t) =>
+            anythingLost ? `${t.palette.error.main}1c` : `${t.palette.success.main}1c`,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <VerdictIcon color={verdictColor} sx={{ fontSize: 32 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            {v.headline}
-          </Typography>
-        </Box>
-        {v.level !== 'ready' && (
-          <>
-            <Typography variant="body1" sx={{ mt: 1 }}>
-              Start here: <strong>{v.lead}</strong>
-            </Typography>
-            {/* The fix for the top issue, one click from the verdict — the owner should never
-                have to hunt down the list for the thing we just told them to start with. */}
-            {v.leadFinding && (
-              <Box sx={{ mt: 1.5 }}>
-                <FixButton finding={v.leadFinding} onCreateMissing={onCreateMissing} />
-              </Box>
-            )}
-          </>
+        {anythingLost ? (
+          <BlockIcon color="error" sx={{ mt: 0.25 }} />
+        ) : (
+          <CheckCircleOutlineIcon color="success" sx={{ mt: 0.25 }} />
         )}
-        <Box sx={{ mt: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {v.counts.critical > 0 && (
-            <Chip color="error" icon={<BlockIcon sx={{ fontSize: 16 }} />} label={`${v.counts.critical} to sort out`} />
-          )}
-          {v.counts.warning > 0 && (
-            <Chip color="warning" icon={<WarningAmberIcon sx={{ fontSize: 16 }} />} label={`${v.counts.warning} to look at`} />
-          )}
-          {v.counts.info > 0 && (
-            <Chip variant="outlined" icon={<InfoOutlinedIcon sx={{ fontSize: 16 }} />} label={`${v.counts.info} to know`} />
-          )}
+        <Box>
+          <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.45 }}>
+            {anythingLost
+              ? `If you import now, ${s.lossPhrase} won't come in.`
+              : 'Everything you uploaded will come in.'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {anythingLost
+              ? blocking.length === 1
+                ? 'One thing is causing that.'
+                : `${blocking.length} things are causing that.`
+              : s.tasks.length > 0
+                ? "Nothing's in the way — the rest is just worth a look."
+                : 'Nothing needs sorting out.'}
+          </Typography>
         </Box>
       </Paper>
 
-      {/* 2 — Fix-first checklist. Each row carries its own in-app fix; nothing here should
-          ever send the owner back to their spreadsheet. */}
-      {s.actions.length > 0 && (
+      {/* 2 — Tasks, ranked by what they cost. The whole row opens the fix. */}
+      {s.tasks.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            What we suggest
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            What to sort out
           </Typography>
-          {s.actions.map((f) => (
-            <ActionRow key={f.id} finding={f} onCreateMissing={onCreateMissing} />
-          ))}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Start at the top — that&apos;s the one costing you the most records.
+          </Typography>
+          <Box sx={{ borderTop: 1, borderColor: 'divider' }}>
+            {s.tasks.map((t) => (
+              <TaskRow key={t.finding.id} task={t} onOpenTask={onOpenTask} />
+            ))}
+          </Box>
         </Box>
       )}
 
-      {/* 3 — What you're importing (outlook + relationships) */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          What you&apos;re importing
-        </Typography>
-        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1.5, mb: 2 }}>
-          {s.outlook.map((o) => (
-            <Paper key={o.entityType} variant="outlined" sx={{ px: 2, py: 1.5, minWidth: 130 }}>
-              <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                {o.count.toLocaleString()}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {o.label}
-              </Typography>
-            </Paper>
-          ))}
-        </Stack>
-        {s.relationships.length > 0 && (
-          <Paper variant="outlined" sx={{ p: 0 }}>
-            {s.relationships.map((r, i) => {
-              const meta = REL_STATUS[r.status];
-              return (
-                <Box
-                  key={r.label}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    px: 2,
-                    py: 1.25,
-                    borderTop: i === 0 ? 0 : 1,
-                    borderColor: 'divider',
-                  }}
-                >
-                  <meta.Icon color={meta.color} sx={{ fontSize: 20 }} />
-                  <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 220 }}>
-                    {r.label}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-                    {r.note}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Paper>
-        )}
-      </Box>
-
-      {/* 4 — To finish setup (missing data + prompt to upload more) */}
-      {s.toFinish.length > 0 && (
+      {/* 3 — Nothing to do here. Collapsed, neutral, out of the way. */}
+      {s.noticed.length > 0 && (
         <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            To finish setup
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Stack spacing={1}>
-              {s.toFinish.map((f) => (
-                <Box key={f.id} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                  <SeverityChip severity={f.severity} />
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {f.title}
+          <Button
+            size="small"
+            onClick={() => setShowNoticed((v) => !v)}
+            endIcon={showNoticed ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          >
+            {s.noticed.length} other {s.noticed.length === 1 ? 'thing' : 'things'} we noticed — nothing you need to do
+          </Button>
+          <Collapse in={showNoticed}>
+            <Paper variant="outlined" sx={{ mt: 1 }}>
+              {s.noticed.map((f, i) => (
+                <Box key={f.id} sx={{ p: 2, borderTop: i === 0 ? 0 : 1, borderColor: 'divider' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {f.title}
+                  </Typography>
+                  {f.recommended_action && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                      {f.recommended_action}
                     </Typography>
-                    {f.recommended_action && (
-                      <Typography variant="body2" color="text.secondary">
-                        {f.recommended_action}
-                      </Typography>
-                    )}
-                  </Box>
+                  )}
                 </Box>
               ))}
-            </Stack>
-            {onUploadMore && (
-              <Button variant="outlined" startIcon={<UploadFileIcon />} sx={{ mt: 2 }} onClick={onUploadMore}>
-                Add more files
-              </Button>
-            )}
-          </Paper>
+            </Paper>
+          </Collapse>
         </Box>
       )}
 
-      {/* 5 — Details (progressive disclosure) */}
-      <Button
-        size="small"
-        onClick={() => setShowDetails((x) => !x)}
-        endIcon={showDetails ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-      >
-        {showDetails ? 'Hide details' : 'Show full summary & details'}
-      </Button>
-      <Collapse in={showDetails}>
-        <Box sx={{ mt: 2 }}>
-          {report.narrative_available && report.summary && (
-            <>
-              <Typography variant="subtitle2" gutterBottom>
-                Full summary
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-line', mb: 2 }}>
-                {report.summary}
-              </Typography>
-            </>
-          )}
-          {report.erp_detection.confidence >= 0.5 && report.erp_detection.source !== 'unknown' && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Looks like a {report.erp_detection.display_name} export.
-            </Typography>
-          )}
-          <Divider sx={{ my: 1 }} />
-          <Typography variant="subtitle2" gutterBottom>
-            Per-file detail
-          </Typography>
-          {report.files.map((f) => (
-            <Typography key={f.filename} variant="body2" color="text.secondary">
-              {f.filename} — {f.entity_type === 'unknown' ? 'unrecognized' : f.entity_type.replace('_', ' ')},{' '}
-              {f.row_count.toLocaleString()} rows
-              {f.entity_confidence < 0.6 ? ' (low-confidence match — please confirm)' : ''}
-            </Typography>
-          ))}
-        </Box>
-      </Collapse>
+      {onUploadMore && (
+        <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={onUploadMore}>
+          Add more files
+        </Button>
+      )}
     </Box>
   );
+}
+
+/**
+ * One task. Neutral by default: the ONLY tag is "Optional", and only because a non-blocking
+ * task genuinely reads differently. GOV.UK drops the background from rows that need nothing
+ * precisely to "draw more attention to tasks that require action".
+ */
+function TaskRow({ task, onOpenTask }: { task: ReviewTask; onOpenTask?: (f: Finding) => void }) {
+  const { finding, blocking } = task;
+  // A task is openable when we have a focused fix for it; otherwise its advice line stands.
+  const openable = !!onOpenTask && isOpenable(finding);
+
+  const body = (
+    <>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography sx={{ fontWeight: 600, lineHeight: 1.4 }}>{finding.title}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          {finding.detail || finding.recommended_action}
+        </Typography>
+        {/* Real values from their own data — recognition beats description. */}
+        {finding.examples.length > 0 && (
+          <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+            {finding.examples.slice(0, 4).map((ex, i) => (
+              <Chip key={i} size="small" variant="outlined" label={ex} sx={{ maxWidth: 300 }} />
+            ))}
+          </Box>
+        )}
+        {!openable && finding.recommended_action && finding.detail && (
+          <Typography variant="body2" sx={{ mt: 1, fontWeight: 500 }}>
+            {finding.recommended_action}
+          </Typography>
+        )}
+      </Box>
+      {!blocking && (
+        <Chip size="small" variant="outlined" label="Optional" sx={{ flex: 'none', alignSelf: 'center' }} />
+      )}
+      {openable && <ChevronRightIcon sx={{ color: 'text.secondary', flex: 'none', alignSelf: 'center' }} />}
+    </>
+  );
+
+  const sx = {
+    display: 'flex',
+    gap: 2,
+    width: '100%',
+    textAlign: 'left' as const,
+    p: 2,
+    minHeight: 48, // shop-floor touch target
+    borderBottom: 1,
+    borderColor: 'divider',
+    color: 'text.primary',
+  };
+
+  if (!openable) return <Box sx={sx}>{body}</Box>;
+  return (
+    <Box
+      component="button"
+      type="button"
+      onClick={() => onOpenTask!(finding)}
+      sx={{
+        ...sx,
+        alignItems: 'flex-start',
+        background: 'none',
+        border: 0,
+        borderBottom: 1,
+        borderColor: 'divider',
+        cursor: 'pointer',
+        font: 'inherit',
+        '&:hover': { bgcolor: 'action.hover' },
+      }}
+    >
+      {body}
+    </Box>
+  );
+}
+
+/** Findings with a focused fix behind them today. */
+export function isOpenable(finding: Finding): boolean {
+  if (autoCreateLinkFor(finding.id)) return true;
+  if (finding.category === 'data_gap') return true;
+  if (finding.category === 'name_variant') return true;
+  return false;
 }

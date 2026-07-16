@@ -433,3 +433,13 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
    "gotchas" were cut; the `/narrative` call was dropped (Map→Review is now instant + deterministic);
    and the parallel "Fix your data" grid became a collapsed "See or edit all your data" escape
    hatch, so there's one guided fix surface, not two competing ones.
+9. ✅ **Import made robust + legible on real scale.** Two 500s that only showed on the 8,393-part
+   export were fixed: the parts importer inserted a **dropped** `part_procurement_tiers.vendor_id`
+   (PGRST204), and collision-detection lookups hit PostgREST's **1000-row cap** so re-importing a
+   big company duplicate-keyed — now every importer's company-scoped lookup pages via
+   `utils/db_pagination.fetch_all_by_company`. And the ~65-batch write got **live progress**
+   (`runImportPlan` emits per-batch snapshots → `ImportProgressPanel`): a determinate bar keyed on
+   rows-written, a stage checklist that ticks off in write order with a per-stage error state, a
+   beforeunload guard, and reassurance copy — no ETA, no cancel (research-backed: NN/g/Carbon/
+   Material for a &gt;10s side-effecting operation). True leave-and-return would need a server-side
+   job (the loop is browser-driven today) — deferred.

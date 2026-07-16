@@ -116,7 +116,8 @@ export interface ImportSummary {
 export interface EntityProgress {
   entity: EntityType;
   rowsTotal: number;
-  rowsDone: number;
+  rowsDone: number; // rows ATTEMPTED (so the bar keeps moving even through a bad batch)
+  rowsFailed: number; // rows whose batch threw — surfaces a failed stage in the checklist
 }
 
 /** A live snapshot of an in-flight import, emitted after every batch so the UI can show a
@@ -181,7 +182,7 @@ export async function runImportPlan(
   for (const b of plan) {
     if (!entityIndex.has(b.entity)) {
       entityIndex.set(b.entity, entities.length);
-      entities.push({ entity: b.entity, rowsTotal: 0, rowsDone: 0 });
+      entities.push({ entity: b.entity, rowsTotal: 0, rowsDone: 0, rowsFailed: 0 });
     }
     entities[entityIndex.get(b.entity)!].rowsTotal += b.rows.length;
   }
@@ -203,6 +204,7 @@ export async function runImportPlan(
   const results: { entity: EntityType; response: ExecuteResponseShape | null }[] = [];
   for (const batch of plan) {
     emit(batch.entity); // show which stage is in flight before we await it
+    let failed = false;
     try {
       const response = await post(batch.endpoint, {
         company_id: companyId,
@@ -213,11 +215,14 @@ export async function runImportPlan(
       });
       results.push({ entity: batch.entity, response });
     } catch {
+      failed = true;
       results.push({ entity: batch.entity, response: null });
     }
     batchesDone += 1;
     rowsDone += batch.rows.length;
-    entities[entityIndex.get(batch.entity)!].rowsDone += batch.rows.length;
+    const ep = entities[entityIndex.get(batch.entity)!];
+    ep.rowsDone += batch.rows.length;
+    if (failed) ep.rowsFailed += batch.rows.length;
     emit(batch.entity);
   }
   emit(null);

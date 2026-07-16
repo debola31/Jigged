@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -145,6 +145,18 @@ export default function ImportDataPage() {
   const [suggestAvailable, setSuggestAvailable] = useState(true);
   const [existing, setExisting] = useState<ExistingIdentities | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>('both');
+
+  // The import loop runs in the browser (~65 sequential POSTs), so leaving the page mid-write
+  // kills it half-done. Warn before the owner navigates or refreshes while it's running.
+  useEffect(() => {
+    if (!importing) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [importing]);
 
   // What the owner loses if they import as things stand — the Review step's headline, and
   // the same sentence the Import step repeats. Recomputed from the working set, so every fix

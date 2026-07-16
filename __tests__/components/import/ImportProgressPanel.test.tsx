@@ -10,8 +10,8 @@ const progress = (over: Partial<ImportProgress> = {}): ImportProgress => ({
   rowsTotal: 504,
   currentEntity: 'parts',
   entities: [
-    { entity: 'vendors', rowsTotal: 3, rowsDone: 3 },
-    { entity: 'parts', rowsTotal: 501, rowsDone: 50 },
+    { entity: 'vendors', rowsTotal: 3, rowsDone: 3, rowsFailed: 0 },
+    { entity: 'parts', rowsTotal: 501, rowsDone: 50, rowsFailed: 0 },
   ],
   ...over,
 });
@@ -39,5 +39,20 @@ describe('ImportProgressPanel', () => {
     expect(screen.getByText('Starting…')).toBeInTheDocument();
     // With no progress there are no stages, so the single bar is the indeterminate one.
     expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+  });
+
+  it('marks a completed-with-failures stage as an error, not a green check', () => {
+    render(
+      <ImportProgressPanel
+        progress={progress({
+          currentEntity: 'parts',
+          entities: [
+            { entity: 'vendors', rowsTotal: 3, rowsDone: 3, rowsFailed: 0 },
+            { entity: 'parts', rowsTotal: 501, rowsDone: 501, rowsFailed: 501 },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText(/501 couldn't be saved/)).toBeInTheDocument();
   });
 });

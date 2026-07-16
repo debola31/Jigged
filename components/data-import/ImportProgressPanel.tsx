@@ -5,6 +5,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Typography from '@mui/material/Typography';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import type { ImportProgress } from '@/lib/dataImportIngest';
 import { ENTITY_LABELS } from '@/lib/dataImportSchema';
@@ -53,11 +54,16 @@ export default function ImportProgressPanel({ progress }: { progress: ImportProg
       {/* Stage checklist — the phased view, in write order. */}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
         {(progress?.entities ?? []).map((e) => {
-          const done = e.rowsTotal > 0 && e.rowsDone >= e.rowsTotal;
-          const active = progress?.currentEntity === e.entity && !done;
+          const complete = e.rowsTotal > 0 && e.rowsDone >= e.rowsTotal;
+          const failed = complete && e.rowsFailed > 0;
+          const done = complete && !failed;
+          const active = progress?.currentEntity === e.entity && !complete;
+          const emphasized = done || active || failed;
           return (
             <Box key={e.entity} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              {done ? (
+              {failed ? (
+                <ErrorOutlineIcon color="error" sx={{ fontSize: 20 }} />
+              ) : done ? (
                 <CheckCircleIcon color="success" sx={{ fontSize: 20 }} />
               ) : active ? (
                 <CircularProgress size={18} sx={{ mx: '1px' }} />
@@ -66,15 +72,15 @@ export default function ImportProgressPanel({ progress }: { progress: ImportProg
               )}
               <Typography
                 variant="body2"
-                sx={{ fontWeight: done || active ? 600 : 400, color: done || active ? 'text.primary' : 'text.secondary', minWidth: 140 }}
+                sx={{ fontWeight: emphasized ? 600 : 400, color: emphasized ? 'text.primary' : 'text.secondary', minWidth: 140 }}
               >
                 {ENTITY_LABELS[e.entity as EntityType] ?? e.entity}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {active
-                  ? `${e.rowsDone.toLocaleString()} of ${e.rowsTotal.toLocaleString()} rows`
-                  : done
-                    ? `${e.rowsTotal.toLocaleString()} rows`
+              <Typography variant="body2" color={failed ? 'error' : 'text.secondary'}>
+                {failed
+                  ? `${e.rowsFailed.toLocaleString()} couldn't be saved — see the summary`
+                  : active
+                    ? `${e.rowsDone.toLocaleString()} of ${e.rowsTotal.toLocaleString()} rows`
                     : `${e.rowsTotal.toLocaleString()} rows`}
               </Typography>
             </Box>

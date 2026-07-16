@@ -97,12 +97,28 @@ describe('runImportPlan — progress', () => {
 
     const final = seen[seen.length - 1].entities;
     expect(final).toEqual([
-      { entity: 'vendors', rowsTotal: 3, rowsDone: 3 },
-      { entity: 'parts', rowsTotal: 501, rowsDone: 501 },
+      { entity: 'vendors', rowsTotal: 3, rowsDone: 3, rowsFailed: 0 },
+      { entity: 'parts', rowsTotal: 501, rowsDone: 501, rowsFailed: 0 },
     ]);
     // The stages complete in write order: vendors reaches 100% before parts finishes.
     const vendorsDoneAt = seen.findIndex((p) => p.entities[0].rowsDone === 3);
     const partsDoneAt = seen.findIndex((p) => (p.entities[1]?.rowsDone ?? 0) === 501);
     expect(vendorsDoneAt).toBeLessThan(partsDoneAt);
+  });
+
+  it('records rowsFailed per entity when a batch throws (surfaces a failed stage)', async () => {
+    const plan = buildImportPlan(bundle());
+    // Fail every parts batch; vendors succeed.
+    const post = vi.fn().mockImplementation((endpoint: string) =>
+      endpoint.includes('parts') ? Promise.reject(new Error('500')) : Promise.resolve({ imported_count: 1 }),
+    );
+    const seen: ImportProgress[] = [];
+    await runImportPlan(plan, 'co', post, (p) => seen.push(structuredClone(p)));
+
+    const final = seen[seen.length - 1].entities;
+    expect(final.find((e) => e.entity === 'vendors')).toMatchObject({ rowsFailed: 0, rowsDone: 3 });
+    expect(final.find((e) => e.entity === 'parts')).toMatchObject({ rowsFailed: 501, rowsDone: 501 });
+    // The bar still advanced through the failed batches (attempted rows) — no stall.
+    expect(seen[seen.length - 1].rowsDone).toBe(504);
   });
 });

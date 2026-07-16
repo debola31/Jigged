@@ -97,6 +97,11 @@ class MockSupabaseTable:
     def in_(self, field, values):
         return self
 
+    def range(self, start, end):
+        # Paged reads (fetch_all_by_company): the mock returns its full data on the first
+        # page; since test fixtures are < 1000 rows, the paging loop stops after one call.
+        return self
+
     def insert(self, data):
         self._inserted = data
         return self
@@ -828,7 +833,9 @@ class TestPartsExecuteEndpoint:
         tier_inserts = [r for r in insert_log if r["table"] == "part_procurement_tiers"]
         assert len(tier_inserts) == 1
         tier = tier_inserts[0]["data"][0]
-        assert tier["vendor_id"] is None
+        # vendor_id was dropped from part_procurement_tiers (migration 20260714173443 —
+        # per-vendor tiers collapsed to part-level); the tier no longer carries it.
+        assert "vendor_id" not in tier
         assert tier["min_quantity"] == 1
         assert tier["cost_per_unit"] == 12.5
 

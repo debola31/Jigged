@@ -46,6 +46,7 @@ from models.vendors_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -269,13 +270,7 @@ async def validate_import(
 ):
     """Validate vendors CSV data before import."""
     try:
-        existing_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_vendors = existing_response.data or []
+        existing_vendors = fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         existing_names = {
             v["name"].lower(): v for v in existing_vendors if v.get("name")
         }

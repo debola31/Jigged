@@ -44,6 +44,7 @@ from models.routings_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -225,24 +226,12 @@ def _load_lookups(supabase: Client, company_id: str) -> tuple[
     dict[str, dict],  # work_center_name_lower -> {id, name, kind}
 ]:
     """Load parts + work_centers lookups for the company."""
-    parts_response = (
-        supabase.table("parts")
-        .select("id, part_name")
-        .eq("company_id", company_id)
-        .execute()
-    )
-    parts = parts_response.data or []
+    parts = fetch_all_by_company(supabase, "parts", "id, part_name", company_id)
     parts_lookup = {
         p["part_name"].lower(): p for p in parts if p.get("part_name")
     }
 
-    wc_response = (
-        supabase.table("work_centers")
-        .select("id, name, kind")
-        .eq("company_id", company_id)
-        .execute()
-    )
-    wcs = wc_response.data or []
+    wcs = fetch_all_by_company(supabase, "work_centers", "id, name, kind", company_id)
     wc_lookup = {wc["name"].lower(): wc for wc in wcs if wc.get("name")}
 
     return parts_lookup, wc_lookup

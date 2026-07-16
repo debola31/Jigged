@@ -67,6 +67,7 @@ from services.uom_normalizer import (
     resolve_units_for_rows,
 )
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -446,14 +447,12 @@ async def validate_import(
     """
     _reject_customer_fields(request)
     try:
-        # Existing parts (for collision detection and legacy_id upsert path)
-        parts_response = (
-            supabase.table("parts")
-            .select("id, part_name, legacy_id")
-            .eq("company_id", request.company_id)
-            .execute()
+        # Existing parts (for collision detection and legacy_id upsert path). Paged: a company
+        # with >1000 parts would otherwise only compare against the first 1000, so re-importing
+        # the rest would 500 on the unique constraint.
+        existing_parts = fetch_all_by_company(
+            supabase, "parts", "id, part_name, legacy_id", request.company_id
         )
-        existing_parts = parts_response.data or []
 
         existing_parts_by_name: dict[str, dict] = {}
         existing_parts_by_legacy_id: dict[str, dict] = {}
@@ -463,14 +462,10 @@ async def validate_import(
             if part.get("legacy_id"):
                 existing_parts_by_legacy_id[part["legacy_id"]] = part
 
-        # Existing vendors (for preferred_vendor_name resolution)
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
+        # Existing vendors (for preferred_vendor_name resolution). Paged past the 1000-row cap.
+        existing_vendors = fetch_all_by_company(
+            supabase, "vendors", "id, name", request.company_id
         )
-        existing_vendors = vendors_response.data or []
         vendor_name_to_id = {
             v["name"].lower(): v["id"] for v in existing_vendors
         }
@@ -850,15 +845,10 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Vendor lookup for execute-time resolution
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
+        # Vendor lookup for execute-time resolution (paged past the 1000-row cap).
         vendor_name_to_id = {
-            v["name"].lower(): v["id"] for v in (vendors_response.data or [])
+            v["name"].lower(): v["id"]
+            for v in fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         }
 
         # UOM resolutions (prefer the ones the frontend already received from validate)
@@ -1159,23 +1149,24 @@ async def execute_import(
                     tier_rows.append(
                         {
                             "part_id": part_id,
-                            "vendor_id": None,
                             "min_quantity": 1,
                             "cost_per_unit": cost,
                         }
                     )
 
                 if tier_rows:
-                    # Upsert on (part_id, vendor_id, min_quantity) so
-                    # re-importing the same CSV updates the imported cost
-                    # instead of failing with a duplicate-key error.
+                    # Upsert on (part_id, min_quantity) so re-importing the same
+                    # CSV updates the imported cost instead of failing with a
+                    # duplicate-key error. (Was keyed on vendor_id too until the
+                    # per-vendor tier model was collapsed — migration
+                    # 20260714173443 dropped the column.)
                     for batch_start in range(0, len(tier_rows), BATCH_SIZE):
                         batch = tier_rows[batch_start : batch_start + BATCH_SIZE]
                         (
                             supabase.table("part_procurement_tiers")
                             .upsert(
                                 batch,
-                                on_conflict="part_id,vendor_id,min_quantity",
+                                on_conflict="part_id,min_quantity",
                             )
                             .execute()
                         )

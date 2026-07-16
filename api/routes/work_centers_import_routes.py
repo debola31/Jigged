@@ -31,6 +31,7 @@ from models.work_centers_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -218,24 +219,12 @@ async def validate_import(
 ):
     """Validate work centers CSV data before import."""
     try:
-        wc_response = (
-            supabase.table("work_centers")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_wcs = wc_response.data or []
+        existing_wcs = fetch_all_by_company(supabase, "work_centers", "id, name", request.company_id)
         existing_wcs_lookup = {
             wc["name"].lower(): wc for wc in existing_wcs if wc.get("name")
         }
 
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_vendors = vendors_response.data or []
+        existing_vendors = fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         vendor_name_to_id = {
             v["name"].lower(): v["id"] for v in existing_vendors
         }
@@ -432,15 +421,10 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Vendor lookup for execute-time resolution
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
+        # Vendor lookup for execute-time resolution (paged past the 1000-row cap).
         vendor_name_to_id = {
-            v["name"].lower(): v["id"] for v in (vendors_response.data or [])
+            v["name"].lower(): v["id"]
+            for v in fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         }
 
         reverse_mappings = {v: k for k, v in request.mappings.items()}

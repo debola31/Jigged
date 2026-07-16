@@ -112,6 +112,24 @@ export interface ImportSummary {
   failed: boolean; // at least one batch threw (network / 500)
 }
 
+/** Per-entity progress, in write order (vendors → … → routings). */
+export interface EntityProgress {
+  entity: EntityType;
+  rowsTotal: number;
+  rowsDone: number;
+}
+
+/** A live snapshot of an in-flight import, emitted after every batch so the UI can show a
+ *  determinate bar + a stage checklist instead of an opaque "Importing…". */
+export interface ImportProgress {
+  batchesDone: number;
+  batchesTotal: number;
+  rowsDone: number;
+  rowsTotal: number;
+  currentEntity: EntityType | null; // the entity whose batch is in flight (null once done)
+  entities: EntityProgress[];
+}
+
 const createdOf = (r: ExecuteResponseShape): number =>
   r.imported_count ?? r.imported_operations_count ?? r.imported_routings_count ?? 0;
 
@@ -155,9 +173,36 @@ export async function runImportPlan(
   plan: ImportBatch[],
   companyId: string,
   post: (endpoint: string, body: unknown) => Promise<ExecuteResponseShape>,
+  onProgress?: (p: ImportProgress) => void,
 ): Promise<ImportSummary> {
+  // Per-entity row totals, in the plan's write order — the spine of the progress checklist.
+  const entities: EntityProgress[] = [];
+  const entityIndex = new Map<EntityType, number>();
+  for (const b of plan) {
+    if (!entityIndex.has(b.entity)) {
+      entityIndex.set(b.entity, entities.length);
+      entities.push({ entity: b.entity, rowsTotal: 0, rowsDone: 0 });
+    }
+    entities[entityIndex.get(b.entity)!].rowsTotal += b.rows.length;
+  }
+  const rowsTotal = entities.reduce((s, e) => s + e.rowsTotal, 0);
+  const batchesTotal = plan.length;
+  let batchesDone = 0;
+  let rowsDone = 0;
+
+  const emit = (currentEntity: EntityType | null) =>
+    onProgress?.({
+      batchesDone,
+      batchesTotal,
+      rowsDone,
+      rowsTotal,
+      currentEntity,
+      entities: entities.map((e) => ({ ...e })),
+    });
+
   const results: { entity: EntityType; response: ExecuteResponseShape | null }[] = [];
   for (const batch of plan) {
+    emit(batch.entity); // show which stage is in flight before we await it
     try {
       const response = await post(batch.endpoint, {
         company_id: companyId,
@@ -170,6 +215,11 @@ export async function runImportPlan(
     } catch {
       results.push({ entity: batch.entity, response: null });
     }
+    batchesDone += 1;
+    rowsDone += batch.rows.length;
+    entities[entityIndex.get(batch.entity)!].rowsDone += batch.rows.length;
+    emit(batch.entity);
   }
+  emit(null);
   return summarizeResults(results);
 }

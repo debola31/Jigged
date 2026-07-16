@@ -33,6 +33,7 @@ import EditableDataGrid from '@/components/data-import/EditableDataGrid';
 import FixToolbar from '@/components/data-import/FixToolbar';
 import MergeVariantsDialog from '@/components/data-import/MergeVariantsDialog';
 import SuggestFixesPanel from '@/components/data-import/SuggestFixesPanel';
+import ImportProgressPanel from '@/components/data-import/ImportProgressPanel';
 import { analyzeBundle } from '@/lib/dataImportAnalyzer';
 import { lossPhrase, rowsAtRisk } from '@/lib/dataImportImpact';
 import {
@@ -56,6 +57,7 @@ import {
   buildImportPlan,
   runImportPlan,
   type ExecuteResponseShape,
+  type ImportProgress,
   type ImportSummary,
 } from '@/lib/dataImportIngest';
 import {
@@ -136,6 +138,7 @@ export default function ImportDataPage() {
   // The one task the owner opened. One thing per screen, inside the task.
   const [openTask, setOpenTask] = useState<Finding | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
   const [suggestLoading, setSuggestLoading] = useState(false);
@@ -320,12 +323,13 @@ export default function ImportDataPage() {
   async function runImport() {
     setError(null);
     setImporting(true);
+    setImportProgress(null);
     try {
       const token = await authToken();
       const plan = buildImportPlan(filterWorkingByMode(working, existing ?? {}, importMode));
       const post = (endpoint: string, body: unknown) =>
         postJson<ExecuteResponseShape>(endpoint, body, token);
-      setImportSummary(await runImportPlan(plan, companyId, post));
+      setImportSummary(await runImportPlan(plan, companyId, post, setImportProgress));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed.');
     } finally {
@@ -621,6 +625,7 @@ export default function ImportDataPage() {
               importMode={importMode}
               onModeChange={setImportMode}
               importing={importing}
+              progress={importProgress}
               summary={importSummary}
               onImport={runImport}
               onBack={() => setActiveStep(3)}
@@ -638,6 +643,7 @@ function ImportStep({
   importMode,
   onModeChange,
   importing,
+  progress,
   summary,
   onImport,
   onBack,
@@ -647,6 +653,7 @@ function ImportStep({
   importMode: ImportMode;
   onModeChange: (mode: ImportMode) => void;
   importing: boolean;
+  progress: ImportProgress | null;
   summary: ImportSummary | null;
   onImport: () => void;
   onBack: () => void;
@@ -665,6 +672,17 @@ function ImportStep({
   // Same sentence the Review step leads with — the owner should never meet a different
   // story about what they're about to lose just because they moved forward a step.
   const lost = lossPhrase(rowsAtRisk(working));
+
+  // The write is long (~65 sequential batches); show live progress, not an opaque "Importing…".
+  if (importing) {
+    return (
+      <Card elevation={2}>
+        <CardContent sx={{ p: 3 }}>
+          <ImportProgressPanel progress={progress} />
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (summary) {
     return (

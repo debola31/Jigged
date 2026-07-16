@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildImportPlan, summarizeResults } from '@/lib/dataImportIngest';
+import { describe, it, expect, vi } from 'vitest';
+import { buildImportPlan, runImportPlan, summarizeResults, type ImportProgress } from '@/lib/dataImportIngest';
 import type { EditableRow, WorkingFile } from '@/lib/dataImportEditing';
 import type { EntityType } from '@/types/data-import';
 
@@ -64,5 +64,45 @@ describe('summarizeResults', () => {
     expect(s.totalSkipped).toBe(1);
     expect(s.totalErrors).toBe(2); // parts 1 error + bom null-batch 1
     expect(s.failed).toBe(true);
+  });
+});
+
+describe('runImportPlan — progress', () => {
+  const bundle = () => [
+    wf('vendors.csv', 'vendors', { name: 'V' }, Array.from({ length: 3 }, (_, i) => ({ V: `v${i}` }))),
+    wf('parts.csv', 'parts', { part_name: 'PN' }, Array.from({ length: 501 }, (_, i) => ({ PN: `p${i}` }))),
+  ];
+
+  it('emits a determinate, monotonic progress stream that ends at 100%', async () => {
+    const plan = buildImportPlan(bundle()); // vendors(1 batch, 3) + parts(2 batches: 500 + 1)
+    const seen: ImportProgress[] = [];
+    const post = vi.fn().mockResolvedValue({ imported_count: 1 });
+
+    await runImportPlan(plan, 'co', post, (p) => seen.push(structuredClone(p)));
+
+    const last = seen[seen.length - 1];
+    expect(last.rowsTotal).toBe(504);
+    expect(last.rowsDone).toBe(504); // everything accounted for
+    expect(last.batchesDone).toBe(3);
+    expect(last.currentEntity).toBeNull(); // final tick signals done
+    // rowsDone never goes backwards.
+    const rows = seen.map((p) => p.rowsDone);
+    expect(rows).toEqual([...rows].sort((a, b) => a - b));
+  });
+
+  it('tracks per-entity totals + completion for the stage checklist', async () => {
+    const plan = buildImportPlan(bundle());
+    const seen: ImportProgress[] = [];
+    await runImportPlan(plan, 'co', vi.fn().mockResolvedValue({}), (p) => seen.push(structuredClone(p)));
+
+    const final = seen[seen.length - 1].entities;
+    expect(final).toEqual([
+      { entity: 'vendors', rowsTotal: 3, rowsDone: 3 },
+      { entity: 'parts', rowsTotal: 501, rowsDone: 501 },
+    ]);
+    // The stages complete in write order: vendors reaches 100% before parts finishes.
+    const vendorsDoneAt = seen.findIndex((p) => p.entities[0].rowsDone === 3);
+    const partsDoneAt = seen.findIndex((p) => (p.entities[1]?.rowsDone ?? 0) === 501);
+    expect(vendorsDoneAt).toBeLessThan(partsDoneAt);
   });
 });

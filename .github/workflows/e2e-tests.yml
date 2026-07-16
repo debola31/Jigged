@@ -11,6 +11,13 @@ jobs:
     name: Playwright E2E (local Supabase)
     timeout-minutes: 25
     runs-on: ubuntu-latest
+    # Pull the Supabase stack from GHCR, not the CLI's default AWS public ECR:
+    # shared GitHub-runner IPs trip public.ecr.aws's anonymous rate limit
+    # ("toomanyrequests"), which flakes `supabase start`. GHCR mirrors the same
+    # images and is effectively unmetered for public pulls from GitHub runners.
+    # Mirrors the backend job in test.yml — keep the two in lockstep. supabase/cli#419.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
     steps:
       - uses: actions/checkout@v4

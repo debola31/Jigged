@@ -126,11 +126,67 @@ per finding, an optional **proposed action + a plain-language uncertainty note**
 renders each as an **accept / reject** proposal; nothing is applied without an explicit accept.
 This is the concrete realization of the PRD's "AI-fix guardrails."
 
-## 5. The review verdict, recomputed live
-`summarize()` already yields the verdict + severity counts + outlook + relationships. In Phase
-2 it runs after every remediation step, so the **verdict and "what will import" update
-in real time** as the owner fixes things — the "watch it get to ready" loop. The final Review
-screen is this same view-model at the moment of commit.
+## 5. The Review step — one consequence, not a verdict wall
+
+Redesigned after a usability round (the owner's own words: *"I don't know where to look and
+what to do"*) and three research briefs (specialist importers; NN/g + GOV.UK + IBM Carbon +
+Atlassian on hierarchy/color; MSR Aether on AI over-reliance). The briefs converged on one
+move, and it's **subtractive**: spend saturated colour exactly once — on the single thing that
+matters now — and turn everything else down. You can't make the urgent thing louder when it's
+already maxed out; you make it salient by quieting the rest.
+
+**Severity means consequence, not check category.** This was the root of the confusion. A blank
+*required* value (7,672 parts with no unit) read as `warning` — the same amber as a genuinely
+harmless "no cost" — while it actually drops every one of those rows on import. Severity is now
+assigned by outcome: `critical` = these rows can't be created. A blank required value and an
+unreadable file are both critical; a missing cost is not.
+
+`summarize(report, impact)` (in `lib/dataImportReview.ts`) yields the new view-model, recomputed
+after every remediation step so the screen updates live:
+
+- **A single consequence line** — *"If you import now, 7,672 parts won't come in"* — instead of
+  a verdict banner. No import product surveyed ships a ready/not-ready verdict, and "Not ready
+  to import" is a dead end the owner can't act on. Xero's framing instead: you can still import;
+  these just won't. Computed by `rowsAtRisk()` (§5a), not by counting findings.
+- **Tasks ranked by rows lost**, blocking first, optional tagged as such — GOV.UK's "complete
+  multiple tasks" list. The whole row opens the fix. **No per-row severity badges**: neutral by
+  default, because GOV.UK drops the background from done rows precisely to *"draw more attention
+  to tasks that require action."*
+- **Deleted on purpose:** the verdict banner (no precedent in 12 products), the severity **count
+  chips** (a tally isn't actionable — GOV.UK's error summary lists the items, never a count),
+  and the record-count / relationship panel (moved to the **Import** step, where it's about to
+  matter — HubSpot's model of counts-after, not counts-during).
+- Everything with nothing to do collapses into *"N other things we noticed."*
+
+### 5a. The rows-at-risk model (`lib/dataImportImpact.ts`)
+The consequence line has to be **true**, so it counts the rows the importer will actually refuse
+— not a sum of finding counts (a row with no unit *and* an unknown vendor is one lost row, not
+two). What costs a row was **verified against the running importers**, not inferred:
+- a blank **required** field — `parts.primary_unit` has an unconditional DB `CHECK`;
+- an **unresolvable reference** — a part naming a vendor absent from the upload is skipped (the
+  part does not land), likewise a routing naming an unknown work center.
+
+Known limit: references resolve against the **upload only**, matching the analyzer. For a company
+that already has data in Jigged, a "missing" vendor may already exist there — so this can
+over-report on a top-up import. Correct for onboarding (the flow this serves); revisit for top-ups.
+The **Import** step shows the same sentence from the same function, so the owner never meets two
+different stories about what they're losing.
+
+### 5b. Fixes live *with* the task
+NN/g: a validation summary *"shouldn't be used as the only form of error indication, as it forces
+the user to search for the field in error."* So a task's fix opens from the task itself, not from
+a toolbar "below":
+- **`FillGapDialog`** resolves a whole missing-required column in one decision. It leads with what
+  the owner's *own* rows already say for that column (evidence they can judge) and defaults to
+  their most common value — a safe default because it's a **derived fact**, not a guess about
+  intent (Johnson & Goldstein / GOV.UK "don't pre-select" reconciled on that axis). Nothing writes
+  until they press the button.
+- **`ConfirmVariantsDialog`** replaces the old merge dialog for duplicates. Per MSR Aether —
+  *"explanations increase blind trust rather than appropriate reliance,"* worst in novices — it
+  shows **no confidence score and no reasoning**. Both records sit side by side with the other
+  facts we hold (vendor, cost, usage), and the owner states the conclusion: *same part / keep
+  separate*. That's a **cognitive forcing function**, the named mitigation for over-reliance. One
+  decision per screen; "keep separate" is a real answer, not a dismissal.
 
 ## 6. Ingestion write pipeline
 
@@ -339,6 +395,12 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
 6. ✅ **Built** — **every finding resolves in-app** (§4 rule, §4d-bis): `lib/dataImportLinks.ts`
    + `CreateMissingDialog` turn the orphan-reference blocker into "here are the 47 names we
    couldn't match — add them?" (with an in-house/outside-shop guess and the vendor cascade), and
-   every `recommended_action` was rewritten to name an action the owner can take here. The
-   verdict stopped saying "Not ready to import — 1 blocking issue" (a dead end, and it reads as
-   the owner's fault) and now names the work: "1 thing to sort out before we import."
+   every `recommended_action` was rewritten to name an action the owner can take here.
+7. ✅ **Built** — **the Review step redesign** (§5): severity re-anchored to consequence (a blank
+   required value is critical, not a soft warning); a single consequence line from the verified
+   `rowsAtRisk()` model (§5a) replacing the verdict banner + count chips; consequence-ranked task
+   list with the fix opening from the row (`FillGapDialog`, `ConfirmVariantsDialog` — evidence,
+   no confidence score, §5b); record-count/relationship panel moved to the Import step. Plus the
+   backend fix this surfaced: a unit-less part used to **500 the whole 500-row batch** (the
+   `parts_requires_unit` DB constraint the importer didn't mirror); it now skips its own row.
+   `REFERENTIAL_LINKS` and required-fields are single-sourced so the check and the fix can't drift.

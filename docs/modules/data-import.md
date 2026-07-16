@@ -57,13 +57,14 @@ in all the CSV exports they have (or just the ones they want); Jigged reads ever
    high confidence + surface only the ambiguous — Flatfile/OneSchema/Dromo; confidence-based
    selective confirmation + assumption-plus-undo for non-technical/older users; and the
    over-reliance guardrail — surface uncertainty, don't force confirmation of the confident.)
-3. **Review & Fix** — reading everything read-only (nothing written, nothing stored), Jigged
-   shows a plain-English **review** that leads with the single most important blocking issue
-   and a plain verdict (**"Ready to import" / "1 thing to fix"**), then a prioritized **"What
-   to fix"** checklist, then a **"What you're importing"** outlook (record counts + how the
-   entities reference each other and where those references are broken), then a **"To finish
-   setup"** list that prompts for missing data or files. The owner fixes it **in-app** (see
-   the guided-remediation target below) rather than in spreadsheets.
+3. **Review & Fix** — reading everything (rows stay in the browser), Jigged shows a plain-English
+   **review** that leads with a single **consequence line** — *"If you import now, 7,672 parts
+   won't come in"* — instead of a ready/not-ready verdict (a dead end the owner can't act on; see
+   the design doc §5). Then a prioritized **"What to sort out"** task list ranked by rows lost,
+   each task opening its own fix. The **"What you're importing"** outlook (record counts + how the
+   entities reference each other) moved to the **Import** step, where it's about to matter. The
+   owner fixes everything **in-app** (see the guided-remediation target below) rather than in
+   spreadsheets.
 4. **Import** — a preview of **exactly what will be created** (dependency-ordered: vendors
    and work centers first, then parts, then routings and BOMs; relationships auto-resolved;
    anything excluded called out so nothing silently drops), then the write behind a single,

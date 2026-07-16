@@ -326,11 +326,12 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "NEW001", "Description": "New Part 1"},
-                {"Part Name": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1", "Unit": "ea"},
+                {"Part Name": "NEW002", "Description": "New Part 2", "Unit": "ea"},
             ],
         }
 
@@ -358,11 +359,12 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "", "Description": "Part Without Name"},
-                {"Part Name": "VALID001", "Description": "Valid Part"},
+                {"Part Name": "", "Description": "Part Without Name", "Unit": "ea"},
+                {"Part Name": "VALID001", "Description": "Valid Part", "Unit": "ea"},
             ],
         }
 
@@ -382,17 +384,82 @@ class TestPartsValidateEndpoint:
         assert data["validation_errors"][0]["error_type"] == "missing_part_name"
 
     @pytest.mark.unit
+    async def test_validate_requires_unit_on_every_part(self, test_client):
+        """A part with no unit is a validation error — for EVERY part, not just stocked.
+
+        `parts` has an unconditional check constraint,
+        CHECK (primary_unit IS NOT NULL). This check used to run only for rows
+        inferred as stocked, so a unit-less row passed validate and then blew up
+        execute's 500-row batch insert with a raw APIError — taking every good
+        row in the batch with it, and surfacing as HTTP 500. These tests mock
+        Supabase, so the constraint isn't there to catch it: assert it here.
+        """
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name"},  # no unit column at all
+            "pricing_columns": [],
+            "rows": [{"Part Name": "NOUNIT001"}],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["error_rows_count"] == 1
+        assert data["validation_errors"][0]["error_type"] == "missing_primary_unit"
+        assert data["valid_rows_count"] == 0
+
+    @pytest.mark.unit
+    async def test_execute_skips_unit_less_row_instead_of_failing_the_batch(
+        self, test_client
+    ):
+        """A unit-less row is skipped; the good rows in its batch still import."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "NOUNIT001", "Unit": ""},   # would violate the constraint
+                {"Part Name": "GOOD001", "Unit": "ea"},   # must survive regardless
+            ],
+            "skip_conflicts": True,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200  # NOT a 500
+        data = response.json()
+        assert data["imported_count"] == 1
+        assert data["skipped_count"] == 1
+
+    @pytest.mark.unit
     async def test_validate_detects_duplicate_part_name_in_csv(self, test_client):
         """Detects duplicate part_name within CSV file."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "DUPE001"},
-                {"Part Name": "DUPE001"},
+                {"Part Name": "DUPE001", "Unit": "ea"},
+                {"Part Name": "DUPE001", "Unit": "ea"},
             ],
         }
 
@@ -427,11 +494,12 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Legacy Id": "legacy_id",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART_A", "Legacy Id": "LEG-123"},
-                {"Part Name": "PART_B", "Legacy Id": "LEG-123"},
+                {"Part Name": "PART_A", "Legacy Id": "LEG-123", "Unit": "ea"},
+                {"Part Name": "PART_B", "Legacy Id": "LEG-123", "Unit": "ea"},
             ],
         }
 
@@ -567,10 +635,11 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Preferred Vendor": "preferred_vendor_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001", "Preferred Vendor": "Nonexistent Vendor"},
+                {"Part Name": "PART001", "Preferred Vendor": "Nonexistent Vendor", "Unit": "ea"},
             ],
         }
 
@@ -637,11 +706,12 @@ class TestPartsExecuteEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "NEW001", "Description": "New Part 1"},
-                {"Part Name": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1", "Unit": "ea"},
+                {"Part Name": "NEW002", "Description": "New Part 2", "Unit": "ea"},
             ],
             "skip_conflicts": False,
         }
@@ -673,11 +743,12 @@ class TestPartsExecuteEndpoint:
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "EXIST001"},  # Will be skipped (duplicate)
-                {"Part Name": "NEW001"},    # Will be imported
+                {"Part Name": "EXIST001", "Unit": "ea"},  # Will be skipped (duplicate)
+                {"Part Name": "NEW001", "Unit": "ea"},    # Will be imported
             ],
             "skip_conflicts": True,
         }
@@ -814,10 +885,11 @@ class TestPartsExecuteEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Legacy Id": "legacy_id",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001", "Legacy Id": "old-system-001"},
+                {"Part Name": "PART001", "Legacy Id": "old-system-001", "Unit": "ea"},
             ],
             "skip_conflicts": False,
         }

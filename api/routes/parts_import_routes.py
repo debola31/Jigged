@@ -648,39 +648,41 @@ async def validate_import(
                     validation_error_rows.add(row_number)
                     continue
 
-            # UOM required when stocked
-            if row_number in stocked_row_numbers:
-                resolved_unit = uom_resolutions.get(row_number)
-                csv_unit = (
-                    row.get(primary_unit_column, "").strip()
-                    if primary_unit_column
-                    else ""
+            # UOM is required for EVERY part, not just stocked ones — the DB
+            # enforces it unconditionally via the `parts_requires_unit` check
+            # constraint. Flagging it only for stocked rows let unit-less rows
+            # through validate and then blew up execute's batch insert.
+            resolved_unit = uom_resolutions.get(row_number)
+            csv_unit = (
+                row.get(primary_unit_column, "").strip()
+                if primary_unit_column
+                else ""
+            )
+            if not resolved_unit and not csv_unit:
+                validation_errors.append(
+                    PartValidationError(
+                        row_number=row_number,
+                        error_type="missing_primary_unit",
+                        field="primary_unit",
+                        message="Unit of measure is required — every part needs one",
+                    )
                 )
-                if not resolved_unit and not csv_unit:
-                    validation_errors.append(
-                        PartValidationError(
-                            row_number=row_number,
-                            error_type="missing_primary_unit",
-                            field="primary_unit",
-                            message="primary_unit is required for stocked parts",
-                        )
+                validation_error_rows.add(row_number)
+                continue
+            if not resolved_unit and csv_unit:
+                # Could not normalize — surface as conflict (unknown_unit)
+                conflicts.append(
+                    PartConflictInfo(
+                        row_number=row_number,
+                        csv_part_name=part_name,
+                        csv_customer_code=None,
+                        conflict_type="unknown_unit",
+                        existing_part_id="",
+                        existing_value=f"Could not normalize unit '{csv_unit}' to a known canonical value",
                     )
-                    validation_error_rows.add(row_number)
-                    continue
-                if not resolved_unit and csv_unit:
-                    # Could not normalize — surface as conflict (unknown_unit)
-                    conflicts.append(
-                        PartConflictInfo(
-                            row_number=row_number,
-                            csv_part_name=part_name,
-                            csv_customer_code=None,
-                            conflict_type="unknown_unit",
-                            existing_part_id="",
-                            existing_value=f"Could not normalize unit '{csv_unit}' to a known canonical value",
-                        )
-                    )
-                    conflict_rows.add(row_number)
-                    continue
+                )
+                conflict_rows.add(row_number)
+                continue
 
             # Vendor resolution
             vendor_name = (
@@ -1016,8 +1018,27 @@ async def execute_import(
                     request.company_id,
                 )
 
-            if resolved_unit:
-                part_data["primary_unit"] = resolved_unit
+            # Backstop for `parts_requires_unit` — an UNCONDITIONAL check
+            # constraint (CHECK (primary_unit IS NOT NULL)). Validate above
+            # should already have skipped this row; this catches it if the two
+            # ever drift apart again. Worth the redundancy: the insert below is
+            # batched 500 at a time, so ONE unit-less row reaching Postgres
+            # raises APIError and loses the entire batch — every good row with
+            # it. That's how this shipped as a 500 rather than a skipped row.
+            if not resolved_unit:
+                errors.append(
+                    PartImportError(
+                        row_number=row_number,
+                        reason=(
+                            "Unit of measure is required — every part needs one "
+                            "(e.g. 'each', 'lbs', 'in')."
+                        ),
+                        data={"part_name": part_name},
+                    )
+                )
+                continue
+
+            part_data["primary_unit"] = resolved_unit
             if quantity_val is not None:
                 part_data["quantity"] = quantity_val
             else:

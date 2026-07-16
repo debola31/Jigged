@@ -218,8 +218,12 @@ PART_SCHEMA = {
     },
     "primary_unit": {
         "type": "string",
-        "required": False,
-        "description": "Primary unit of measure (required when is_stocked=true; e.g., 'lbs', 'pcs', 'kg', 'in')",
+        # Required for EVERY part, not just stocked ones: the parts table has an
+        # unconditional `parts_requires_unit` CHECK (primary_unit IS NOT NULL).
+        # This said False, so a unit-less row passed validate and then failed the
+        # batch insert with a 500.
+        "required": True,
+        "description": "Primary unit of measure — every part needs one (e.g., 'lbs', 'pcs', 'kg', 'in')",
     },
     "quantity": {
         "type": "number",

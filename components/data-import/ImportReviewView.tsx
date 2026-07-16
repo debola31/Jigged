@@ -208,9 +208,11 @@ function TaskRow({ task, onOpenTask }: { task: ReviewTask; onOpenTask?: (f: Find
   const details = (
     <Box sx={{ flex: 1, minWidth: 0 }}>
       <Typography sx={{ fontWeight: 600, lineHeight: 1.4 }}>{finding.title}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-        {finding.detail || finding.recommended_action}
-      </Typography>
+      {finding.detail && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          {finding.detail}
+        </Typography>
+      )}
       {/* Real values from their own data — recognition beats description. */}
       {finding.examples.length > 0 && (
         <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -218,11 +220,6 @@ function TaskRow({ task, onOpenTask }: { task: ReviewTask; onOpenTask?: (f: Find
             <Chip key={i} size="small" variant="outlined" label={ex} sx={{ maxWidth: 300 }} />
           ))}
         </Box>
-      )}
-      {!openable && finding.recommended_action && finding.detail && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {finding.recommended_action}
-        </Typography>
       )}
     </Box>
   );

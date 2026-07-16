@@ -61,7 +61,7 @@ export default function CreateMissingDialog({ link, missing, onClose, onConfirm 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>
-        Add the {missing.length} {parentLabel} we couldn&apos;t find?
+        {`Add the ${missing.length} ${parentLabel} we couldn't find?`}
       </DialogTitle>
       <DialogContent dividers>
         <Typography variant="body1" sx={{ mb: 2 }}>

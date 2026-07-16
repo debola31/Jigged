@@ -180,7 +180,14 @@ a toolbar "below":
   the owner's *own* rows already say for that column (evidence they can judge) and defaults to
   their most common value — a safe default because it's a **derived fact**, not a guess about
   intent (Johnson & Goldstein / GOV.UK "don't pre-select" reconciled on that axis). Nothing writes
-  until they press the button.
+  until they press the button. For **unit fields** it speaks the app's own canonical unit system
+  (`lib/unitPresets`): the raw export code is resolved to its standard form ("EA" → Each) in both
+  the evidence and a grouped standard-unit picker, so the shop picks a real, consistent unit —
+  never a stray code — with an "Other" free-text only for genuinely non-standard units.
+- **The tasks read as what they are.** An actionable task is an interactive card with a verb button
+  ("Set units", "Add them", "Review"); an optional/no-fix item is a quiet plain row. That visual
+  split is the priority signal (Norman's signifiers; the flat list that preceded it tested as "I
+  can't tell these are clickable"). The consequence sub-line is a directive, not a passive count.
 - **`ConfirmVariantsDialog`** replaces the old merge dialog for duplicates. Per MSR Aether —
   *"explanations increase blind trust rather than appropriate reliance,"* worst in novices — it
   shows **no confidence score and no reasoning**. Both records sit side by side with the other
@@ -331,7 +338,13 @@ serializable/resumable interruptions). [*Bounded Autonomy* §8; LangChain / Open
 
 ## 8. Endpoint inventory
 - **Reused (existing):** each entity's `…/import/execute` (the write); `/structure` (mapping +
-  ERP); `/narrative` (prose). Existing conflict/validate logic is reused as-is.
+  ERP). Existing conflict/validate logic is reused as-is.
+- **`/narrative` — endpoint still exists, but the wizard no longer calls it.** Its only visible
+  output was the "gotchas" list, which was cut (§5: vague, out-of-tool, redundant with the real
+  orphan checks). With nothing consuming it, calling it was an invisible AI cost and the Map→Review
+  step's only network dependency (it caused an ECONNRESET-class failure in the local drive). The
+  Map→Review transition is now **fully client-side and deterministic** — instant, and it can't
+  fail. The endpoint is left in place (cheap to re-enable) but is dead from the frontend.
 - **Built:** `/api/data-import/suggest-fixes` (AI proposals, no writes) — guardrail-bound
   per-finding suggestions (explicit action, uncertainty-not-confidence, never auto-applied). The
   non-empty-company reconciliation read is client-side + RLS-scoped (`lib/dataImportExisting.ts`),
@@ -404,3 +417,9 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
    backend fix this surfaced: a unit-less part used to **500 the whole 500-row batch** (the
    `parts_requires_unit` DB constraint the importer didn't mirror); it now skips its own row.
    `REFERENTIAL_LINKS` and required-fields are single-sourced so the check and the fix can't drift.
+8. ✅ **Sharpened from a live drive on the real Tangle export** (§5, §5b, §8): units speak the
+   app's canonical unit system, not raw export codes; actionable tasks became interactive cards
+   with verb buttons (the flat rows didn't read as clickable); the "table below" copy and the AI
+   "gotchas" were cut; the `/narrative` call was dropped (Map→Review is now instant + deterministic);
+   and the parallel "Fix your data" grid became a collapsed "See or edit all your data" escape
+   hatch, so there's one guided fix surface, not two competing ones.

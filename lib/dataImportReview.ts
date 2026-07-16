@@ -33,6 +33,10 @@ export interface ReviewSummary {
   /** '' when nothing is at risk — the view says "everything will come in". */
   lossPhrase: string;
   impact: EntityImpact[];
+  /** The positive side + the progress signal: how many rows will actually come in, of the
+   *  total. `willImport` grows toward `total` as the owner fixes things. */
+  willImport: number;
+  totalRows: number;
   tasks: ReviewTask[];
   noticed: Finding[];
   outlook: EntityOutlook[];
@@ -90,7 +94,11 @@ export function summarize(report: ImportReview, impact: EntityImpact[] = []): Re
     filenames: byEntity.get(e)!.filenames,
   }));
 
-  return { lossPhrase: lossPhrase(impact), impact: losses(impact), tasks, noticed, outlook };
+  // The "what will come in" side, summed across every entity — grows as fixes land.
+  const totalRows = impact.reduce((s, e) => s + e.total, 0);
+  const willImport = impact.reduce((s, e) => s + (e.total - e.lost), 0);
+
+  return { lossPhrase: lossPhrase(impact), impact: losses(impact), willImport, totalRows, tasks, noticed, outlook };
 }
 
 export { ENTITY_LABEL };

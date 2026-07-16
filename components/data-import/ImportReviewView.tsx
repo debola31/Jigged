@@ -5,6 +5,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
+import LinearProgress from '@mui/material/LinearProgress';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import BlockIcon from '@mui/icons-material/Block';
@@ -77,7 +78,7 @@ export default function ImportReviewView({
         ) : (
           <CheckCircleOutlineIcon color="success" sx={{ mt: 0.25 }} />
         )}
-        <Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.45 }}>
             {anythingLost
               ? `If you import now, ${s.lossPhrase} won't come in.`
@@ -85,11 +86,34 @@ export default function ImportReviewView({
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {anythingLost
-              ? 'Open each one below to fix it — the list clears as you go.'
+              ? 'Open each one below to fix it — the count grows as you go.'
               : s.tasks.length > 0
                 ? "Nothing's in the way — the rest is just worth a look."
                 : 'Nothing needs sorting out.'}
           </Typography>
+
+          {/* What WILL come in — the positive side, and the progress signal: this bar fills
+              and the count climbs toward the total as each fix lands. */}
+          {s.totalRows > 0 && (
+            <Box sx={{ mt: 1.75 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {anythingLost
+                    ? `${s.willImport.toLocaleString()} of ${s.totalRows.toLocaleString()} rows will come in`
+                    : `All ${s.totalRows.toLocaleString()} rows will come in`}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {Math.round((s.willImport / s.totalRows) * 100)}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={(s.willImport / s.totalRows) * 100}
+                color={anythingLost ? 'primary' : 'success'}
+                sx={{ height: 8, borderRadius: 4 }}
+              />
+            </Box>
+          )}
         </Box>
       </Paper>
 

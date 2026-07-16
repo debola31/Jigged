@@ -98,3 +98,58 @@ describe('EditOp is reversible as a unit', () => {
     expect(restored[0].rows.map((r) => r.Name)).toEqual(working[0].rows.map((r) => r.Name));
   });
 });
+
+describe('mergeVariants cascades a rename into referencing files', () => {
+  // parts + bom + routings, where bom/routings reference parts by name. Two part-name spellings
+  // ("BRKT-100" / "BRKT100") should merge into one WITHOUT orphaning the rows that used the old
+  // spelling — the "optional cleanup manufactures blocking errors" regression.
+  const bundle = () =>
+    buildWorkingFiles(
+      [
+        { filename: 'parts.csv', headers: ['Part', 'UoM'], rows: [
+          { Part: 'BRKT-100', UoM: 'each' },
+          { Part: 'BRKT100', UoM: 'each' },
+          { Part: 'SPCR-22', UoM: 'each' },
+        ] },
+        { filename: 'bom.csv', headers: ['Parent', 'Child', 'Qty', 'U'], rows: [
+          { Parent: 'BRKT100', Child: 'SPCR-22', Qty: '2', U: 'each' }, // parent uses the merged-away spelling
+        ] },
+        { filename: 'routings.csv', headers: ['Part', 'WC'], rows: [
+          { Part: 'BRKT100', WC: 'MILL' }, // routing uses the merged-away spelling
+        ] },
+      ],
+      [
+        { filename: 'parts.csv', entity_type: 'parts', entity_confidence: 1, headers: ['Part', 'UoM'], row_count: 3,
+          column_roles: { part_name: 'Part', primary_unit: 'UoM' } },
+        { filename: 'bom.csv', entity_type: 'bom', entity_confidence: 1, headers: ['Parent', 'Child', 'Qty', 'U'], row_count: 1,
+          column_roles: { parent_part_name: 'Parent', child_part_name: 'Child', quantity: 'Qty', unit: 'U' } },
+        { filename: 'routings.csv', entity_type: 'routings', entity_confidence: 1, headers: ['Part', 'WC'], row_count: 1,
+          column_roles: { part_name: 'Part', work_center_name: 'WC' } },
+      ],
+    );
+
+  it('rewrites the BOM and routing references to the canonical part name', () => {
+    const w = bundle();
+    const next = applyOp(w, mergeVariants(w, 0, 'Part', 'BRKT-100', ['BRKT100']));
+    expect(next[0].rows.map((r) => r.Part)).toEqual(['BRKT-100', 'BRKT-100', 'SPCR-22']);
+    expect(next[1].rows[0].Parent).toBe('BRKT-100'); // bom parent followed the rename
+    expect(next[2].rows[0].Part).toBe('BRKT-100'); // routing part followed the rename
+  });
+
+  it('does not manufacture a new orphan finding (the whole point)', () => {
+    const w = bundle();
+    const before = analyzeBundle(workingToAnalyzed(w)).filter((f) => f.category === 'orphan_reference');
+    expect(before).toHaveLength(0); // clean to start
+    const next = applyOp(w, mergeVariants(w, 0, 'Part', 'BRKT-100', ['BRKT100']));
+    const after = analyzeBundle(workingToAnalyzed(next)).filter((f) => f.category === 'orphan_reference');
+    expect(after).toHaveLength(0); // still clean — the merge didn't break references
+  });
+
+  it('undoes the cascade as one unit', () => {
+    const w = bundle();
+    const op = mergeVariants(w, 0, 'Part', 'BRKT-100', ['BRKT100']);
+    const restored = applyOp(applyOp(w, op), invertOp(op));
+    expect(restored[1].rows[0].Parent).toBe('BRKT100');
+    expect(restored[2].rows[0].Part).toBe('BRKT100');
+  });
+});

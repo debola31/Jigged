@@ -7,6 +7,8 @@
  */
 
 import { aggressiveNorm } from '@/lib/dataImportAnalyzer';
+import { REFERENTIAL_LINKS } from '@/lib/dataImportLinks';
+import { norm } from '@/lib/dataImportSchema';
 import type { CellEdit, EditOp, WorkingFile } from '@/lib/dataImportEditing';
 
 /** Replace text in one column across every row (substring by default, or whole-cell). */
@@ -84,7 +86,17 @@ export function findVariantGroups(wf: WorkingFile, colId: string): VariantGroup[
   return groups.sort((a, b) => b.variants.length - a.variants.length);
 }
 
-/** Rewrite each listed spelling in one column to the chosen canonical value. */
+/**
+ * Rewrite each listed spelling in one column to the chosen canonical value — AND cascade the
+ * rename into any file that references it.
+ *
+ * Without the cascade, merging part-name spellings in the parts file silently orphans every
+ * BOM/routing row that pointed at a merged-away spelling: the reference no longer matches any
+ * part, so an "optional" cleanup manufactures blocking, un-fixable errors. (This is exactly the
+ * "green → not green after the optional merge" regression.) So when the merged column is a
+ * parent identity in {@link REFERENTIAL_LINKS}, we rewrite the child references in the same
+ * undoable op.
+ */
 export function mergeVariants(
   working: WorkingFile[],
   fileIndex: number,
@@ -95,13 +107,36 @@ export function mergeVariants(
   const set = new Set(variants);
   const wf = working[fileIndex];
   const edits: CellEdit[] = [];
-  if (wf) {
-    for (const row of wf.rows) {
-      const cur = row[colId] ?? '';
-      if (set.has(cur) && cur !== canonical) {
-        edits.push({ fileIndex, rowId: row.__rowId, colId, oldValue: cur, newValue: canonical });
-      }
+  if (!wf) return { label: `Merge ${variants.length} spellings into "${canonical}"`, edits };
+
+  // 1. The target column itself.
+  for (const row of wf.rows) {
+    const cur = row[colId] ?? '';
+    if (set.has(cur) && cur !== canonical) {
+      edits.push({ fileIndex, rowId: row.__rowId, colId, oldValue: cur, newValue: canonical });
     }
   }
+
+  // 2. Cascade to references. If this column is a parent identity, rewrite every child row that
+  //    pointed at a merged-away spelling (matched the analyzer's way — case/space-insensitive).
+  const field = Object.keys(wf.columnRoles).find((f) => wf.columnRoles[f] === colId);
+  if (field) {
+    const mergedAway = new Set(variants.map((v) => norm(v)));
+    for (const link of REFERENTIAL_LINKS) {
+      if (link.parentEntity !== wf.entityType || link.parentField !== field) continue;
+      working.forEach((cf, ci) => {
+        if (cf.entityType !== link.childEntity) return;
+        const childCol = cf.columnRoles[link.childField];
+        if (!childCol) return;
+        for (const row of cf.rows) {
+          const cur = row[childCol] ?? '';
+          if (cur !== canonical && mergedAway.has(norm(cur))) {
+            edits.push({ fileIndex: ci, rowId: row.__rowId, colId: childCol, oldValue: cur, newValue: canonical });
+          }
+        }
+      });
+    }
+  }
+
   return { label: `Merge ${variants.length} spellings into "${canonical}"`, edits };
 }

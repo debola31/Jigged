@@ -557,7 +557,9 @@ export default function ImportDataPage() {
                   >
                     {showAllData ? 'Hide the full data' : 'See or edit all your data'}
                   </Button>
-                  <Collapse in={showAllData}>
+                  {/* unmountOnExit: the grid renders every row, so keep it OUT of the DOM until
+                      opened — otherwise a 30k-row export makes the whole Review page janky. */}
+                  <Collapse in={showAllData} unmountOnExit>
                     <Typography variant="body2" color="text.secondary" sx={{ my: 1.5 }}>
                       Edit any value directly, fix a whole column at once, or let AI suggest fixes.
                       Everything above updates as you change things here.

@@ -296,9 +296,12 @@ function crossFileOrphans(files: AnalyzedFile[]): Finding[] {
         examples: orphanExamples,
         source_files: childFiles.filter((af) => childCols.get(af.filename)).map((af) => af.filename),
         verified: true,
+        // The parent file is present (an absent one yields a "not checked" finding instead), so
+        // this is always a name MISMATCH. Auto-creatable parents (work centers, vendors) we can
+        // add; parts we can't (they need a unit + cost), so point at fixing the reference.
         recommended_action: isAutoCreatable(parentEntity)
           ? `We can add these ${distinct} ${parentLabel} for you — have a look and confirm.`
-          : `Add the file with these ${parentLabel} and we'll connect the rows up.`,
+          : `These names don't match any ${parentLabel.replace(/s$/, '')} in your files — fix them in your data below, or those rows will be skipped.`,
       });
     }
   }

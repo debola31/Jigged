@@ -96,6 +96,15 @@ describe('summarize — the consequence line', () => {
     expect(s.lossPhrase).toBe('7,672 parts and 6,565 routing steps');
     // Entities losing nothing never appear.
     expect(s.impact.map((i) => i.entityType)).toEqual(['parts', 'routings']);
+    // The "what will come in" side sums across every entity (the progress signal).
+    expect(s.totalRows).toBe(18639 + 8393 + 214);
+    expect(s.willImport).toBe(18639 - 6565 + (8393 - 7672) + 214);
+  });
+
+  it('reports full import when nothing is lost (progress = 100%)', () => {
+    const s = summarize(report([], []), [{ entityType: 'parts', label: 'parts', total: 8393, lost: 0 }]);
+    expect(s.totalRows).toBe(8393);
+    expect(s.willImport).toBe(8393);
   });
 
   it('joins three losses with commas and a final "and"', () => {

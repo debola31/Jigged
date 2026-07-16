@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
-import Divider from '@mui/material/Divider';
 import Button from '@mui/material/Button';
 import TextField from '@mui/material/TextField';
 import Alert from '@mui/material/Alert';
@@ -14,37 +15,22 @@ import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
-import ListItemIcon from '@mui/material/ListItemIcon';
-import ListItemText from '@mui/material/ListItemText';
-import Snackbar from '@mui/material/Snackbar';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
-import CheckIcon from '@mui/icons-material/Check';
-import PercentIcon from '@mui/icons-material/Percent';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
-import TuneIcon from '@mui/icons-material/Tune';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
+import { unitShortLabel } from '@/lib/standardUnits';
 import {
   calculateRoutingCost,
-  calculateTierPricing,
   type RoutingCostBreakdown,
 } from '@/utils/routingCostCalculation';
+import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAccess';
+import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 import {
-  getTiersForPart,
-  replaceTiersForPart,
-  setPartMarkupRate,
-} from '@/utils/partPricingTiersAccess';
-import { getAllMarkupRates, applyRateToPart } from '@/utils/markupRatesAccess';
-import { addPartPricingNote } from '@/utils/partsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
-import {
-  type MarkupRate,
-  summarizeBreakpoints,
-} from '@/types/markupRates';
+  addPartPricingNote,
+  getComputedPartCost,
+  updatePartCostingBatchQuantity,
+} from '@/utils/partsAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
@@ -64,10 +50,16 @@ interface PartPricingProps {
    * for callers outside the part-detail page.
    */
   currentChain?: string[];
+  /**
+   * Called after this card saves the part's pricing tiers. Lets the parent
+   * re-fetch so the workspace completeness banner reflects the new markup
+   * instead of going stale.
+   */
+  onPricingChanged?: () => void;
 }
 
 /**
- * Working-copy of a tier inside the editor (Custom mode only).
+ * Working-copy of a tier inside the editor.
  *
  * For made parts: markup % is the source of truth; unit_price derives from
  * `base_cost × (1 + markup/100)` and is editable as a back-calculation.
@@ -86,8 +78,6 @@ interface EditRow {
   baseCostPerUnit: number | null;
 }
 
-const DEFAULT_CUSTOM_MARKUP = '25';
-
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -99,13 +89,25 @@ function parseNumber(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): EditRow {
+/**
+ * Recompute a tier row's Base/unit and Unit price from the SINGLE-SOURCE base
+ * cost at that tier's own quantity — `baseCostByQty` holds
+ * `getComputedPartCost(part, qty)` results (the same engine the quote form and
+ * the persisted line use, so a tier's price here matches a quote at that qty).
+ * Base absent from the map = not fetched yet → render "—" until it lands.
+ */
+function recomputeRow(row: EditRow, baseCostByQty: Map<number, number | null>): EditRow {
   const qty = parseNumber(row.quantity);
-  if (!breakdown || qty === null || qty <= 0) {
+  if (qty === null || qty <= 0) {
+    return { ...row, baseCostPerUnit: null };
+  }
+  const base = baseCostByQty.has(qty) ? baseCostByQty.get(qty) ?? null : undefined;
+  if (base === undefined) {
     return { ...row, baseCostPerUnit: null };
   }
   const markup = parseNumber(row.markupPercent);
-  const { baseCostPerUnit, unitPrice } = calculateTierPricing(breakdown, qty, markup);
+  const baseCostPerUnit = base === null ? null : Math.round(base * 100) / 100;
+  const unitPrice = unitPriceFromBase(base, markup);
   return {
     ...row,
     baseCostPerUnit,
@@ -114,13 +116,30 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
 }
 
 /**
+ * One blank, unfilled tier row (min qty 1, markup empty) shown when a part has
+ * no persisted tiers yet — the user fills the markup and saves. Until then the
+ * part reads as "no markup / not priceable".
+ */
+function blankRow(): EditRow {
+  return {
+    sequence: 10,
+    quantity: '1',
+    markupPercent: '',
+    unitPrice: '',
+    baseCostPerUnit: 0,
+  };
+}
+
+/**
  * Per-part Pricing card.
  *
- * Two layouts depending on `part.source`:
+ * Each part owns its markup directly — a set of quantity-break tiers
+ * (Min qty / Markup %), always inline-editable. There is no shared or named
+ * markup-rate layer; a new part opens with a single unfilled row to fill in.
  *
  *   Made parts:
  *     - Cost build-up (run labor / setup / materials) summarised at top
- *     - Markup tier table with Qty / Base / unit / Markup % / Unit price
+ *     - Markup tier table with Qty / Base / Markup % / Unit price
  *     - Unit price is editable and back-calculates the markup
  *
  *   Bought parts:
@@ -133,16 +152,15 @@ function recomputeRow(row: EditRow, breakdown: RoutingCostBreakdown | null): Edi
  *       time. The quote engine multiplies get_procurement_cost(qty) by
  *       (1 + markup/100) using the closest tier from this card.
  *
- * The mode chip at top-right ("Markup: Custom" or a rate name) and its
- * picker menu are identical in both layouts. Custom = inline editable
- * tier rows; rate-linked = read-only display of the rate's breakpoints
- * + Switch-to-Custom / Edit-the-rate buttons.
+ * Pricing feeds quotes (financial data), so tier edits are committed via an
+ * explicit Save — not auto-saved.
  */
 export default function PartPricing({
   companyId,
   part,
   refreshKey = 0,
   currentChain = [],
+  onPricingChanged,
 }: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
@@ -153,43 +171,43 @@ export default function PartPricing({
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
+  // Base cost per tier quantity, from the ONE canonical engine
+  // (getComputedPartCost → compute_part_cost_at_qty) — the same source the quote
+  // form and the persisted line use, so a tier's Base/unit + Unit price match a
+  // quote at that qty. `breakdown` is kept only for the cost build-up + warnings.
+  const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
+  const inFlightTierQtys = useRef<Set<number>>(new Set());
+  const tierBaseCostsRef = useRef(tierBaseCosts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Pricing feeds quotes (financial data), so tier edits are committed via an
-  // explicit Save — not auto-saved. `dirty` tracks unsaved edits.
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [dirty, setDirty] = useState(false);
   const saving = saveState === 'saving';
 
-  // Local mirror of part.markup_rate_id so the UI flips instantly between
-  // rate-linked (read-only) and Custom (editable) without waiting for the
-  // parent to refetch the part.
-  const [linkedRateId, setLinkedRateId] = useState<string | null>(part.markup_rate_id);
-  useEffect(() => {
-    setLinkedRateId(part.markup_rate_id);
-  }, [part.markup_rate_id]);
-
-  const [rateMenuAnchor, setRateMenuAnchor] = useState<HTMLElement | null>(null);
-  const [userRates, setUserRates] = useState<MarkupRate[]>([]);
-  const [applyingRateName, setApplyingRateName] = useState<string | null>(null);
-  const [appliedRateName, setAppliedRateName] = useState<string | null>(null);
-
-  const linkedRate = userRates.find((r) => r.id === linkedRateId) ?? null;
-  const isCustom = linkedRateId === null;
+  // Costing lot size — the production run this part's cost amortizes over, and
+  // the quantity it's valued at when consumed as a component. Drives the live
+  // Cost breakdown below (setup / N). Made parts only.
+  const [costingQtyStr, setCostingQtyStr] = useState<string>(
+    String(part.costing_batch_quantity ?? 1),
+  );
+  const [costingDirty, setCostingDirty] = useState(false);
+  const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
+  const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
+  const costingSaving = costingSaveState === 'saving';
+  const costingQty = (() => {
+    const n = parseFloat(costingQtyStr);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  })();
+  const costingUnit = unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit');
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Bought parts have no routing — skip the calculateRoutingCost call
-      // (it would just return null) and load only the persisted tiers. The
-      // procurement subsection embedded above the markup table provides the
-      // cost source instead.
-      const [tiers, routingBreakdown] = await Promise.all([
-        getTiersForPart(partId),
-        isBought ? Promise.resolve(null) : calculateRoutingCost(partId),
-      ]);
-      setBreakdown(routingBreakdown);
+      // Only the persisted markup tiers load here. The cost breakdown is owned
+      // by the costing-qty effect below (it re-amortizes at the chosen lot
+      // size); bought parts have no routing breakdown at all.
+      const tiers = await getTiersForPart(partId);
 
       // baseCostPerUnit is purely a UI display value (computed live from the
       // breakdown + tier qty). The column was dropped from part_pricing_tiers
@@ -200,13 +218,17 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        // unitPrice is recomputed live by recomputeRow below; the
-        // part_pricing_tiers.unit_price column has been dropped — prices
-        // are always derived from the routing + BOM rollup.
+        // unitPrice + baseCostPerUnit are filled in by the base-cost effect
+        // (getComputedPartCost per tier qty → base × markup) once the async
+        // costs land; start blank so nothing stale renders.
         unitPrice: '',
-        baseCostPerUnit: 0,
+        baseCostPerUnit: null,
       }));
-      setRows(asRows.map((r) => recomputeRow(r, routingBreakdown)));
+      // A never-configured part shows a single unfilled row to fill in — NOT
+      // dirty, so Save stays disabled until the user actually edits it.
+      const seeded = asRows.length > 0 ? asRows : [blankRow()];
+      setRows(seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
+      setDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
     } finally {
@@ -222,17 +244,98 @@ export default function PartPricing({
     loadAll();
   }, [loadAll, refreshKey]);
 
+  // Keep the ref current for loadAll (see tierBaseCostsRef).
   useEffect(() => {
+    tierBaseCostsRef.current = tierBaseCosts;
+  }, [tierBaseCosts]);
+
+  // Re-seed the costing-qty field when the persisted part value changes.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCostingQtyStr(String(part.costing_batch_quantity ?? 1));
+    setCostingDirty(false);
+    setCostingSaveState('idle');
+  }, [part.costing_batch_quantity]);
+
+  // The Cost breakdown, computed at the costing lot size (setup amortized over
+  // it; bought-child tiers resolve at the resulting consumption). Debounced so
+  // typing a qty doesn't spam the engine; old values stay visible during the
+  // recompute (no spinner flash). Bought parts have no routing breakdown.
+  useEffect(() => {
+    if (isBought) {
+      setBreakdown(null);
+      setBreakdownLoading(false);
+      return;
+    }
     let cancelled = false;
-    getAllMarkupRates(companyId)
-      .then((rates) => {
-        if (!cancelled) setUserRates(rates);
-      })
-      .catch((err) => console.error('Failed to load markup rates:', err));
+    setBreakdownLoading(true);
+    const handle = setTimeout(() => {
+      calculateRoutingCost(partId, costingQty)
+        .then((b) => {
+          if (cancelled) return;
+          setBreakdown(b);
+          setBreakdownLoading(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBreakdown(null);
+          setBreakdownLoading(false);
+        });
+    }, 300);
     return () => {
       cancelled = true;
+      clearTimeout(handle);
     };
-  }, [companyId]);
+  }, [partId, isBought, costingQty, refreshKey]);
+
+  // Fetch the single-source base cost for each distinct tier quantity via the
+  // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
+  // one the quote form and the persisted line use. Debounced so editing a tier
+  // qty doesn't refetch on every keystroke. Bought parts don't show a base/unit
+  // column, so skip them.
+  useEffect(() => {
+    if (isBought) return;
+    const qtys = [
+      ...new Set(
+        rows
+          .map((r) => parseNumber(r.quantity))
+          .filter((q): q is number => q !== null && q > 0),
+      ),
+    ];
+    const missing = qtys.filter((q) => !tierBaseCosts.has(q) && !inFlightTierQtys.current.has(q));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      for (const q of missing) {
+        inFlightTierQtys.current.add(q);
+        getComputedPartCost(partId, q)
+          .catch(() => null)
+          .then((base) => {
+            inFlightTierQtys.current.delete(q);
+            if (cancelled) return;
+            setTierBaseCosts((prev) => new Map(prev).set(q, base));
+          });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [rows, tierBaseCosts, partId, isBought]);
+
+  // A routing / BOM / child-batch change (refreshKey) invalidates the cached
+  // base costs — the rolled-up cost is different now, so clear and refetch.
+  useEffect(() => {
+    inFlightTierQtys.current.clear();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTierBaseCosts(new Map());
+  }, [refreshKey]);
+
+  // Re-price every tier row when base costs arrive/change (base × markup).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
+  }, [tierBaseCosts]);
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
@@ -242,8 +345,7 @@ export default function PartPricing({
 
   /**
    * Persist the current tiers. Explicit (button-driven) rather than auto-saved
-   * because pricing feeds quotes. Saving a rate-linked part forks it to Custom
-   * (replaceTiersForPart with no rateId sets markup_rate_id = null).
+   * because pricing feeds quotes.
    */
   const handleSave = async (): Promise<void> => {
     const allValid = rows.every((r) => {
@@ -265,11 +367,10 @@ export default function PartPricing({
         markup_percent: parseNumber(r.markupPercent),
       }));
       await replaceTiersForPart(companyId, partId, payload);
-      setLinkedRateId(null);
       // Auto-log the change as a 'pricing' note (audit trail in the Notes feed).
       // Non-fatal: a note-write failure must never block the pricing save.
       try {
-        const operator = await getCurrentOperator(companyId);
+        const operator = await getCurrentMember(companyId);
         if (operator) {
           const summary = payload
             .map((t) => `@${t.quantity} → ${t.markup_percent ?? '—'}%`)
@@ -296,14 +397,17 @@ export default function PartPricing({
               quantity: String(t.quantity),
               markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
               unitPrice: '',
-              baseCostPerUnit: 0,
+              baseCostPerUnit: null,
             },
-            breakdown,
+            tierBaseCosts,
           ),
         ),
       );
       setDirty(false);
       setSaveState('saved');
+      // Refresh the parent so the workspace "missing markup" banner reflects
+      // the new markup instead of going stale.
+      onPricingChanged?.();
     } catch (err) {
       console.error('Failed to save pricing tiers:', err);
       setSaveState('error');
@@ -317,7 +421,7 @@ export default function PartPricing({
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], quantity: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
       return next;
     });
   };
@@ -326,7 +430,7 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, breakdown);
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
       return next;
     });
   };
@@ -361,7 +465,7 @@ export default function PartPricing({
         unitPrice: '',
         baseCostPerUnit: 0,
       };
-      return [...prev, recomputeRow(row, breakdown)];
+      return [...prev, recomputeRow(row, tierBaseCosts)];
     });
   };
 
@@ -369,58 +473,29 @@ export default function PartPricing({
     updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleApplyRate = async (rate: MarkupRate): Promise<void> => {
-    setRateMenuAnchor(null);
-    setApplyingRateName(rate.name);
-    setError(null);
+  const handleCostingSave = async (): Promise<void> => {
+    setCostingSaveState('saving');
     try {
-      await applyRateToPart(companyId, partId, rate.id);
-      setLinkedRateId(rate.id);
-      await loadAll();
-      setAppliedRateName(rate.name);
+      await updatePartCostingBatchQuantity(partId, costingQty);
+      setCostingSaveState('saved');
+      setCostingDirty(false);
+      // Deliberately NOT calling onPricingChanged: the batch size doesn't affect
+      // this part's own pricing tiers (their base is at the order qty) or its
+      // priceability — only its value as a component on OTHER parts' pages. A
+      // refresh here would just re-fetch the same numbers and flicker.
     } catch (err) {
-      console.error('Failed to apply markup rate:', err);
-      setError(err instanceof Error ? err.message : 'Failed to apply markup rate');
-    } finally {
-      setApplyingRateName(null);
+      setCostingSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
     }
-  };
-
-  const handleSwitchToCustom = async (): Promise<void> => {
-    setRateMenuAnchor(null);
-    if (linkedRateId === null) return;
-    setError(null);
-    try {
-      // Flip the FK to null without rewriting tiers — the user wants to
-      // start editing from the rate's current values.
-      await setPartMarkupRate(partId, null);
-      setLinkedRateId(null);
-    } catch (err) {
-      console.error('Failed to switch to custom:', err);
-      setError(err instanceof Error ? err.message : 'Failed to switch to custom');
-    }
-  };
-
-  const handleStartCustomFromEmpty = (): void => {
-    // From the empty state "Set custom tiers" CTA: drop in one editable row
-    // at qty=1 with a sensible default markup. Autosave persists it as soon
-    // as the row is valid.
-    updateRows(() => [
-      recomputeRow(
-        {
-          sequence: 10,
-          quantity: '1',
-          markupPercent: DEFAULT_CUSTOM_MARKUP,
-          unitPrice: '',
-          baseCostPerUnit: 0,
-        },
-        breakdown,
-      ),
-    ]);
   };
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
-  const setupBatch = breakdown ? Math.round(breakdown.total_setup_cost * 100) / 100 : 0;
+  // total_setup_cost is the one-time setup; amortize it over the batch here so
+  // the row is per-unit and changes live with the quantity (calculateRoutingCost
+  // keeps setup un-amortized — the tier layer / this card divide it).
+  const setupPerUnit = breakdown
+    ? Math.round((breakdown.total_setup_cost / costingQty) * 100) / 100
+    : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
   // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
   const materialPerUnit: number | null = breakdown
@@ -428,476 +503,278 @@ export default function PartPricing({
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
+  // The three lines sum to the part's unit cost at the batch size.
+  const costPerUnit: number | null =
+    materialPerUnit === null
+      ? null
+      : Math.round((runPerUnit + setupPerUnit + materialPerUnit) * 100) / 100;
 
-  // Three states drive what renders in the markup section:
-  //   1. linked to a rate                → read-only tier table + switch/edit bar
-  //   2. Custom with at least one tier   → editable table + Add tier
-  //   3. Custom with zero tiers          → empty-state cards prompting a choice
-  const showReadOnly = linkedRateId !== null;
-  const showEmptyState = isCustom && rows.length === 0;
-  const showEditable = isCustom && rows.length > 0;
-
-  /** Header row for the Pricing section: h6 + saving indicator + Markup
-      chip. Rendered at the top of the card for both made and bought
-      parts — bought parts get a separate Cost card above this one. */
-  const pricingHeader = (
-    <Box
-      sx={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 2,
-        mb: 2,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Typography variant="h6" sx={{ fontWeight: 600 }}>
-          Pricing
+  const warningsAlert =
+    !isBought && breakdown && breakdown.warnings.length > 0 ? (
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          Heads up:
         </Typography>
-        <SaveStatus state={saveState} />
-      </Box>
-      <Button
-        variant="outlined"
-        size="small"
-        startIcon={isCustom ? <TuneIcon /> : <PercentIcon />}
-        endIcon={<KeyboardArrowDownIcon />}
-        onClick={(e) => setRateMenuAnchor(e.currentTarget)}
-        disabled={applyingRateName !== null}
-        sx={{ borderRadius: 4, textTransform: 'none', fontWeight: 500 }}
-      >
-        {applyingRateName
-          ? `Applying ${applyingRateName}…`
-          : `Markup: ${isCustom ? 'Custom' : (linkedRate?.name ?? 'rate')}`}
-      </Button>
+        {breakdown.warnings.map((w, i) => {
+          // missing_material_cost warnings expose `child_part_name` +
+          // `detail` so the part name itself can be the link (no
+          // trailing "Open child →"). Other warning types fall back
+          // to the bare `message` string with no link, since they
+          // don't point at a navigable target.
+          const isLinkable = !!w.child_part_id && !!w.child_part_name;
+          return (
+            <Typography key={i} variant="body2">
+              {'• '}
+              {isLinkable ? (
+                <>
+                  <Link
+                    href={buildPartHref({
+                      companyId,
+                      targetPartId: w.child_part_id as string,
+                      chain: pushPartToChain(
+                        currentChain,
+                        part.id,
+                        w.child_part_id as string,
+                      ),
+                    })}
+                    style={{
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {w.child_part_name} ›
+                  </Link>{' '}
+                  {w.detail ?? ''}
+                </>
+              ) : (
+                w.message
+              )}
+            </Typography>
+          );
+        })}
+      </Alert>
+    ) : null;
+
+  const spinner = (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+      <CircularProgress size={24} />
     </Box>
   );
 
   return (
-    <Box>
-      {pricingHeader}
-
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+        <Alert severity="error" onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {/* Made parts: routing breakdown gates the rest. Bought parts skip
-          this entirely (the cost source above is the procurement panel). */}
-      {!isBought && !loading && breakdown && breakdown.warnings.length > 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Heads up:
-          </Typography>
-          {breakdown.warnings.map((w, i) => {
-            // missing_material_cost warnings expose `child_part_name` +
-            // `detail` so the part name itself can be the link (no
-            // trailing "Open child →"). Other warning types fall back
-            // to the bare `message` string with no link, since they
-            // don't point at a navigable target.
-            const isLinkable = !!w.child_part_id && !!w.child_part_name;
-            return (
-              <Typography key={i} variant="body2">
-                {'• '}
-                {isLinkable ? (
-                  <>
-                    <Link
-                      href={buildPartHref({
-                        companyId,
-                        targetPartId: w.child_part_id as string,
-                        chain: pushPartToChain(
-                          currentChain,
-                          part.id,
-                          w.child_part_id as string,
-                        ),
-                      })}
-                      style={{
-                        color: 'inherit',
-                        textDecoration: 'underline',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {w.child_part_name} ›
-                    </Link>{' '}
-                    {w.detail ?? ''}
-                  </>
-                ) : (
-                  w.message
-                )}
+      {/* COST card — made parts only. A bought part's cost lives in the
+          procurement (Cost) panel rendered alongside this one, so the page
+          reads the same for both: Cost card, then Pricing card. */}
+      {!isBought && (
+        <Card elevation={2}>
+          <CardContent>
+            {/* Header + the costing lot size. Changing it re-amortizes setup and
+                updates the build-up live; it's also the qty this part is valued
+                at when consumed as a material in another part. */}
+            <Box
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1, flexWrap: 'wrap' }}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                Cost
               </Typography>
-            );
-          })}
-        </Alert>
-      )}
+              <Box sx={{ flex: 1 }} />
+              <TextField
+                label={`Batch size (${costingUnit})`}
+                value={costingQtyStr}
+                onChange={(e) => {
+                  setCostingQtyStr(e.target.value);
+                  setCostingDirty(true);
+                  setCostingSaveState('idle');
+                }}
+                type="number"
+                size="small"
+                inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
+                sx={{ width: 170 }}
+              />
+              <SaveStatus state={costingSaveState} />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleCostingSave}
+                disabled={!costingDirty || costingSaving}
+              >
+                Save
+              </Button>
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              Setup spreads across the run this part is made in. This quantity is
+              also what it&apos;s valued at when used as a material in another part.
+            </Typography>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-          <CircularProgress size={24} />
-        </Box>
-      )}
+            {breakdownLoading && !breakdown && spinner}
 
-      {/* Made parts only: routing-not-set-up empty state. */}
-      {!isBought && !loading && !breakdown && (
-        <Box
-          sx={{
-            py: 4,
-            px: 2,
-            textAlign: 'center',
-            border: (theme) => `1px dashed ${theme.palette.divider}`,
-            borderRadius: 1,
-          }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            Add operations or materials to calculate pricing
-          </Typography>
-        </Box>
-      )}
-
-      {/* Made parts: cost build-up rows above the divider. */}
-      {!isBought && !loading && breakdown && (
-        <>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mb: 2 }}>
-            <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
-            <SummaryRow
-              label="Setup (one-time)"
-              value={formatCurrency(setupBatch)}
-              hint="amortized across tier qty"
-            />
-            {(materialPerUnit === null || materialPerUnit > 0) && (
-              <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
-            )}
-          </Box>
-
-          <Divider sx={{ mb: 2 }} />
-        </>
-      )}
-
-      {/* Markup section — same three states for both made and bought, only
-          the visible columns differ. Bought parts hide Base / unit and
-          Unit price (those are quote-time values; cost depends on which
-          vendor wins at the actual order qty). */}
-      {!loading && (isBought || breakdown) && (
-        <>
-          {/* (1) RATE-LINKED — read-only. */}
-          {showReadOnly && (
-            <>
-              {/* Make customizing obvious (the old small "Switch to Custom"
-                  button was missed). Prominent contained action at the top. */}
+            {!breakdownLoading && !breakdown && (
               <Box
                 sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 2,
-                  mb: 2,
-                  flexWrap: 'wrap',
+                  py: 4,
+                  px: 2,
+                  textAlign: 'center',
+                  border: (theme) => `1px dashed ${theme.palette.divider}`,
+                  borderRadius: 1,
                 }}
               >
                 <Typography variant="body2" color="text.secondary">
-                  Following the <strong>{linkedRate?.name ?? 'selected'}</strong> rate.
+                  Add operations or materials to calculate cost
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {linkedRate && (
-                    <Button
-                      size="small"
-                      component={Link}
-                      href={`/dashboard/${companyId}/markup-rates/${linkedRate.id}/edit`}
-                      endIcon={<OpenInNewIcon fontSize="small" />}
-                    >
-                      Edit the rate
-                    </Button>
-                  )}
-                  <Button
-                    size="small"
-                    variant="contained"
-                    startIcon={<TuneIcon />}
-                    onClick={handleSwitchToCustom}
-                  >
-                    Customize pricing
-                  </Button>
+              </Box>
+            )}
+
+            {warningsAlert}
+
+            {breakdown && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                <SummaryRow label="Run labor / unit" value={formatCurrency(runPerUnit)} />
+                <SummaryRow label="Setup / unit" value={formatCurrency(setupPerUnit)} />
+                {(materialPerUnit === null || materialPerUnit > 0) && (
+                  <SummaryRow label="Materials / unit" value={formatCurrency(materialPerUnit)} />
+                )}
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    mt: 1,
+                    pt: 1,
+                    borderTop: (theme) => `1px solid ${theme.palette.divider}`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    Cost / unit
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {formatCurrency(costPerUnit)}
+                  </Typography>
                 </Box>
               </Box>
-              <TableContainer>
-
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>{qtyColumnHeader}</TableCell>
-                      {!isBought && <TableCell align="right">Base / unit</TableCell>}
-                      <TableCell align="right">Markup %</TableCell>
-                      {!isBought && <TableCell align="right">Unit price</TableCell>}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {rows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={isBought ? 2 : 4}>
-                          <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-                            This rate has no breakpoints yet. Edit the rate to add some,
-                            or switch to Custom to set tiers just for this part.
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      rows.map((row) => {
-                        const markupNum = parseNumber(row.markupPercent);
-                        const unitPriceNum = parseNumber(row.unitPrice);
-                        return (
-                          <TableRow key={row.id}>
-                            <TableCell>{row.quantity || '—'}</TableCell>
-                            {!isBought && (
-                              <TableCell align="right">
-                                {formatCurrency(row.baseCostPerUnit)}
-                              </TableCell>
-                            )}
-                            <TableCell align="right">
-                              {markupNum !== null ? `${markupNum}%` : '—'}
-                            </TableCell>
-                            {!isBought && (
-                              <TableCell align="right">
-                                {formatCurrency(unitPriceNum)}
-                              </TableCell>
-                            )}
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </>
-          )}
-
-          {/* (2) CUSTOM with tiers — editable. */}
-          {showEditable && (
-            <>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>{qtyColumnHeader}</TableCell>
-                      {!isBought && <TableCell align="right">Base / unit</TableCell>}
-                      <TableCell align="right">Markup %</TableCell>
-                      {!isBought && <TableCell align="right">Unit price</TableCell>}
-                      <TableCell align="right"></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {rows.map((row, idx) => {
-                      return (
-                        <TableRow key={row.id ?? `tier-${idx}`}>
-                          <TableCell sx={{ minWidth: 90 }}>
-                            <TextField
-                              size="small"
-                              value={row.quantity}
-                              onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                              inputMode="decimal"
-                            />
-                          </TableCell>
-                          {!isBought && (
-                            <TableCell align="right">
-                              {formatCurrency(row.baseCostPerUnit)}
-                            </TableCell>
-                          )}
-                          <TableCell align="right" sx={{ minWidth: 120 }}>
-                            <TextField
-                              size="small"
-                              value={row.markupPercent}
-                              onChange={(e) => handleMarkupChange(idx, e.target.value)}
-                              inputMode="decimal"
-                              sx={{ width: 100 }}
-                            />
-                          </TableCell>
-                          {!isBought && (
-                            <TableCell align="right" sx={{ minWidth: 130 }}>
-                              <TextField
-                                size="small"
-                                value={row.unitPrice}
-                                onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
-                                inputMode="decimal"
-                                sx={{ width: 120 }}
-                              />
-                            </TableCell>
-                          )}
-                          <TableCell align="right">
-                            <DeleteIconButton
-                              ariaLabel="Remove tier"
-                              onClick={() => removeRow(idx)}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  mt: 2,
-                  gap: 1.5,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
-                  Add tier
-                </Button>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  {dirty && saveState !== 'saving' && (
-                    <Typography variant="caption" color="text.secondary">
-                      Unsaved changes
-                    </Typography>
-                  )}
-                  <SaveStatus state={saveState} />
-                  <Button
-                    variant="contained"
-                    size="small"
-                    onClick={handleSave}
-                    disabled={!dirty || saving}
-                  >
-                    Save pricing
-                  </Button>
-                </Box>
-              </Box>
-            </>
-          )}
-
-          {/* (3) CUSTOM with no tiers — explicit choice prompt. */}
-          {showEmptyState && (
-            <Box
-              sx={{
-                py: 4,
-                px: 2,
-                textAlign: 'center',
-                border: (theme) => `1px dashed ${theme.palette.divider}`,
-                borderRadius: 1,
-              }}
-            >
-              <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-                {isBought ? 'How should this part be marked up?' : 'How should this part be priced?'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                Pick a markup rate to follow company-wide pricing rules, or set custom
-                tiers just for this part.
-              </Typography>
-              <Box
-                sx={{
-                  display: 'flex',
-                  gap: 2,
-                  justifyContent: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Button
-                  variant="contained"
-                  startIcon={<PercentIcon />}
-                  endIcon={<KeyboardArrowDownIcon />}
-                  onClick={(e) => setRateMenuAnchor(e.currentTarget)}
-                  disabled={applyingRateName !== null}
-                >
-                  {userRates.length > 0 ? 'Pick a markup rate' : 'Create a markup rate'}
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<TuneIcon />}
-                  onClick={handleStartCustomFromEmpty}
-                >
-                  Set custom tiers
-                </Button>
-              </Box>
-            </Box>
-          )}
-        </>
+            )}
+          </CardContent>
+        </Card>
       )}
 
-      {/* Mode picker menu — Custom + every rate, plus a tail link to the
-          rates management page. */}
-      <Menu
-        anchorEl={rateMenuAnchor}
-        open={Boolean(rateMenuAnchor)}
-        onClose={() => setRateMenuAnchor(null)}
-        slotProps={{ paper: { sx: { minWidth: 320, maxWidth: 420 } } }}
-      >
-        <MenuItem
-          onClick={handleSwitchToCustom}
-          selected={isCustom}
-          disabled={isCustom}
-        >
-          <ListItemIcon sx={{ minWidth: 32 }}>
-            {isCustom ? <CheckIcon fontSize="small" color="primary" /> : <TuneIcon fontSize="small" />}
-          </ListItemIcon>
-          <ListItemText
-            primary="Custom"
-            secondary="Set tier values just for this part"
-            slotProps={{
-              primary: { sx: { fontWeight: 500 } },
-              secondary: { sx: { fontSize: '0.75rem' } },
+      {/* PRICING card — markup tiers (bought + made). */}
+      <Card elevation={2}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Pricing
+            </Typography>
+            <SaveStatus state={saveState} />
+          </Box>
+
+          {loading && spinner}
+
+          {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
+              and Unit price (those are quote-time values; cost depends on which
+              vendor wins at the actual order qty). */}
+          {!loading && (isBought || breakdown) && (
+            <>
+              <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>{qtyColumnHeader}</TableCell>
+                  {!isBought && <TableCell align="right">Base / unit</TableCell>}
+                  <TableCell align="right">Markup %</TableCell>
+                  {!isBought && <TableCell align="right">Unit price</TableCell>}
+                  <TableCell align="right"></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.map((row, idx) => {
+                  return (
+                    <TableRow key={row.id ?? `tier-${idx}`}>
+                      <TableCell sx={{ minWidth: 90 }}>
+                        <TextField
+                          size="small"
+                          value={row.quantity}
+                          onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                          inputMode="decimal"
+                        />
+                      </TableCell>
+                      {!isBought && (
+                        <TableCell align="right">
+                          {formatCurrency(row.baseCostPerUnit)}
+                        </TableCell>
+                      )}
+                      <TableCell align="right" sx={{ minWidth: 120 }}>
+                        <TextField
+                          size="small"
+                          value={row.markupPercent}
+                          onChange={(e) => handleMarkupChange(idx, e.target.value)}
+                          inputMode="decimal"
+                          sx={{ width: 100 }}
+                        />
+                      </TableCell>
+                      {!isBought && (
+                        <TableCell align="right" sx={{ minWidth: 130 }}>
+                          <TextField
+                            size="small"
+                            value={row.unitPrice}
+                            onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
+                            inputMode="decimal"
+                            sx={{ width: 120 }}
+                          />
+                        </TableCell>
+                      )}
+                      <TableCell align="right">
+                        <DeleteIconButton
+                          ariaLabel="Remove tier"
+                          onClick={() => removeRow(idx)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              mt: 2,
+              gap: 1.5,
+              flexWrap: 'wrap',
             }}
-          />
-        </MenuItem>
-
-        <Divider sx={{ my: 0.5 }} />
-
-        {userRates.length === 0 && (
-          <MenuItem disabled>
-            <ListItemText
-              primary="No rates yet"
-              secondary="Create one to apply it here"
-              slotProps={{
-                primary: { sx: { fontStyle: 'italic' } },
-                secondary: { sx: { fontSize: '0.75rem' } },
-              }}
-            />
-          </MenuItem>
-        )}
-        {userRates.map((rate) => {
-          const isApplied = linkedRateId === rate.id;
-          return (
-            <MenuItem key={rate.id} onClick={() => handleApplyRate(rate)} selected={isApplied}>
-              <ListItemIcon sx={{ minWidth: 32 }}>
-                {isApplied ? <CheckIcon fontSize="small" color="primary" /> : null}
-              </ListItemIcon>
-              <ListItemText
-                primary={rate.name}
-                secondary={
-                  isApplied
-                    ? `Currently applied · ${summarizeBreakpoints(rate.breakpoints)}`
-                    : summarizeBreakpoints(rate.breakpoints)
-                }
-                slotProps={{
-                  primary: { sx: { fontWeight: 500 } },
-                  secondary: { sx: { fontSize: '0.75rem' } },
-                }}
-              />
-            </MenuItem>
-          );
-        })}
-
-        <Divider sx={{ my: 0.5 }} />
-
-        <MenuItem
-          component={Link}
-          href={`/dashboard/${companyId}/markup-rates`}
-          onClick={() => setRateMenuAnchor(null)}
-          sx={{ color: 'primary.main' }}
-        >
-          <ListItemIcon sx={{ minWidth: 32 }}>
-            <SettingsOutlinedIcon fontSize="small" color="primary" />
-          </ListItemIcon>
-          <ListItemText primary="Manage rates…" />
-        </MenuItem>
-      </Menu>
-
-      <Snackbar
-        open={appliedRateName !== null}
-        autoHideDuration={3000}
-        onClose={() => setAppliedRateName(null)}
-        message={appliedRateName ? `Applied "${appliedRateName}"` : ''}
-      />
+          >
+            <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
+              Add tier
+            </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              {dirty && saveState !== 'saving' && (
+                <Typography variant="caption" color="text.secondary">
+                  Unsaved changes
+                </Typography>
+              )}
+              <SaveStatus state={saveState} />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleSave}
+                disabled={!dirty || saving}
+              >
+                Save pricing
+              </Button>
+            </Box>
+          </Box>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </Box>
   );
 }

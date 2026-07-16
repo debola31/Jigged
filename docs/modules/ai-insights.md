@@ -156,7 +156,7 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 
 ### Allowed Tables
 
-`companies`, `customers`, `vendors`, `parts`, `part_pricing_tiers`, `parts_bom`, `parts_unit_conversions`, `markup_rates`, `quotes`, `quote_line_items`, `quote_materials`, `quote_operations`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`, `routings`, `routing_operations`, `inventory_transactions`
+`companies`, `customers`, `vendors`, `parts`, `part_pricing_tiers`, `parts_bom`, `parts_unit_conversions`, `quotes`, `quote_line_items`, `quote_materials`, `quote_operations`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`, `routings`, `routing_operations`, `inventory_transactions`
 
 > Source of truth: the `ALLOWED_TABLES` frozenset in `api/tools/schema_context.py`. Keep this list and `SCHEMA_CONTEXT` in sync with the code.
 

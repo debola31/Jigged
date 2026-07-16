@@ -96,6 +96,7 @@ describe('partsAccess utilities', () => {
     quantity: 0,
     reorder_point: null,
     preferred_vendor_id: null,
+    costing_batch_quantity: null,
     legacy_id: null,
     is_location_tracked: false,
     created_at: '2024-01-01T00:00:00Z',
@@ -372,8 +373,32 @@ describe('partsAccess utilities', () => {
       await getAllParts('company-1', 'PART001');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'part_name.ilike.%PART001%,description.ilike.%PART001%'
+        'part_name.ilike."%PART001%",description.ilike."%PART001%"'
       );
+    });
+
+    it('double-quotes the value so parentheses in the term do not break the filter', async () => {
+      // Regression: a part named "F40750-1 (REX-76)" returned zero rows because
+      // the raw `)` terminated the PostgREST `.or()` group early. The value must
+      // now be double-quoted so PostgREST treats the parens literally.
+      mockQueryBuilder.data = [mockPart];
+      mockQueryBuilder.error = null;
+
+      await getAllParts('company-1', 'F40750-1 (REX-76)');
+
+      expect(mockQueryBuilder.or).toHaveBeenCalledWith(
+        'part_name.ilike."%F40750-1 (REX-76)%",description.ilike."%F40750-1 (REX-76)%"'
+      );
+    });
+
+    it('escapes ILIKE wildcards in the search term', async () => {
+      mockQueryBuilder.data = [mockPart];
+      mockQueryBuilder.error = null;
+
+      await getAllParts('company-1', '50%');
+
+      const filter = (mockQueryBuilder.or as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(filter).toContain('\\%'); // literal % escaped for ILIKE
     });
 
     it('throws error when Supabase query fails', async () => {
@@ -563,6 +588,7 @@ describe('partsAccess utilities', () => {
         quantity: 0,
         reorder_point: null,
         preferred_vendor_id: null,
+        costing_batch_quantity: null,
         legacy_id: null,
         is_location_tracked: false,
         created_at: '2024-01-01T00:00:00Z',

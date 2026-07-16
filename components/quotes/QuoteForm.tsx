@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import NextLink from 'next/link';
 import Box from '@mui/material/Box';
@@ -29,8 +29,8 @@ import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import type { QuoteFormData, LeadTimeUnit } from '@/types/quote';
-import { LEAD_TIME_UNITS, PAYMENT_TERM_PRESETS } from '@/types/quote';
+import type { QuoteFormData } from '@/types/quote';
+import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   createQuote,
   updateQuote,
@@ -45,7 +45,8 @@ import {
   pickPrimaryContact,
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
-import { resolveTier } from '@/utils/quotePricingResolver';
+import { resolveTier, resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
+import { getComputedPartCost } from '@/utils/partsAccess';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 import { quantityUnitSuffix, unitShortLabel } from '@/lib/standardUnits';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
@@ -704,7 +705,58 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setCustomerModalOpen(false);
   };
 
-  /** Per-row live preview of the resolved tier + total: blockPreviews[block][row].
+  // Base cost per (part | order-qty), from the ONE canonical engine
+  // (compute_part_cost_at_qty) at the ACTUAL order quantity. The row price is
+  // base × the markup tier that applies at that qty — the same single-source
+  // rule the persisted line uses — so the form shows exactly what gets saved,
+  // and a ceiling/batch part is priced exactly at any qty (not snapped to a
+  // tier breakpoint). Keyed by `${partId}|${qty}`; a stored `null` means the
+  // part can't currently be costed. Debounced so typing a qty doesn't refetch
+  // on every keystroke.
+  const [orderQtyBaseCosts, setOrderQtyBaseCosts] = useState<Map<string, number | null>>(new Map());
+  const inFlightBaseKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const wanted: Array<{ key: string; partId: string; qty: number }> = [];
+    for (const block of partBlocks) {
+      if (!block.part) continue;
+      for (const row of block.rows) {
+        const qty = Number(row.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        wanted.push({ key: `${block.part.id}|${qty}`, partId: block.part.id, qty });
+      }
+    }
+    const missing = wanted.filter(
+      (w) => !orderQtyBaseCosts.has(w.key) && !inFlightBaseKeys.current.has(w.key),
+    );
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      for (const { key, partId, qty } of missing) {
+        inFlightBaseKeys.current.add(key);
+        getComputedPartCost(partId, qty)
+          .catch(() => null)
+          .then((base) => {
+            inFlightBaseKeys.current.delete(key);
+            if (cancelled) return;
+            setOrderQtyBaseCosts((prev) => {
+              const next = new Map(prev);
+              next.set(key, base);
+              return next;
+            });
+          });
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [partBlocks, orderQtyBaseCosts]);
+
+  /** Per-row live preview: blockPreviews[block][row] = { resolved, total, loading }.
+   *  `resolved.unit_price` = base(orderQty) × markup(orderQty) — the single
+   *  source of truth. `loading` is true while the base cost is being fetched.
    *  A part-level custom price (block.override_*) applies to every row. */
   const blockPreviews = useMemo(() => {
     return partBlocks.map((block) => {
@@ -716,26 +768,42 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         overridePrice !== null && Number.isFinite(overridePrice) && overridePrice >= 0;
       return block.rows.map((row) => {
         const orderQty = Number(row.quantity);
-        if (!Number.isFinite(orderQty) || orderQty <= 0) {
-          return {
-            resolved: null as ReturnType<typeof resolveTier>,
-            total: null as number | null,
-          };
-        }
+        const empty = {
+          resolved: null as ReturnType<typeof resolveTier>,
+          total: null as number | null,
+          loading: false,
+        };
+        if (!Number.isFinite(orderQty) || orderQty <= 0) return empty;
         if (overrideValid) {
           return {
             resolved: null as ReturnType<typeof resolveTier>,
             total: Math.round((overridePrice as number) * orderQty * 100) / 100,
+            loading: false,
           };
         }
-        const resolved = resolveTier(block.tiers, orderQty);
+        if (!block.part) return empty;
+        const markup = resolveMarkupAtQty(block.tiers, orderQty);
+        if (!markup) return empty;
+        const key = `${block.part.id}|${orderQty}`;
+        const loading = !orderQtyBaseCosts.has(key);
+        const base = orderQtyBaseCosts.get(key) ?? null;
+        const unitPrice = unitPriceFromBase(base, markup.markup_percent);
         return {
-          resolved,
-          total: resolved ? Math.round(resolved.unit_price * orderQty * 100) / 100 : null,
+          resolved:
+            unitPrice !== null
+              ? {
+                  unit_price: unitPrice,
+                  source_tier_id: markup.source_tier_id,
+                  matched_tier_quantity: markup.matched_tier_quantity,
+                  below_min: markup.below_min,
+                }
+              : null,
+          total: unitPrice !== null ? Math.round(unitPrice * orderQty * 100) / 100 : null,
+          loading,
         };
       });
     });
-  }, [partBlocks]);
+  }, [partBlocks, orderQtyBaseCosts]);
 
   /**
    * Firm order = every part has exactly one quantity → show a grand total.
@@ -774,18 +842,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const validationError = useMemo<string | null>(() => {
     if (!formData.customer_id) return 'Pick a customer.';
     if (partBlocks.length === 0) return 'Add at least one part to the quote.';
-    const leadRaw = formData.lead_time_value;
-    const leadNum = Number(leadRaw);
-    if (
-      leadRaw === '' ||
-      !Number.isFinite(leadNum) ||
-      leadNum < 0 ||
-      !Number.isInteger(leadNum)
-    ) {
-      return 'Enter a lead time (whole number).';
-    }
-    if (formData.lead_time_unit === '') {
-      return 'Select a lead time unit.';
+    // Lead time is free text (e.g. "2–3 weeks", "In stock") but required.
+    if (formData.lead_time_text.trim() === '') {
+      return 'Enter a lead time.';
     }
     // Payment terms are required on every quote (the custom "Other" field
     // writes back into payment_terms, so this one check covers both paths).
@@ -1331,6 +1390,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                       : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
                                   </Typography>
                                 </>
+                              ) : preview?.loading ? (
+                                <Typography variant="caption" color="text.secondary">
+                                  Pricing…
+                                </Typography>
                               ) : (
                                 <Typography variant="caption" color="warning.main">
                                   No priced tier — add a tier or use a custom price
@@ -1514,60 +1577,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           </Typography>
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              {/* Two clean fields: a plain number (native spinner arrows
-                  hidden) + a separate unit dropdown. The unit has no default —
-                  it shows a "Select…" placeholder and is required
-                  (validationError), so a quote can't ship with a wrong unit. */}
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <TextField
-                  label="Lead time"
-                  type="number"
-                  size="small"
-                  required
-                  value={formData.lead_time_value}
-                  onChange={(e) => handleFieldChange('lead_time_value', e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ min: 0, step: 1, inputMode: 'numeric' }}
-                  sx={{
-                    width: 120,
-                    // Hide the native number spinner arrows — they crowd the
-                    // unit field and add no value for a small whole number.
-                    '& input[type=number]': { MozAppearance: 'textfield' },
-                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button':
-                      { WebkitAppearance: 'none', margin: 0 },
-                  }}
-                />
-                <FormControl size="small" required sx={{ flex: 1 }}>
-                  <InputLabel id="lead-time-unit-label" shrink>
-                    Unit
-                  </InputLabel>
-                  <Select
-                    labelId="lead-time-unit-label"
-                    label="Unit"
-                    notched
-                    displayEmpty
-                    value={formData.lead_time_unit}
-                    onChange={(e) =>
-                      handleFieldChange('lead_time_unit', e.target.value as LeadTimeUnit)
-                    }
-                    renderValue={(selected) =>
-                      selected ? (
-                        LEAD_TIME_UNITS.find((u) => u.value === selected)?.label
-                      ) : (
-                        <Box component="span" sx={{ color: 'text.secondary' }}>
-                          Select…
-                        </Box>
-                      )
-                    }
-                  >
-                    {LEAD_TIME_UNITS.map((u) => (
-                      <MenuItem key={u.value} value={u.value}>
-                        {u.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Box>
+              {/* Free-text lead time — the shop types whatever fits
+                  ("2–3 weeks", "In stock", "Call to confirm"). Required
+                  (validationError); stored verbatim and no longer drives the
+                  job due date (entered manually at conversion). */}
+              <TextField
+                label="Lead time"
+                size="small"
+                fullWidth
+                required
+                value={formData.lead_time_text}
+                onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
+                helperText={'e.g. “2–3 weeks” or “In stock”'}
+                InputLabelProps={{ shrink: true }}
+              />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField

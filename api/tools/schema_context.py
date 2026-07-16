@@ -109,14 +109,6 @@ SCHEMA_CONTEXT = """
 - from_unit: TEXT (unique per part)
 - to_primary_factor: NUMERIC (>0; multiply a from_unit qty by this to get primary_unit qty)
 
-### markup_rates
-- id: UUID (PK)
-- company_id: UUID -- ALWAYS filter with $1
-- name: TEXT (unique per company)
-- breakpoints: JSONB (array of quantity → markup_percent rows)
-- is_default: BOOLEAN
-- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-
 ### quotes
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
@@ -125,8 +117,7 @@ SCHEMA_CONTEXT = """
 - status: TEXT -- one of: 'active', 'expired'
 - status_changed_at: TIMESTAMPTZ
 - converted_at: TIMESTAMPTZ (when accepted/converted to a job)
-- lead_time_days: INTEGER (normalized calendar days, derived from lead_time_value/unit)
-- lead_time_value: INTEGER, lead_time_unit: TEXT -- business_days | calendar_days | weeks
+- lead_time_text: TEXT (free-text lead time as stated, e.g. "2–3 weeks", "In stock"; does not drive the job due date)
 - payment_terms: TEXT (e.g. 'Net 30', '2/10 Net 30'), expiration_date: DATE
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: revenue is NOT on quotes anymore. Sum quote_line_items.total_price
@@ -182,7 +173,7 @@ SCHEMA_CONTEXT = """
   (shipment-driven; aggregated from job_parts.fulfillment_status, populated in PR 4)
 - status_changed_at: TIMESTAMPTZ
 - started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
-- due_date: DATE, lead_time_days: INTEGER
+- due_date: DATE
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: jobs no longer carry part_id. A job ships one or more parts via job_parts.
 - NOTE: shipped_at column was dropped. Use the SQL helper
@@ -417,7 +408,6 @@ ALLOWED_TABLES = frozenset({
     "part_pricing_tiers",
     "parts_bom",
     "parts_unit_conversions",
-    "markup_rates",
     "quotes",
     "quote_line_items",
     "quote_materials",

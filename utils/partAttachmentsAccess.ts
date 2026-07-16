@@ -5,7 +5,7 @@ import {
   deleteFileFromStorage,
   getSignedUrl,
 } from '@/utils/storageHelpers';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import type { PartAttachment, PartAttachmentKind } from '@/types/part';
 
 /**
@@ -113,7 +113,7 @@ export async function uploadPartAttachment(
   const validationError = validatePartAttachmentFile(file);
   if (validationError) throw new Error(validationError);
 
-  const operator = await getCurrentOperator(companyId);
+  const operator = await getCurrentMember(companyId);
   if (!operator) {
     throw new Error('Could not identify your account — reload the page and try again.');
   }

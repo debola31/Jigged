@@ -30,7 +30,6 @@ import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
-import PercentIcon from '@mui/icons-material/Percent';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
 import { AgGridReact } from 'ag-grid-react';
@@ -51,7 +50,6 @@ import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
 import { getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
-import BulkApplyMarkupRateDialog from '@/components/parts/BulkApplyMarkupRateDialog';
 import type { Part } from '@/types/part';
 
 // Augment Part with the "would the quote form accept this without a
@@ -90,8 +88,6 @@ export default function PartsPage() {
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
-
-  const [markupDialogOpen, setMarkupDialogOpen] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -449,13 +445,6 @@ export default function PartsPage() {
               selectedCount={selectedIds.length}
             />
             <Button
-              variant="outlined"
-              startIcon={<PercentIcon />}
-              onClick={() => setMarkupDialogOpen(true)}
-            >
-              Set markup ({selectedIds.length})
-            </Button>
-            <Button
               variant="contained"
               color="error"
               startIcon={<DeleteIcon />}
@@ -549,35 +538,6 @@ export default function PartsPage() {
           </Box>
         </Card>
       )}
-
-      <BulkApplyMarkupRateDialog
-        open={markupDialogOpen}
-        onClose={() => setMarkupDialogOpen(false)}
-        companyId={companyId}
-        partIds={selectedIds}
-        onApplied={({ updated, failed, priceUncomputed, rateName }) => {
-          setMarkupDialogOpen(false);
-          setSelectedIds([]);
-          if (gridRef.current?.api) gridRef.current.api.deselectAll();
-          // Three-state message: failed (rate write blew up), priceUncomputed
-          // (rate linked but unit_price=null — missing op rate or external
-          // pricing on the part itself), and clean success.
-          const partsWord = (n: number) => `${n} part${n === 1 ? '' : 's'}`;
-          const notes: string[] = [];
-          if (priceUncomputed > 0) {
-            notes.push(`${partsWord(priceUncomputed)} couldn't compute a price`);
-          }
-          if (failed > 0) {
-            notes.push(`${failed} failed`);
-          }
-          const suffix = notes.length > 0 ? ` (${notes.join(', ')})` : '';
-          setSnackbar({
-            open: true,
-            message: `Applied "${rateName}" to ${partsWord(updated)}${suffix}`,
-            severity: failed > 0 ? 'error' : 'success',
-          });
-        }}
-      />
 
       <Dialog
         open={deleteDialog.open}

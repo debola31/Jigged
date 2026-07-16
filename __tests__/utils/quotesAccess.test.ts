@@ -383,8 +383,7 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [{ part_id: 'part-1', order_quantity: 100 }],
-      lead_time_value: '14',
-      lead_time_unit: 'business_days',
+      lead_time_text: '14 business days',
       payment_terms: '',
       expiration_date: '',
     };
@@ -475,17 +474,42 @@ describe('quotesAccess utilities', () => {
       ).rejects.toThrow('Every part needs an order quantity greater than zero.');
     });
 
-    it('rejects a lead time that normalizes to > 3650 days', async () => {
-      // 5000 business days → ceil(5000 * 7/5) = 7000 calendar days.
-      await expect(
-        createQuote('company-1', { ...baseForm, lead_time_value: '5000' }),
-      ).rejects.toThrow('Lead time must be 3,650 days or fewer.');
+    it('persists free-text lead time verbatim', async () => {
+      const insertSpy = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: { id: 'quote-new', company_id: 'company-1' },
+            error: null,
+          }),
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) =>
+        table === 'quotes' ? { insert: insertSpy } : mockQueryBuilder,
+      );
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await createQuote('company-1', { ...baseForm, lead_time_text: '2–3 weeks' });
+      expect(insertSpy.mock.calls[0][0].lead_time_text).toBe('2–3 weeks');
     });
 
-    it('rejects a negative lead time value', async () => {
-      await expect(
-        createQuote('company-1', { ...baseForm, lead_time_value: '-5' }),
-      ).rejects.toThrow('Lead time must be a whole number');
+    it('stores a blank lead time as null', async () => {
+      const insertSpy = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: { id: 'quote-new', company_id: 'company-1' },
+            error: null,
+          }),
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) =>
+        table === 'quotes' ? { insert: insertSpy } : mockQueryBuilder,
+      );
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await createQuote('company-1', { ...baseForm, lead_time_text: '   ' });
+      expect(insertSpy.mock.calls[0][0].lead_time_text).toBeNull();
     });
   });
 
@@ -496,8 +520,7 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [{ part_id: 'part-1', order_quantity: 200 }],
-      lead_time_value: '14',
-      lead_time_unit: 'business_days',
+      lead_time_text: '14 business days',
       payment_terms: '',
       expiration_date: '',
     };
@@ -879,8 +902,7 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [],
-      lead_time_value: '14',
-      lead_time_unit: 'business_days',
+      lead_time_text: '14 business days',
       payment_terms: '',
       expiration_date: '',
     };
@@ -1137,8 +1159,7 @@ describe('quotesAccess utilities', () => {
       billing_address_id: '',
       shipping_address_id: '',
       parts: [{ part_id: 'part-1', order_quantity: 10 }],
-      lead_time_value: '14',
-      lead_time_unit: 'business_days',
+      lead_time_text: '14 business days',
       payment_terms: '',
       expiration_date,
     });

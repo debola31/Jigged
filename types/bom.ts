@@ -15,6 +15,13 @@ export interface BomLine {
   quantity: number;
   unit: string;
   sequence: number;
+  /**
+   * When true, the consuming order draws `ceil(order_qty × per-part quantity)`
+   * whole units of this material (discrete stock — a steel strip you can't cut
+   * a fraction of). When false (default), consumption is fractional. Drives the
+   * ceiling branch in `compute_part_cost_at_qty` / `calculateRoutingCost`.
+   */
+  consume_whole_units: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -23,6 +30,7 @@ export interface BomLineFormData {
   child_part_id: string;
   quantity: string;
   unit: string;
+  consume_whole_units: boolean;
 }
 
 export interface BomLineWithChildPart extends BomLine {
@@ -33,6 +41,13 @@ export interface BomLineWithChildPart extends BomLine {
     primary_unit: string | null;
     is_stocked: boolean;
     source: 'made' | 'bought';
+    /**
+     * Batch qty at which this (made) child's cost is amortized when consumed as
+     * a material — NULL = value at the cascaded consumed qty (default). Lets the
+     * BOM panel show a pinned child's fixed cost basis. Always null for bought
+     * children.
+     */
+    costing_batch_quantity: number | null;
   };
 }
 
@@ -52,6 +67,7 @@ export const EMPTY_BOM_FORM: BomLineFormData = {
   child_part_id: '',
   quantity: '',
   unit: '',
+  consume_whole_units: false,
 };
 
 export function bomLineToFormData(bomLine: BomLine): BomLineFormData {
@@ -59,5 +75,6 @@ export function bomLineToFormData(bomLine: BomLine): BomLineFormData {
     child_part_id: bomLine.child_part_id,
     quantity: String(bomLine.quantity),
     unit: bomLine.unit,
+    consume_whole_units: bomLine.consume_whole_units,
   };
 }

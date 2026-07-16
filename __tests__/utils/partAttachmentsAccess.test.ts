@@ -42,7 +42,7 @@ vi.mock('@/utils/storageHelpers', () => ({
 
 const { mockGetCurrentOperator } = vi.hoisted(() => ({ mockGetCurrentOperator: vi.fn() }));
 vi.mock('@/utils/operatorAccess', () => ({
-  getCurrentOperator: (...a: unknown[]) => mockGetCurrentOperator(...a),
+  getCurrentMember: (...a: unknown[]) => mockGetCurrentOperator(...a),
 }));
 
 import {

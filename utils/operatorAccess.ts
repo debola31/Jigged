@@ -5,8 +5,10 @@
  * supabase.auth.signInWithPassword(). Most operations now use direct
  * Supabase client calls with RLS policies.
  *
- * NOTE: Operators are stored in user_company_access with role='operator'.
- * The legacy 'operators' table is deprecated.
+ * NOTE: There is no dedicated "operators" table. Shop-floor users are
+ * user_company_access rows with role='operator', but admins/users are company
+ * members too and can act in the operator view just the same (see
+ * getCurrentMember — deliberately not role-filtered).
  *
  * Multi-part jobs (refactor): a job carries N child job_parts, and ALL
  * operator-facing work is keyed on `job_part_id`. The operator-jobs list at
@@ -18,12 +20,6 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
-import type { Database } from '@/types/database';
-
-// Update payload type for user_company_access. Used where the patch
-// object is built conditionally and would otherwise be inferred as
-// Record<string, unknown>, which the typed .update(...) rejects.
-type UserCompanyAccessUpdate = Database['public']['Tables']['user_company_access']['Update'];
 import type {
   OperatorJob,
   OperatorPlantJob,
@@ -38,93 +34,18 @@ import type {
   PartPreviousNote,
 } from '@/types/operator';
 
-// Operator type from user_company_access. role and created_at are
-// nullable in the DB schema (text DEFAULT 'operator'; timestamptz
-// DEFAULT now()) but never null at read time because of the defaults.
-// Mirroring the DB shape here keeps the typed select returns happy
-// without papering the gap with per-site casts.
-interface OperatorAccess {
-  id: string;
-  user_id: string;
-  company_id: string;
-  role: string | null;
-  name: string | null;
-  created_at: string | null;
-}
-
 // ============================================================================
-// ADMIN OPERATOR CRUD (uses user_company_access)
+// CURRENT USER (the signed-in company member — ANY role)
 // ============================================================================
 
-export async function listOperators(companyId: string): Promise<OperatorAccess[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .select('id, company_id, user_id, name, role, created_at')
-    .eq('company_id', companyId)
-    .eq('role', 'operator')
-    .order('name');
-
-  if (error) throw new Error(error.message);
-  return data || [];
-}
-
-export async function getOperator(operatorId: string): Promise<OperatorAccess> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .select('id, company_id, user_id, name, role, created_at')
-    .eq('id', operatorId)
-    .eq('role', 'operator')
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-export async function updateOperator(
-  operatorId: string,
-  request: { name?: string }
-): Promise<OperatorAccess> {
-  const supabase = getSupabase();
-
-  const updates: UserCompanyAccessUpdate = {};
-  if (request.name !== undefined) updates.name = request.name;
-
-  const { data, error } = await supabase
-    .from('user_company_access')
-    .update(updates)
-    .eq('id', operatorId)
-    .select('id, company_id, user_id, name, role, created_at')
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data;
-}
-
-export async function deleteOperator(operatorId: string): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('user_company_access')
-    .delete()
-    .eq('id', operatorId);
-
-  if (error) {
-    console.error('Error deleting operator:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
-        entity: 'operator',
-        fallback: 'Failed to remove operator.',
-      }),
-    );
-  }
-}
-
-// ============================================================================
-// OPERATOR SESSION HELPERS
-// ============================================================================
-
-export async function getCurrentOperator(companyId: string): Promise<{
+/**
+ * The signed-in user's user_company_access row for this company — used wherever
+ * we need the acting member's account id (job-note author, operation completer,
+ * activity attribution). Intentionally NOT role-filtered: operators, users, and
+ * admins are all company members, and every one of them can act in the operator
+ * view. (There is no separate "operators" table — that legacy table is gone.)
+ */
+export async function getCurrentMember(companyId: string): Promise<{
   id: string;
   name: string | null;
   user_id: string;
@@ -134,14 +55,14 @@ export async function getCurrentOperator(companyId: string): Promise<{
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
-  const { data: operatorAccess } = await supabase
+  const { data: member } = await supabase
     .from('user_company_access')
     .select('id, name, user_id')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
 
-  return operatorAccess;
+  return member;
 }
 
 // ============================================================================
@@ -222,15 +143,15 @@ async function getReadyOperationsForStation(
  */
 export async function getOperatorJobs(
   companyId: string,
-  operationTypeId?: string,
+  workCenterId?: string,
 ): Promise<OperatorJob[]> {
-  if (!operationTypeId) {
+  if (!workCenterId) {
     // No station selected — the station-scoped list needs a station. The
     // whole-plant view is getAllStationsOperatorJobs() instead.
     return [];
   }
 
-  const readyRows = await getReadyOperationsForStation(companyId, operationTypeId);
+  const readyRows = await getReadyOperationsForStation(companyId, workCenterId);
   return buildOperatorJobs(readyRows);
 }
 
@@ -338,6 +259,172 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       operation_status: row.op_status,
       operations_total: progress.total,
       operations_completed: progress.done,
+    };
+  });
+}
+
+// ============================================================================
+// COMPLETED JOB LIST (the jobs page "Completed" filter)
+// ============================================================================
+
+// Cap the "recently completed" list. An operator reaches it to undo a mis-tapped
+// completion, so what matters is the LATEST completions, not full history —
+// ordered by completed_at desc, this is "the most recent N completed steps".
+const COMPLETED_LIST_LIMIT = 50;
+
+// A completed job_operation shaped as a ReadyRow (so buildOperatorJobs can enrich
+// it exactly like the ready list), plus the two fields the completed list adds:
+// which station it ran at and when it was completed.
+interface CompletedOpRow {
+  ready: ReadyRow;
+  work_center_id: string | null;
+  completed_at: string | null;
+}
+
+// Fetch the most-recently-completed operations across the given station(s),
+// joined to their part/job for the display fields buildOperatorJobs needs.
+// Company isolation is enforced two ways: the explicit jobs.company_id filter and
+// work_center_id ∈ this company's stations.
+async function getCompletedOperationRows(
+  companyId: string,
+  workCenterIds: string[],
+): Promise<CompletedOpRow[]> {
+  if (workCenterIds.length === 0) return [];
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_operations')
+    .select(`
+      id, job_id, job_part_id, operation_name, status, completed_at, work_center_id,
+      job_parts!inner(
+        quantity, part_id,
+        parts(part_name, description),
+        jobs!inner(job_number, company_id)
+      )
+    `)
+    .eq('status', 'completed')
+    .eq('job_parts.jobs.company_id', companyId)
+    .in('work_center_id', workCenterIds)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(COMPLETED_LIST_LIMIT);
+
+  if (error) {
+    // Mirror getReadyOperationsForStation: surface the failure instead of
+    // swallowing it into an empty list (the jobs page shows it in an Alert).
+    throw new Error(`Failed to load completed operations: ${error.message}`);
+  }
+
+  type Row = {
+    id: string;
+    job_id: string;
+    job_part_id: string;
+    operation_name: string;
+    status: string;
+    completed_at: string | null;
+    work_center_id: string | null;
+    job_parts:
+      | {
+          quantity: number;
+          part_id: string;
+          parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
+        }
+      | {
+          quantity: number;
+          part_id: string;
+          parts: { part_name: string; description: string | null } | { part_name: string; description: string | null }[] | null;
+          jobs: { job_number: string } | { job_number: string }[] | null;
+        }[]
+      | null;
+  };
+
+  return ((data ?? []) as Row[]).map((r) => {
+    const partJoin = Array.isArray(r.job_parts) ? r.job_parts[0] : r.job_parts;
+    const partsJoin = partJoin
+      ? Array.isArray(partJoin.parts) ? partJoin.parts[0] : partJoin.parts
+      : null;
+    const jobJoin = partJoin
+      ? Array.isArray(partJoin.jobs) ? partJoin.jobs[0] : partJoin.jobs
+      : null;
+    return {
+      ready: {
+        job_id: r.job_id,
+        job_part_id: r.job_part_id,
+        job_operation_id: r.id,
+        operation_name: r.operation_name,
+        op_status: r.status,
+        job_number: jobJoin?.job_number ?? '',
+        part_id: partJoin?.part_id ?? '',
+        part_name: partsJoin?.part_name ?? '',
+        part_description: partsJoin?.description ?? null,
+        part_quantity: partJoin?.quantity ?? 0,
+      },
+      work_center_id: r.work_center_id,
+      completed_at: r.completed_at,
+    };
+  });
+}
+
+/**
+ * Recently completed work at ONE station — backs the jobs list's "Completed"
+ * filter under the My Station scope. One card per job_part (its most recent
+ * completed operation at the station), most-recent first, so an operator can
+ * reopen a step they finished by mistake and undo it. Mirrors getOperatorJobs
+ * (the ready list) but keyed on completed operations instead of the readiness RPC.
+ */
+export async function getCompletedOperatorJobs(
+  companyId: string,
+  workCenterId?: string,
+): Promise<OperatorJob[]> {
+  if (!workCenterId) return [];
+  const rows = await getCompletedOperationRows(companyId, [workCenterId]);
+
+  // Dedupe by job_part (rows are completed_at-desc, so the first seen per part is
+  // its most recent completion) → one card per part, like the ready list.
+  const seen = new Set<string>();
+  const unique = rows.filter((r) => {
+    if (seen.has(r.ready.job_part_id)) return false;
+    seen.add(r.ready.job_part_id);
+    return true;
+  });
+
+  const jobs = await buildOperatorJobs(unique.map((r) => r.ready));
+  // buildOperatorJobs preserves input order (1:1 over readyRows), so index-align
+  // the completed_at timestamps back onto the enriched rows.
+  return jobs.map((job, i) => ({ ...job, completed_at: unique[i].completed_at }));
+}
+
+/**
+ * Whole-plant ("All Stations") "Completed" list: recently completed work across
+ * every station, grouped by station in the UI. One card per (job_part, station),
+ * since a part can have completed work at more than one station.
+ */
+export async function getAllStationsCompletedOperatorJobs(
+  companyId: string,
+  stations: Station[],
+): Promise<OperatorPlantJob[]> {
+  const stationIds = stations.map((s) => s.id);
+  if (stationIds.length === 0) return [];
+  const rows = await getCompletedOperationRows(companyId, stationIds);
+
+  const nameById = new Map(stations.map((s) => [s.id, s.name] as const));
+  const seen = new Set<string>();
+  const unique = rows.filter((r) => {
+    const key = `${r.ready.job_part_id}:${r.work_center_id ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const jobs = await buildOperatorJobs(unique.map((r) => r.ready));
+  return jobs.map((job, i) => {
+    const wcId = unique[i].work_center_id;
+    return {
+      ...job,
+      completed_at: unique[i].completed_at,
+      work_center_id: wcId,
+      work_center_name: wcId ? nameById.get(wcId) ?? null : null,
     };
   });
 }
@@ -543,7 +630,7 @@ export async function completeOperation(
 
   const { data: op, error: opError } = await supabase
     .from('job_operations')
-    .select('id, job_id, job_part_id, started_at')
+    .select('id, job_id, job_part_id')
     .eq('id', jobOperationId)
     .single();
   if (opError || !op) throw new Error('Operation not found.');
@@ -560,7 +647,6 @@ export async function completeOperation(
       status: 'completed',
       completed_at: now,
       completed_by: user?.id ?? null,
-      started_at: op.started_at ?? now,
     })
     .eq('id', jobOperationId);
 
@@ -982,7 +1068,7 @@ export async function getJobNotes(
 
 /**
  * Append a note to the job feed. `authorId` is the author's user_company_access
- * id (from getCurrentOperator); RLS requires it to match the caller's access row.
+ * id (from getCurrentMember); RLS requires it to match the caller's access row.
  *
  * `opts.jobOperationId` is the optional step tag. The operation page always
  * passes it (with `jobPartId`) so operator captures are step-scoped; the

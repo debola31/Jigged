@@ -108,3 +108,16 @@ export function quantityUnitSuffix(unit: string | null | undefined): string | nu
   if (STANDARD_UNITS_BY_KEY[unit]?.category === 'count') return null;
   return unitShortLabel(unit);
 }
+
+/**
+ * Default whether a new BOM material line should consume whole units (ceiling)
+ * vs fractional, based on its unit of measure. Count units (each / pieces /
+ * dozen — discrete stock you can't cut a fraction of) default to whole-unit;
+ * length / weight / volume / area / time default to fractional. Any
+ * unrecognized / custom unit falls back to `false` (fractional) — the
+ * no-behavior-change side, so the default is never a guess on a money path.
+ */
+export function defaultConsumeWholeUnits(unit: string | null | undefined): boolean {
+  if (!unit) return false;
+  return STANDARD_UNITS_BY_KEY[unit]?.category === 'count';
+}

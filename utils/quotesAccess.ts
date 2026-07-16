@@ -17,8 +17,7 @@ import type {
   QuoteLineItem,
   CompanyMember,
 } from '@/types/quote';
-import { isExpirationDatePast, isQuoteExpired, leadTimeToDays } from '@/types/quote';
-import type { LeadTimeUnit } from '@/types/quote';
+import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
@@ -30,6 +29,7 @@ import {
   deleteLineItem,
 } from '@/utils/quoteLineItemsAccess';
 import { isDrifted, isDriftedDegraded } from '@/utils/quotePricingResolver';
+import { escapeIlikePattern } from '@/utils/searchFilter';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
@@ -45,47 +45,6 @@ function asQuote(row: Record<string, unknown> & { status: string }): Quote {
 /** Trim a form string to a value or NULL (empty/whitespace → NULL). */
 function nullIfBlank(s: string | null | undefined): string | null {
   return s && s.trim() !== '' ? s.trim() : null;
-}
-
-/**
- * Resolve the lead-time columns to persist from the form payload. Returns the
- * raw (value, unit) the user stated plus the normalized calendar-day count
- * (lead_time_days) that convertQuoteToJob reads. Throws on an out-of-range
- * value so create/update share one validation path.
- */
-function normalizeLeadTime(formData: QuoteFormData): {
-  leadTimeValue: number | null;
-  leadTimeUnit: LeadTimeUnit;
-  leadTimeDays: number | null;
-} {
-  const unit = formData.lead_time_unit;
-  if (unit === '') {
-    // The form requires an explicit unit; guard the shared save path too so a
-    // missing unit can never silently normalize to a wrong day count.
-    throw new Error('Select a lead time unit.');
-  }
-  const raw = formData.lead_time_value;
-  const value = raw !== '' && raw !== null && raw !== undefined ? Number(raw) : null;
-  if (value !== null && (!Number.isFinite(value) || value < 0 || !Number.isInteger(value))) {
-    throw new Error('Lead time must be a whole number of days/weeks.');
-  }
-  const leadTimeDays = leadTimeToDays(value, unit);
-  if (leadTimeDays !== null && leadTimeDays > 3650) {
-    throw new Error('Lead time must be 3,650 days or fewer.');
-  }
-  return { leadTimeValue: value, leadTimeUnit: unit, leadTimeDays };
-}
-
-/**
- * Sanitize search string for use in LIKE/ILIKE queries
- * Escapes SQL wildcards to prevent unintended pattern matching
- */
-function sanitizeSearchString(search: string): string {
-  return search
-    .replace(/\\/g, '\\\\')
-    .replace(/%/g, '\\%')
-    .replace(/_/g, '\\_')
-    .substring(0, 100);
 }
 
 /**
@@ -171,7 +130,7 @@ export async function getQuotes(
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
   if (filters.search?.trim()) {
-    const sanitized = sanitizeSearchString(filters.search.trim());
+    const sanitized = escapeIlikePattern(filters.search.trim());
     query = query.ilike('quote_number', `%${sanitized}%`);
   }
 
@@ -220,7 +179,7 @@ export async function getAllQuotes(
     if (filters.customerId) query = query.eq('customer_id', filters.customerId);
     if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
     if (filters.search?.trim()) {
-      const sanitized = sanitizeSearchString(filters.search.trim());
+      const sanitized = escapeIlikePattern(filters.search.trim());
       query = query.ilike('quote_number', `%${sanitized}%`);
     }
 
@@ -259,7 +218,7 @@ export async function getQuotesCount(
   if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.search?.trim()) {
-    const sanitized = sanitizeSearchString(filters.search.trim());
+    const sanitized = escapeIlikePattern(filters.search.trim());
     query = query.ilike('quote_number', `%${sanitized}%`);
   }
 
@@ -376,8 +335,7 @@ export async function createQuote(
     }
   }
 
-  const { leadTimeValue, leadTimeUnit, leadTimeDays } = normalizeLeadTime(formData);
-
+  const leadTimeText = nullIfBlank(formData.lead_time_text);
   const expirationDate = formData.expiration_date || null;
   const paymentTerms = nullIfBlank(formData.payment_terms);
 
@@ -407,9 +365,7 @@ export async function createQuote(
       contact_id: nullIfEmpty(formData.contact_id),
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
-      lead_time_days: leadTimeDays,
-      lead_time_value: leadTimeValue,
-      lead_time_unit: leadTimeUnit,
+      lead_time_text: leadTimeText,
       payment_terms: paymentTerms,
       expiration_date: expirationDate,
       status: 'active',
@@ -533,7 +489,7 @@ export async function updateQuote(
     }
   }
 
-  const { leadTimeValue, leadTimeUnit, leadTimeDays } = normalizeLeadTime(formData);
+  const leadTimeText = nullIfBlank(formData.lead_time_text);
 
   // customer_po_number is not on the quote — it lives on jobs and is
   // captured during convertQuoteToJob (migration 20260526). updateQuote
@@ -557,9 +513,7 @@ export async function updateQuote(
       contact_id: nullIfEmpty(formData.contact_id),
       billing_address_id: nullIfEmpty(formData.billing_address_id),
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
-      lead_time_days: leadTimeDays,
-      lead_time_value: leadTimeValue,
-      lead_time_unit: leadTimeUnit,
+      lead_time_text: leadTimeText,
       payment_terms: nullIfBlank(formData.payment_terms),
       expiration_date: newExpiration,
       status: nextStatus,
@@ -927,6 +881,10 @@ async function writeCostSnapshotsForPart(
       unit: item.unit,
       cost_per_unit: item.cost_per_unit,
       line_cost: item.cost,
+      // Discrete count actually consumed across the order (ceil in whole-unit
+      // mode) so the itemized breakdown can explain a line whose per-part
+      // quantity × cost_per_unit no longer multiplies out to line_cost.
+      units_consumed: item.units_consumed,
     }));
     const { error } = await supabase.from('quote_materials').insert(matRows);
     if (error) throw error;
@@ -1023,13 +981,12 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
 
 export interface ConvertToJobOptions {
   /**
-   * Ship-by date for the new job. ISO date string (yyyy-mm-dd). When omitted,
-   * defaults to today + the quote's lead_time_days; when the quote has no
-   * lead time and no override is provided, the job is created without a due
-   * date. The quote's lead_time_days is always carried over to the job
-   * as the promise snapshot — it is not overridable here.
+   * Ship-by date for the new job. ISO date string (yyyy-mm-dd). REQUIRED:
+   * lead time is now free text and no longer implies a date, so the due date
+   * is entered manually in the Convert-to-Job modal and rejected here if
+   * empty/missing.
    */
-  dueDate?: string | null;
+  dueDate: string;
   /**
    * Customer-issued PO number, captured at conversion time. The customer
    * doesn't typically have a PO at quote creation — it's issued when they
@@ -1175,18 +1132,12 @@ export async function convertQuoteToJob(
     throw new Error('Authentication required. Please log in and try again.');
   }
 
-  // The lead time the customer was quoted is the promise — copy it to the job
-  // as a historical snapshot, never overridden here.
-  const promisedLeadTime = quote.lead_time_days;
-
-  // Due date resolution: explicit override > today + quoted lead time > null
-  let dueDate: string | null = null;
-  if (options.dueDate !== undefined && options.dueDate !== null && options.dueDate !== '') {
-    dueDate = options.dueDate;
-  } else if (promisedLeadTime !== null && promisedLeadTime !== undefined) {
-    const d = new Date();
-    d.setDate(d.getDate() + promisedLeadTime);
-    dueDate = d.toISOString().slice(0, 10);
+  // The due date is entered manually at conversion — lead time is now free
+  // text and no longer implies a date. Required: reject an empty/invalid value
+  // before any write (the Convert-to-Job modal also enforces not-in-the-past).
+  const dueDate = (options.dueDate ?? '').trim();
+  if (dueDate === '' || Number.isNaN(new Date(dueDate).getTime())) {
+    throw new Error('A due date is required to create the job.');
   }
 
   // Job number mirrors the quote number (Q-0141 → J-0141). Manual jobs are
@@ -1203,7 +1154,6 @@ export async function convertQuoteToJob(
       production_status: 'not_started',
       fulfillment_status: 'unshipped',
       due_date: dueDate,
-      lead_time_days: promisedLeadTime,
       customer_po_number: customerPoNumber,
       // Carry the quote's billing/shipping address + contact onto the job so
       // it has a shippable address of its own. Editable on the job afterwards

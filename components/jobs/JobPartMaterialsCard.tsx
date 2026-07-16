@@ -21,15 +21,25 @@ import type { BomLineWithChildPart } from '@/types/bom';
 interface JobPartMaterialsCardProps {
   /** The made part this job_part produces (job_parts.part_id). */
   partId: string;
+  /**
+   * The job_part order quantity. When provided, each material row also shows
+   * the total this job draws — ceil(order_qty × per-part qty) for whole-unit
+   * lines — so the shop floor never sees a meaningless "0.05 strips per unit".
+   */
+  orderQuantity?: number;
 }
+
+const formatMatQty = (n: number): string =>
+  n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 /**
  * Read-only materials list for a job part, sourced LIVE from the part's BOM
  * (parts_bom) rather than the job_materials snapshot. Material consumption is
  * no longer tracked per job — the part BOM is the source of truth, so the Job
- * page reflects the current BOM. Quantities are per unit of the part.
+ * page reflects the current BOM. Quantities are per unit of the part; when the
+ * order quantity is known, each row also shows the whole-order total.
  */
-export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardProps) {
+export default function JobPartMaterialsCard({ partId, orderQuantity }: JobPartMaterialsCardProps) {
   const params = useParams();
   const companyId = params.companyId as string;
   const [lines, setLines] = useState<BomLineWithChildPart[] | null>(null);
@@ -75,6 +85,15 @@ export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardPro
           <List dense disablePadding>
             {lines.map((line, idx) => {
               const childPartId = line.child_part?.id;
+              // Whole-order draw: ceil for discrete stock (a strip you can't cut
+              // a fraction of), else the fractional total. Shown so "0.05 strips
+              // per unit" is never the only number on the floor.
+              const jobNeeds =
+                orderQuantity && orderQuantity > 0
+                  ? line.consume_whole_units
+                    ? Math.ceil(orderQuantity * line.quantity)
+                    : orderQuantity * line.quantity
+                  : null;
               const text = (
                 <ListItemText
                   primary={
@@ -83,9 +102,17 @@ export default function JobPartMaterialsCard({ partId }: JobPartMaterialsCardPro
                     </Typography>
                   }
                   secondary={
-                    <Typography variant="caption" color="text.secondary">
-                      {line.quantity} {line.unit}
-                    </Typography>
+                    <>
+                      <Typography variant="caption" color="text.secondary" component="span" sx={{ display: 'block' }}>
+                        {line.quantity} {line.unit} / part
+                        {line.consume_whole_units ? ' · whole units' : ''}
+                      </Typography>
+                      {jobNeeds !== null && (
+                        <Typography variant="caption" color="text.primary" component="span" sx={{ display: 'block', fontWeight: 500 }}>
+                          This job needs {formatMatQty(jobNeeds)} {line.unit}
+                        </Typography>
+                      )}
+                    </>
                   }
                 />
               );

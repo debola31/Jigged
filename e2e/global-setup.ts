@@ -290,16 +290,15 @@ async function ensurePart(
       .from('part_procurement_tiers')
       .select('id')
       .eq('part_id', partId)
-      .is('vendor_id', null)
       .eq('min_quantity', 1)
       .maybeSingle();
     if (tierLookupErr) {
       throw new Error(`tier lookup failed (${spec.part_name}): ${tierLookupErr.message}`);
     }
     if (!existingTier) {
+      // Part-level tier sheet — vendor is a label on the part, not a tier column.
       const { error: tierErr } = await supabase.from('part_procurement_tiers').insert({
         part_id: partId,
-        vendor_id: null,
         min_quantity: 1,
         cost_per_unit: spec.cost_per_unit,
       });

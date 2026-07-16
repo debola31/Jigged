@@ -297,7 +297,7 @@ export default function WorkCenterDetailPage() {
                 </Typography>
                 <Divider sx={{ mb: 2 }} />
                 <StationQRCode
-                  operationTypeId={workCenter.id}
+                  workCenterId={workCenter.id}
                   operationName={workCenter.name}
                   operationCode={metadataCode}
                   companyId={companyId}

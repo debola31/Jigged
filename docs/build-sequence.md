@@ -418,7 +418,7 @@ Phase 0 is complete when the pilot shop owner can:
   | quantity | Integer | Yes | Number of units quoted |
   | unit_price | Decimal | No | Price per unit |
   | total_price | Decimal | No | Total quoted price (quantity × unit_price) |
-  | estimated_lead_time_days | Integer | No | Estimated days to complete |
+  | estimated_lead_time | Text | No | Lead time as free text (e.g. "2–3 weeks") — no longer a numeric day count |
   | valid_until | Date | No | Quote expiration date |
   | status | Text | Yes | pending_approval, approved, rejected, expired |
   | converted_to_job_id | UUID (FK) | No | Link to job when converted |
@@ -509,7 +509,7 @@ Phase 0 is complete when the pilot shop owner can:
 
   ▸ **Timeline**
 
-  - Estimated Lead Time (days)
+  - Lead time (free text)
 
   - Valid Until (date picker)
 

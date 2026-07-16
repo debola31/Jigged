@@ -36,7 +36,6 @@ Jigged/
 │       ├── jobs/                  # No /jobs/new — jobs come from quote conversion
 │       ├── work-centers/          # Replaces the old "Operations" module
 │       ├── vendors/
-│       ├── markup-rates/
 │       └── shipments/             # Feature-flagged per tenant
 │
 ├── components/

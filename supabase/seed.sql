@@ -236,16 +236,18 @@ insert into public.parts (id, company_id, part_name, description, source, is_sto
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'in',0,null,null)
 on conflict (id) do nothing;
 
--- Procurement tiers for bought parts (so compute_part_cost_at_qty resolves a cost).
-insert into public.part_procurement_tiers (part_id, vendor_id, min_quantity, cost_per_unit) values
-  ('60000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',1,6.4),
-  ('60000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001',1,4.1),
-  ('60000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000001',1,7.85),
-  ('60000000-0000-0000-0000-000000000004','30000000-0000-0000-0000-000000000004',1,1.25),
-  ('60000000-0000-0000-0000-000000000005','30000000-0000-0000-0000-000000000002',1,0.18),
-  ('60000000-0000-0000-0000-000000000006','30000000-0000-0000-0000-000000000002',1,0.07),
-  ('60000000-0000-0000-0000-000000000007','30000000-0000-0000-0000-000000000002',1,0.09),
-  ('60000000-0000-0000-0000-000000000008','30000000-0000-0000-0000-000000000005',1,14.5)
+-- Part-level procurement tiers for bought parts (so compute_part_cost_at_qty
+-- resolves a cost). Vendor is a supplier label on the part
+-- (parts.preferred_vendor_id, set above), not a dimension of the cost tiers.
+insert into public.part_procurement_tiers (part_id, min_quantity, cost_per_unit) values
+  ('60000000-0000-0000-0000-000000000001',1,6.4),
+  ('60000000-0000-0000-0000-000000000002',1,4.1),
+  ('60000000-0000-0000-0000-000000000003',1,7.85),
+  ('60000000-0000-0000-0000-000000000004',1,1.25),
+  ('60000000-0000-0000-0000-000000000005',1,0.18),
+  ('60000000-0000-0000-0000-000000000006',1,0.07),
+  ('60000000-0000-0000-0000-000000000007',1,0.09),
+  ('60000000-0000-0000-0000-000000000008',1,14.5)
 on conflict do nothing;
 
 -- BOM edges (parent_part_id → child_part_id, qty, sequence 10/20/…; unit 'ea').
@@ -338,6 +340,30 @@ insert into public.part_pricing_tiers (part_id, company_id, sequence, quantity, 
   ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222',2,10,47),
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222',1,1,70),
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222',2,36,55)
+on conflict do nothing;
+
+-- Every part in a BOM tree needs its own markup to be quotable (each part owns
+-- its markup — the company-wide default-rate layer was removed in
+-- 20260713011616, and get_priceable_part_ids/compute_part_cost_explain now
+-- require a non-null markup_percent). Give the bought parts and sub-assemblies
+-- a single default tier so the sellable products above resolve as priceable.
+insert into public.part_pricing_tiers (part_id, company_id, sequence, quantity, markup_percent) values
+  -- Bought parts (sold on directly at times, and required for tree priceability).
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222',1,1,35),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222',1,1,40),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222',1,1,35),
+  -- Sub-assemblies / made intermediates.
+  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222',1,1,45),
+  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222',1,1,45)
 on conflict do nothing;
 
 -- ── Inventory receipts (one dated addition per stocked part, ~120 days ago) ──
@@ -435,16 +461,15 @@ begin
       i := i + 1;
       if p_status = 'completed' then
         update public.job_operations set status='completed',
-          started_at = now() - ((p_anchor + (n - i + 1)*2)||' days')::interval,
           completed_at = now() - ((p_anchor + (n - i + 1)*2 - 1)||' days')::interval,
           completed_by = '11111111-1111-1111-1111-111111111111' where id = op.id;
       elsif p_status = 'in_progress' then
         if i = 1 then
           update public.job_operations set status='completed',
-            started_at = now() - ((p_anchor+3)||' days')::interval, completed_at = now() - ((p_anchor+2)||' days')::interval,
+            completed_at = now() - ((p_anchor+2)||' days')::interval,
             completed_by='11111111-1111-1111-1111-111111111111' where id = op.id;
         elsif i = 2 then
-          update public.job_operations set status='in_progress', started_at = now() - ((p_anchor+1)||' days')::interval where id = op.id;
+          update public.job_operations set status='in_progress' where id = op.id;
         end if;
       end if;
     end loop;
@@ -541,9 +566,9 @@ begin
   select id into v_contact from public.customer_contacts where customer_id = p_customer and is_primary limit 1;
   v_created := now() - (p_created||' days')::interval;
   insert into public.quotes (company_id, quote_number, customer_id, billing_address_id, shipping_address_id, contact_id,
-    status, lead_time_days, lead_time_value, lead_time_unit, payment_terms, expiration_date, created_by, created_at, status_changed_at)
+    status, lead_time_text, payment_terms, expiration_date, created_by, created_at, status_changed_at)
   values ('22222222-2222-2222-2222-222222222222', '', p_customer, v_bill, v_ship, v_contact,
-    p_status, p_lead, p_lead, 'calendar_days', 'Net 30', (now() + (p_exp||' days')::interval)::date,
+    p_status, p_lead || ' days', 'Net 30', (now() + (p_exp||' days')::interval)::date,
     '11111111-1111-1111-1111-111111111111', v_created, v_created)
   returning id into v_id;
   return v_id;
@@ -557,9 +582,9 @@ begin
   perform pg_temp.add_quote_line(q, '60000000-0000-0000-0000-000000000015', 10, 10);
   select quote_number into v_num from public.quotes where id = q;
   v_created := now() - interval '172 days';
-  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, lead_time_days, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
+  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
   select '22222222-2222-2222-2222-222222222222', q, '50000000-0000-0000-0000-000000000001', replace(v_num,'Q-','J-'), 'not_started', 'unshipped',
-         (now() - interval '130 days')::date, 14, 'PO-NW-44120', billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
+         (now() - interval '130 days')::date, 'PO-NW-44120', billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
   from public.quotes where id = q
   returning id into j;
   perform pg_temp.add_job_part(j, ql.part_id, 10, ql.quantity, ql.unit_price, ql.id, v_created)
@@ -597,9 +622,9 @@ declare v_job uuid; v_num text; v_created timestamptz; ql record;
 begin
   v_created := now() - (p_created||' days')::interval;
   select 'J-'||regexp_replace(quote_number,'^Q-','') into v_num from public.quotes where id = p_quote;
-  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, lead_time_days, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
+  insert into public.jobs (company_id, quote_id, customer_id, job_number, production_status, fulfillment_status, due_date, customer_po_number, billing_address_id, shipping_address_id, contact_id, created_by, created_at)
   select '22222222-2222-2222-2222-222222222222', p_quote, customer_id, v_num, 'not_started', 'unshipped',
-         (now() + (p_due||' days')::interval)::date, 14, p_po, billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
+         (now() + (p_due||' days')::interval)::date, p_po, billing_address_id, shipping_address_id, contact_id, '11111111-1111-1111-1111-111111111111', v_created
   from public.quotes where id = p_quote
   returning id into v_job;
   for ql in select id, part_id, quantity, unit_price, sequence from public.quote_line_items where quote_id = p_quote order by sequence loop

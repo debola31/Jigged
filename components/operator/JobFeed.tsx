@@ -18,7 +18,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CloseIcon from '@mui/icons-material/Close';
-import { getJobNotes, addJobNote, getCurrentOperator } from '@/utils/operatorAccess';
+import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
 import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
@@ -118,7 +118,7 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
   useEffect(() => {
     if (!showComposer) return;
     let active = true;
-    getCurrentOperator(companyId).then((op) => {
+    getCurrentMember(companyId).then((op) => {
       if (active && op) setOperatorId(op.id);
     });
     return () => {

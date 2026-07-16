@@ -32,21 +32,11 @@ import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
+import { orIlikeValue } from '@/utils/searchFilter';
 import {
   getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
 } from '@/utils/quickbooksAccess';
-
-/**
- * Sanitize search string for use in LIKE/ILIKE queries
- */
-function sanitizeSearchString(search: string): string {
-  return search
-    .replace(/\\/g, '\\\\')
-    .replace(/%/g, '\\%')
-    .replace(/_/g, '\\_')
-    .substring(0, 100);
-}
 
 /**
  * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
@@ -156,8 +146,7 @@ export async function getAllJobs(
       }
       query = query.in('id', ids);
     } else if (filters.search?.trim()) {
-      const sanitized = sanitizeSearchString(filters.search.trim());
-      query = query.or(`job_number.ilike.%${sanitized}%`);
+      query = query.or(`job_number.ilike.${orIlikeValue(filters.search.trim())}`);
     }
     if (filters.overdue) {
       // Single source of truth for the overdue predicate — see
@@ -551,7 +540,6 @@ export async function createJobFromPurchaseOrder(
     production_status: 'not_started',
     fulfillment_status: 'unshipped',
     due_date: input.due_date || null,
-    lead_time_days: null,
     customer_po_number: customerPoNumber,
     billing_address_id: billingAddressId,
     shipping_address_id: shippingAddressId,
@@ -1368,18 +1356,10 @@ export async function completeJobOperation(
   const { data: { user } } = await supabase.auth.getUser();
   const now = new Date().toISOString();
 
-  // Preserve an existing start stamp; back-fill it if the op was never started.
-  const { data: existing } = await supabase
-    .from('job_operations')
-    .select('started_at')
-    .eq('id', operationId)
-    .single();
-
   const updateData: JobOperationUpdate = {
     status: 'completed',
     completed_at: now,
     completed_by: user?.id || null,
-    started_at: existing?.started_at ?? now,
     updated_at: now,
   };
   if (data.notes !== undefined) updateData.notes = data.notes;
@@ -1424,7 +1404,6 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
     .from('job_operations')
     .update({
       status: 'pending',
-      started_at: null,
       completed_at: null,
       completed_by: null,
       updated_at: new Date().toISOString(),

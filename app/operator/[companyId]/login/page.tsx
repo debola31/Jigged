@@ -24,7 +24,7 @@ import { getCompany } from '@/utils/companyAccess';
  * Operator Login Page.
  *
  * Mobile-first email/password login using Supabase Auth.
- * Reads station (operation_type_id) from URL query param.
+ * Reads the station (work center id) from the ?station= URL query param.
  */
 export default function OperatorLoginPage() {
   const params = useParams();
@@ -144,7 +144,9 @@ export default function OperatorLoginPage() {
         .single();
 
       if (opError || !operatorAccess) {
-        await supabase.auth.signOut();
+        // Local scope — only clear this device's session; don't revoke the
+        // user's sessions on other devices.
+        await supabase.auth.signOut({ scope: 'local' });
         throw new Error('You do not have access to this company');
       }
 

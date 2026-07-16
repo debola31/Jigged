@@ -27,6 +27,9 @@ vi.mock('@/utils/quotesAccess', () => ({
 const getPartsForSelectByIds = vi.fn();
 vi.mock('@/utils/partsAccess', () => ({
   getPartsForSelectByIds: (...args: unknown[]) => getPartsForSelectByIds(...args),
+  // The form prices each row at base(orderQty) × markup; base comes from here.
+  // 40 × 25% markup = $50, matching the resolver stub below.
+  getComputedPartCost: vi.fn(async () => 40),
 }));
 
 // Customers: dropdown + defaults
@@ -45,12 +48,24 @@ vi.mock('@/utils/partPricingTiersAccess', () => ({
 }));
 
 vi.mock('@/utils/quotePricingResolver', () => ({
-  // Always-resolves stub so validation only blocks on the cases this file tests.
+  // Always-resolves stubs so validation only blocks on the cases this file tests.
   resolveTier: vi.fn(() => ({
     qty_break: 1,
     markup_percent: 25,
     unit_price: 50,
+    matched_tier_quantity: 1,
+    below_min: false,
   })),
+  resolveMarkupAtQty: vi.fn(() => ({
+    markup_percent: 25,
+    source_tier_id: 't1',
+    matched_tier_quantity: 1,
+    below_min: false,
+  })),
+  // Real cost-plus so base(40) × 25% = $50 shows in the row.
+  unitPriceFromBase: vi.fn((base: number | null, markup: number | null) =>
+    base === null || markup === null ? null : Math.round(base * (1 + markup / 100) * 100) / 100,
+  ),
 }));
 
 // Modal/autocomplete children — render nothing so the surface stays clean.
@@ -76,8 +91,7 @@ const initialBlank: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [],
-  lead_time_value: '',
-  lead_time_unit: 'business_days',
+  lead_time_text: '',
   payment_terms: '',
   expiration_date: '',
 };
@@ -88,8 +102,7 @@ const initialPopulated: QuoteFormData = {
   billing_address_id: '',
   shipping_address_id: '',
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
-  lead_time_value: '14',
-  lead_time_unit: 'business_days',
+  lead_time_text: '14 business days',
   // Payment terms are required to submit a quote, so the "populated/complete"
   // fixture carries one.
   payment_terms: 'Net 30',
@@ -155,7 +168,7 @@ describe('QuoteForm', () => {
     render(
       <QuoteForm
         mode="create"
-        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_value: '14' }}
+        initialData={{ ...initialBlank, customer_id: 'cust-1', lead_time_text: '2 weeks' }}
       />,
     );
     await waitFor(() => {
@@ -203,7 +216,7 @@ describe('QuoteForm', () => {
     const [companyId, payload] = createQuote.mock.calls[0];
     expect(companyId).toBe('test-company-id'); // from test-utils useParams mock
     expect(payload.customer_id).toBe('cust-1');
-    expect(payload.lead_time_value).toBe('14');
+    expect(payload.lead_time_text).toBe('14 business days');
     expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 5 }]);
 
     await waitFor(() => {

@@ -93,13 +93,6 @@ function getPageTitle(pathname: string): string {
     return 'Settings';
   }
 
-  // Check for markup-rates routes
-  if (segments.includes('markup-rates')) {
-    if (segments.includes('new')) return 'New Markup Rate';
-    if (segments.includes('edit')) return 'Edit Markup Rate';
-    return 'Markup Rates';
-  }
-
   // Check for vendors routes
   if (segments.includes('vendors')) {
     if (segments.includes('new')) return 'New Vendor';

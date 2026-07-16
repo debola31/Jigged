@@ -118,15 +118,33 @@ export default function QuoteCostBreakdownView({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {materials.map((mat) => (
-                  <TableRow key={mat.id}>
-                    <TableCell>{mat.item_name}</TableCell>
-                    <TableCell align="right">{mat.quantity}</TableCell>
-                    <TableCell align="right">{mat.unit ?? '—'}</TableCell>
-                    <TableCell align="right">{formatCurrency(mat.cost_per_unit)}</TableCell>
-                    <TableCell align="right">{formatCurrency(mat.line_cost)}</TableCell>
-                  </TableRow>
-                ))}
+                {materials.map((mat) => {
+                  // When whole-unit ceiling (or batch pinning) is in play, the
+                  // per-part qty × cost/unit no longer multiplies out to
+                  // line/unit — e.g. 0.05 strips × $109 ≠ $10.38 because the
+                  // order rounds up to whole strips. Surface the discrete count
+                  // that reconciles them so the row doesn't read as an error.
+                  const reconciles =
+                    mat.units_consumed == null ||
+                    Math.abs((mat.quantity ?? 0) * (mat.cost_per_unit ?? 0) - (mat.line_cost ?? 0)) <=
+                      0.005;
+                  return (
+                    <TableRow key={mat.id}>
+                      <TableCell>
+                        {mat.item_name}
+                        {!reconciles && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            {mat.units_consumed} {mat.unit ?? ''} consumed for this order (whole-unit)
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell align="right">{mat.quantity}</TableCell>
+                      <TableCell align="right">{mat.unit ?? '—'}</TableCell>
+                      <TableCell align="right">{formatCurrency(mat.cost_per_unit)}</TableCell>
+                      <TableCell align="right">{formatCurrency(mat.line_cost)}</TableCell>
+                    </TableRow>
+                  );
+                })}
                 <TableRow>
                   <TableCell colSpan={4} sx={{ fontWeight: 600 }}>
                     Total materials / unit

@@ -9,7 +9,7 @@ import {
   resolveScan,
   depleteStockAtLocation,
 } from '@/utils/inventoryLocationsAccess';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 
 const mockPush = vi.fn();
 
@@ -26,7 +26,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
 }));
 
 vi.mock('@/utils/operatorAccess', () => ({
-  getCurrentOperator: vi.fn(),
+  getCurrentMember: vi.fn(),
 }));
 
 // The bin view embeds modals that import partsAccess + jobsAccess
@@ -62,7 +62,7 @@ const renderPage = () => render(<OperatorBinViewPage />, { wrapper: ({ children 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (getCurrentOperator as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'op1', name: 'Sam', user_id: 'u1' });
+  (getCurrentMember as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'op1', name: 'Sam', user_id: 'u1' });
 });
 
 describe('OperatorBinViewPage', () => {

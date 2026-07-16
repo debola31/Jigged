@@ -13,7 +13,7 @@ import Snackbar from '@mui/material/Snackbar';
 import LogoutIcon from '@mui/icons-material/Logout';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import FeedbackDialog from '@/components/feedback/FeedbackDialog';
-import { getCurrentOperator } from '@/utils/operatorAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { getCompany } from '@/utils/companyAccess';
 import { getSupabase } from '@/lib/supabase';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
@@ -53,7 +53,7 @@ export default function OperatorProfilePage() {
         }
 
         // Get operator info
-        const operator = await getCurrentOperator(companyId);
+        const operator = await getCurrentMember(companyId);
         if (!operator) {
           setError('Operator not found');
           setLoading(false);
@@ -82,7 +82,10 @@ export default function OperatorProfilePage() {
     // OperatorStationContext uses; sessionStorage is no longer the station's home.
     clearStoredStation();
     const supabase = getSupabase();
-    await supabase.auth.signOut();
+    // Local scope — sign out ONLY this device. An operator logging out here must
+    // not revoke their session on their other devices (which surfaced as a
+    // forced re-login when marking a job complete).
+    await supabase.auth.signOut({ scope: 'local' });
     router.push(`/operator/${companyId}/login`);
   };
 

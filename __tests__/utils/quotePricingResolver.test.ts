@@ -3,6 +3,8 @@ import type { PartPricingTier } from '@/types/partPricing';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import {
   resolveTier,
+  resolveMarkupAtQty,
+  unitPriceFromBase,
   resolveTierFromSnapshot,
   buildPricingBasisSnapshot,
   isDrifted,
@@ -249,5 +251,61 @@ describe('isDriftedDegraded — basis_unknown rows', () => {
 
   it('does not flag when the part has no priced tiers today', () => {
     expect(isDriftedDegraded(80, 25, [])).toBe(false);
+  });
+});
+
+describe('resolveMarkupAtQty', () => {
+  const tiers = [
+    { id: 't1', quantity: 1, markup_percent: 25 },
+    { id: 't50', quantity: 50, markup_percent: 18 },
+    { id: 't100', quantity: 100, markup_percent: 12 },
+  ];
+
+  it('picks the largest tier with quantity <= qty', () => {
+    expect(resolveMarkupAtQty(tiers, 60)).toEqual({
+      markup_percent: 18,
+      source_tier_id: 't50',
+      matched_tier_quantity: 50,
+      below_min: false,
+    });
+    expect(resolveMarkupAtQty(tiers, 100)?.source_tier_id).toBe('t100');
+    expect(resolveMarkupAtQty(tiers, 1)?.source_tier_id).toBe('t1');
+  });
+
+  it('uses the lowest tier and flags below_min when qty is under the floor', () => {
+    const r = resolveMarkupAtQty(tiers, 0.5);
+    expect(r?.source_tier_id).toBe('t1');
+    expect(r?.below_min).toBe(true);
+  });
+
+  it('ignores tiers with no markup and returns null when none have one', () => {
+    expect(
+      resolveMarkupAtQty([{ id: 'x', quantity: 1, markup_percent: null }], 5),
+    ).toBeNull();
+    // A null-markup tier is skipped; the next priced tier wins.
+    const mixed = [
+      { id: 'a', quantity: 1, markup_percent: null },
+      { id: 'b', quantity: 10, markup_percent: 40 },
+    ];
+    expect(resolveMarkupAtQty(mixed, 100)?.source_tier_id).toBe('b');
+  });
+
+  it('returns null for a non-finite qty', () => {
+    expect(resolveMarkupAtQty(tiers, Number.NaN)).toBeNull();
+  });
+});
+
+describe('unitPriceFromBase', () => {
+  it('applies cost-plus and rounds to cents', () => {
+    expect(unitPriceFromBase(26.6664, 25)).toBe(33.33); // 33.3330 → 33.33
+    expect(unitPriceFromBase(8, 25)).toBe(10);
+    expect(unitPriceFromBase(1.114, 100)).toBe(2.23); // single round
+  });
+
+  it('returns null when base or markup is unavailable', () => {
+    expect(unitPriceFromBase(null, 25)).toBeNull();
+    expect(unitPriceFromBase(10, null)).toBeNull();
+    expect(unitPriceFromBase(10, Number.NaN)).toBeNull();
+    expect(unitPriceFromBase(Number.POSITIVE_INFINITY, 25)).toBeNull();
   });
 });

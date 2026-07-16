@@ -105,12 +105,37 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 **How to apply (workflow per change):**
 1. `supabase migration new <slug>` — creates the file with a fresh 14-digit timestamp.
 2. Write the SQL into the new file.
-3. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
-4. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
-5. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
-6. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
+3. **If the migration creates a table in `public`, grant it explicitly** — in the same migration, alongside `ENABLE ROW LEVEL SECURITY` and the policies. See "Data API grants" below. Without a `GRANT` the table is invisible to PostgREST/supabase-js and the FastAPI backend.
+4. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
+5. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
+6. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
+7. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
 
-The remaining handful of 8-digit-prefixed legacy files (e.g. `20260314_grant_anon_waitlist.sql`) are grandfathered — leave them alone. Never reuse the 8-digit pattern for new files.
+Never use the 8-digit date-only prefix for new files — always let the CLI generate the timestamp.
+
+### Data API grants (new tables in `public`)
+
+**Every new table in `public` needs explicit grants in its own migration.** Nothing is exposed to the Data API automatically any more — [`20260716025048_align_data_api_default_privileges.sql`](supabase/migrations/20260716025048_align_data_api_default_privileges.sql) revoked the default privileges that used to do it for you, matching what Supabase enforces on all projects from 2026-10-30 ([changelog #45329](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)).
+
+Bundle the grants with the RLS + policy block, in the same migration as the `CREATE TABLE`:
+
+```sql
+CREATE TABLE public.your_table (...);
+ALTER TABLE public.your_table ENABLE ROW LEVEL SECURITY;
+CREATE POLICY ... ON public.your_table ...;
+
+GRANT SELECT ON public.your_table TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO service_role;
+```
+
+**Grants and RLS are different layers.** A grant decides whether a role can touch the table *at all*; RLS decides *which rows*. RLS with no matching grant is unreachable, and a grant with no RLS policy is denied — you need both. Tailor the roles to the table:
+
+- Most tables are member-scoped by RLS, and `anon` rarely needs more than `SELECT` (often nothing at all — drop the `anon` line if the table is never read logged-out).
+- Backend-only tables (secrets, tokens) should grant `service_role` **only**, and explicitly `REVOKE` from `anon`/`authenticated` — see [`quickbooks_connections`](supabase/migrations/20260620122700_quickbooks_integration.sql#L50-L51).
+- Do **not** write `REVOKE`-down-from-`ALL` to express intent. That idiom relied on the old permissive default having granted everything first; under the current default it revokes privileges that were never granted, leaving the table exposed to nobody.
+
+**Symptom of a missing grant:** PostgREST returns `42501 permission denied`, and its error hint names the grant to add. Because local now matches prod, this fails in dev rather than only in production.
 
 ### Schema source-of-truth
 
@@ -503,22 +528,35 @@ pnpm install                                       # node deps for THIS worktree
 conda run -n jigged python -m pytest tests/unit/   # backend tests, jigged env
 ```
 
-**The local Supabase stack follows the _primary_ checkout's branch, not your
-worktree.** `supabase start` / `supabase db reset` replay the migrations on the
-branch checked out in the **primary** working tree (the first entry in
-`git worktree list`) — a linked worktree's un-merged migrations are **not** on
-the local stack. So when working from a worktree:
+**The local Supabase stack is a machine-wide singleton, shared by every
+worktree — it is NOT per-worktree.** There is one Postgres container set per
+machine. `supabase start` / `supabase db reset` replay migrations from whatever
+directory invokes them into that one shared DB, so a `db reset` from any
+worktree **replaces the stack for every other worktree** too. It does not track
+a branch; it holds whatever was last replayed into it — in practice the
+primary's, since that's where resets usually run. So when working from a
+worktree:
 
-- **No migration changes in your branch?** The local stack is a valid substrate
-  — run `pnpm dev`, unit tests, and E2E against it from the worktree normally.
-  This is why a UI/logic-only change can be fully verified locally from a
-  worktree (the schema it needs already exists).
-- **Your branch adds or edits migrations?** Verify them on the PR's Supabase
-  **preview branch**, which applies the migration to its own isolated DB —
-  that's the gate. Do **not** try to reproduce them on the local stack from a
-  worktree: checking the branch out in the primary tree or `db reset`-ing to
-  pick them up just confuses what the local stack represents (and mutates the
-  primary's checkout). Keep migration verification on the preview branch.
+- **No migration changes in your branch?** The shared local stack is a valid
+  substrate — run `pnpm dev`, unit tests, and E2E against it from the worktree
+  normally (the schema it needs already exists).
+- **Your branch adds or edits migrations?** **Verify them on the PR's Supabase
+  preview branch**, which applies the migration to its own isolated DB — that's
+  the gate. Do **not** `db reset` the shared stack from a worktree to pick up
+  your migrations: with concurrent worktree agents it clobbers the DB the others
+  depend on, and even solo it just confuses what the stack represents. **The
+  rule: worktree migrations go to the preview branch, never the shared local
+  stack.**
+- **Need `types/database.ts` regenerated for a worktree migration?** `pnpm
+  gen:db-types` introspects the shared `--local` stack, so it has the same
+  hazard. Prefer letting **CI regenerate + diff-check** types on the PR (the
+  backend job already fails on a mismatch), or regenerate against a throwaway
+  DB — don't `db reset` the shared stack mid-flight just to gen types. A
+  hand-edited `types/database.ts` is a valid stopgap that CI will validate.
+- **Merge → local:** merging to `main` auto-applies the migration to **prod**
+  (branching pipeline), but your **local** stack only picks it up when you
+  `git pull` in the primary and `supabase db reset` again. Merge→prod is
+  automatic; merge→local is a manual replay.
 
 ### E2E gotchas
 

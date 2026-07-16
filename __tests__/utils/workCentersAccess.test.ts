@@ -59,7 +59,7 @@ describe('workCentersAccess', () => {
     it('applies name ilike when search is non-empty', async () => {
       mockQueryBuilder.data = [];
       await getAllWorkCenters('co-1', 'mill');
-      expect(mockQueryBuilder.or).toHaveBeenCalledWith('name.ilike.%mill%');
+      expect(mockQueryBuilder.or).toHaveBeenCalledWith('name.ilike."%mill%"');
     });
 
     it('skips the or() filter when search is whitespace', async () => {

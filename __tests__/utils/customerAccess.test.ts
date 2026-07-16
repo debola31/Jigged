@@ -126,7 +126,7 @@ describe('customerAccess utilities', () => {
       const result = await getAllCustomers('company-1', 'all', 'Customer One');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'name.ilike.%Customer One%'
+        'name.ilike."%Customer One%"'
       );
       expect(result).toHaveLength(1);
     });

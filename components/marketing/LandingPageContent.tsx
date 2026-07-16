@@ -11,7 +11,6 @@ import Features from './Features';
 import ShopFloorShowcase from './ShopFloorShowcase';
 import KnowledgeCapture from './KnowledgeCapture';
 import HowItWorks from './HowItWorks';
-import EarlyAccess from './EarlyAccess';
 // import Testimonial from './Testimonial'; // Re-enable once a real quote is confirmed
 import FinalCTA from './FinalCTA';
 
@@ -41,8 +40,9 @@ export default function LandingPageContent() {
       <ShopFloorShowcase />
       <KnowledgeCapture />
       <HowItWorks />
-      <EarlyAccess />
       {/* <Testimonial /> Re-enable once a real quote is confirmed */}
+      {/* One closing beat: the founding-shops message is folded into FinalCTA — a separate
+          early-access band above it just repeated the same pitch before the same button. */}
       <FinalCTA />
     </>
   );

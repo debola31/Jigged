@@ -3,10 +3,13 @@ import type { Part } from '@/types/part';
 /**
  * Where a part sits on the "can I actually quote this yet?" spectrum.
  *
- * Derived purely from the part's structure plus the same priceability signal
- * the data layer uses (`compute_part_cost_explain` / `get_priceable_part_ids`,
- * both backed by `compute_part_cost_at_qty`), so the workspace completeness
- * chip can never disagree with the parts-list ✓/⚠ column.
+ * Derived purely from the part's structure plus the same priceability verdict
+ * the data layer uses. `compute_part_cost_explain.is_priceable` (detail) and
+ * `get_priceable_part_ids` (list) now enforce the *identical* structural rule —
+ * the part itself has a markup, every op is priced, and every purchased leaf in
+ * the BOM tree has a vendor cost (a material's own markup is NOT required) — so
+ * the workspace and the parts-list ✓/⚠ column can never disagree (locked by an
+ * agreement test).
  *
  * Honest by construction (per the no-silent-fallback principle): we never
  * invent a reason a part can't be priced — `isPriceable` is ground truth, and
@@ -61,15 +64,17 @@ export function getPartSetupStatus(
     };
   }
 
-  // Made parts that have some structure but still don't resolve to a price
-  // (missing labour rates / material costs) get a guidance banner. Bought parts
-  // surface the same gap INLINE in the Cost card instead (a red starter tier in
-  // PartProcurementPricingPanel), so we emit no banner for them — the chip still
-  // reads "Needs cost", but the workspace doesn't double up with a yellow alert.
+  // Made parts that have some structure but still don't resolve to a price get
+  // a guidance banner. The banner itself (WorkspaceTab) lists the concrete gaps
+  // — which sub-part has no markup, which op has no rate, which leaf has no cost
+  // — with links; this string is only a fallback. Bought parts surface the same
+  // gap INLINE in the Cost card instead (a red starter tier in
+  // PartProcurementPricingPanel), so we emit no banner for them (null) — the
+  // workspace doesn't double up with a yellow alert.
   const nextStep =
     part.source === 'bought'
       ? null
-      : 'This part isn’t priceable yet — check that operations have labour rates and materials have costs.';
+      : 'This part isn’t priceable yet — its markup, an operation rate, or a material cost still needs setting up.';
 
   return {
     state: 'needs_cost',

@@ -11,6 +11,7 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { orIlikeValue } from '@/utils/searchFilter';
 import type { Database } from '@/types/database';
 
 // Insert payload for routing_operations, minus the columns the callers
@@ -146,7 +147,7 @@ export async function getRoutings(
     .eq('company_id', companyId);
 
   if (search?.trim()) {
-    query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+    query = query.or(`name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
   }
 
   if (partId) {

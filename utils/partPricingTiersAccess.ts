@@ -5,11 +5,8 @@ import type {
   PartPricingTierInput,
   ComputedPartPricingTier,
 } from '@/types/partPricing';
-import {
-  calculateRoutingCost,
-  calculateTierPricing,
-} from '@/utils/routingCostCalculation';
 import { getComputedPartCost } from '@/utils/partsAccess';
+import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
 
 /**
  * Get all pricing tiers for a part (raw DB shape), ordered by sequence.
@@ -31,57 +28,70 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
 }
 
 /**
- * Single source of truth for tier pricing: load the tier rows (markup % is
- * the user-controlled source of truth), compute the current base cost — from
- * the part's live routing + BOM for made parts, or from its procurement tiers
- * (`compute_part_cost_at_qty`) for bought parts that have no routing — then
- * derive `unit_price = base × (1 + markup/100)` per tier qty. Both part kinds
- * price through this one resolver so no read path can drift.
+ * The price of a part at a specific quantity — the SINGLE SOURCE OF TRUTH the
+ * Pricing card, the quote form, and the persisted quote line all use.
  *
- * Use this anywhere a user sees a tier price (quote form chip, PDF, the
- * resolved tier picked for a quote line item). The Part detail page already
- * computes the same way via `calculateTierPricing`; this helper unifies the
- * other read paths so they can't drift.
+ * `base_cost` comes from the ONE canonical engine `compute_part_cost_at_qty`
+ * (via `getComputedPartCost`) at the ACTUAL qty; the markup is the tier that
+ * applies at that qty; `unit_price = base × (1 + markup/100)`. Because base is
+ * computed at the exact qty (not read off a step-function tier ladder), the
+ * number is exact at every qty and identical wherever it's shown. A caller that
+ * already has the tier list passes it in to skip the extra fetch; otherwise the
+ * tiers are loaded here.
+ */
+export interface PartPriceAtQty {
+  base_cost: number | null;
+  markup_percent: number | null;
+  unit_price: number | null;
+  source_tier_id: string | null;
+  below_min: boolean;
+}
+
+export async function getPartPriceAtQty(
+  partId: string,
+  qty: number,
+  tiers?: ReadonlyArray<{ id: string; quantity: number; markup_percent: number | null }>,
+): Promise<PartPriceAtQty> {
+  const ladder = tiers ?? (await getTiersForPart(partId));
+  const [resolved, base] = await Promise.all([
+    Promise.resolve(resolveMarkupAtQty(ladder, qty)),
+    getComputedPartCost(partId, qty).catch(() => null),
+  ]);
+  const unit_price = resolved ? unitPriceFromBase(base, resolved.markup_percent) : null;
+  return {
+    base_cost: base,
+    markup_percent: resolved?.markup_percent ?? null,
+    unit_price,
+    source_tier_id: resolved?.source_tier_id ?? null,
+    below_min: resolved?.below_min ?? false,
+  };
+}
+
+/**
+ * The tier ladder with each tier's `unit_price` computed AT THAT TIER'S OWN
+ * QUANTITY, all through the one canonical engine (`getComputedPartCost` — the
+ * same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
+ * disagree). Drives the quote-form tier ladder, the drift snapshot, and the
+ * Pricing card's tier table. A null markup or an unresolvable base yields
+ * `unit_price = null` so the "no usable tier" check still fires.
  *
- * When materials are incomplete (a BOM child has no priced procurement tier)
- * `calculateTierPricing` returns `unit_price: null` — the resolver then
- * skips that tier, and the quote form surfaces "no pricing tiers yet" so
- * the user fixes the underlying gap rather than getting a misleading price.
+ * Note: this is the price AT each breakpoint. The actual order/line price is
+ * `getPartPriceAtQty(part, orderQty)` — base at the real qty × the resolved
+ * tier's markup — which every consuming surface uses so between-breakpoint
+ * orders are exact, not snapped to a breakpoint.
  */
 export async function getTiersWithComputedPrices(
   partId: string,
 ): Promise<ComputedPartPricingTier[]> {
-  const [tiers, breakdown] = await Promise.all([
-    getTiersForPart(partId),
-    calculateRoutingCost(partId).catch(() => null),
-  ]);
+  const tiers = await getTiersForPart(partId);
+  if (tiers.length === 0) return [];
 
-  if (!breakdown) {
-    // No routing/BOM (e.g. bought parts): the base cost comes from the part's
-    // procurement tiers via `compute_part_cost_at_qty`, not a parent routing.
-    // Sell price is still the same cost-plus model — base × (1 + markup/100) —
-    // so bought parts price in every read path that uses this resolver (quote
-    // form preview, quote PDF, quote line items). Matches `calculateTierPricing`
-    // semantics exactly: a null markup yields a null price ("no price yet"), and
-    // a tier whose base cost can't resolve (no procurement tier covers its qty)
-    // keeps unit_price = null so the "no usable tier" check still fires.
-    return Promise.all(
-      tiers.map(async (t) => {
-        const rawBase = await getComputedPartCost(partId, t.quantity).catch(() => null);
-        if (rawBase === null || t.markup_percent == null || Number.isNaN(t.markup_percent)) {
-          return { ...t, unit_price: null };
-        }
-        const baseCostPerUnit = Math.round(rawBase * 100) / 100;
-        const unitPrice = Math.round(baseCostPerUnit * (1 + t.markup_percent / 100) * 100) / 100;
-        return { ...t, unit_price: unitPrice };
-      }),
-    );
-  }
-
-  return tiers.map((t) => {
-    const { unitPrice } = calculateTierPricing(breakdown, t.quantity, t.markup_percent);
-    return { ...t, unit_price: unitPrice };
-  });
+  return Promise.all(
+    tiers.map(async (t) => {
+      const base = await getComputedPartCost(partId, t.quantity).catch(() => null);
+      return { ...t, unit_price: unitPriceFromBase(base, t.markup_percent) };
+    }),
+  );
 }
 
 /**
@@ -110,20 +120,14 @@ export async function getTier(tierId: string): Promise<PartPricingTier | null> {
  * dropped — every read recomputes it live via `getTiersWithComputedPrices`
  * so the stored cache can't drift from the underlying routing + BOM.
  *
- * Also writes parts.markup_rate_id from `opts.rateId`. Two callers, two
- * intents:
- *   - applyRateToPart() passes the rate's id, so the part stays linked to
- *     that rate after the snapshot.
- *   - The PartPricing manual-edit path omits opts.rateId, which writes
- *     markup_rate_id = null and flips the part to "Custom". This guarantees
- *     that any tier write keeps the link state consistent with intent —
- *     impossible to accidentally retain a stale rate link after an edit.
+ * Each part owns its markup directly — there is no shared/named markup-rate
+ * layer. A tier row with a NULL `markup_percent` is an unfilled row (the part
+ * reads as "no markup / not priceable" until the user fills it).
  */
 export async function replaceTiersForPart(
   companyId: string,
   partId: string,
   tiers: PartPricingTierInput[],
-  opts: { rateId?: string | null } = {},
 ): Promise<PartPricingTier[]> {
   const supabase = getSupabase();
 
@@ -137,9 +141,8 @@ export async function replaceTiersForPart(
 
   // Delete the "no longer present" rows BEFORE the insert/update pass. This
   // frees up the (part_id, sequence) unique-constraint slots so a caller that
-  // passes a fresh set of inputs without ids (e.g., applying a markup rate
-  // that replaces all current tiers) doesn't 409 against the rows it's about
-  // to obsolete.
+  // passes a fresh set of inputs without ids (e.g., replacing every tier in
+  // one save) doesn't 409 against the rows it's about to obsolete.
   const keepIds = new Set(
     tiers.map((t) => t.id).filter((id): id is string => Boolean(id)),
   );
@@ -177,37 +180,7 @@ export async function replaceTiersForPart(
     }
   }
 
-  // Sync the part's rate link with the caller's intent. A rate-apply path
-  // passes the rate id; a manual-edit path omits it and the part flips to
-  // Custom (null). Done last so the FK update reflects a successful tier
-  // write — a partial failure leaves the link state matching the row state.
-  const nextRateId = opts.rateId ?? null;
-  const { error: rateLinkErr } = await supabase
-    .from('parts')
-    .update({ markup_rate_id: nextRateId })
-    .eq('id', partId);
-  if (rateLinkErr) throw rateLinkErr;
-
   return getTiersForPart(partId);
-}
-
-/**
- * Update only the part's markup_rate_id without touching its tiers. Used by
- * the PartPricing "Switch to Custom" affordance, which flips the part to
- * Custom while preserving the current tier values as the editable starting
- * point. Pass `null` to clear, or a rate id to link without re-snapshotting
- * (the apply-rate paths in markupRatesAccess already handle re-snapshotting).
- */
-export async function setPartMarkupRate(
-  partId: string,
-  rateId: string | null,
-): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('parts')
-    .update({ markup_rate_id: rateId })
-    .eq('id', partId);
-  if (error) throw error;
 }
 
 /**

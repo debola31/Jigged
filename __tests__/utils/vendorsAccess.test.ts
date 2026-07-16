@@ -51,7 +51,7 @@ describe('vendorsAccess', () => {
       mockQueryBuilder.data = [];
       await getAllVendors('co-1', 'acme');
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
-        'name.ilike.%acme%,city.ilike.%acme%',
+        'name.ilike."%acme%",city.ilike."%acme%"',
       );
     });
 

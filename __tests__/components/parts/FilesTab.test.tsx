@@ -26,7 +26,7 @@ vi.mock('@/hooks/useUserRole', () => ({
 
 const mockGetCurrentOperator = vi.fn();
 vi.mock('@/utils/operatorAccess', () => ({
-  getCurrentOperator: (...a: unknown[]) => mockGetCurrentOperator(...a),
+  getCurrentMember: (...a: unknown[]) => mockGetCurrentOperator(...a),
 }));
 
 // The STEP 3D viewer is loaded via next/dynamic(() => import('./StepViewer')).

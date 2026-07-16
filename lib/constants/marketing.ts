@@ -9,18 +9,46 @@ export const SHOP_SIZES = [
 ];
 
 export const MARKETING_META = {
-  title: 'Jigged — Your shop floor, finally under control',
+  // Mirrors the hero headline — keep the two in step.
+  title: 'Jigged — Your whole shop, in one place',
+  // KEEP THIS UNDER ~155 CHARS. Google truncates the snippet around there (it's really
+  // a ~920px budget), and the previous 220-char version was cut at "...take at the
+  // machine" — so its whole payoff ("no tribal knowledge walking out the door") was
+  // invisible in search results. Front-load the offer; the segment is folded into it so
+  // "precision machine shop" still matches what an owner searches.
   description:
-    'Paperless shop-floor software for precision machine shops. See where every job stands, and capture the notes and photos your operators take at the machine — no paper travelers, no tribal knowledge walking out the door.',
+    'Run your machine shop in one place — quote to invoice and everything between. Tricks your best guys figured out are there next time someone needs them.',
 };
 
 export const HERO = {
-  eyebrow: 'Paperless operations for precision machine shops',
-  // Two display lines: the control promise, then the reassurance.
-  headlineLead: 'Your shop floor,',
-  headlineEmphasis: 'finally under control.',
+  // Category + segment (the frame of reference). "Paperless operations" claimed the wrong
+  // category — that's the operator-view pitch, and it already lives in the subhead. Pick
+  // the frame deliberately: left unstated, a shop owner files us under "another ERP",
+  // which is the worst shelf given our own pain line about 500-person plants. Segment
+  // stays "precision machine shops" (who someone IS) rather than "precision
+  // manufacturing" (an industry abstraction) — narrow beachhead, and it matches the
+  // capability strip + footer.
+  eyebrow: 'Shop software for precision machine shops',
+  // Two display lines. The headline states WHAT WE OFFER (StoryBrand's grunt test);
+  // the subhead below carries HOW IT MAKES LIFE BETTER — which is where the
+  // know-how/capture story belongs, both by the framework and because leading with
+  // "we capture your operations" reads as taking the thing a shop holds dear.
+  // "Your shop floor, finally under control" stated a feeling, not an offer; it also
+  // positioned against disorder rather than against the real alternative (an ERP + a
+  // stack of spreadsheets + homegrown tools), and undersold a product that now runs
+  // quote → floor → shipping → invoicing.
+  headlineLead: 'Your whole shop,',
+  headlineEmphasis: 'in one place.',
+  // Unpacks the headline rather than repeating it: "whole shop" is abstract, so this says
+  // what it actually spans, then delivers the two benefits (grunt test: subhead = how it
+  // makes life better). Opened "Go paperless" before — the narrow pitch we cut from the
+  // eyebrow, and paperless is a mechanism anyway (the shop-floor section sells it).
+  // "Jigged shows you" made Jigged the actor; the customer is the hero. "Captures the
+  // notes your operators take" → "stay with the part": same fact, the shop's side of the
+  // table. "Next time someone needs it" (not "you run the part") is availability, not just
+  // the owner's own recall.
   subhead:
-    'Go paperless from quote to done. Jigged shows you where every job stands without walking the floor — and captures the notes and photos your operators take at the machine, so the fix your best guy figured out is still there next time you run the part.',
+    'Quoting to invoicing and everything in between. See where every job stands without walking the floor — and the notes and photos your operators take at the machine stay with the part, so the fix your best guy figured out is there next time someone needs it.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   secondaryCta: { label: 'See how it works', href: '#how-it-works' },
 };
@@ -34,13 +62,13 @@ export const PAIN = {
   eyebrow: 'The daily reality',
   heading: 'Sound familiar?',
   points: [
-    'You quoted a job from memory because opening the ERP was slower than doing the math yourself.',
-    'You lost track of a job’s status and had to walk the floor to find out.',
-    'Your inventory says you have material. Your shelf says otherwise.',
-    'You bought software built for 500-person plants and your 12-person shop uses 10% of it.',
+    'Your best setups live in one machinist’s head — and walk out the door the day he retires.',
+    'An ERP, a stack of spreadsheets, a few homegrown tools — a different one for every step, and none of them talk.',
+    'Your systems log the numbers, but how the parts sit in the fixture and the finesse in the setup never get written down.',
+    'Software built for a 500-person plant expects a planner and a full-time admin. You’ve got a shop to run.',
   ],
   closer:
-    'We built Jigged because shop owners kept telling us the same thing: nothing out there fits how they actually work.',
+    'Owners run the whole shop across an ERP, spreadsheets, and homegrown tools nobody else could use. We’re building Jigged to do it all in one place — everything they need, nothing they don’t.',
 };
 
 export type Feature = {
@@ -51,8 +79,9 @@ export type Feature = {
   alt: string;
 };
 
-// Job status leads. The DAG "routing workflow" shot is gone; the operator shot is
-// the complete-only flow (no timer). See lib/constants comment + issue #489.
+// Three desktop tools in flow order: job status leads, then quoting, then the
+// QuickBooks invoicing integration (replaced the inventory row — inventory isn't
+// demo-ready yet). The operator/mobile story is its own section (ShopFloorShowcase).
 export const FEATURES: Feature[] = [
   {
     key: 'jobs',
@@ -64,19 +93,21 @@ export const FEATURES: Feature[] = [
   },
   {
     key: 'quotes',
+    // "Set markups by part category" described the markup-rates module, which was removed
+    // (#569 — each part now owns its own pricing). Copy follows the product.
     headline: 'Quote faster, win more work',
     description:
-      'Build cost-plus quotes in minutes. Set markups by part category and Jigged does the math the same way every time.',
+      'Build cost-plus quotes in minutes. Every part carries its own pricing, so the math comes out the same every time.',
     image: '/screenshots/feature-quotes.png',
-    alt: 'Jigged quote showing base cost, markup, and unit price for a part',
+    alt: 'A Jigged quote — line items, unit prices and total, ready to convert to a job',
   },
   {
-    key: 'inventory',
-    headline: 'Inventory in the units you actually use',
+    key: 'invoicing',
+    headline: 'Invoicing, wired straight to QuickBooks',
     description:
-      'Count stock in feet, sheets, or pieces — whatever’s on the shelf. Tie material to jobs so you know what’s allocated and what’s free.',
-    image: '/screenshots/feature-inventory.png',
-    alt: 'Jigged inventory transaction converting feet to inches when removing stock',
+      'Jigged is directly integrated with QuickBooks. Bill the quantities that shipped and Jigged creates the invoice in QuickBooks for you — no re-keying, no double entry. Your books stay the system of record.',
+    image: '/screenshots/feature-invoicing-quickbooks.png',
+    alt: 'Creating a QuickBooks invoice from a Jigged job — billing shipped quantities, synced to QuickBooks',
   },
 ];
 
@@ -89,7 +120,7 @@ export const SHOP_FLOOR = {
   subhead:
     'Operators work from a tablet at their station — no paper travelers, no hunting for the latest revision.',
   points: [
-    'Scan the QR on the traveler and land on the exact job and step.',
+    'Operators sign in, pick their station, and see only the jobs waiting on them.',
     'The current drawing and work instructions, right there at the machine.',
     'One tap to mark a step complete — no timers, no training.',
     'Runs on any tablet or phone. Nothing to install.',
@@ -113,36 +144,37 @@ export const KNOWLEDGE = {
 
 export type Step = { number: string; headline: string; description: string };
 
+// A real sequence — quote → track → ship and invoice — so the 01/02/03 numbering
+// encodes something true. (03 used to be "Run your shop, not your software," which
+// was a benefit, not a step, and said the same thing as the closing CTA right below
+// it. The no-rollout objection it carried now sits in 01, next to "15 minutes.")
 export const STEPS: Step[] = [
   {
     number: '01',
     headline: 'Set up your shop',
     description:
-      'Add your team, part categories, and markup defaults. About 15 minutes.',
+      'Add your team, part categories, and markup defaults. About 15 minutes — no consultants, no six-month rollout.',
   },
   {
     number: '02',
     headline: 'Quote and track',
     description:
-      'Create quotes, turn them into jobs, and follow everything from one place.',
+      'Create quotes, turn them into jobs, and follow every step from one place.',
   },
   {
     number: '03',
-    headline: 'Run your shop, not your software',
+    headline: 'Ship and get paid',
     description:
-      'No implementation consultants. No six-month rollout. Jigged stays out of the way.',
+      'Log what goes out the door, then push the invoice straight to QuickBooks. No re-keying.',
   },
 ];
 
-export const EARLY_ACCESS = {
-  heading: 'Free during early access.',
-  body: 'We’re onboarding a small group of shops and building exactly what they need. No card, no contract.',
-};
-
+// The founding-shops beat lives here, folded into the single closing CTA — a separate
+// "early access" band above it just repeated the same message before the same button.
 export const FINAL_CTA = {
   heading: 'Ready to stop fighting your software?',
   subhead:
-    'Free during early access. We’re working closely with a small group of shops.',
+    'We’re taking on a small group of precision shops as founding partners — they shape where Jigged goes, and get in before we open it up.',
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   emailLabel: 'Or request early access and we’ll reach out:',
 };

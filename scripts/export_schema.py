@@ -717,6 +717,168 @@ class SchemaExporter:
         return "\n".join(lines)
 
     # =========================================================================
+    # GRANTS & DEFAULT PRIVILEGES
+    # =========================================================================
+    # Canonical privilege orders, used to sort output deterministically and to
+    # collapse a full set to `ALL`. MAINTAIN is PG17+; prod runs PG17, which is
+    # the only database this script targets. A privilege outside these lists is
+    # emitted explicitly rather than folded into ALL — verbose on a different
+    # Postgres, but never wrong.
+    TABLE_PRIVILEGE_ORDER = [
+        "SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER",
+        "MAINTAIN",
+    ]
+    SEQUENCE_PRIVILEGE_ORDER = ["USAGE", "SELECT", "UPDATE"]
+    FUNCTION_PRIVILEGE_ORDER = ["EXECUTE"]
+    TYPE_PRIVILEGE_ORDER = ["USAGE"]
+
+    # pg_default_acl.defaclobjtype -> (keyword, canonical privilege order)
+    DEFACL_OBJTYPES = {
+        "r": ("TABLES", TABLE_PRIVILEGE_ORDER),
+        "S": ("SEQUENCES", SEQUENCE_PRIVILEGE_ORDER),
+        "f": ("FUNCTIONS", FUNCTION_PRIVILEGE_ORDER),
+        "T": ("TYPES", TYPE_PRIVILEGE_ORDER),
+    }
+
+    def format_privileges(self, privileges: Set[str], order: List[str]) -> str:
+        """Sort privileges canonically, collapsing an exact full set to ALL."""
+        if privileges == set(order):
+            return "ALL"
+        known = [p for p in order if p in privileges]
+        unknown = sorted(privileges - set(order))
+        return ", ".join(known + unknown)
+
+    def export_grants(self) -> str:
+        """Export GRANT statements and ALTER DEFAULT PRIVILEGES.
+
+        Data API exposure is decided here, not in the RLS sections: a role can
+        reach a table through PostgREST/supabase-js only if it holds a GRANT on
+        it, and RLS then decides which rows. The two layers are independent —
+        RLS with no grant is unreachable, a grant with no policy is denied.
+
+        Supabase is removing the default privileges that used to grant new
+        `public` tables automatically (changelog #45329; enforced on all
+        existing projects 2026-10-30). That makes this section load-bearing:
+        the per-object grants record what is actually exposed today, and the
+        default-privileges block records whether *new* tables will be exposed
+        at all.
+
+        Scoped to `public` to match get_tables(), so the grants listed always
+        correspond to the tables exported above. Cluster-wide default ACLs
+        (defaclnamespace = 0) are out of scope — Supabase sets per-schema ones.
+        """
+        # LEFT JOIN LATERAL, not CROSS JOIN: a relation whose relacl IS NULL has
+        # no explicit grants at all, and that is exactly the state worth seeing
+        # after the revoke. CROSS JOIN would drop those rows silently.
+        # aclexplode reports PUBLIC as grantee = 0.
+        object_sql = """
+            SELECT
+                n.nspname AS schema,
+                c.relname AS name,
+                c.relkind AS relkind,
+                CASE
+                    WHEN a.grantee IS NULL THEN NULL
+                    WHEN a.grantee = 0 THEN 'PUBLIC'
+                    ELSE pg_get_userbyid(a.grantee)
+                END AS grantee,
+                a.privilege_type AS privilege_type
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN LATERAL aclexplode(c.relacl) a ON true
+            WHERE n.nspname = ANY(%s)
+                AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+            ORDER BY n.nspname, c.relname
+        """
+        default_sql = """
+            SELECT
+                pg_get_userbyid(d.defaclrole) AS owner_role,
+                n.nspname AS schema,
+                d.defaclobjtype AS objtype,
+                CASE
+                    WHEN a.grantee = 0 THEN 'PUBLIC'
+                    ELSE pg_get_userbyid(a.grantee)
+                END AS grantee,
+                a.privilege_type AS privilege_type
+            FROM pg_default_acl d
+            JOIN pg_namespace n ON n.oid = d.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+            WHERE n.nspname = ANY(%s)
+            ORDER BY 1, 2, 3, 4
+        """
+        object_rows = self.query(object_sql, (['public'],))
+        default_rows = self.query(default_sql, (['public'],))
+
+        if not object_rows and not default_rows:
+            return ""
+
+        lines = ["-- ============================================================",
+                 "-- 12. GRANTS & DEFAULT PRIVILEGES",
+                 "-- ============================================================",
+                 "-- A role reaches a table through the Data API only if it holds a GRANT",
+                 "-- here; RLS then filters rows. Both layers are required.",
+                 "--",
+                 "-- New tables in `public` are NOT granted automatically (Supabase changelog",
+                 "-- #45329). The default privileges at the end of this section decide what,",
+                 "-- if anything, a newly created object is exposed to.",
+                 ""]
+
+        # Group privileges per (object, grantee); track objects with no ACL at all.
+        grants: Dict[Tuple[str, str, str], Set[str]] = defaultdict(set)
+        relkinds: Dict[Tuple[str, str], str] = {}
+        ungranted: List[Tuple[str, str]] = []
+
+        for row in object_rows:
+            key2 = (row["schema"], row["name"])
+            relkinds[key2] = row["relkind"]
+            if row["grantee"] is None:
+                ungranted.append(key2)
+                continue
+            grants[(row["schema"], row["name"], row["grantee"])].add(row["privilege_type"])
+
+        if ungranted:
+            lines.append("-- Objects with no explicit grants — unreachable via the Data API:")
+            for schema, name in sorted(set(ungranted)):
+                lines.append(f"--   {schema}.{name}")
+            lines.append("")
+
+        for (schema, name, grantee) in sorted(grants.keys()):
+            order = (self.SEQUENCE_PRIVILEGE_ORDER
+                     if relkinds.get((schema, name)) == "S"
+                     else self.TABLE_PRIVILEGE_ORDER)
+            privileges = self.format_privileges(grants[(schema, name, grantee)], order)
+            keyword = "SEQUENCE" if relkinds.get((schema, name)) == "S" else "TABLE"
+            full_name = self.format_schema_table(schema, name)
+            # PUBLIC is a keyword, not an identifier — never quote it.
+            target = "PUBLIC" if grantee == "PUBLIC" else self.escape_identifier(grantee)
+            lines.append(f"GRANT {privileges} ON {keyword} {full_name} TO {target};")
+
+        if default_rows:
+            lines.append("")
+            lines.append("-- Default privileges — what a NEWLY created object is granted.")
+            lines.append("-- anon/authenticated/service_role absent from TABLES means new tables")
+            lines.append("-- are invisible to the Data API until granted explicitly.")
+
+            defaults: Dict[Tuple[str, str, str, str], Set[str]] = defaultdict(set)
+            for row in default_rows:
+                key = (row["owner_role"], row["schema"], row["objtype"], row["grantee"])
+                defaults[key].add(row["privilege_type"])
+
+            for (owner_role, schema, objtype, grantee) in sorted(defaults.keys()):
+                if objtype not in self.DEFACL_OBJTYPES:
+                    continue
+                keyword, order = self.DEFACL_OBJTYPES[objtype]
+                privileges = self.format_privileges(defaults[(owner_role, schema, objtype, grantee)], order)
+                target = "PUBLIC" if grantee == "PUBLIC" else self.escape_identifier(grantee)
+                lines.append(
+                    f"ALTER DEFAULT PRIVILEGES FOR ROLE {self.escape_identifier(owner_role)} "
+                    f"IN SCHEMA {self.escape_identifier(schema)} "
+                    f"GRANT {privileges} ON {keyword} TO {target};"
+                )
+
+        lines.append("")
+        return "\n".join(lines)
+
+    # =========================================================================
     # MAIN EXPORT
     # =========================================================================
     def export(self) -> str:
@@ -746,6 +908,7 @@ class SchemaExporter:
             self.export_views(),
             self.export_comments(),
             self.export_storage_buckets(),
+            self.export_grants(),
             "COMMIT;",
             "",
         ]

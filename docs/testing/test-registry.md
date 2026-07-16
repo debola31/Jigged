@@ -111,7 +111,6 @@ Coverage roadmap: 45% → 50% → 55% → 60%. Each 3f sub-PR raises the floor i
 17 of 24 `utils/*Access.ts` files have no test file. Highest-impact:
 - `bomAccess.ts` (2.67% coverage)
 - `customerContactsAccess.ts` (1.78%)
-- `markupRatesAccess.ts` (6.29%)
 - `quoteLineItemsAccess.ts` (0%)
 - `routingsAccess.ts` (1.34%)
 - `partPricingTiersAccess.ts` (0%)

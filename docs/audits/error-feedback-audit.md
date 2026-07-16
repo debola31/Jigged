@@ -43,7 +43,6 @@ Translator applied this pass (were surfacing raw errors):
 | `deleteCustomerContact` | `utils/customerContactsAccess.ts` | contact |
 | `deleteJob` / `bulkDeleteJobs` | `utils/jobsAccess.ts` | job |
 | `deleteQuote` | `utils/quotesAccess.ts` | quote |
-| `deleteMarkupRate` / `bulkDeleteMarkupRates` | `utils/markupRatesAccess.ts` | markup rate |
 | `deleteRouting` / `deleteRoutingOperation` | `utils/routingsAccess.ts` | routing / operation |
 | `deleteBomLine` | `utils/bomAccess.ts` | BOM line |
 | `deleteTier` (pricing) | `utils/partPricingTiersAccess.ts` | pricing tier |

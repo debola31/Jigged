@@ -84,7 +84,7 @@ Option B — Implement full line-item reconcile + decide pricing-refresh rule. u
 
 Pros: matches user intuition; eliminates the displayed price vs. reference price mismatch.
 Cons: bigger code change; introduces a new policy question (snapshot vs. refresh on edit); needs a UI signal for "this line was repriced because tiers changed."
-This decision belongs in a documented snapshot-vs-live policy that applies beyond quotes — same question hits BOM costs, routing rates, markup rates (project_markup_rates_decision.md).
+This decision belongs in a documented snapshot-vs-live policy that applies beyond quotes — same question hits BOM costs and routing rates.
 
 6. Verification — how to know this evaluation is correct
 Since this is an evaluation, "verification" means confirming the gaps I've named are real before acting:

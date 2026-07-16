@@ -50,6 +50,16 @@ jobs:
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
+    # Pull the Supabase stack images (postgres, postgres-meta, gotrue, …) from
+    # GitHub Container Registry instead of the CLI's default AWS public ECR.
+    # Shared GitHub-runner IPs regularly trip public.ecr.aws's anonymous pull
+    # rate limit ("toomanyrequests: Rate exceeded"), which flaked `supabase
+    # start` at the postgres-meta pull. GHCR mirrors the identical images and is
+    # effectively unmetered for public pulls from GitHub-hosted runners.
+    # (docker.io mirrors them too but carries its own anonymous per-IP limit, so
+    # it just trades one throttle for another.) See supabase/cli#419.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
     defaults:
       run:
         working-directory: ./api

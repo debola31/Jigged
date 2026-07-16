@@ -423,6 +423,38 @@ class TestPartsValidateEndpoint:
         assert data["valid_rows_count"] == 0
 
     @pytest.mark.unit
+    async def test_validate_resolves_unit_on_a_NON_stocked_part(self, test_client):
+        """A filled unit on a made/non-stocked part must resolve — not be skipped as unknown_unit.
+
+        UOM resolution used to run only for rows inferred as *stocked*. A "made"
+        part (is_stocked=false) with a perfectly good unit like "each" therefore
+        never got resolved, hit the "raw unit present but not resolved" branch,
+        and was rejected as unknown_unit. That silently skipped ~7,700 parts of a
+        real is_stocked=false export even after the owner filled every unit. Now
+        resolution runs for every row; "each" resolves via the alias table.
+        """
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Stocked": "is_stocked",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "MADE-001", "Stocked": "false", "Unit": "each"}],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+        response = await test_client.post("/api/parts/import/validate", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid_rows_count"] == 1  # imports fine
+        assert data["error_rows_count"] == 0
+        assert not any(c["conflict_type"] == "unknown_unit" for c in data["conflicts"])
+
+    @pytest.mark.unit
     async def test_execute_skips_unit_less_row_instead_of_failing_the_batch(
         self, test_client
     ):

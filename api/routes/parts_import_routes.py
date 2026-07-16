@@ -520,50 +520,25 @@ async def validate_import(
         validation_error_rows: set[int] = set()
         conflict_rows: set[int] = set()
 
-        # Determine which rows look stocked (so we know whether to require unit)
-        stocked_row_numbers: set[int] = set()
-        for i, row in enumerate(request.rows):
-            row_number = i + 1 + request.batch_offset
-            explicit_stocked: Optional[bool] = None
-            if is_stocked_column:
-                explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
-            elif legacy_is_stockable_column:
-                explicit_stocked = parse_bool(row.get(legacy_is_stockable_column, ""))
-            if explicit_stocked is True:
-                stocked_row_numbers.add(row_number)
-            elif explicit_stocked is None and _row_has_inventory_data(
-                row, reverse_mappings
-            ):
-                stocked_row_numbers.add(row_number)
-
-        # Resolve UOMs for stocked rows that have a unit column
+        # Resolve UOMs for EVERY row that has a unit column — not just stocked ones.
+        #
+        # `parts_requires_unit` makes a unit mandatory for every part (stocked or "made"), so a
+        # unit has to be resolved for every row. This previously ran only for `stocked_row_numbers`,
+        # which meant a filled unit on a NON-stocked ("made") part was never resolved: it then hit
+        # the "have a raw unit but no resolved unit" branch and was rejected as `unknown_unit` and
+        # skipped — even a perfectly good "each". That's why filling units still skipped ~7,700
+        # parts on the Tangle export (its parts are is_stocked=false). resolve_units_for_rows
+        # returns 1-based indices into the rows we pass, so add batch_offset to get row_number.
         if request.pre_resolved_uoms:
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
         elif primary_unit_column or description_column:
-            stocked_rows = [
-                row
-                for i, row in enumerate(request.rows)
-                if (i + 1 + request.batch_offset) in stocked_row_numbers
-            ]
-            stocked_index_map = {
-                idx + 1: orig_idx + 1 + request.batch_offset
-                for idx, orig_idx in enumerate(
-                    [
-                        i
-                        for i in range(len(request.rows))
-                        if (i + 1 + request.batch_offset) in stocked_row_numbers
-                    ]
-                )
-            }
             partial = resolve_units_for_rows(
-                stocked_rows,
+                request.rows,
                 name_column=part_name_column,
                 description_column=description_column,
                 uom_column=primary_unit_column,
             )
-            uom_resolutions = {
-                stocked_index_map[k]: v for k, v in partial.items()
-            }
+            uom_resolutions = {k + request.batch_offset: v for k, v in partial.items()}
         else:
             uom_resolutions = {}
 

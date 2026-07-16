@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-08T21:26:03Z
+-- Generated: 2026-07-16T20:51:51Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -200,19 +200,6 @@ CREATE TABLE IF NOT EXISTS "public"."invitations"
     CONSTRAINT "invitations_status_check" CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'expired'::character varying, 'revoked'::character varying])::text[])))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."markup_rates"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "name" text NOT NULL,
-    "breakpoints" jsonb NOT NULL DEFAULT '[]'::jsonb,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "is_default" boolean NOT NULL DEFAULT false,
-    CONSTRAINT "markup_rates_pkey" PRIMARY KEY (id),
-    CONSTRAINT "markup_rates_name_unique_per_company" UNIQUE (company_id, name)
-);
-
 CREATE TABLE IF NOT EXISTS "public"."quotes"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -225,21 +212,18 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "created_by" uuid,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
-    "lead_time_days" integer,
     "expiration_date" date,
     "billing_address_id" uuid,
     "shipping_address_id" uuid,
     "contact_id" uuid,
     "payment_terms" text,
-    "lead_time_value" integer,
-    "lead_time_unit" text DEFAULT 'business_days'::text,
     "customer_name" text,
     "bill_to_address" jsonb,
     "ship_to_address" jsonb,
     "contact_snapshot" jsonb,
+    "lead_time_text" text,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
-    CONSTRAINT "quotes_lead_time_unit_check" CHECK ((lead_time_unit = ANY (ARRAY['business_days'::text, 'calendar_days'::text, 'weeks'::text]))),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
 );
 
@@ -257,7 +241,6 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "due_date" date,
-    "lead_time_days" integer,
     "production_status" text NOT NULL,
     "fulfillment_status" text NOT NULL,
     "customer_po_number" text,
@@ -470,11 +453,12 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "source" text NOT NULL DEFAULT 'made'::text,
-    "markup_rate_id" uuid,
     "is_location_tracked" boolean NOT NULL DEFAULT false,
+    "costing_batch_quantity" numeric NOT NULL DEFAULT 1,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
+    CONSTRAINT "parts_costing_batch_quantity_check" CHECK (((costing_batch_quantity IS NULL) OR (costing_batch_quantity > (0)::numeric))),
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
     CONSTRAINT "parts_requires_unit" CHECK ((primary_unit IS NOT NULL)),
     CONSTRAINT "parts_source_check" CHECK ((source = ANY (ARRAY['made'::text, 'bought'::text])))
@@ -542,7 +526,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_procurement_tiers"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "part_id" uuid NOT NULL,
-    "vendor_id" uuid,
     "min_quantity" numeric NOT NULL,
     "cost_per_unit" numeric NOT NULL,
     "quoted_at" date,
@@ -551,7 +534,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_procurement_tiers"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "part_procurement_tiers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "part_procurement_tiers_part_id_vendor_id_min_quantity_key" UNIQUE (part_id, vendor_id, min_quantity),
     CONSTRAINT "part_procurement_tiers_cost_per_unit_check" CHECK ((cost_per_unit > (0)::numeric)),
     CONSTRAINT "part_procurement_tiers_min_quantity_check" CHECK ((min_quantity > (0)::numeric))
 );
@@ -567,6 +549,7 @@ CREATE TABLE IF NOT EXISTS "public"."parts_bom"
     "notes" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "consume_whole_units" boolean NOT NULL DEFAULT false,
     CONSTRAINT "parts_bom_pkey" PRIMARY KEY (id),
     CONSTRAINT "parts_bom_unique_child" UNIQUE (parent_part_id, child_part_id),
     CONSTRAINT "parts_bom_no_self_reference" CHECK ((parent_part_id <> child_part_id)),
@@ -681,7 +664,9 @@ CREATE TABLE IF NOT EXISTS "public"."quote_materials"
     "line_cost" numeric,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "part_id" uuid NOT NULL,
-    CONSTRAINT "quote_materials_pkey" PRIMARY KEY (id)
+    "units_consumed" numeric,
+    CONSTRAINT "quote_materials_pkey" PRIMARY KEY (id),
+    CONSTRAINT "quote_materials_units_consumed_check" CHECK (((units_consumed IS NULL) OR (units_consumed >= (0)::numeric)))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quote_operations"
@@ -805,9 +790,7 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "estimated_setup_minutes" numeric(8,2) DEFAULT 0,
     "estimated_run_minutes_per_unit" numeric(8,4) DEFAULT 0,
     "status" text NOT NULL DEFAULT 'pending'::text,
-    "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
-    "assigned_to" uuid,
     "completed_by" uuid,
     "instructions" text,
     "notes" text,
@@ -904,7 +887,6 @@ ALTER TABLE "public"."job_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."markup_rates" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_location_stock" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_notes" ENABLE ROW LEVEL SECURITY;
@@ -1427,45 +1409,6 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."markup_rates";
-CREATE POLICY "ai_readonly_select"
-    ON "public"."markup_rates"
-    FOR SELECT
-    TO jigged_ai_readonly
-    USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
-
-DROP POLICY IF EXISTS "markup_rates_delete" ON "public"."markup_rates";
-CREATE POLICY "markup_rates_delete"
-    ON "public"."markup_rates"
-    FOR DELETE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "markup_rates_insert" ON "public"."markup_rates";
-CREATE POLICY "markup_rates_insert"
-    ON "public"."markup_rates"
-    FOR INSERT
-    WITH CHECK ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "markup_rates_select" ON "public"."markup_rates";
-CREATE POLICY "markup_rates_select"
-    ON "public"."markup_rates"
-    FOR SELECT
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
-
-DROP POLICY IF EXISTS "markup_rates_update" ON "public"."markup_rates";
-CREATE POLICY "markup_rates_update"
-    ON "public"."markup_rates"
-    FOR UPDATE
-    USING ((company_id IN ( SELECT user_company_access.company_id
-   FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid()))));
 
 DROP POLICY IF EXISTS "Uploaders and admins can delete part_attachments" ON "public"."part_attachments";
 CREATE POLICY "Uploaders and admins can delete part_attachments"
@@ -2406,9 +2349,6 @@ ALTER TABLE "public"."job_notes"
     ADD CONSTRAINT "job_notes_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_operations"
-    ADD CONSTRAINT "job_operations_assigned_to_fkey" FOREIGN KEY (assigned_to) REFERENCES auth.users(id);
-
-ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_completed_by_fkey" FOREIGN KEY (completed_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."job_operations"
@@ -2456,9 +2396,6 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."markup_rates"
-    ADD CONSTRAINT "markup_rates_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
 ALTER TABLE "public"."part_attachments"
     ADD CONSTRAINT "part_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2495,14 +2432,8 @@ ALTER TABLE "public"."part_pricing_tiers"
 ALTER TABLE "public"."part_procurement_tiers"
     ADD CONSTRAINT "part_procurement_tiers_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."part_procurement_tiers"
-    ADD CONSTRAINT "part_procurement_tiers_vendor_id_fkey" FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE RESTRICT;
-
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."parts"
-    ADD CONSTRAINT "parts_markup_rate_id_fkey" FOREIGN KEY (markup_rate_id) REFERENCES markup_rates(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."parts"
     ADD CONSTRAINT "parts_preferred_vendor_id_fkey" FOREIGN KEY (preferred_vendor_id) REFERENCES vendors(id) ON DELETE SET NULL;
@@ -2716,7 +2647,6 @@ CREATE INDEX IF NOT EXISTS idx_job_materials_parts_bom ON public.job_materials U
 CREATE INDEX IF NOT EXISTS idx_job_note_media_note ON public.job_note_media USING btree (note_id);
 CREATE INDEX IF NOT EXISTS idx_job_notes_job_created ON public.job_notes USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_operations_job_part_id ON public.job_operations USING btree (job_part_id);
-CREATE INDEX IF NOT EXISTS idx_job_ops_assigned ON public.job_operations USING btree (assigned_to) WHERE (assigned_to IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_job ON public.job_operations USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_routing_operation ON public.job_operations USING btree (routing_operation_id) WHERE (routing_operation_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_job_ops_status ON public.job_operations USING btree (status);
@@ -2734,8 +2664,6 @@ CREATE INDEX IF NOT EXISTS idx_jobs_invoicing_status ON public.jobs USING btree 
 CREATE INDEX IF NOT EXISTS idx_jobs_job_number_trgm ON public.jobs USING gin (job_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
-CREATE INDEX IF NOT EXISTS idx_markup_rates_company ON public.markup_rates USING btree (company_id);
-CREATE UNIQUE INDEX IF NOT EXISTS markup_rates_one_default_per_company ON public.markup_rates USING btree (company_id) WHERE is_default;
 CREATE INDEX IF NOT EXISTS idx_part_attachments_part_created ON public.part_attachments USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS part_location_stock_company_idx ON public.part_location_stock USING btree (company_id);
 CREATE INDEX IF NOT EXISTS part_location_stock_location_idx ON public.part_location_stock USING btree (location_id);
@@ -2745,11 +2673,10 @@ CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_procurement_tiers_expiring ON public.part_procurement_tiers USING btree (part_id, expires_at) WHERE (expires_at IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_procurement_tiers_part ON public.part_procurement_tiers USING btree (part_id);
-CREATE INDEX IF NOT EXISTS idx_procurement_tiers_vendor ON public.part_procurement_tiers USING btree (vendor_id) WHERE (vendor_id IS NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS part_procurement_tiers_part_id_min_quantity_key ON public.part_procurement_tiers USING btree (part_id, min_quantity);
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_made ON public.parts USING btree (company_id) WHERE (source = 'made'::text);
 CREATE INDEX IF NOT EXISTS idx_parts_company_stocked ON public.parts USING btree (company_id) WHERE is_stocked;
-CREATE INDEX IF NOT EXISTS idx_parts_markup_rate_id ON public.parts USING btree (markup_rate_id);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name_trgm ON public.parts USING gin (part_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btree (preferred_vendor_id) WHERE (preferred_vendor_id IS NOT NULL);
@@ -3110,91 +3037,6 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.bulk_apply_markup_rate(p_company_id uuid, p_part_ids uuid[], p_rate_id uuid)
- RETURNS jsonb
- LANGUAGE plpgsql
- SET statement_timeout TO '120s'
-AS $function$
-DECLARE
-    v_rate_breakpoints jsonb;
-    v_part_id          uuid;
-    v_qty              integer;
-    v_markup           numeric;
-    v_sequence         integer;
-    v_base_cost        numeric;
-    v_has_null_price   boolean;
-    v_updated          integer := 0;
-    v_price_uncomputed integer := 0;
-    v_failed           jsonb := '[]'::jsonb;
-BEGIN
-    SELECT breakpoints INTO v_rate_breakpoints
-    FROM public.markup_rates
-    WHERE id = p_rate_id AND company_id = p_company_id;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Markup rate % not found in company %', p_rate_id, p_company_id;
-    END IF;
-
-    FOREACH v_part_id IN ARRAY p_part_ids LOOP
-        BEGIN
-            v_has_null_price := false;
-            v_sequence := 0;
-
-            DELETE FROM public.part_pricing_tiers WHERE part_id = v_part_id;
-
-            FOR v_qty, v_markup IN
-                SELECT FLOOR((bp->>'qty')::numeric)::integer,
-                       (bp->>'markup_percent')::numeric
-                FROM jsonb_array_elements(v_rate_breakpoints) bp
-                WHERE (bp->>'qty')::numeric > 0
-                ORDER BY (bp->>'qty')::numeric ASC
-            LOOP
-                v_sequence := v_sequence + 10;
-
-                -- Still call compute_part_cost_at_qty so the per-part
-                -- "price uncomputed" flag returned to the UI stays accurate.
-                -- We just no longer persist the resulting unit price.
-                BEGIN
-                    v_base_cost := public.compute_part_cost_at_qty(v_part_id, v_qty);
-                    IF v_base_cost IS NULL THEN
-                        v_has_null_price := true;
-                    END IF;
-                EXCEPTION WHEN OTHERS THEN
-                    v_has_null_price := true;
-                END;
-
-                INSERT INTO public.part_pricing_tiers
-                    (part_id, company_id, sequence, quantity, markup_percent)
-                VALUES
-                    (v_part_id, p_company_id, v_sequence, v_qty, v_markup);
-            END LOOP;
-
-            UPDATE public.parts
-                SET markup_rate_id = p_rate_id
-              WHERE id = v_part_id;
-
-            v_updated := v_updated + 1;
-            IF v_has_null_price THEN
-                v_price_uncomputed := v_price_uncomputed + 1;
-            END IF;
-        EXCEPTION WHEN OTHERS THEN
-            v_failed := v_failed || jsonb_build_object(
-                'part_id', v_part_id,
-                'error',   SQLERRM
-            );
-        END;
-    END LOOP;
-
-    RETURN jsonb_build_object(
-        'updated',          v_updated,
-        'price_uncomputed', v_price_uncomputed,
-        'failed',           v_failed
-    );
-END;
-$function$
-
-;
-
 CREATE OR REPLACE FUNCTION public.compute_job_fulfillment_status(p_job_id uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -3350,7 +3192,6 @@ AS $function$
 DECLARE
     v_source text;
     v_part_name text;
-    v_preferred_vendor_id uuid;
     v_routing_id uuid;
     v_total numeric := 0;
     v_op RECORD;
@@ -3358,6 +3199,9 @@ DECLARE
     v_bom RECORD;
     v_to_primary_factor numeric;
     v_qty_in_primary_unit numeric;
+    v_consumed numeric;
+    v_child_val_qty numeric;
+    v_pinned boolean;
     v_child_cost numeric;
     v_tier_cost numeric;
 BEGIN
@@ -3366,29 +3210,37 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT source, part_name, preferred_vendor_id
-      INTO v_source, v_part_name, v_preferred_vendor_id
+    SELECT source, part_name
+      INTO v_source, v_part_name
       FROM public.parts
      WHERE id = p_part_id;
     IF v_source IS NULL THEN
         RAISE EXCEPTION 'compute_part_cost_at_qty: part % not found', p_part_id;
     END IF;
 
-    -- ---------- Bought parts: resolve to a preferred-vendor tier ----------
+    -- ---------- Bought parts: resolve to the part's own tier sheet ----------
     IF v_source = 'bought' THEN
-        IF v_preferred_vendor_id IS NULL THEN
-            RETURN NULL;
-        END IF;
         SELECT t.cost_per_unit
           INTO v_tier_cost
           FROM public.part_procurement_tiers t
          WHERE t.part_id = p_part_id
-           AND t.vendor_id = v_preferred_vendor_id
            AND t.min_quantity <= p_qty
            AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
          ORDER BY t.cost_per_unit ASC,
                   t.min_quantity DESC
          LIMIT 1;
+        -- Below every break: floor to the lowest-min tier (smallest pack you can
+        -- buy) so the part is still costable, rather than returning NULL.
+        IF v_tier_cost IS NULL THEN
+            SELECT t.cost_per_unit
+              INTO v_tier_cost
+              FROM public.part_procurement_tiers t
+             WHERE t.part_id = p_part_id
+               AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+             ORDER BY t.min_quantity ASC,
+                      t.cost_per_unit ASC
+             LIMIT 1;
+        END IF;
         RETURN v_tier_cost;
     END IF;
 
@@ -3435,8 +3287,11 @@ BEGIN
         SELECT b.quantity,
                b.unit,
                b.child_part_id,
-               c.primary_unit AS child_primary_unit,
-               c.part_name    AS child_part_name
+               b.consume_whole_units,
+               c.primary_unit          AS child_primary_unit,
+               c.part_name             AS child_part_name,
+               c.source                AS child_source,
+               c.costing_batch_quantity AS child_costing_batch_quantity
           FROM public.parts_bom b
           JOIN public.parts c ON c.id = b.child_part_id
          WHERE b.parent_part_id = p_part_id
@@ -3457,16 +3312,44 @@ BEGIN
             v_qty_in_primary_unit := v_bom.quantity;
         END IF;
 
+        -- Units of the child physically consumed across the parent batch of
+        -- p_qty. Whole-unit lines ceiling to discrete stock; fractional lines
+        -- are exact.
+        IF v_bom.consume_whole_units THEN
+            v_consumed := ceil(p_qty * v_qty_in_primary_unit);
+        ELSE
+            v_consumed := p_qty * v_qty_in_primary_unit;
+        END IF;
+
+        -- A MADE child is valued at its standard costing lot size (setup
+        -- amortized over the run it's produced in), fixed regardless of how many
+        -- this order draws. A BOUGHT child is valued at what we actually consume
+        -- (to hit the right procurement tier / floor).
+        v_pinned := (v_bom.child_source = 'made');
+        IF v_pinned THEN
+            v_child_val_qty := v_bom.child_costing_batch_quantity;
+        ELSE
+            v_child_val_qty := v_consumed;
+        END IF;
+
         v_child_cost := public.compute_part_cost_at_qty(
             v_bom.child_part_id,
-            p_qty * v_qty_in_primary_unit
+            v_child_val_qty
         );
 
         IF v_child_cost IS NULL THEN
             RETURN NULL;
         END IF;
 
-        v_total := v_total + v_qty_in_primary_unit * v_child_cost;
+        IF NOT v_bom.consume_whole_units AND NOT v_pinned THEN
+            -- Bought child, fractional consumption — textually identical to the
+            -- pre-feature expression so those lines stay byte-for-byte the same.
+            v_total := v_total + v_qty_in_primary_unit * v_child_cost;
+        ELSE
+            -- Made (lot-size valuation) and/or whole-unit ceiling: per parent
+            -- unit = consumed units × unit cost, spread across the p_qty units.
+            v_total := v_total + (v_consumed * v_child_cost) / p_qty;
+        END IF;
     END LOOP;
 
     RETURN v_total;
@@ -3476,15 +3359,18 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.compute_part_cost_explain(p_part_id uuid, p_qty numeric)
- RETURNS TABLE(unit_cost numeric, missing_leaves jsonb)
+ RETURNS TABLE(unit_cost numeric, missing_leaves jsonb, missing_markups jsonb, missing_op_rates jsonb, is_priceable boolean)
  LANGUAGE plpgsql
  STABLE
 AS $function$
 DECLARE
-    v_missing jsonb;
+    v_missing_leaves   jsonb;
+    v_missing_markups  jsonb;
+    v_missing_op_rates jsonb;
+    v_unit_cost        numeric;
 BEGIN
-    WITH RECURSIVE tree(part_id, part_name, source, preferred_vendor_id, cumulative_qty, depth) AS (
-        SELECT p.id, p.part_name, p.source, p.preferred_vendor_id, p_qty, 0
+    WITH RECURSIVE tree(part_id, part_name, source, cumulative_qty, depth) AS (
+        SELECT p.id, p.part_name, p.source, p_qty, 0
           FROM public.parts p
          WHERE p.id = p_part_id
 
@@ -3493,19 +3379,42 @@ BEGIN
         SELECT c.id,
                c.part_name,
                c.source,
-               c.preferred_vendor_id,
-               t.cumulative_qty *
-                   CASE
-                       WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
-                           b.quantity * COALESCE(
-                               (SELECT uc.to_primary_factor
-                                  FROM public.parts_unit_conversions uc
-                                 WHERE uc.part_id = c.id
-                                   AND uc.from_unit = b.unit),
-                               1
-                           )
-                       ELSE b.quantity
-                   END,
+               CASE
+                   -- Made child: value its subtree at its standard costing lot
+                   -- size (fixed, not the cascaded consumed qty).
+                   WHEN c.source = 'made' THEN
+                       c.costing_batch_quantity
+                   -- Bought whole-unit line: ceiling the cascaded consumption.
+                   WHEN b.consume_whole_units THEN
+                       ceil(
+                           t.cumulative_qty *
+                           CASE
+                               WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
+                                   b.quantity * COALESCE(
+                                       (SELECT uc.to_primary_factor
+                                          FROM public.parts_unit_conversions uc
+                                         WHERE uc.part_id = c.id
+                                           AND uc.from_unit = b.unit),
+                                       1
+                                   )
+                               ELSE b.quantity
+                           END
+                       )
+                   -- Bought fractional cascade.
+                   ELSE
+                       t.cumulative_qty *
+                       CASE
+                           WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
+                               b.quantity * COALESCE(
+                                   (SELECT uc.to_primary_factor
+                                      FROM public.parts_unit_conversions uc
+                                     WHERE uc.part_id = c.id
+                                       AND uc.from_unit = b.unit),
+                                   1
+                               )
+                           ELSE b.quantity
+                       END
+               END,
                t.depth + 1
           FROM tree t
           JOIN public.parts_bom b ON b.parent_part_id = t.part_id
@@ -3513,39 +3422,97 @@ BEGIN
          WHERE t.source = 'made'
            AND t.depth < 50
     ),
-    missing AS (
+    -- A bought leaf is "missing" only if it has NO non-expired procurement tier.
+    leaves AS (
         SELECT tr.part_id, tr.part_name, tr.depth, tr.cumulative_qty AS qty_required
           FROM tree tr
          WHERE tr.source = 'bought'
-           AND (
-               tr.preferred_vendor_id IS NULL
-               OR NOT EXISTS (
+           AND NOT EXISTS (
                    SELECT 1
                      FROM public.part_procurement_tiers t
                     WHERE t.part_id = tr.part_id
-                      AND t.vendor_id = tr.preferred_vendor_id
-                      AND t.min_quantity <= tr.cumulative_qty
                       AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
                )
+    ),
+    -- Only the ROOT part (depth 0 = the part being quoted) needs a markup. A
+    -- material's markup is never used inside a parent, so descendants are not
+    -- flagged.
+    markups AS (
+        SELECT tr.part_id, tr.part_name, tr.source, MIN(tr.depth) AS depth
+          FROM tree tr
+         WHERE tr.depth = 0
+           AND NOT EXISTS (
+                   SELECT 1 FROM public.part_pricing_tiers pt
+                    WHERE pt.part_id = tr.part_id
+                      AND pt.markup_percent IS NOT NULL
+               )
+         GROUP BY tr.part_id, tr.part_name, tr.source
+    ),
+    op_rates AS (
+        SELECT tr.part_id, tr.part_name, MIN(tr.depth) AS depth
+          FROM tree tr
+          JOIN public.routings r            ON r.part_id = tr.part_id
+          JOIN public.routing_operations ro ON ro.routing_id = r.id
+          JOIN public.work_centers wc       ON wc.id = ro.work_center_id
+         WHERE tr.source = 'made'
+           AND (
+               (wc.kind = 'internal'
+                   AND ro.labor_rate_override IS NULL
+                   AND wc.labor_rate IS NULL)
+               OR
+               (wc.kind <> 'internal'
+                   AND ro.external_unit_price IS NULL)
            )
+         GROUP BY tr.part_id, tr.part_name
     )
-    SELECT COALESCE(
-              jsonb_agg(
-                  jsonb_build_object(
-                      'part_id', m.part_id,
-                      'part_name', m.part_name,
-                      'depth', m.depth,
-                      'qty_required', m.qty_required
-                  )
-                  ORDER BY m.depth DESC, m.part_name ASC
-              ),
-              '[]'::jsonb
-           )
-      INTO v_missing
-      FROM missing m;
+    SELECT
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',      l.part_id,
+                            'part_name',    l.part_name,
+                            'depth',        l.depth,
+                            'qty_required', l.qty_required
+                        )
+                        ORDER BY l.depth DESC, l.part_name ASC
+                    ), '[]'::jsonb)
+           FROM leaves l),
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',   m.part_id,
+                            'part_name', m.part_name,
+                            'depth',     m.depth,
+                            'source',    m.source
+                        )
+                        ORDER BY m.depth ASC, m.part_name ASC
+                    ), '[]'::jsonb)
+           FROM markups m),
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',   o.part_id,
+                            'part_name', o.part_name,
+                            'depth',     o.depth
+                        )
+                        ORDER BY o.depth ASC, o.part_name ASC
+                    ), '[]'::jsonb)
+           FROM op_rates o)
+      INTO v_missing_leaves, v_missing_markups, v_missing_op_rates;
 
-    unit_cost := public.compute_part_cost_at_qty(p_part_id, p_qty);
-    missing_leaves := v_missing;
+    BEGIN
+        v_unit_cost := public.compute_part_cost_at_qty(p_part_id, p_qty);
+    EXCEPTION WHEN OTHERS THEN
+        v_unit_cost := NULL;
+    END;
+
+    unit_cost        := v_unit_cost;
+    missing_leaves   := v_missing_leaves;
+    missing_markups  := v_missing_markups;
+    missing_op_rates := v_missing_op_rates;
+    is_priceable     := (v_missing_leaves = '[]'::jsonb
+                         AND v_missing_markups = '[]'::jsonb
+                         AND v_missing_op_rates = '[]'::jsonb);
     RETURN NEXT;
 END;
 $function$
@@ -4345,47 +4312,35 @@ CREATE OR REPLACE FUNCTION public.get_priceable_part_ids(p_company_id uuid)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
+    v_costable uuid[];
     v_priceable uuid[];
     v_new uuid[];
 BEGIN
-    -- Base case: bought parts that have at least one pricing tier AND a
-    -- non-expired procurement tier on their preferred vendor.
+    -- COSTABLE — a part whose cost resolves. Markup is NOT required here: a
+    -- material's markup is never used when consumed in a parent. Base case:
+    -- bought parts with a non-expired procurement tier.
     SELECT COALESCE(array_agg(DISTINCT p.id), ARRAY[]::uuid[])
-    INTO v_priceable
+    INTO v_costable
     FROM public.parts p
     WHERE p.company_id = p_company_id
       AND p.source = 'bought'
-      AND p.preferred_vendor_id IS NOT NULL
-      AND EXISTS (
-          SELECT 1
-          FROM public.part_pricing_tiers t
-          WHERE t.part_id = p.id
-      )
       AND EXISTS (
           SELECT 1
           FROM public.part_procurement_tiers pt
           WHERE pt.part_id = p.id
-            AND pt.vendor_id = p.preferred_vendor_id
             AND (pt.expires_at IS NULL OR pt.expires_at >= CURRENT_DATE)
       );
 
     -- Fixed-point: add made parts whose routing is complete and whose BOM
-    -- children (if any) are all already in v_priceable. Loop terminates
-    -- when no new parts are added — bounded by BOM depth.
+    -- children (if any) are all already costable. Bounded by BOM depth.
     LOOP
         SELECT COALESCE(array_agg(p.id), ARRAY[]::uuid[])
         INTO v_new
         FROM public.parts p
         WHERE p.company_id = p_company_id
           AND p.source = 'made'
-          AND NOT (p.id = ANY(v_priceable))
-          AND EXISTS (
-              SELECT 1
-              FROM public.part_pricing_tiers t
-              WHERE t.part_id = p.id
-          )
-          -- Every routing op (if any) must have full pricing. NOT EXISTS
-          -- with an unpriced op is the negative form of "all priced".
+          AND NOT (p.id = ANY(v_costable))
+          -- Every routing op (if any) must have full pricing.
           AND NOT EXISTS (
               SELECT 1
               FROM public.routings r
@@ -4401,18 +4356,30 @@ BEGIN
                         AND ro.external_unit_price IS NULL)
                 )
           )
-          -- Every BOM child must already be priceable. A made part with no
-          -- BOM children passes this check trivially (NOT EXISTS over empty).
+          -- Every BOM child must already be costable.
           AND NOT EXISTS (
               SELECT 1
               FROM public.parts_bom b
               WHERE b.parent_part_id = p.id
-                AND NOT (b.child_part_id = ANY(v_priceable))
+                AND NOT (b.child_part_id = ANY(v_costable))
           );
 
         EXIT WHEN cardinality(v_new) = 0;
-        v_priceable := v_priceable || v_new;
+        v_costable := v_costable || v_new;
     END LOOP;
+
+    -- PRICEABLE = costable AND has its own non-null-markup pricing tier. Only the
+    -- part being sold needs a markup; its materials just need to be costable.
+    SELECT COALESCE(array_agg(p.id), ARRAY[]::uuid[])
+    INTO v_priceable
+    FROM public.parts p
+    WHERE p.id = ANY(v_costable)
+      AND EXISTS (
+          SELECT 1
+          FROM public.part_pricing_tiers t
+          WHERE t.part_id = p.id
+            AND t.markup_percent IS NOT NULL
+      );
 
     RETURN v_priceable;
 END;
@@ -4431,18 +4398,14 @@ DECLARE
 BEGIN
     SELECT preferred_vendor_id INTO v_preferred_vendor_id
       FROM public.parts WHERE id = p_part_id;
-    IF v_preferred_vendor_id IS NULL THEN
-        RETURN; -- no rows, callers treat as NULL cost
-    END IF;
 
-    -- Pick the cheapest non-expired tier under the preferred vendor where
-    -- min_quantity <= p_qty. Cross-vendor and NULL-vendor rows are now
-    -- reference-only; they never drive cost.
-    SELECT t.id, t.cost_per_unit, t.vendor_id
+    -- Cheapest non-expired tier on the part's own sheet where min_quantity <=
+    -- p_qty. Vendor no longer gates cost; the returned vendor_id is the part's
+    -- preferred-vendor label.
+    SELECT t.id, t.cost_per_unit
       INTO v_tier
       FROM public.part_procurement_tiers t
      WHERE t.part_id = p_part_id
-       AND t.vendor_id = v_preferred_vendor_id
        AND t.min_quantity <= p_qty
        AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
      ORDER BY t.cost_per_unit ASC,
@@ -4451,12 +4414,12 @@ BEGIN
 
     IF FOUND THEN
         unit_cost := v_tier.cost_per_unit;
-        vendor_id := v_tier.vendor_id;
-        tier_id := v_tier.id;
-        source := 'tier';
+        vendor_id := v_preferred_vendor_id;
+        tier_id   := v_tier.id;
+        source    := 'tier';
         RETURN NEXT;
     END IF;
-    -- No row returned when no tier matches under the preferred vendor.
+    -- No row when no tier covers p_qty.
 END;
 $function$
 
@@ -5032,7 +4995,6 @@ BEGIN
 
     -- Delete in FK-respecting order. job_materials/job_operations live under
     -- jobs (not company-scoped directly), so we pivot through jobs first.
-    DELETE FROM operator_sessions WHERE company_id = v_demo_company_id;
     DELETE FROM inventory_transactions WHERE company_id = v_demo_company_id;
     DELETE FROM job_materials WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
     DELETE FROM job_operations WHERE job_id IN (SELECT id FROM jobs WHERE company_id = v_demo_company_id);
@@ -5150,34 +5112,6 @@ END $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.seed_default_markup_rates()
- RETURNS trigger
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-  INSERT INTO public.markup_rates (company_id, name, breakpoints, is_default) VALUES
-    (NEW.id,
-     'Default',
-     '[{"qty": 1, "markup_percent": 25}]'::jsonb,
-     true),
-    (NEW.id,
-     'Volume tiers',
-     '[{"qty": 1, "markup_percent": 25},
-       {"qty": 10, "markup_percent": 22},
-       {"qty": 100, "markup_percent": 18},
-       {"qty": 1000, "markup_percent": 15}]'::jsonb,
-     false),
-    (NEW.id,
-     'Premium small batch',
-     '[{"qty": 1, "markup_percent": 40},
-       {"qty": 10, "markup_percent": 32}]'::jsonb,
-     false);
-  RETURN NEW;
-END;
-$function$
-
-;
-
 CREATE OR REPLACE FUNCTION public.seed_demo_data(p_company_id uuid, p_user_id uuid, p_template_name text DEFAULT 'default'::text)
  RETURNS void
  LANGUAGE plpgsql
@@ -5255,7 +5189,7 @@ BEGIN
     END IF;
 
     -- Parts: cost_per_unit dropped from parts. For bought parts with a
-    -- template-supplied cost, emit a NULL-vendor procurement tier.
+    -- template-supplied cost, emit a part-level procurement tier.
     IF v_template->'parts' IS NOT NULL THEN
         FOR v_item IN SELECT * FROM jsonb_array_elements(v_template->'parts') LOOP
             v_new_id := gen_random_uuid();
@@ -5281,8 +5215,8 @@ BEGIN
 
             IF v_part_source = 'bought' AND v_part_cost IS NOT NULL AND v_part_cost > 0 THEN
                 INSERT INTO part_procurement_tiers
-                    (part_id, vendor_id, min_quantity, cost_per_unit)
-                VALUES (v_new_id, NULL, 1, v_part_cost);
+                    (part_id, min_quantity, cost_per_unit)
+                VALUES (v_new_id, 1, v_part_cost);
             END IF;
         END LOOP;
     END IF;
@@ -5925,9 +5859,6 @@ AS '$libdir/pg_trgm', $function$word_similarity_op$function$
 DROP TRIGGER IF EXISTS "ai_config_updated_at" ON "public"."ai_config";
 CREATE TRIGGER ai_config_updated_at BEFORE UPDATE ON public.ai_config FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS "companies_seed_default_markup_rates" ON "public"."companies";
-CREATE TRIGGER companies_seed_default_markup_rates AFTER INSERT ON public.companies FOR EACH ROW EXECUTE FUNCTION seed_default_markup_rates();
-
 DROP TRIGGER IF EXISTS "companies_updated_at" ON "public"."companies";
 CREATE TRIGGER companies_updated_at BEFORE UPDATE ON public.companies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -5999,9 +5930,6 @@ CREATE TRIGGER trg_snapshot_job_party BEFORE INSERT OR UPDATE OF customer_id, bi
 
 DROP TRIGGER IF EXISTS "trigger_job_production_status_change" ON "public"."jobs";
 CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_production_status_change();
-
-DROP TRIGGER IF EXISTS "markup_rates_updated_at" ON "public"."markup_rates";
-CREATE TRIGGER markup_rates_updated_at BEFORE UPDATE ON public.markup_rates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS "trg_recompute_part_quantity" ON "public"."part_location_stock";
 CREATE TRIGGER trg_recompute_part_quantity AFTER INSERT OR DELETE OR UPDATE ON public.part_location_stock FOR EACH ROW EXECUTE FUNCTION recompute_part_quantity_from_locations();
@@ -6154,14 +6082,11 @@ COMMENT ON TABLE "public"."inventory_transactions"
 COMMENT ON TABLE "public"."job_fulfillment_audit"
     IS 'Forward-transition log into fully_shipped. Written from create_shipment_with_line_items; never from a trigger (no incidental-ordering ambiguity for triggering_shipment_id). Reverse transitions are captured on shipments.voided_at/voided_by.';
 
-COMMENT ON TABLE "public"."markup_rates"
-    IS 'Named, reusable markup matrices (qty × markup%) per company. Applied to parts via snapshot — copies breakpoints into part_pricing_tiers, no link.';
-
 COMMENT ON TABLE "public"."part_location_stock"
     IS 'Per-location stock balances; source of truth for location-tracked parts. SELECT-only via RLS — mutated only through SECURITY DEFINER RPCs that also write inventory_transactions.';
 
 COMMENT ON TABLE "public"."part_procurement_tiers"
-    IS 'Vendor-keyed tiered pricing for bought parts. Each row is one (vendor, min_quantity, cost_per_unit) point on a vendor''s tier sheet. vendor_id may be NULL for "internal estimate" rows. Ordering of tiers within a vendor sheet is derived from min_quantity ASC — no separate sequence column. Resolved at read time via get_procurement_cost(part_id, qty), which picks the cheapest non-expired tier where min_quantity <= qty across all vendors.';
+    IS 'Part-level bought-part cost tier sheet: (part_id, min_quantity) → cost_per_unit. One set per part, independent of vendor. Cost resolution (compute_part_cost_at_qty / get_procurement_cost) reads these directly; parts.preferred_vendor_id is a supplier label, not a cost filter. Multi-vendor cost sheets / RFQ / POs are deferred to a future purchasing module.';
 
 COMMENT ON TABLE "public"."parts"
     IS 'Unified item master. Replaces the prior two-table split between manufacturable parts and stockable inventory_items.';
@@ -6385,12 +6310,6 @@ COMMENT ON COLUMN "public"."job_operations"."routing_operation_id"
 COMMENT ON COLUMN "public"."jobs"."customer_po_number"
     IS 'Customer-issued PO number for this job. Captured at convertQuoteToJob time (or by reorder when applicable). Indexed via the partial unique-per-company index and via pg_trgm for the jobs-list search RPC.';
 
-COMMENT ON COLUMN "public"."markup_rates"."breakpoints"
-    IS 'JSONB array of {qty: int>0, markup_percent: number}. Sorted by qty ascending. At least one breakpoint required at write time.';
-
-COMMENT ON COLUMN "public"."part_procurement_tiers"."vendor_id"
-    IS 'Vendor whose sheet this tier belongs to. Cost resolution restricts to the part''s preferred_vendor_id — sheets under other vendors (and vendor_id=NULL "Internal estimate" rows) are reference-only and never drive cost. To switch which sheet drives cost, change the part''s preferred_vendor_id.';
-
 COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
     IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
 
@@ -6424,6 +6343,9 @@ COMMENT ON COLUMN "public"."parts"."source"
 COMMENT ON COLUMN "public"."parts"."is_location_tracked"
     IS 'When true, parts.quantity is a trigger-maintained rollup of part_location_stock and direct quantity writes are rejected.';
 
+COMMENT ON COLUMN "public"."parts"."costing_batch_quantity"
+    IS 'Standard costing lot size: the production run this part''s cost is amortized over (setup / batch). A made part is always valued at this quantity when it is consumed as a component in another part''s BOM. Default 1. Bought parts ignore it.';
+
 COMMENT ON COLUMN "public"."parts_bom"."quantity"
     IS 'Quantity of child consumed per unit of parent, expressed in `unit`. Cost rollups convert to the child part primary_unit via parts_unit_conversions if `unit` differs.';
 
@@ -6432,6 +6354,9 @@ COMMENT ON COLUMN "public"."parts_bom"."unit"
 
 COMMENT ON COLUMN "public"."parts_bom"."sequence"
     IS 'Display order in the BOM panel. Steps of 10 leave room for inserts.';
+
+COMMENT ON COLUMN "public"."parts_bom"."consume_whole_units"
+    IS 'true = ceiling material consumption to whole units at the order qty (discrete stock); false = fractional (default, current behavior).';
 
 COMMENT ON COLUMN "public"."parts_unit_conversions"."to_primary_factor"
     IS 'Multiplier: quantity_in_from_unit * to_primary_factor = quantity_in_primary_unit.';
@@ -6454,6 +6379,9 @@ COMMENT ON COLUMN "public"."quote_materials"."item_name"
 COMMENT ON COLUMN "public"."quote_materials"."part_id"
     IS 'The manufactured part this material consumption belongs to (the line-item part on the quote).';
 
+COMMENT ON COLUMN "public"."quote_materials"."units_consumed"
+    IS 'Whole/fractional units of this material actually consumed across the quoted order (ceil(order_qty * per-part consumption) in whole-unit mode); NULL = legacy row where `quantity` is the literal per-unit value.';
+
 COMMENT ON COLUMN "public"."quotes"."billing_address_id"
     IS 'Customer address used for BILL TO on the printable quote and downstream shipments. Set at quote creation from the customer''s default_billing row; editable per-quote.';
 
@@ -6465,12 +6393,6 @@ COMMENT ON COLUMN "public"."quotes"."contact_id"
 
 COMMENT ON COLUMN "public"."quotes"."payment_terms"
     IS 'Payment terms shown on the quote (preset or custom free text), e.g. Net 30, 2/10 Net 30.';
-
-COMMENT ON COLUMN "public"."quotes"."lead_time_value"
-    IS 'Lead time as stated by the user, in the unit given by lead_time_unit. Normalized into lead_time_days on save.';
-
-COMMENT ON COLUMN "public"."quotes"."lead_time_unit"
-    IS 'Unit for lead_time_value: business_days | calendar_days | weeks.';
 
 COMMENT ON COLUMN "public"."quotes"."customer_name"
     IS 'Immutable snapshot of the customer name at quote issue time.';
@@ -6631,5 +6553,263 @@ COMMENT ON COLUMN "public"."work_centers"."labor_rate"
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('attachments', 'attachments', false, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- 12. GRANTS & DEFAULT PRIVILEGES
+-- ============================================================
+-- A role reaches a table through the Data API only if it holds a GRANT
+-- here; RLS then filters rows. Both layers are required.
+--
+-- New tables in `public` are NOT granted automatically (Supabase changelog
+-- #45329). The default privileges at the end of this section decide what,
+-- if anything, a newly created object is exposed to.
+
+GRANT ALL ON TABLE "public"."ai_chat_queries" TO "anon";
+GRANT ALL ON TABLE "public"."ai_chat_queries" TO "authenticated";
+GRANT ALL ON TABLE "public"."ai_chat_queries" TO "postgres";
+GRANT ALL ON TABLE "public"."ai_chat_queries" TO "service_role";
+GRANT ALL ON TABLE "public"."ai_config" TO "anon";
+GRANT ALL ON TABLE "public"."ai_config" TO "authenticated";
+GRANT ALL ON TABLE "public"."ai_config" TO "postgres";
+GRANT ALL ON TABLE "public"."ai_config" TO "service_role";
+GRANT ALL ON TABLE "public"."auth_audit_log" TO "anon";
+GRANT ALL ON TABLE "public"."auth_audit_log" TO "authenticated";
+GRANT ALL ON TABLE "public"."auth_audit_log" TO "postgres";
+GRANT ALL ON TABLE "public"."auth_audit_log" TO "service_role";
+GRANT ALL ON TABLE "public"."companies" TO "anon";
+GRANT ALL ON TABLE "public"."companies" TO "authenticated";
+GRANT SELECT ON TABLE "public"."companies" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."companies" TO "postgres";
+GRANT ALL ON TABLE "public"."companies" TO "service_role";
+GRANT ALL ON TABLE "public"."company_custom_units" TO "anon";
+GRANT ALL ON TABLE "public"."company_custom_units" TO "authenticated";
+GRANT ALL ON TABLE "public"."company_custom_units" TO "postgres";
+GRANT ALL ON TABLE "public"."company_custom_units" TO "service_role";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."company_order_counters" TO "anon";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."company_order_counters" TO "authenticated";
+GRANT ALL ON TABLE "public"."company_order_counters" TO "postgres";
+GRANT ALL ON TABLE "public"."company_order_counters" TO "service_role";
+GRANT ALL ON TABLE "public"."customer_addresses" TO "anon";
+GRANT ALL ON TABLE "public"."customer_addresses" TO "authenticated";
+GRANT ALL ON TABLE "public"."customer_addresses" TO "postgres";
+GRANT ALL ON TABLE "public"."customer_addresses" TO "service_role";
+GRANT ALL ON TABLE "public"."customer_contacts" TO "anon";
+GRANT ALL ON TABLE "public"."customer_contacts" TO "authenticated";
+GRANT SELECT ON TABLE "public"."customer_contacts" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."customer_contacts" TO "postgres";
+GRANT ALL ON TABLE "public"."customer_contacts" TO "service_role";
+GRANT ALL ON TABLE "public"."customers" TO "anon";
+GRANT ALL ON TABLE "public"."customers" TO "authenticated";
+GRANT SELECT ON TABLE "public"."customers" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."customers" TO "postgres";
+GRANT ALL ON TABLE "public"."customers" TO "service_role";
+GRANT ALL ON TABLE "public"."demo_data_templates" TO "anon";
+GRANT ALL ON TABLE "public"."demo_data_templates" TO "authenticated";
+GRANT ALL ON TABLE "public"."demo_data_templates" TO "postgres";
+GRANT ALL ON TABLE "public"."demo_data_templates" TO "service_role";
+GRANT ALL ON TABLE "public"."feedback" TO "anon";
+GRANT ALL ON TABLE "public"."feedback" TO "authenticated";
+GRANT ALL ON TABLE "public"."feedback" TO "postgres";
+GRANT ALL ON TABLE "public"."feedback" TO "service_role";
+GRANT ALL ON TABLE "public"."inventory_locations" TO "anon";
+GRANT ALL ON TABLE "public"."inventory_locations" TO "authenticated";
+GRANT ALL ON TABLE "public"."inventory_locations" TO "postgres";
+GRANT ALL ON TABLE "public"."inventory_locations" TO "service_role";
+GRANT ALL ON TABLE "public"."inventory_transactions" TO "anon";
+GRANT ALL ON TABLE "public"."inventory_transactions" TO "authenticated";
+GRANT SELECT ON TABLE "public"."inventory_transactions" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."inventory_transactions" TO "postgres";
+GRANT ALL ON TABLE "public"."inventory_transactions" TO "service_role";
+GRANT ALL ON TABLE "public"."invitations" TO "anon";
+GRANT ALL ON TABLE "public"."invitations" TO "authenticated";
+GRANT ALL ON TABLE "public"."invitations" TO "postgres";
+GRANT ALL ON TABLE "public"."invitations" TO "service_role";
+GRANT ALL ON TABLE "public"."job_attachments" TO "anon";
+GRANT ALL ON TABLE "public"."job_attachments" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_attachments" TO "postgres";
+GRANT ALL ON TABLE "public"."job_attachments" TO "service_role";
+GRANT ALL ON TABLE "public"."job_fulfillment_audit" TO "anon";
+GRANT ALL ON TABLE "public"."job_fulfillment_audit" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_fulfillment_audit" TO "postgres";
+GRANT ALL ON TABLE "public"."job_fulfillment_audit" TO "service_role";
+GRANT ALL ON TABLE "public"."job_materials" TO "anon";
+GRANT ALL ON TABLE "public"."job_materials" TO "authenticated";
+GRANT SELECT ON TABLE "public"."job_materials" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."job_materials" TO "postgres";
+GRANT ALL ON TABLE "public"."job_materials" TO "service_role";
+GRANT ALL ON TABLE "public"."job_note_media" TO "anon";
+GRANT ALL ON TABLE "public"."job_note_media" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_note_media" TO "postgres";
+GRANT ALL ON TABLE "public"."job_note_media" TO "service_role";
+GRANT ALL ON TABLE "public"."job_notes" TO "anon";
+GRANT ALL ON TABLE "public"."job_notes" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_notes" TO "postgres";
+GRANT ALL ON TABLE "public"."job_notes" TO "service_role";
+GRANT ALL ON TABLE "public"."job_operations" TO "anon";
+GRANT ALL ON TABLE "public"."job_operations" TO "authenticated";
+GRANT SELECT ON TABLE "public"."job_operations" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."job_operations" TO "postgres";
+GRANT ALL ON TABLE "public"."job_operations" TO "service_role";
+GRANT ALL ON TABLE "public"."job_parts" TO "anon";
+GRANT ALL ON TABLE "public"."job_parts" TO "authenticated";
+GRANT SELECT ON TABLE "public"."job_parts" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."job_parts" TO "postgres";
+GRANT ALL ON TABLE "public"."job_parts" TO "service_role";
+GRANT ALL ON TABLE "public"."jobs" TO "anon";
+GRANT ALL ON TABLE "public"."jobs" TO "authenticated";
+GRANT SELECT ON TABLE "public"."jobs" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."jobs" TO "postgres";
+GRANT ALL ON TABLE "public"."jobs" TO "service_role";
+GRANT ALL ON TABLE "public"."part_attachments" TO "anon";
+GRANT ALL ON TABLE "public"."part_attachments" TO "authenticated";
+GRANT ALL ON TABLE "public"."part_attachments" TO "postgres";
+GRANT ALL ON TABLE "public"."part_attachments" TO "service_role";
+GRANT ALL ON TABLE "public"."part_location_stock" TO "anon";
+GRANT ALL ON TABLE "public"."part_location_stock" TO "authenticated";
+GRANT ALL ON TABLE "public"."part_location_stock" TO "postgres";
+GRANT ALL ON TABLE "public"."part_location_stock" TO "service_role";
+GRANT ALL ON TABLE "public"."part_notes" TO "anon";
+GRANT ALL ON TABLE "public"."part_notes" TO "authenticated";
+GRANT ALL ON TABLE "public"."part_notes" TO "postgres";
+GRANT ALL ON TABLE "public"."part_notes" TO "service_role";
+GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "anon";
+GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "authenticated";
+GRANT SELECT ON TABLE "public"."part_pricing_tiers" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "postgres";
+GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "service_role";
+GRANT ALL ON TABLE "public"."part_procurement_tiers" TO "anon";
+GRANT ALL ON TABLE "public"."part_procurement_tiers" TO "authenticated";
+GRANT ALL ON TABLE "public"."part_procurement_tiers" TO "postgres";
+GRANT ALL ON TABLE "public"."part_procurement_tiers" TO "service_role";
+GRANT ALL ON TABLE "public"."parts" TO "anon";
+GRANT ALL ON TABLE "public"."parts" TO "authenticated";
+GRANT SELECT ON TABLE "public"."parts" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."parts" TO "postgres";
+GRANT ALL ON TABLE "public"."parts" TO "service_role";
+GRANT ALL ON TABLE "public"."parts_bom" TO "anon";
+GRANT ALL ON TABLE "public"."parts_bom" TO "authenticated";
+GRANT SELECT ON TABLE "public"."parts_bom" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."parts_bom" TO "postgres";
+GRANT ALL ON TABLE "public"."parts_bom" TO "service_role";
+GRANT ALL ON TABLE "public"."parts_unit_conversions" TO "anon";
+GRANT ALL ON TABLE "public"."parts_unit_conversions" TO "authenticated";
+GRANT SELECT ON TABLE "public"."parts_unit_conversions" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."parts_unit_conversions" TO "postgres";
+GRANT ALL ON TABLE "public"."parts_unit_conversions" TO "service_role";
+GRANT ALL ON TABLE "public"."quickbooks_connections" TO "postgres";
+GRANT ALL ON TABLE "public"."quickbooks_connections" TO "service_role";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."quickbooks_customer_map" TO "anon";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."quickbooks_customer_map" TO "authenticated";
+GRANT ALL ON TABLE "public"."quickbooks_customer_map" TO "postgres";
+GRANT ALL ON TABLE "public"."quickbooks_customer_map" TO "service_role";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_line_items" TO "anon";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_line_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_line_items" TO "postgres";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_line_items" TO "service_role";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."quickbooks_invoice_links" TO "anon";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."quickbooks_invoice_links" TO "authenticated";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_links" TO "postgres";
+GRANT ALL ON TABLE "public"."quickbooks_invoice_links" TO "service_role";
+GRANT ALL ON TABLE "public"."quote_line_items" TO "anon";
+GRANT ALL ON TABLE "public"."quote_line_items" TO "authenticated";
+GRANT SELECT ON TABLE "public"."quote_line_items" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."quote_line_items" TO "postgres";
+GRANT ALL ON TABLE "public"."quote_line_items" TO "service_role";
+GRANT ALL ON TABLE "public"."quote_materials" TO "anon";
+GRANT ALL ON TABLE "public"."quote_materials" TO "authenticated";
+GRANT SELECT ON TABLE "public"."quote_materials" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."quote_materials" TO "postgres";
+GRANT ALL ON TABLE "public"."quote_materials" TO "service_role";
+GRANT ALL ON TABLE "public"."quote_operations" TO "anon";
+GRANT ALL ON TABLE "public"."quote_operations" TO "authenticated";
+GRANT SELECT ON TABLE "public"."quote_operations" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."quote_operations" TO "postgres";
+GRANT ALL ON TABLE "public"."quote_operations" TO "service_role";
+GRANT ALL ON TABLE "public"."quotes" TO "anon";
+GRANT ALL ON TABLE "public"."quotes" TO "authenticated";
+GRANT SELECT ON TABLE "public"."quotes" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."quotes" TO "postgres";
+GRANT ALL ON TABLE "public"."quotes" TO "service_role";
+GRANT ALL ON TABLE "public"."routing_operations" TO "anon";
+GRANT ALL ON TABLE "public"."routing_operations" TO "authenticated";
+GRANT SELECT ON TABLE "public"."routing_operations" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."routing_operations" TO "postgres";
+GRANT ALL ON TABLE "public"."routing_operations" TO "service_role";
+GRANT ALL ON TABLE "public"."routings" TO "anon";
+GRANT ALL ON TABLE "public"."routings" TO "authenticated";
+GRANT SELECT ON TABLE "public"."routings" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."routings" TO "postgres";
+GRANT ALL ON TABLE "public"."routings" TO "service_role";
+GRANT ALL ON TABLE "public"."saved_insights" TO "anon";
+GRANT ALL ON TABLE "public"."saved_insights" TO "authenticated";
+GRANT ALL ON TABLE "public"."saved_insights" TO "postgres";
+GRANT ALL ON TABLE "public"."saved_insights" TO "service_role";
+GRANT ALL ON TABLE "public"."shipment_line_items" TO "anon";
+GRANT ALL ON TABLE "public"."shipment_line_items" TO "authenticated";
+GRANT ALL ON TABLE "public"."shipment_line_items" TO "postgres";
+GRANT ALL ON TABLE "public"."shipment_line_items" TO "service_role";
+GRANT ALL ON TABLE "public"."shipments" TO "anon";
+GRANT ALL ON TABLE "public"."shipments" TO "authenticated";
+GRANT ALL ON TABLE "public"."shipments" TO "postgres";
+GRANT ALL ON TABLE "public"."shipments" TO "service_role";
+GRANT ALL ON TABLE "public"."system_admins" TO "anon";
+GRANT ALL ON TABLE "public"."system_admins" TO "authenticated";
+GRANT ALL ON TABLE "public"."system_admins" TO "postgres";
+GRANT ALL ON TABLE "public"."system_admins" TO "service_role";
+GRANT ALL ON TABLE "public"."user_company_access" TO "anon";
+GRANT ALL ON TABLE "public"."user_company_access" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_company_access" TO "postgres";
+GRANT ALL ON TABLE "public"."user_company_access" TO "service_role";
+GRANT ALL ON TABLE "public"."user_preferences" TO "anon";
+GRANT ALL ON TABLE "public"."user_preferences" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_preferences" TO "postgres";
+GRANT ALL ON TABLE "public"."user_preferences" TO "service_role";
+GRANT ALL ON TABLE "public"."vendor_contacts" TO "anon";
+GRANT ALL ON TABLE "public"."vendor_contacts" TO "authenticated";
+GRANT SELECT ON TABLE "public"."vendor_contacts" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."vendor_contacts" TO "postgres";
+GRANT ALL ON TABLE "public"."vendor_contacts" TO "service_role";
+GRANT ALL ON TABLE "public"."vendors" TO "anon";
+GRANT ALL ON TABLE "public"."vendors" TO "authenticated";
+GRANT SELECT ON TABLE "public"."vendors" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."vendors" TO "postgres";
+GRANT ALL ON TABLE "public"."vendors" TO "service_role";
+GRANT ALL ON TABLE "public"."waitlist" TO "anon";
+GRANT ALL ON TABLE "public"."waitlist" TO "authenticated";
+GRANT ALL ON TABLE "public"."waitlist" TO "postgres";
+GRANT ALL ON TABLE "public"."waitlist" TO "service_role";
+GRANT ALL ON TABLE "public"."work_centers" TO "anon";
+GRANT ALL ON TABLE "public"."work_centers" TO "authenticated";
+GRANT SELECT ON TABLE "public"."work_centers" TO "jigged_ai_readonly";
+GRANT ALL ON TABLE "public"."work_centers" TO "postgres";
+GRANT ALL ON TABLE "public"."work_centers" TO "service_role";
+
+-- Default privileges — what a NEWLY created object is granted.
+-- anon/authenticated/service_role absent from TABLES means new tables
+-- are invisible to the Data API until granted explicitly.
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT UPDATE ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT UPDATE ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT UPDATE ON SEQUENCES TO "service_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLES TO "service_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "supabase_admin" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
 
 COMMIT;

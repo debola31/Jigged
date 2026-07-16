@@ -290,14 +290,15 @@ async function getRevenueInRange(
   const supabase = getSupabase();
   // "Revenue in range" used to filter jobs.shipped_at — but shipped_at is
   // gone in the dual-status model. Re-anchor on fulfillment_status =
-  // fully_shipped + the new SQL helper job_last_ship_date, which PR 4
-  // wires up to the shipments cascade. PR 3 ships a NULL-returning stub,
-  // so this query returns 0 until shipments exist — that's the truthful
-  // answer because no shipments exist yet.
+  // fully_shipped and use updated_at as the in-range proxy (same shape as
+  // getCompletedJobsInRange below). We sum quote_line_items.total_price and
+  // don't need a per-job ship date here — job_last_ship_date exists only as a
+  // job_last_ship_date(uuid) function, not a jobs-row computed column, so
+  // selecting it as a computed column made PostgREST reject the query with 400.
   const { data, error } = await supabase
     .from('jobs')
     .select(
-      'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price)), last_ship_date:job_last_ship_date',
+      'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))',
     )
     .eq('company_id', companyId)
     .eq('fulfillment_status', 'fully_shipped')

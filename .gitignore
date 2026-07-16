@@ -77,3 +77,6 @@ api/.coverage
 # settings.json is re-included so shared, team-level Claude config can still be committed.
 .claude/*
 !.claude/settings.json
+
+# Local UI-drive screenshots (may contain real customer data — never commit)
+.screenshots/

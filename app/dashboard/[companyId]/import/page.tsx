@@ -66,7 +66,7 @@ import {
 } from '@/lib/dataImportReconcile';
 import { fetchExistingIdentities } from '@/lib/dataImportExisting';
 import { API_BASE_URL } from '@/lib/api';
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   EntityType,
   Finding,

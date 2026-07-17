@@ -117,7 +117,7 @@ describe('cross-file orphans (asymmetric keys)', () => {
 
 describe('required columns', () => {
   it('none identified -> single classification_uncertain, no missing spam', () => {
-    const vendors = af('v.csv', 'vendors', { legacy_id: 'ID' }, [{ ID: '1' }]);
+    const vendors = af('v.csv', 'vendors', { city: 'City' }, [{ City: 'Detroit' }]);
     const findings = analyzeBundle([vendors]);
     expect(ids(findings).has('classification_uncertain.v.csv')).toBe(true);
     expect(byCat(findings, 'missing_column')).toHaveLength(0);

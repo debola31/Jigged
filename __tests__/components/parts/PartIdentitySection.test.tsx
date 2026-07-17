@@ -40,7 +40,6 @@ const mockPart = (over: Partial<Part> = {}): Part => ({
   quantity: 0,
   reorder_point: null,
   preferred_vendor_id: null,
-  legacy_id: null,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
   ...over,

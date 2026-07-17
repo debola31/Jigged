@@ -56,6 +56,39 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+/** Synthetic column we inject a file-order sequence into (see numberRoutingOpsInFileOrder). */
+export const SYNTHETIC_SEQ_COLUMN = '__jigged_seq';
+
+/**
+ * Give routing operations a stable step number when the CSV has no sequence column.
+ *
+ * Without this, the server auto-numbers each part's operations PER 500-row batch, resetting the
+ * counter every batch — so a part whose steps straddle a batch boundary gets renumbered and the
+ * re-import upsert (keyed on routing_id, sequence) either collides or overwrites the wrong row.
+ * We have the whole file here, so we number each part's ops by their order across the ENTIRE
+ * file, up front, and hand the server an explicit `sequence` — the same thing it was trying to
+ * derive, done once instead of per batch. File order = operation order for essentially every
+ * routing export; if it isn't, the user maps their real step-order column at the Map step (which
+ * takes precedence — this only fires when `sequence` is unmapped). Mutates `rows` + `mappings`.
+ */
+function numberRoutingOpsInFileOrder(
+  rows: Record<string, string>[],
+  wf: WorkingFile,
+  mappings: Record<string, string>,
+): void {
+  const partCol = wf.columnRoles['part_name'];
+  if (!partCol) return; // can't group without a part; server falls back to per-batch numbering
+  const nextSeq = new Map<string, number>();
+  for (const row of rows) {
+    const key = (row[partCol] ?? '').trim().toLowerCase();
+    if (!key) continue;
+    const n = (nextSeq.get(key) ?? 0) + 1;
+    nextSeq.set(key, n);
+    row[SYNTHETIC_SEQ_COLUMN] = String(n);
+  }
+  mappings[SYNTHETIC_SEQ_COLUMN] = 'sequence';
+}
+
 /** Dependency-ordered, ≤500-row batches. Files classified 'unknown' (or empty) are skipped. */
 export function buildImportPlan(working: WorkingFile[]): ImportBatch[] {
   const plan: ImportBatch[] = [];
@@ -67,6 +100,10 @@ export function buildImportPlan(working: WorkingFile[]): ImportBatch[] {
         if (wf.rows.length === 0) continue;
         const mappings = mappingsFor(wf);
         const rows = wf.rows.map(stripRowId);
+        // Must run BEFORE chunk() — the whole file is needed to number across batch boundaries.
+        if (entity === 'routings' && !wf.columnRoles['sequence']) {
+          numberRoutingOpsInFileOrder(rows, wf, mappings);
+        }
         const chunks = chunk(rows, BATCH_SIZE);
         chunks.forEach((c, i) =>
           plan.push({

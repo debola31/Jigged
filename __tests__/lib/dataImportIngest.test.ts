@@ -49,6 +49,36 @@ describe('buildImportPlan', () => {
     expect(plan[0].batchCount).toBe(2);
     expect(plan[1].batchIndex).toBe(1);
   });
+
+  it('numbers routing ops in whole-file order per part when no sequence column is mapped', () => {
+    // Part A's ops straddle the 500-row batch boundary — the case that used to renumber per
+    // batch. Interleave A and B so we prove numbering is per-part, not per-row-index.
+    const rows: Record<string, string>[] = [];
+    for (let i = 0; i < 300; i++) rows.push({ Part: 'A', WC: `wcA${i}` });
+    for (let i = 0; i < 300; i++) rows.push({ Part: 'B', WC: `wcB${i}` }); // A finishes at index 599 → batch 2
+    const plan = buildImportPlan([wf('rt.csv', 'routings', { part_name: 'Part', work_center_name: 'WC' }, rows)]);
+
+    // Synthetic sequence column is mapped, and every batch carries it.
+    expect(plan[0].mappings['__jigged_seq']).toBe('sequence');
+    const all = plan.flatMap((b) => b.rows);
+    const aSeqs = all.filter((r) => r.Part === 'A').map((r) => Number(r['__jigged_seq']));
+    const bSeqs = all.filter((r) => r.Part === 'B').map((r) => Number(r['__jigged_seq']));
+    expect(aSeqs).toEqual(Array.from({ length: 300 }, (_, i) => i + 1)); // 1..300, continuous across batches
+    expect(bSeqs).toEqual(Array.from({ length: 300 }, (_, i) => i + 1));
+  });
+
+  it('leaves a mapped sequence column untouched (exact order wins)', () => {
+    const rows = [
+      { Part: 'A', WC: 'x', Seq: '20' },
+      { Part: 'A', WC: 'y', Seq: '10' },
+    ];
+    const plan = buildImportPlan([
+      wf('rt.csv', 'routings', { part_name: 'Part', work_center_name: 'WC', sequence: 'Seq' }, rows),
+    ]);
+    expect(plan[0].mappings['__jigged_seq']).toBeUndefined(); // no synthetic column injected
+    expect(plan[0].rows[0]).not.toHaveProperty('__jigged_seq');
+    expect(plan[0].mappings).toMatchObject({ Seq: 'sequence' });
+  });
 });
 
 describe('summarizeResults', () => {

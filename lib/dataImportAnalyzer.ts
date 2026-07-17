@@ -402,6 +402,34 @@ function inactiveFlags(af: AnalyzedFile): Finding[] {
   }];
 }
 
+/**
+ * Routings with no step-order column. The importer numbers each part's operations by their
+ * order in the file (grouped by part) — correct for essentially every routing export, but worth
+ * saying out loud, and pointing at the real fix (map a step-order column) rather than leaving it
+ * implicit. Info-level: nothing to DO, it just shows in "things we noticed".
+ */
+function routingSequenceNotice(files: AnalyzedFile[]): Finding[] {
+  const out: Finding[] = [];
+  for (const af of filesOf(files, 'routings')) {
+    if (!af.rows.length || roleCol(af, 'sequence')) continue; // mapped a step column → exact order
+    out.push({
+      id: `sequence_inferred.${af.filename}`,
+      category: 'sequence_inferred',
+      severity: 'info',
+      entity_type: 'routings',
+      title: `No step-order column in ${af.filename}`,
+      detail: 'Operations will be numbered in the order they appear in the file, grouped by part.',
+      count: af.rows.length,
+      examples: [],
+      source_files: [af.filename],
+      verified: true,
+      recommended_action:
+        'If your file has an operation/step number, map it at the Map step for exact order — otherwise file order is used.',
+    });
+  }
+  return out;
+}
+
 /** Run every deterministic check and return findings sorted by severity. */
 export function analyzeBundle(files: AnalyzedFile[]): Finding[] {
   const findings: Finding[] = [];
@@ -414,6 +442,7 @@ export function analyzeBundle(files: AnalyzedFile[]): Finding[] {
   findings.push(...crossFileOrphans(files));
   findings.push(...costCoverage(files));
   findings.push(...nameVariants(files));
+  findings.push(...routingSequenceNotice(files));
   findings.sort((a, b) => (SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]) || a.id.localeCompare(b.id));
   return findings;
 }

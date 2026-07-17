@@ -43,7 +43,6 @@ class MockAIProvider:
             "cost per unit": ("cost_per_unit", 0.90),
             "cost": ("cost_per_unit", 0.80),
             "preferred vendor": ("preferred_vendor_name", 0.85),
-            "legacy id": ("legacy_id", 0.85),
         }
 
         class Suggestion:
@@ -525,7 +524,7 @@ class TestPartsValidateEndpoint:
         The import upserts on (company_id, part_name), so re-importing the same export is
         idempotent: existing parts update, they don't skip or duplicate. No legacy_id needed.
         """
-        existing_parts = [{"id": "p1", "part_name": "EXIST-001", "legacy_id": None}]
+        existing_parts = [{"id": "p1", "part_name": "EXIST-001"}]
         request_data = {
             "company_id": "test-company-id",
             "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
@@ -759,7 +758,7 @@ class TestPartsExecuteEndpoint:
     async def test_execute_updates_existing_creates_new(self, test_client):
         """Re-importing is idempotent: an existing part UPDATES, a new one is CREATED, no skips."""
         existing_parts = [
-            {"id": "existing-1", "part_name": "EXIST001", "legacy_id": None},
+            {"id": "existing-1", "part_name": "EXIST001"},
         ]
 
         request_data = {

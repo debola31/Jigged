@@ -27,7 +27,6 @@ export interface Part {
   // 25) instead of re-amortizing over however many a consuming order draws.
   // NULL = value at the cascaded consumed qty (default). Ignored for bought.
   costing_batch_quantity: number | null;
-  legacy_id: string | null;
   // When true, parts.quantity is a trigger-maintained rollup of
   // part_location_stock and stock is managed per-location (see InventoryTab).
   is_location_tracked: boolean;
@@ -119,7 +118,7 @@ export interface PartUnitConversionFormData {
 
 /**
  * Form data for creating/editing parts. Includes the editable subset of the
- * Part columns — preferred_vendor_id is editable, legacy_id is not (it's an
+ * Part columns — preferred_vendor_id is editable (it's an
  * import-only identifier).
  *
  * Unit conversions live on the part detail page (not the create/edit form)

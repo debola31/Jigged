@@ -50,7 +50,6 @@ const WORK_CENTER_FIELDS: FieldDefinition[] = [
   { key: 'vendor_name', label: 'Vendor Name', required: false },
   { key: 'labor_rate', label: 'Labor Rate ($/hr)', required: false },
   { key: 'description', label: 'Description', required: false },
-  { key: 'legacy_id', label: 'Legacy ID', required: false },
 ];
 
 interface AnalyzeResponse {

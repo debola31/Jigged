@@ -211,7 +211,8 @@ a toolbar "below":
 The per-entity import routes (`parts_import_routes`, `vendors_import_routes`,
 `work_centers_import_routes`, `bom_import_routes`, `routings_import_routes`, customers in
 `import_routes`) already implement the hard write logic: field validation, **conflict detection
-against existing rows**, **`legacy_id` ON CONFLICT upsert**, per-entity business rules (parts
+against existing rows**, **ON CONFLICT upsert on the natural identity key** (`part_name` / `name`),
+per-entity business rules (parts
 procurement tiers, UOM resolution, external-work-center vendor resolution), 500-row batching
 (Vercel body limit), and RLS via the service-role client. Rebuilding that in a unified endpoint
 would duplicate hundreds of lines and drift. **Decision: the unified importer reuses these
@@ -237,7 +238,7 @@ action and the existing routes own it.
 
 ### 6c. Upsert modes
 Map the PRD's modes onto the existing importers: **Add new + update existing** (default) uses
-the `legacy_id`/identity ON CONFLICT upsert; **create-only** skips matches; **update-only**
+the natural-identity ON CONFLICT upsert (`part_name` / `name`); **create-only** skips matches; **update-only**
 skips non-matches. Some importers may need a small `mode` parameter added to their execute
 request — a contained change, confirmed per route at build time.
 

@@ -141,7 +141,7 @@ class VendorExecuteResponse(BaseModel):
 
     success: bool
     imported_count: int
-    updated_count: int = 0  # Rows upserted via legacy_id ON CONFLICT path
+    updated_count: int = 0  # Rows upserted via (company_id, name) ON CONFLICT path
     merged_count: int = 0  # Rows folded into a canonical name via confirmed_merges
     contacts_imported_count: int = 0  # vendor_contacts rows created from primary_contact_* fields
     skipped_count: int
@@ -228,10 +228,5 @@ VENDOR_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Country (defaults to USA)",
-    },
-    "legacy_id": {
-        "type": "string",
-        "required": False,
-        "description": "ID from legacy/previous system. Unique per company; enables idempotent re-import via ON CONFLICT.",
     },
 }

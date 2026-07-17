@@ -49,7 +49,6 @@ SCHEMA_CONTEXT = """
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT
 - notes: TEXT
-- legacy_id: TEXT (unique per company; carried from a prior system on import)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: vendors do NOT carry capability flags. Whether a vendor supplies
   materials vs. performs outside ops is derived from references:
@@ -71,7 +70,6 @@ SCHEMA_CONTEXT = """
   part_procurement_tiers; for made parts it's labor + setup/qty + BOM rollup.)
 - reorder_point: NUMERIC (nullable; reorder when quantity drops to this)
 - preferred_vendor_id: UUID (FK -> vendors.id, nullable)
-- legacy_id: TEXT (unique per company; carried from a prior system on import)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - The four (source, is_stocked) quadrants mean:
     * (made,   false) → Custom Made (built to order)

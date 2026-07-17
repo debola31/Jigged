@@ -20,8 +20,9 @@ The Vendors module manages the master list of external suppliers and outsourced-
 | `company_id` | FK |
 | `name` | required |
 | `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` | `country` defaults to `'USA'` |
-| `legacy_id` | unique per company; used by importers for idempotent upsert |
 | `created_at`, `updated_at` | |
+
+**Unique Constraint:** `(company_id, name)` — the identity key the CSV importer upserts on (`ON CONFLICT (company_id, name)`), so re-importing is idempotent.
 
 ### `vendor_contacts` table
 

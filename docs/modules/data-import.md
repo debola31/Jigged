@@ -328,8 +328,8 @@ The same surface serves both the first-time "bring my whole shop in" journey and
 
 - **Importing into a non-empty company is an UPSERT, not a load.** When the shop already
   has data, the unified flow gains a **reconciliation step**: match each uploaded row
-  against existing Jigged records by the entity's identity key (parts by `part_name` /
-  `legacy_id`; vendors, work centers, customers by `name`) and bucket every row as **New**,
+  against existing Jigged records by the entity's identity key (parts by `part_name`;
+  vendors, work centers, customers by `name`) and bucket every row as **New**,
   **Update** (fields differ), **Unchanged** (identical → skip), or **Conflict** (e.g. same
   name, different id → surface, don't guess). The owner chooses a **mode** — default
   **Add new + update existing** (non-destructive: only the columns present are written,
@@ -337,7 +337,8 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   pre-commit review becomes **"what will change"** with the bucket counts + a downloadable
   skip list, and the post-import summary reports added / updated / skipped. The existing
   per-entity importers already implement the write-side upsert (conflict detection vs.
-  existing rows + `legacy_id` ON CONFLICT), so Phase 2 reuses that; the pre-import *preview*
+  existing rows + ON CONFLICT on the natural identity key — `part_name` / `name`), so Phase 2
+  reuses that; the pre-import *preview*
   needs only a bounded, read-only fetch of existing identity values (RLS-safe) to bucket
   new-vs-update. This whole capability is **Phase 2** — Phase 1 handles the empty
   (greenfield) case, where every row is "New." Research basis: HubSpot / Salesforce /

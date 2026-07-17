@@ -25,7 +25,7 @@ A **work center** is a unit of production capacity. It can be **internal** (a ma
 | `vendor_id` | FK → `vendors`; required when `kind='external'` (DB CHECK), null when `kind='internal'` |
 | `labor_rate` | numeric; used when `kind='internal'`; cleared to null when `kind='external'` |
 | `description` | optional multiline |
-| `metadata` | jsonb; defaults to `{}`. `bulkImportWorkCenters` stores `{legacy_id}` when a source system id is carried on import; otherwise empty |
+| `metadata` | jsonb; defaults to `{}` (reserved for future per-work-center attributes) |
 | `created_at`, `updated_at` | |
 
 External work centers do **not** carry a labor_rate on the work-center row. Their cost is a single **vendor unit price** set per routing operation (`routing_operations.external_unit_price`) — pricing is per-operation, not per-vendor. External (vendor) work **bills once per part, so there is no setup cost** — setup is an internal-only concept (the `external_setup_cost` column was dropped in June 2026).

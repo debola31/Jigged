@@ -55,12 +55,11 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | quantity | Numeric | Yes | On-hand count (default 0); only ever changed through `inventory_transactions`, never the part form |
 | reorder_point | Numeric | No | Low-stock threshold |
 | preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
-| legacy_id | Text | No | Import cross-reference; unique per company when set |
 | is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. `(company_id, legacy_id)` is also unique when `legacy_id` is set.
+**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. This is the identity key the CSV importer upserts on (`ON CONFLICT (company_id, part_name)`), so re-importing the same export updates parts in place rather than duplicating them.
 
 **Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`); rather than a shared default, each part now owns its markup directly on its own `part_pricing_tiers` rows.
 

@@ -78,7 +78,6 @@ const VENDOR_FIELDS: FieldDefinition[] = [
   { key: 'state', label: 'State', required: false },
   { key: 'postal_code', label: 'Postal Code', required: false },
   { key: 'country', label: 'Country', required: false },
-  { key: 'legacy_id', label: 'Legacy ID', required: false },
 ];
 
 interface AnalyzeResponse {

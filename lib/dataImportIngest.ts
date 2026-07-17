@@ -2,7 +2,8 @@
  * Dependency-ordered ingestion: turn the confirmed working set into batched calls to the
  * EXISTING per-entity import `execute` routes, in an order where parents commit before
  * children (so each importer resolves references against already-written rows). No new write
- * logic — we reuse the routes that already validate + conflict-detect + legacy_id-upsert.
+ * logic — we reuse the routes that already validate + conflict-detect + upsert by natural
+ * identity (part_name / vendor name / work-center name).
  *
  * Split by concern: buildImportPlan + summarizeResults are PURE (unit-tested); runImportPlan
  * is the thin network driver.
@@ -168,7 +169,7 @@ export function summarizeResults(
  * Execute the plan against the backend, one batch at a time in dependency order (so parents
  * commit before children resolve their references). `post` performs one authed POST and
  * returns the parsed response; a throw is recorded and the run continues (resumable — a
- * re-run fills the rest idempotently via legacy_id ON CONFLICT).
+ * re-run fills the rest idempotently via ON CONFLICT on the natural-identity key).
  */
 export async function runImportPlan(
   plan: ImportBatch[],

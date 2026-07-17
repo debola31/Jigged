@@ -80,3 +80,6 @@ api/.coverage
 
 # Local UI-drive screenshots (may contain real customer data — never commit)
 .screenshots/
+
+# Blender
+/outputs/

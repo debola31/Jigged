@@ -60,6 +60,13 @@ class MockSupabaseTable:
             self._on_insert(data)
         return self
 
+    def upsert(self, data, on_conflict=None):
+        # Work centers now upsert on (company_id, name). Treat it like insert for the mock.
+        self._inserted = data
+        if self._on_insert is not None:
+            self._on_insert(data)
+        return self
+
     def execute(self):
         result = MagicMock()
         result.data = self._data

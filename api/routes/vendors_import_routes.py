@@ -270,11 +270,6 @@ async def validate_import(
 ):
     """Validate vendors CSV data before import."""
     try:
-        existing_vendors = fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
-        existing_names = {
-            v["name"].lower(): v for v in existing_vendors if v.get("name")
-        }
-
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         name_column = reverse_mappings.get("name")
         contact_name_column = reverse_mappings.get("primary_contact_name")
@@ -334,19 +329,8 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            if name_lower in existing_names:
-                existing = existing_names[name_lower]
-                conflicts.append(
-                    VendorConflictInfo(
-                        row_number=row_number,
-                        csv_name=name,
-                        conflict_type="duplicate_name",
-                        existing_vendor_id=existing["id"],
-                        existing_value=f"Vendor '{name}' already exists",
-                    )
-                )
-                conflict_rows.add(row_number)
-                continue
+            # An existing vendor is NOT a conflict — execute upserts on
+            # (company_id, name), so a re-imported vendor updates in place.
 
             # Contact-related validation. Skip rows already in
             # validation_error_rows or conflict_rows so we don't double-up
@@ -463,11 +447,18 @@ async def execute_import(
 
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         name_column = reverse_mappings.get("name")
-        legacy_id_column = reverse_mappings.get("legacy_id")
         contact_name_column = reverse_mappings.get("primary_contact_name")
         contact_email_column = reverse_mappings.get("primary_contact_email")
         contact_phone_column = reverse_mappings.get("primary_contact_phone")
         contact_role_column = reverse_mappings.get("primary_contact_role")
+
+        # Names already in Jigged — drives the created/updated split and, crucially, means we
+        # only queue contacts for NEW vendors. Re-importing an existing vendor updates it in
+        # place; re-inserting its contact would duplicate the row.
+        existing_vendor_names = {
+            (v.get("name") or "").lower()
+            for v in fetch_all_by_company(supabase, "vendors", "name", request.company_id)
+        }
 
         # Pending vendor_contacts rows. We can only insert these AFTER the
         # vendor row exists (we need its id). Build a list of (canonical_name,
@@ -475,8 +466,7 @@ async def execute_import(
         # vendor inserts return.
         pending_contacts: list[tuple[str, dict]] = []
 
-        rows_to_insert: list[dict] = []
-        rows_to_upsert: list[dict] = []
+        rows_to_write: list[dict] = []
         errors: list[VendorImportError] = []
         skipped = 0
         merged = 0
@@ -498,7 +488,7 @@ async def execute_import(
                 # the canonical name so the canonical vendor still gets a
                 # primary contact (only attach the FIRST one we see — multiple
                 # merged rows with conflicting contacts would race for is_primary).
-                if contact_name_column:
+                if contact_name_column and canonical_name.lower() not in existing_vendor_names:
                     contact_name_val = row.get(contact_name_column, "").strip()
                     if contact_name_val and not any(
                         cn.lower() == canonical_name.lower()
@@ -545,19 +535,13 @@ async def execute_import(
             if "country" not in vendor_data or not vendor_data.get("country"):
                 vendor_data["country"] = "USA"
 
-            legacy_id_val = (
-                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
-            )
-            if legacy_id_val:
-                vendor_data["legacy_id"] = legacy_id_val
-                rows_to_upsert.append(vendor_data)
-            else:
-                rows_to_insert.append(vendor_data)
+            rows_to_write.append(vendor_data)
 
-            # Queue a contact insert if the row has a contact name. Email/
-            # phone-only rows are caught by validation as missing_contact_name
-            # and skipped before reaching here.
-            if contact_name_column:
+            # Queue a contact insert if the row has a contact name — but ONLY for a NEW vendor.
+            # A re-imported (existing) vendor updates in place; re-inserting its contact would
+            # duplicate the row. Email/phone-only rows are caught by validation as
+            # missing_contact_name and skipped before reaching here.
+            if contact_name_column and canonical_name.lower() not in existing_vendor_names:
                 contact_name_val = row.get(contact_name_column, "").strip()
                 if contact_name_val:
                     pending_contacts.append(
@@ -573,49 +557,30 @@ async def execute_import(
                         )
                     )
 
+        # Idempotent write: upsert on (company_id, name). Existing vendors update in place, new
+        # ones insert — split by which names existed before this run.
         BATCH_SIZE = 500
-        imported_count = 0
-        updated_count = 0
-        # name → vendor.id, used to attach pending_contacts after insert.
+        imported_count = sum(
+            1 for r in rows_to_write if r["name"].lower() not in existing_vendor_names
+        )
+        updated_count = len(rows_to_write) - imported_count
+        # name → vendor.id, used to attach pending_contacts (new vendors only) after the write.
         name_to_vendor_id: dict[str, str] = {}
 
-        if rows_to_insert:
+        if rows_to_write:
             try:
-                total = len(rows_to_insert)
-                for batch_start in range(0, total, BATCH_SIZE):
-                    batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
-                    response = supabase.table("vendors").insert(batch).execute()
-                    if response.data:
-                        imported_count += len(response.data)
-                        for r in response.data:
-                            if r.get("name") and r.get("id"):
-                                name_to_vendor_id[r["name"].lower()] = r["id"]
-            except Exception as e:
-                error_str = str(e)
-                if "23505" in error_str or "duplicate key" in error_str.lower():
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Import failed: A vendor with this name already exists.",
-                    )
-                sentry_sdk.capture_exception(e)
-                raise HTTPException(status_code=500, detail="Internal server error")
-
-        if rows_to_upsert:
-            try:
-                total = len(rows_to_upsert)
-                for batch_start in range(0, total, BATCH_SIZE):
-                    batch = rows_to_upsert[batch_start : batch_start + BATCH_SIZE]
+                for batch_start in range(0, len(rows_to_write), BATCH_SIZE):
+                    batch = rows_to_write[batch_start : batch_start + BATCH_SIZE]
                     response = (
                         supabase.table("vendors")
-                        .upsert(batch, on_conflict="company_id,legacy_id")
+                        .upsert(batch, on_conflict="company_id,name")
                         .execute()
                     )
-                    if response.data:
-                        updated_count += len(response.data)
-                        for r in response.data:
-                            if r.get("name") and r.get("id"):
-                                name_to_vendor_id[r["name"].lower()] = r["id"]
+                    for r in response.data or []:
+                        if r.get("name") and r.get("id"):
+                            name_to_vendor_id[r["name"].lower()] = r["id"]
             except Exception as e:
+                logger.error(f"Vendors import upsert error: {str(e)}", exc_info=True)
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
 

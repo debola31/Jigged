@@ -15,6 +15,19 @@
 import type { EntityType, Finding, ImportReview, Severity } from '@/types/data-import';
 import type { EntityImpact } from '@/lib/dataImportImpact';
 import { losses, lossPhrase } from '@/lib/dataImportImpact';
+import { autoCreateLinkFor } from '@/lib/dataImportLinks';
+
+/**
+ * Does this finding have a focused, one-click fix in the Review step today? Drives the
+ * task-vs-notice split below AND the card-vs-plain-row treatment in the view — one source
+ * of truth so they can't disagree.
+ */
+export function isOpenable(finding: Finding): boolean {
+  if (autoCreateLinkFor(finding.id)) return true; // "Add the missing vendors/work centers"
+  if (finding.category === 'data_gap') return true; // "Fill in / Set units"
+  if (finding.category === 'name_variant') return true; // "Review variants"
+  return false;
+}
 
 export interface EntityOutlook {
   entityType: EntityType;
@@ -67,9 +80,16 @@ const isFact = (f: Finding) => f.category === 'record_count';
 export function summarize(report: ImportReview, impact: EntityImpact[] = []): ReviewSummary {
   const findings = report.findings.filter((f) => !isFact(f));
 
-  // Severity now encodes consequence: critical = these rows can't be created.
+  // "What to sort out" is for things with something to DO — not everything non-info.
+  // A finding is a task only if it's BLOCKING (critical = these rows can't come in, so the
+  // owner must see it) OR ACTIONABLE (has a one-click in-app fix). A non-blocking finding
+  // with no fix — "13 duplicate names collapse into one", "93% have no cost, add later",
+  // "couldn't check this reference" — is a no-op under an action heading, which reads as a
+  // dead end. Those drop to "noticed" regardless of warning-vs-info severity.
+  const isTask = (f: Finding) => f.severity === 'critical' || isOpenable(f);
+
   const tasks: ReviewTask[] = findings
-    .filter((f) => f.severity !== 'info')
+    .filter(isTask)
     .map((f) => ({ finding: f, blocking: f.severity === 'critical' }))
     .sort(
       (a, b) =>
@@ -78,7 +98,7 @@ export function summarize(report: ImportReview, impact: EntityImpact[] = []): Re
         a.finding.id.localeCompare(b.finding.id),
     );
 
-  const noticed = findings.filter((f) => f.severity === 'info');
+  const noticed = findings.filter((f) => !isTask(f));
 
   const byEntity = new Map<EntityType, { count: number; filenames: string[] }>();
   for (const fc of report.files) {

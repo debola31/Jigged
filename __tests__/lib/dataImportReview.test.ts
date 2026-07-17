@@ -67,6 +67,27 @@ describe('summarize — tasks', () => {
     expect(s.noticed).toEqual([]); // record counts aren't "noticed" either — they're the outlook
   });
 
+  it('a warning with nothing to DO drops to "noticed", not "What to sort out"', () => {
+    // Regression: duplicates auto-collapse and "no cost" is optional — both are warnings, but
+    // neither is blocking or has an in-app fix. Showing them under an action heading with no
+    // control reads as a dead end. They belong in "things we noticed — nothing to do".
+    const r = report(
+      [{ filename: 'parts.csv', entity_type: 'parts', row_count: 8393 }],
+      [
+        finding({ id: 'duplicate.parts.part_name', category: 'duplicate', severity: 'warning',
+          title: '13 duplicate part_name value(s)', detail: 'The repeats collapse into one record.', count: 13, entity_type: 'parts' }),
+        finding({ id: 'cost_coverage.parts.csv', category: 'cost_coverage', severity: 'warning',
+          title: '93% of parts have no cost/price', count: 7775, entity_type: 'parts' }),
+        finding({ id: 'name_variant.parts.x', category: 'name_variant', severity: 'warning',
+          title: '3 variants', count: 3, entity_type: 'parts' }),
+      ],
+    );
+    const s = summarize(r);
+    // Only the openable warning (name_variant) is a task; the two no-op warnings drop to noticed.
+    expect(s.tasks.map((t) => t.finding.id)).toEqual(['name_variant.parts.x']);
+    expect(s.noticed.map((f) => f.id).sort()).toEqual(['cost_coverage.parts.csv', 'duplicate.parts.part_name']);
+  });
+
   it('info findings go to "noticed", never to tasks', () => {
     const r = report(
       [{ filename: 'parts.csv', entity_type: 'parts', row_count: 10 }],

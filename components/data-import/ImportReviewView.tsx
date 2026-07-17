@@ -18,7 +18,7 @@ import RedoIcon from '@mui/icons-material/Redo';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import type { Finding, ImportReview } from '@/types/data-import';
 import type { EntityImpact } from '@/lib/dataImportImpact';
-import { summarize, type ReviewTask } from '@/lib/dataImportReview';
+import { summarize, isOpenable, type ReviewTask } from '@/lib/dataImportReview';
 import { autoCreateLinkFor } from '@/lib/dataImportLinks';
 
 interface ImportReviewViewProps {
@@ -158,18 +158,23 @@ export default function ImportReviewView({
           </Button>
           <Collapse in={showNoticed}>
             <Paper variant="outlined" sx={{ mt: 1 }}>
-              {s.noticed.map((f, i) => (
-                <Box key={f.id} sx={{ p: 2, borderTop: i === 0 ? 0 : 1, borderColor: 'divider' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {f.title}
-                  </Typography>
-                  {f.recommended_action && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                      {f.recommended_action}
+              {s.noticed.map((f, i) => {
+                // The explanatory line: prefer the "what to do" advice, else the "what happens"
+                // detail (e.g. duplicates: "the repeats collapse into one record").
+                const note = f.recommended_action || f.detail;
+                return (
+                  <Box key={f.id} sx={{ p: 2, borderTop: i === 0 ? 0 : 1, borderColor: 'divider' }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {f.title}
                     </Typography>
-                  )}
-                </Box>
-              ))}
+                    {note && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+                        {note}
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              })}
             </Paper>
           </Collapse>
         </Box>
@@ -294,10 +299,3 @@ function TaskRow({ task, onOpenTask }: { task: ReviewTask; onOpenTask?: (f: Find
   );
 }
 
-/** Findings with a focused fix behind them today. */
-export function isOpenable(finding: Finding): boolean {
-  if (autoCreateLinkFor(finding.id)) return true;
-  if (finding.category === 'data_gap') return true;
-  if (finding.category === 'name_variant') return true;
-  return false;
-}

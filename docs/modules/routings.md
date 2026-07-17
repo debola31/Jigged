@@ -148,11 +148,12 @@ Routings can also be created in bulk from a CSV via a **FastAPI** import pipelin
 
 - `POST /analyze` — reads the uploaded CSV's headers/sample rows and uses AI column mapping to propose which column feeds which `routing_operations` field (work center, setup/cycle time, labor-rate override, external unit price, instructions), returning the suggested mapping for the user to confirm.
 - `POST /validate` — applies the confirmed mapping to every row, resolves work centers, runs per-kind field validation, and reports per-row conflicts (`unknown_work_center`, invalid numeric fields, external-field-on-internal, …) **without writing anything**.
-- `POST /execute` — on a clean (or user-accepted) validation, creates one `routings` row per part and bulk-inserts the `routing_operations`.
+- `POST /execute` — on a clean (or user-accepted) validation, creates one `routings` row per part and **upserts** the `routing_operations` on their unique key `(routing_id, sequence)`.
 
 Behavioral details:
 
-- **One CSV row per operation**, grouped by `part_name`. The importer creates one `routings` row per part (respecting the `routings.part_id` UNIQUE constraint) and bulk-inserts `routing_operations`.
+- **One CSV row per operation**, grouped by `part_name`. The importer creates one `routings` row per part (respecting the `routings.part_id` UNIQUE constraint) and **upserts** `routing_operations` on `(routing_id, sequence)`.
+- **Idempotent re-import.** Because operations upsert on `(routing_id, sequence)`, re-importing the same file updates the existing steps in place rather than colliding — the response reports `imported_operations_count` (new) vs `updated_count` (updated in place). The existing-operation lookup is paged past PostgREST's 1000-row cap, so a re-import of thousands of operations no longer leaves most rows undetected and 500-ing on a plain insert (the batch-level "N errors" a full re-import used to show). Assumes a stable `sequence` per row (routing exports carry one); rows auto-numbered because the CSV had no `sequence` column are the exception.
 - **Work-center resolution** — `work_center_name` is matched against existing `work_centers`. Rows with no `work_center_name` fall back to a work center literally named `MISCELLANEOUS` (case-insensitive) if one exists; otherwise the row fails validation as `unknown_work_center`. Work centers are **not** auto-created from the CSV — the user imports work centers first.
 - **Per-kind field validation** — the cost fields allowed on a row depend on the resolved work center's kind: internal → `setup_minutes` / `cycle_minutes_per_unit` / `labor_rate_override`; external → `external_unit_price`. Supplying an external-only field on an internal row is rejected.
 

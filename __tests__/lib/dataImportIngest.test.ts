@@ -65,6 +65,38 @@ describe('summarizeResults', () => {
     expect(s.totalErrors).toBe(2); // parts 1 error + bom null-batch 1
     expect(s.failed).toBe(true);
   });
+
+  it('groups row-level errors by reason with examples, and counts a failed batch by its rows', () => {
+    const s = summarizeResults([
+      {
+        entity: 'routings',
+        response: {
+          imported_operations_count: 0,
+          skipped_count: 0,
+          errors: [
+            { row_number: 3, reason: "Part 'ABC-123' not found at execute time", data: { Part: 'ABC-123' } },
+            { row_number: 9, reason: "Part 'DEF-9' not found at execute time", data: { Part: 'DEF-9' } },
+            { row_number: 12, reason: 'Work center could not be resolved for row', data: { WC: 'Mystery' } },
+          ],
+        },
+      },
+      // A whole BOM batch of 500 rows threw with the server's detail message.
+      { entity: 'bom', response: null, failure: { message: 'Import failed: duplicate key value', rows: 500 } },
+    ]);
+
+    const routings = s.byEntity.find((e) => e.entity === 'routings')!;
+    // The two "Part 'X' not found" collapse into one heading; examples keep the specifics.
+    const partGroup = routings.errorGroups.find((g) => g.reason === 'Part not found')!;
+    expect(partGroup.count).toBe(2);
+    expect(partGroup.examples).toEqual(['ABC-123', 'DEF-9']);
+    expect(routings.errorGroups.map((g) => g.reason)).toContain('Work center could not be resolved');
+
+    // A failed batch is counted by its rows, not as "1 error".
+    const bom = s.byEntity.find((e) => e.entity === 'bom')!;
+    expect(bom.errorCount).toBe(500);
+    expect(bom.errorGroups[0].count).toBe(500);
+    expect(s.totalErrors).toBe(503); // 3 routing rows + 500 bom rows
+  });
 });
 
 describe('runImportPlan — progress', () => {

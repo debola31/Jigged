@@ -31,3 +31,40 @@ def fetch_all_by_company(supabase: Client, table: str, columns: str, company_id:
         if len(batch) < _PAGE_SIZE:
             return out
         start += _PAGE_SIZE
+
+
+def fetch_all_in(
+    supabase: Client,
+    table: str,
+    columns: str,
+    column: str,
+    values: list[Any],
+    chunk_size: int = 300,
+) -> list[dict[str, Any]]:
+    """Return every row of `table` where `column` IN `values`.
+
+    Two limits are handled: the IN-list is chunked (a few hundred UUIDs per request keeps the
+    query-string under PostgREST/proxy URL limits), and each chunk's response is paged past the
+    1000-row cap. Same reason as fetch_all_by_company — a re-import must compare against ALL
+    existing rows, not just the first page.
+    """
+    out: list[dict[str, Any]] = []
+    for i in range(0, len(values), chunk_size):
+        chunk = values[i : i + chunk_size]
+        if not chunk:
+            continue
+        start = 0
+        while True:
+            resp = (
+                supabase.table(table)
+                .select(columns)
+                .in_(column, chunk)
+                .range(start, start + _PAGE_SIZE - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            out.extend(batch)
+            if len(batch) < _PAGE_SIZE:
+                break
+            start += _PAGE_SIZE
+    return out

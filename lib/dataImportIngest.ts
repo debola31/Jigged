@@ -96,12 +96,69 @@ export interface ExecuteResponseShape {
   errors?: unknown[];
 }
 
+/** One class of failure, grouped so "38 errors" becomes "38 rows — part not found (e.g. …)".
+ *  `reason` has the row-specific bits stripped out so many rows collapse under one heading;
+ *  `examples` keeps a few of the specific values back for recognition. */
+export interface ImportErrorGroup {
+  reason: string;
+  count: number;
+  examples: string[];
+}
+
 export interface EntityResult {
   entity: EntityType;
   created: number;
   updated: number;
   skipped: number;
-  errorCount: number;
+  errorCount: number; // rows that failed to import (row-level rejections + failed-batch rows)
+  errorGroups: ImportErrorGroup[];
+}
+
+/** Recorded when a whole batch throws (network / 500) — carries the server's message and how
+ *  many rows went down with it, so the summary can say what happened and to how many rows. */
+export interface BatchFailure {
+  message: string;
+  rows: number;
+}
+
+type BatchOutcome = { entity: EntityType; response: ExecuteResponseShape | null; failure?: BatchFailure };
+
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+
+/** The human reason a route gave for rejecting a row — every importer uses `reason`, some
+ *  `message`. */
+function rowErrorReason(e: unknown): string {
+  const o = asRecord(e);
+  const r = o && (o.reason ?? o.message);
+  return typeof r === 'string' && r.trim() ? r.trim() : 'Could not be imported';
+}
+
+/** Strip the row-specific bits so many rows group under one heading:
+ *  "Part 'ABC-123' not found at execute time" and "Part 'DEF' not found …" → "Part not found". */
+function reasonHeading(reason: string): string {
+  return reason
+    .replace(/\s*'[^']*'/g, '') // drop quoted values: "Part 'ABC' not found" → "Part not found"
+    .replace(/\s*\((?:parent|child)=[^)]*\)/gi, '') // drop "(parent=…, child=…)"
+    .replace(/\s+at execute time/gi, '') // internal jargon
+    .replace(/\s+for row\b/gi, '')
+    .replace(/\.\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** A specific value to show back — the quoted value in the reason (the failing part name),
+ *  else the first non-empty field of the row's data. */
+function reasonExample(e: unknown, reason: string): string | null {
+  const q = reason.match(/'([^']+)'/);
+  if (q) return q[1];
+  const data = asRecord(asRecord(e)?.data);
+  if (data) {
+    for (const v of Object.values(data)) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return null;
 }
 
 export interface ImportSummary {
@@ -135,25 +192,63 @@ export interface ImportProgress {
 const createdOf = (r: ExecuteResponseShape): number =>
   r.imported_count ?? r.imported_operations_count ?? r.imported_routings_count ?? 0;
 
-/** Aggregate per-batch responses (each paired with its entity) into one summary. */
-export function summarizeResults(
-  results: { entity: EntityType; response: ExecuteResponseShape | null }[],
-): ImportSummary {
+/** Aggregate per-batch responses (each paired with its entity) into one summary — including
+ *  a grouped, human-readable breakdown of WHY rows failed, so the summary never shows a bare
+ *  error count with no cause or next step. */
+export function summarizeResults(results: BatchOutcome[]): ImportSummary {
   const byEntity = new Map<EntityType, EntityResult>();
+  // entity -> reasonHeading -> { count, examples }
+  const groups = new Map<EntityType, Map<string, { count: number; examples: string[] }>>();
   let failed = false;
-  for (const { entity, response } of results) {
-    const e = byEntity.get(entity) ?? { entity, created: 0, updated: 0, skipped: 0, errorCount: 0 };
+
+  const addGroup = (entity: EntityType, reason: string, count: number, example: string | null) => {
+    let g = groups.get(entity);
+    if (!g) {
+      g = new Map();
+      groups.set(entity, g);
+    }
+    const cur = g.get(reason) ?? { count: 0, examples: [] };
+    cur.count += count;
+    if (example && cur.examples.length < 6 && !cur.examples.includes(example)) cur.examples.push(example);
+    g.set(reason, cur);
+  };
+
+  for (const { entity, response, failure } of results) {
+    const e =
+      byEntity.get(entity) ?? { entity, created: 0, updated: 0, skipped: 0, errorCount: 0, errorGroups: [] };
     if (response === null) {
       failed = true;
-      e.errorCount += 1;
+      if (failure) {
+        // A whole batch went down — every row in it failed.
+        e.errorCount += failure.rows;
+        addGroup(entity, reasonHeading(failure.message), failure.rows, null);
+      } else {
+        e.errorCount += 1;
+        addGroup(entity, 'A batch could not be sent to the server', 1, null);
+      }
     } else {
       e.created += createdOf(response);
       e.updated += response.updated_count ?? 0;
       e.skipped += response.skipped_count ?? 0;
-      e.errorCount += response.errors?.length ?? 0;
+      const errs = response.errors ?? [];
+      e.errorCount += errs.length;
+      for (const er of errs) {
+        const reason = rowErrorReason(er);
+        addGroup(entity, reasonHeading(reason), 1, reasonExample(er, reason));
+      }
     }
     byEntity.set(entity, e);
   }
+
+  for (const [entity, g] of groups) {
+    const e = byEntity.get(entity);
+    if (e) {
+      e.errorGroups = [...g.entries()]
+        .map(([reason, v]) => ({ reason, count: v.count, examples: v.examples }))
+        .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+    }
+  }
+
   const list = [...byEntity.values()];
   return {
     byEntity: list,
@@ -202,7 +297,7 @@ export async function runImportPlan(
       entities: entities.map((e) => ({ ...e })),
     });
 
-  const results: { entity: EntityType; response: ExecuteResponseShape | null }[] = [];
+  const results: BatchOutcome[] = [];
   for (const batch of plan) {
     emit(batch.entity); // show which stage is in flight before we await it
     let failed = false;
@@ -215,9 +310,12 @@ export async function runImportPlan(
         ...batch.extra,
       });
       results.push({ entity: batch.entity, response });
-    } catch {
+    } catch (err) {
       failed = true;
-      results.push({ entity: batch.entity, response: null });
+      // Keep the server's reason (postJson throws Error(detail)) and the row count, so the
+      // summary can say what failed and to how many rows — not just "N errors".
+      const message = err instanceof Error && err.message ? err.message : 'The import could not reach the server';
+      results.push({ entity: batch.entity, response: null, failure: { message, rows: batch.rows.length } });
     }
     batchesDone += 1;
     rowsDone += batch.rows.length;

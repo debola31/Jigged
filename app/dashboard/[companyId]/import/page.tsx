@@ -716,26 +716,52 @@ function ImportStep({
               : ''}
             .
           </Alert>
-          <Stack spacing={1}>
+          <Stack spacing={1.5}>
             {summary.byEntity.map((e) => (
-              <Box key={e.entity} sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
-                <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 130, textTransform: 'capitalize' }}>
-                  {e.entity.replace('_', ' ')}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {e.created.toLocaleString()} created
-                  {e.updated > 0 ? `, ${e.updated} updated` : ''}
-                  {e.skipped > 0 ? `, ${e.skipped} skipped` : ''}
-                  {e.errorCount > 0 ? `, ${e.errorCount} error${e.errorCount === 1 ? '' : 's'}` : ''}
-                </Typography>
+              <Box key={e.entity}>
+                <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 130, textTransform: 'capitalize' }}>
+                    {e.entity.replace('_', ' ')}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {e.created.toLocaleString()} created
+                    {e.updated > 0 ? `, ${e.updated.toLocaleString()} updated` : ''}
+                    {e.skipped > 0 ? `, ${e.skipped.toLocaleString()} skipped` : ''}
+                    {e.errorCount > 0 ? `, ${e.errorCount.toLocaleString()} error${e.errorCount === 1 ? '' : 's'}` : ''}
+                  </Typography>
+                </Box>
+                {/* Why the errors happened — grouped by reason, with real examples. Turns a
+                    bare "38 errors" into "38 — Part not found (e.g. ABC-123)". */}
+                {e.errorGroups.length > 0 && (
+                  <Box sx={{ ml: { sm: '146px' }, mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {e.errorGroups.map((g, i) => (
+                      <Box key={i}>
+                        <Typography variant="body2" color="text.secondary">
+                          <Box component="span" sx={{ color: 'warning.main', fontWeight: 600 }}>
+                            {g.count.toLocaleString()}
+                          </Box>{' '}
+                          {g.reason}
+                        </Typography>
+                        {g.examples.length > 0 && (
+                          <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                            {g.examples.map((ex, j) => (
+                              <Chip key={j} size="small" variant="outlined" label={ex} sx={{ maxWidth: 260 }} />
+                            ))}
+                          </Box>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
               </Box>
             ))}
           </Stack>
           {summary.totalSkipped + summary.totalErrors > 0 && (
             <Alert severity="info" sx={{ mt: 2 }}>
-              Skipped rows usually reference something not yet in Jigged. Fix them on the Review step
-              and re-run — re-importing is safe (existing records update in place, they don&apos;t
-              duplicate).
+              Skipped and errored rows almost always reference something that isn&apos;t in Jigged yet
+              (a part, vendor, or work center the row points at). Add or fix it on the Review step and
+              run the import again — re-importing is safe: existing records update in place, they
+              don&apos;t duplicate.
             </Alert>
           )}
         </CardContent>

@@ -125,7 +125,8 @@ class RoutingExecuteResponse(BaseModel):
 
     success: bool
     imported_routings_count: int  # routings table rows created
-    imported_operations_count: int  # routing_operations table rows created
+    imported_operations_count: int  # routing_operations rows created (new)
+    updated_count: int = 0  # routing_operations rows updated in place on re-import
     skipped_count: int
     errors: list[RoutingImportError]
 

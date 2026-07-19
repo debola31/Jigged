@@ -194,7 +194,7 @@ All inventory operations use the Supabase client with RLS policies (no backend A
 - **List items:** `getStockedParts` — query `parts` where `is_stocked = true`, with RLS
 - **Create item:** Insert into `parts` (`is_stocked = true`) with RLS (via the part workspace)
 - **Update item:** Update `parts` with RLS
-- **Delete item:** Delete from `parts` with RLS (hard delete; conversions cascade, transactions keep the `item_name` snapshot)
+- **Delete item:** Archive (soft-delete) — `deletePart` / `bulkDeleteParts` call the `archive_parts` RPC, which sets `deleted_at`, hiding the part from inventory lists/search/pickers; it never blocks on references. Nothing cascades away because the row survives: `parts_unit_conversions` and `inventory_transactions` are **kept** (the ledger keeps its `item_name` snapshot, and the `part_id` link normally still resolves the archived row). See `docs/architecture.md` §16.
 - **Add / remove / adjust stock:** `addPartStock` / `removePartStock` / `removePartStockGraceful` / `adjustPartStock` — update `parts.quantity` and insert an `inventory_transactions` row
 - **Location stock (opt-in):** `addStockAtLocation` / `depleteStockAtLocation` / `adjustStockAtLocation` / `transferStock` — Postgres RPCs that update `part_location_stock`, roll up `parts.quantity`, and write `inventory_transactions`
 - **Get transactions:** `getPartTransactions` — query `inventory_transactions` (joined to job/operation) with RLS; `updateTransactionNotes` edits notes
@@ -246,9 +246,9 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Delete**
 
-- [ ] **Given** a stocked part not referenced by quotes/jobs/BOMs, **when** a user deletes it, **then** it is permanently removed (hard delete) and its `inventory_transactions` remain with `item_name` preserved — *write path verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'deletes part by ID'`; FK-guard message by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'throws user-friendly error on FK constraint violation'`*.
+- [ ] **Given** any stocked part (referenced by quotes/jobs/BOMs or not), **when** a user deletes it, **then** it is archived via the `archive_parts` RPC (soft-delete: `deleted_at` set, hidden from inventory) and never blocked, while its `inventory_transactions` are kept with `item_name` preserved — *write path verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'archives the part via the archive_parts RPC (never a hard delete, never blocks)'`*.
 
-- [ ] **Given** several selected stocked parts, **when** a user bulk-deletes, **then** all are removed (or a friendly FK error is shown) — *verified by `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'deletes multiple parts by IDs'` AND `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'throws user-friendly error on FK constraint violation'`*.
+- [ ] **Given** several selected stocked parts, **when** a user bulk-deletes, **then** all are archived in one `archive_parts` RPC call (never blocked) — *verified by `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'archives multiple parts via the archive_parts RPC'`*.
 
 **Transaction history (FR-13)**
 
@@ -308,12 +308,16 @@ The system must enforce the following validation rules:
 
 - Adjustment transactions - Can set quantity to any non-negative value (used for corrections/reconciliation)
 
-### Hard Delete (No Soft Delete)
+### Archive (Soft Delete)
 
-Inventory items (stocked `parts`) use hard delete (no deleted_at column). When an item is deleted:
+Stocked `parts` are **archived**, not hard-deleted: `parts` carries a nullable `deleted_at`, and the "Delete" action (`deletePart` / `bulkDeleteParts`) calls the `archive_parts` RPC, which stamps `deleted_at` in one transaction. It never blocks on references. When an item is archived:
 
-- The `parts` record is permanently removed
+- The `parts` row is **kept**, just hidden — every inventory list/search/picker filters `deleted_at IS NULL`, while by-id reads and any retained `part_id` FK still resolve it
 
-- Associated `parts_unit_conversions` are cascade deleted
+- Associated `parts_unit_conversions` are **kept** — nothing cascades away, because the row survives
 
-- `inventory_transactions` remain for audit purposes with `part_id` nulled (SET NULL) and the `item_name` / `location_name` snapshots preserved
+- `inventory_transactions` are unaffected: they still carry the `item_name` / `location_name` snapshots, and their `part_id` FK (`ON DELETE SET NULL`) normally still resolves the archived part rather than being nulled (the `SET NULL` only fires on a true `DELETE`, which the UI no longer issues)
+
+- Re-creating or re-importing the same `part_name` **revives** the archived row (un-archives + updates it) rather than duplicating it
+
+See `docs/architecture.md` §16 for the authoritative deletion & archiving policy.

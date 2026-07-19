@@ -212,7 +212,6 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const hasRelatedRecords = customer.quotes_count > 0 || customer.jobs_count > 0;
   const contactBeingDeleted = deleteContactId
     ? contacts.find((c) => c.id === deleteContactId)
     : undefined;
@@ -247,17 +246,11 @@ export default function CustomerDetailPage() {
           >
             Edit
           </Button>
-          <Tooltip
-            title={
-              hasRelatedRecords
-                ? 'Cannot delete — customer is referenced by quotes or jobs'
-                : 'Delete Customer'
-            }
-          >
+          <Tooltip title="Delete (archive) this customer">
             <span>
               <IconButton
                 onClick={() => setDeleteDialogOpen(true)}
-                disabled={actionLoading || hasRelatedRecords}
+                disabled={actionLoading}
                 sx={{
                   color: 'error.main',
                   '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
@@ -704,9 +697,17 @@ export default function CustomerDetailPage() {
         <DialogTitle>Delete Customer?</DialogTitle>
         <DialogContent>
           <Typography>
-            Permanently delete <strong>{customer.name}</strong>? Their contacts
-            and addresses will be deleted too. This can&apos;t be undone.
+            <strong>{customer.name}</strong> will be removed from your lists.
+            Quotes and jobs that reference it keep working, and you can bring it
+            back by re-creating or re-importing the same name.
           </Typography>
+          {(customer.quotes_count > 0 || customer.jobs_count > 0) && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Used on {customer.quotes_count} quote
+              {customer.quotes_count === 1 ? '' : 's'}, {customer.jobs_count} job
+              {customer.jobs_count === 1 ? '' : 's'} — kept for history.
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)} disabled={actionLoading}>

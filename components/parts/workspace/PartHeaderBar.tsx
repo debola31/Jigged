@@ -32,7 +32,6 @@ interface PartHeaderBarProps {
   activeTab: string;
   onTabChange: (slug: string) => void;
   onDelete: () => void;
-  hasReferences: boolean;
   actionLoading: boolean;
 }
 
@@ -60,7 +59,6 @@ export default function PartHeaderBar({
   activeTab,
   onTabChange,
   onDelete,
-  hasReferences,
   actionLoading,
 }: PartHeaderBarProps) {
   return (
@@ -97,17 +95,11 @@ export default function PartHeaderBar({
           <Typography sx={{ color: CRUMB_CURRENT, fontWeight: 500 }}>{partName}</Typography>
         </Breadcrumbs>
 
-        <Tooltip
-          title={
-            hasReferences
-              ? "Cannot delete — this part is referenced by quotes, jobs, or other parts' BOMs"
-              : 'Delete Part'
-          }
-        >
+        <Tooltip title="Delete part">
           <span>
             <IconButton
               onClick={onDelete}
-              disabled={actionLoading || hasReferences}
+              disabled={actionLoading}
               size="small"
               sx={{
                 color: 'error.main',

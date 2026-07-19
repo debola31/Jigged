@@ -64,7 +64,7 @@ Sections:
 - **Linked Parts** (accordion) — parts where `preferred_vendor_id = this vendor`. Shows `part_name`, `primary_unit`.
 - **Linked Work Centers** (accordion) — work centers where `vendor_id = this vendor`. Shows `name`, `kind` (`internal | external`; external is the case where the FK is set).
 
-The **Delete** button is disabled when any linked part or work center exists (FK constraint `23503` blocks the delete; the UI checks before showing the button).
+The **Delete** button archives the vendor (sets `deleted_at`) and is **never disabled or blocked** — even when parts (`preferred_vendor_id`) or work centers (`vendor_id`) still point at it. The row survives the archive, so those links keep resolving; the vendor simply disappears from lists, search, and pickers (all of which filter `deleted_at IS NULL`). Reusing the name later revives the row. See [architecture.md §16](../architecture.md) for the universal archive (soft-delete) policy.
 
 ### Create — `/dashboard/{companyId}/vendors/new`
 
@@ -92,13 +92,13 @@ CSV upload, column mapping, validation, then execute via `/api/vendors/import/*`
 | `getAllVendors(companyId, search, sortField, sortDir)` | Batched 1000-row fetch; search across name and city |
 | `getAllVendorsWithPrimaryContact(companyId, search, sortField, sortDir)` | `getAllVendors` + each vendor's `is_primary` contact joined — powers the list grid |
 | `getVendor(vendorId)` | Single-row fetch; returns `null` on `PGRST116` (not found) |
-| `checkVendorNameExists(companyId, name, excludeId?)` | Case-insensitive uniqueness check for the create/edit form |
+| `checkVendorNameExists(companyId, name, excludeId?)` | Case-insensitive uniqueness check for the create/edit form; scoped to **live** rows (`deleted_at IS NULL`) so an archived name doesn't falsely block — it revives on create instead |
 | `getPartsByPreferredVendor(vendorId)` | `{id, part_name, primary_unit}` — for the detail page Linked Parts accordion |
 | `getWorkCentersByVendor(vendorId)` | `{id, name, kind}` — for the Linked Work Centers accordion |
-| `createVendor(companyId, formData, initialContact?)` | Inserts vendor, optionally inserts one `vendor_contacts` row with `is_primary=true` |
+| `createVendor(companyId, formData, initialContact?)` | Inserts vendor, optionally inserts one `vendor_contacts` row with `is_primary=true`. On a `23505` name collision with an **archived** vendor, revives that row instead (un-archive + apply form values via `reviveArchivedVendorByName`); a collision with a **live** vendor re-throws as a genuine duplicate |
 | `updateVendor(vendorId, formData)` | Vendor-row update only; contact CRUD is separate |
-| `deleteVendor(vendorId)` | Raises `23503` if FK references exist |
-| `bulkDeleteVendors(vendorIds)` | Batched 100/chunk, same FK guard |
+| `deleteVendor(vendorId)` | **Archive** — sets `deleted_at` via `.update()` (not a SQL `DELETE`); never blocks on references (parts / work-center links survive the archived row) |
+| `bulkDeleteVendors(vendorIds)` | **Archive** in 100-row batches; same never-blocks semantics |
 | `bulkImportVendors(companyId, rows)` | Direct-client de-dupe-by-name insert (returns `{imported, skipped, errors}`). **Note:** the Import *page* executes via the FastAPI `/api/vendors/import/{analyze,validate,execute}` endpoints (AI column mapping); this function is the direct-client path. |
 
 Contact CRUD lives in `utils/vendorContactsAccess.ts`:
@@ -127,7 +127,7 @@ Given/When/Then scenarios, each carrying a **verification clause** — a test po
 
 - [ ] **Given** the create form, **when** a user enters a name (required) plus optional address fields and saves, **then** a vendor is created with `company_id` stitched on and `country` defaulting to `USA`, and reloading the list shows it — *insert path verified by `__tests__/utils/vendorsAccess.test.ts > 'createVendor' > 'inserts a vendor row with company_id stitched on'`; reload-persistence E2E automation-pending*.
 - [ ] **Given** the create form with the optional initial-contact sub-form filled, **when** the user saves, **then** the vendor is created together with one `vendor_contacts` row flagged `is_primary=true` — *automation-pending (`createVendor` `initialContact` path)*.
-- [ ] **Given** the create form, **when** a user submits a name already used in the company (case-insensitive), **then** it is flagged as a duplicate before insert — *automation-pending (`checkVendorNameExists`; DB unique `(company_id, name)`)*.
+- [ ] **Given** the create form, **when** a user submits a name already used by a **live** vendor (case-insensitive), **then** it is flagged as a duplicate before insert; a name held only by an **archived** vendor is not blocked — it revives that row instead — *automation-pending (`checkVendorNameExists` is scoped to `deleted_at IS NULL`; `createVendor` revives on the `23505`; DB unique `(company_id, name)`)*.
 
 **Edit a vendor (edit → save → reload → persists)**
 
@@ -140,11 +140,13 @@ Given/When/Then scenarios, each carrying a **verification clause** — a test po
 - [ ] **Given** a vendor with several contacts, **when** a user marks one primary, **then** exactly one primary remains (the previous one is cleared) and reloading confirms it — *automation-pending (`setPrimaryContact`; enforced by partial unique index `vendor_contacts_one_primary`)*.
 - [ ] **Given** a contact, **when** a user deletes it, **then** reloading shows it gone — *automation-pending (`deleteVendorContact`)*.
 
-**Delete & bulk**
+**Delete (= archive) & bulk**
 
-- [ ] **Given** a vendor with no linked parts or work centers, **when** a user deletes it, **then** it is removed — *verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'deletes by vendor id'`*.
-- [ ] **Given** a vendor referenced by a part (`preferred_vendor_id`) or work center (`vendor_id`), **when** a user attempts delete, **then** it is blocked with a friendly FK message and the detail-page Delete button is disabled — *delete guard verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'throws with a friendly message on FK violation (23503)'`; disabled-button UI automation-pending*.
-- [ ] **Given** selected vendors, **when** a user bulk-deletes, **then** unreferenced vendors are removed in 100-row batches under the same FK guard — *automation-pending (`bulkDeleteVendors`)*.
+- [ ] **Given** any vendor, **when** a user deletes it, **then** it is **archived** — `deleted_at` is stamped via `.update()` (no SQL `DELETE`) — and it disappears from lists, search, and pickers, while a by-id link (`getVendor`) still resolves it — *verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'archives by vendor id (sets deleted_at) instead of deleting'`*.
+- [ ] **Given** a vendor referenced by a part (`preferred_vendor_id`) or work center (`vendor_id`), **when** a user deletes it, **then** the archive still **succeeds — it never blocks** — and the row survives so those references keep resolving (there is no `23503` FK guard, and the detail-page Delete button is never disabled) — *same archive path as above; the former FK-guard test was removed*.
+- [ ] **Given** a Supabase failure while archiving, **when** the update runs, **then** a friendly error is thrown rather than failing silently — *verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'throws when the archive update errors'`*.
+- [ ] **Given** selected vendors, **when** a user bulk-deletes, **then** they are archived (`deleted_at` set) in 100-row batches, never blocked by references — *automation-pending (`bulkDeleteVendors`)*.
+- [ ] **Given** an archived vendor's name, **when** a user re-creates or re-imports that name, **then** the archived row is **revived** (un-archived + updated) rather than duplicated — *insert-collision revive path in `createVendor` (`reviveArchivedVendorByName`); import upsert sets `deleted_at=None`; automation-pending*.
 
 **Read edge cases**
 

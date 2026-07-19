@@ -21,6 +21,6 @@ _None._ The module's doc, UI, access layer, and schema agree.
 ## Informational / aligned
 
 - **`legacy_id`** exists on the `vendors` table + import mapping but not the create/edit form. vendors.md already frames it as importer-only — consistent. (Flag only if you want it form-editable.)
-- **No soft-delete / deactivation** — delete is hard-delete with an FK guard; the doc doesn't claim otherwise. Noted so the absence is a conscious choice.
+- **Delete is archive (soft-delete).** Since the universal archive model (PR #580), `deleteVendor` / `bulkDeleteVendors` stamp `deleted_at` via `.update()` instead of issuing a SQL `DELETE`, and the archive **never blocks** on references — a vendor used as a part's `preferred_vendor_id` or a work center's `vendor_id` archives fine, the row survives so those links keep resolving. Reads filter `deleted_at IS NULL` (lists / search / pickers); by-id (`getVendor`) does not. Name stays the natural identity: re-creating or re-importing an archived name **revives** the row (`createVendor` revives on the `23505`; import upsert sets `deleted_at=None`). This replaced the old hard-delete-with-`23503`-FK-guard behaviour. See [architecture.md §16](../../architecture.md).
 - **Contact-name search** is deferred (doc says so); the list searches name + city only. Aligned.
 - **One-primary-contact invariant** — enforced in `vendorContactsAccess.ts` AND by the partial unique index `vendor_contacts_one_primary`. Doc's "enforced in access layer" note is accurate (belt-and-suspenders with the DB index).

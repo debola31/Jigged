@@ -110,7 +110,7 @@ There are **no** Address or Notes sections on this form. Additional contacts and
 
 - Cancel → Returns without saving
 
-- Delete (edit mode only) → Confirmation dialog, then hard delete (cascades to contacts + addresses)
+- Delete (edit mode only) → Confirmation dialog, then **archive** (soft-delete): sets `customers.deleted_at`, hiding the customer from lists/search/pickers. The row — and its contacts + addresses — are kept, so any quotes/jobs that reference it still resolve. Re-creating the same name later revives it.
 
 ### 3. Customer Detail
 
@@ -126,7 +126,7 @@ The detail page is the hub for everything below the name:
 
 - **Related** card — live counts of the customer's Quotes and Jobs
 
-- **Edit** button (routes to the `/edit` form) and a **Delete** button that is disabled when the customer has related quotes or jobs
+- **Edit** button (routes to the `/edit` form) and a **Delete** button. "Delete" **archives** the customer (soft-delete — sets `deleted_at`) after a confirmation; it is **never blocked** by references — a customer with related quotes or jobs archives fine, and those documents keep resolving the (now-hidden) row. The Related-card counts are impact information, not a block. See `docs/architecture.md` §16.
 
 ---
 
@@ -355,9 +355,11 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Delete**
 
-- [ ] **Given** a customer with zero quotes and zero jobs, **when** the user confirms delete, **then** the row is hard-deleted (its contacts + addresses cascade) and the app returns to the list — *write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'softDeleteCustomer' > 'deletes customer by ID'` (note: `softDeleteCustomer` performs a hard `.delete()` despite the name — rename tracked in #550); reload E2E automation-pending (#367)*.
+- [ ] **Given** any customer, **when** the user confirms delete, **then** the customer is **archived** (soft-delete, never a hard delete): `softDeleteCustomer` stamps `customers.deleted_at`, the row is hidden from the list/search/pickers, its contacts + addresses and any quote/job links are kept, and the app returns to the list — *write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'softDeleteCustomer' > 'archives customer by ID (stamps deleted_at)'`; reload E2E automation-pending (#367)*.
 
-- [ ] **Given** a customer referenced by quotes or jobs, **when** the user opens its detail page, **then** the Delete button is disabled with a "Cannot delete — customer is referenced by quotes or jobs" tooltip; a bulk delete that hits the FK surfaces "Cannot delete some customers because they have associated parts, quotes, or jobs" — *automation-pending (detail-page guard reads `quotes_count`/`jobs_count` from `getCustomerWithRelations`; bulk guard is the `23503` branch in `bulkSoftDeleteCustomers`)*. **Resolved (#550): the "Delete Behavior" section below documents this shipped block; the snapshot + hard-delete model that would let a referenced customer be removed — deletion drops the customer's count/history while the snapshot keeps their name on historical docs — is Planned, not yet built.**
+- [ ] **Given** a customer referenced by quotes or jobs, **when** the user deletes it, **then** the delete is **never blocked** — the customer archives like any other and the referencing quotes/jobs keep resolving the retained (now-hidden) row (no FK can trap the user). The list/bulk delete confirms through `DeleteImpactDialog` (impact/warn, not a disable) and calls `softDeleteCustomer` / `bulkSoftDeleteCustomers`, both of which `UPDATE deleted_at` — *archive write path verified by `__tests__/utils/customerAccess.test.ts > 'customerAccess utilities' > 'softDeleteCustomer' > 'archives customer by ID (stamps deleted_at)'`; canonical policy in `docs/architecture.md` §16*.
+
+- [ ] **Given** a previously-archived customer, **when** a customer with the same name is re-created or re-imported, **then** the archived row is **revived** (not duplicated): `createCustomer` catches the unique-name `23505` and calls `reviveArchivedCustomerByName` (clears `deleted_at`, applies the new values), and the CSV import upsert sets `deleted_at = NULL`; `checkCustomerNameExists` is scoped to live rows so an archived name never falsely blocks — *grounded in `utils/customerAccess.ts` (`createCustomer` → `reviveArchivedCustomerByName`, `checkCustomerNameExists`); dedicated revive test automation-pending*.
 
 - [ ] **Given** a contact or address on the detail page, **when** the user deletes it, **then** a confirmation dialog appears (address dialog warns if a default is being removed) and the row is deleted independently of the customer — *automation-pending (`deleteCustomerContact` / `deleteCustomerAddress`)*.
 
@@ -377,16 +379,20 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 ---
 
-## Delete Behavior
+## Delete Behavior — archive (soft-delete), never blocks
 
-**Current (shipped): a customer that is referenced by quotes or jobs cannot be deleted through the app.** There is **no** "delete anyway and orphan the records" flow, and nothing sets `customer_id` to NULL as a product action today.
+"Delete" is a universal **archive**. See `docs/architecture.md` §16 (Deletion & Archiving Policy) for the canonical, cross-entity policy; the customer-specific behavior is:
 
-- On the **detail page**, the Delete button is **disabled** whenever the customer has related quotes or jobs — the page computes `hasRelatedRecords` from the `quotes_count` / `jobs_count` returned by `getCustomerWithRelations` and shows a "Cannot delete — customer is referenced by quotes or jobs" tooltip.
+- **Archive, not hard delete.** `customers` carries a nullable `deleted_at timestamptz`. `softDeleteCustomer` / `bulkSoftDeleteCustomers` `UPDATE customers SET deleted_at = now()` for the target rows — they do **not** issue a SQL `DELETE`. The customer row and its `customer_contacts` + `customer_addresses` are **kept**, just hidden.
 
-- The **bulk delete** path (`bulkSoftDeleteCustomers`) does not pre-check counts; it catches the Postgres foreign-key violation (`23503`) and surfaces "Cannot delete some customers because they have associated parts, quotes, or jobs. Remove those references first." The single-delete path (`softDeleteCustomer`) likewise does not pre-check and re-throws the raw FK error.
+- **Never blocked by references.** A customer referenced by quotes, jobs, or shipments archives fine: the row survives, so every retained `customer_id` FK still resolves the (now-hidden) customer and the document stays readable. There is no "cannot delete — referenced" block and no foreign-key error to surface. Deletion is confirmed through `DeleteImpactDialog` (an impact/warning summary), never a disable.
 
-- A delete that *does* succeed (an unreferenced customer) cascades only to that customer's own `customer_contacts` and `customer_addresses` (both `ON DELETE CASCADE`).
+- **Reads hide archived customers.** List / search / picker / count queries filter `deleted_at IS NULL` (`getAllCustomers`, `checkCustomerNameExists`, …). By-id reads (`getCustomer`) intentionally do **not** filter, so a direct link or a document's retained FK still resolves an archived customer.
 
-_DB-level detail (for accuracy):_ the foreign keys to `customers(id)` are mixed — `quotes.customer_id` and `jobs.customer_id` are `ON DELETE SET NULL`, `customer_contacts` / `customer_addresses` are `ON DELETE CASCADE`, and `shipments.customer_id` is `NOT NULL` with a plain FK (`NO ACTION`), so a customer that has shipments is what actually raises the `23503` the delete paths hit. The user-facing guard keys off the `quotes_count` / `jobs_count` check, independent of these constraints. (No `parts → customers` FK exists, despite the bulk error string mentioning "parts".)
+- **History is retained.** Because the row persists, the customer's quotes/jobs history stays intact after archiving — nothing is destroyed.
 
-> **Planned: snapshot + hard-delete (see #550).** Not built yet. **Owner decision (#333):** hard delete is the model — there is **no archive**, and history for a deleted customer is **not** retained. The intended direction is to (a) **snapshot** the customer's display fields (**name**, bill-to address, contact) onto quotes / jobs / invoices at creation, so each document keeps a readable customer record even after the customer is gone; and (b) rely on the existing **`ON DELETE SET NULL`** on `quotes.customer_id` / `jobs.customer_id` so that deleting a customer removes the live link and its "N quotes / N jobs" count (the count is intentionally not preserved). Deleting a customer that still has **shipments** stays blocked while `shipments.customer_id` is `NOT NULL`. No `is_active` / Archive is planned right now. The snapshot columns don't exist yet — do not treat this as shipped.
+- **Name is the natural identity — reuse revives.** `customers_company_name_unique` stays a full `(company_id, name)` constraint, so there is only ever one row per name. Re-creating or re-importing an archived customer's name **revives** the archived row instead of duplicating it: `createCustomer` catches the unique-name `23505` and calls `reviveArchivedCustomerByName` (clears `deleted_at`, applies the new form values); the CSV import upsert sets `deleted_at = NULL` on `DO UPDATE`. `checkCustomerNameExists` is scoped to live rows so an archived name never falsely blocks creation.
+
+**Supersedes the earlier #333 / #550 decision.** The prior framing — "hard delete is the model, there is **no** archive, history is **not** retained, deletes are blocked when referenced, and snapshot + hard-delete is Planned (#550)" — is **no longer accurate**. Archive is the shipped model (PR #580) and history **is** retained (the row persists). Individually deleting a contact or address from the detail page is still a real delete — those are sub-entities, not archived.
+
+**Deferred (not built):** a Trash / Restore UI and a permanent purge are intentionally out of v1 — v1 archives and retains, and reuse-by-name already brings an archived customer back.

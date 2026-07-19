@@ -25,6 +25,20 @@ raw DB errors can leak and standardizes the fix.
 - auth errors (via `isAuthError`) → "Your session has expired. Please sign in again."
 - anything else → `fallback` (or a generic "Something went wrong. Please try again.")
 
+> **Scope update — universal archive (PR #580; [Architecture §16 — Deletion &
+> Archiving Policy](../architecture.md#16-deletion--archiving-policy)).** "Delete" is now
+> a soft-delete (archive via `deleted_at`) for **parts, customers, vendors, work_centers,
+> jobs, and quotes**, and it **never blocks on references** — the row survives so
+> referencing records still resolve. Those delete paths therefore **no longer raise
+> `23503` at all**, and the friendly "`<entity>` can't be deleted…" message no longer
+> applies to them (this supersedes the `deleteJob`/`deleteQuote` rows and the
+> `deletePart`/`deleteVendor`/`deleteWorkCenter` entries in the tables below, which
+> predate the archive model). Keep the `23503` mapping only as **generic guidance** for
+> genuine remaining FK-violation surfaces where a hard `DELETE` can still trip a
+> constraint — e.g. customer addresses/contacts, routing/BOM sub-items,
+> pricing/procurement tiers, operators (the customer-address case that triggered this
+> audit is exactly such a surface).
+
 Access functions throw `new Error(friendlyErrorMessage(error, …))`, so the friendly
 text propagates to every caller's `err.message` — UIs that do
 `setError(err instanceof Error ? err.message : '…')` now show the friendly message

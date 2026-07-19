@@ -359,10 +359,10 @@ dependent parts' costs recompute. See `docs/architecture.md` §16.
 
 ---
 
-## Delete Behavior
+## Delete Behavior — archive (soft-delete), never blocks
 
-A part can be deleted only when no quote line items, jobs, or other parts' BOMs reference it (a part used as a BOM child is RESTRICTed). The delete dialog surfaces the related-record counts (quotes / jobs / BOM parents); if any exist, the Delete button is disabled. Pricing tiers are removed by cascade when the part is deleted.
+"Delete" **archives** the part: `deletePart`/`bulkDeleteParts` call the `archive_parts` RPC, which sets `parts.deleted_at` and detaches the part as a BOM child (deletes `parts_bom` rows where it's the child) in one transaction. It is **never** disabled or refused — a part on quotes/jobs or used in another part's BOM archives like any other. The row and its pricing tiers, attachments, and files are all **kept** (nothing cascades away), so every quote line item / job / document that references the part still resolves; the part is simply hidden from lists, search, and pickers (reads filter `deleted_at IS NULL`).
 
-Attachment metadata rows cascade with the part, but the stored files do not — so `deletePart` captures the attachment storage paths first, deletes the part row, and only then best-effort removes the files. (Capture-then-clean, not clean-then-delete: a part blocked by FK references must keep its files when the delete is refused.)
+The delete dialog (`DeleteImpactDialog`) surfaces an impact summary from `parts_deletion_impact` — how many quotes and jobs reference the parts (kept for history) and how many **other** parts have them as a BOM component and will thus have their cost recomputed — but it never prevents the delete.
 
-Quote line items are immutable historical records — deleting a part that's been quoted requires first removing the dependent quotes (or accepting that the historical record stays).
+Because name is the part's natural identity, re-creating or re-importing an archived part's `part_name` **revives** the archived row (un-archives + updates it) rather than duplicating it. Quote line items remain immutable historical records regardless. See `docs/architecture.md` §16 for the full standard.

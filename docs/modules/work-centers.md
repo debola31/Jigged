@@ -64,7 +64,7 @@ Sections:
 - **Details card** — labor rate (internal) **or** vendor link + "Pricing per routing operation" note (external); description; "Used in routing operations" count; created/updated timestamps.
 - **Station QR Code card** (internal only) — `StationQRCode` component. The scan URL is keyed off the work-center **id** (there is no station-code field: `StationQRCode`'s optional `operationCode` caption prop is left unset, so no code prints under the QR).
 
-The **Delete** button (and the confirm dialog's Delete) is disabled when `routing_operations_count > 0` (FK constraint `23503` would otherwise block).
+The **Delete** button archives the work center (sets `deleted_at`) and is **never disabled or blocked** — even when `routing_operations_count > 0`. The row survives the archive, so every referencing routing operation still resolves it; the work center just disappears from the list tabs and routing pickers (which filter `deleted_at IS NULL`). Reusing the name later revives it. (The `routing_operations_count` shown here still drives the **Kind-toggle lock in edit mode** — see Edit below — but no longer gates deletion.) See [architecture.md §16](../architecture.md) for the universal archive (soft-delete) policy.
 
 ### Create — `/dashboard/{companyId}/work-centers/new`
 
@@ -99,10 +99,10 @@ CSV upload → AI-assisted column mapping → conflict/validation review → exe
 | `getWorkCentersByKind(companyId, kind, search)` | Filter by kind (the list page's per-tab query) |
 | `getWorkCentersForRouting(companyId, kind?)` | `{id, name, kind, labor_rate, vendor_name}` — vendor name pre-joined for the routing picker |
 | `getWorkCenterWithRelations(workCenterId)` | Hydrates with `routing_operations_count` and vendor |
-| `createWorkCenter(companyId, formData)` | `kind='external'` clears `labor_rate` to null; inserts `metadata: {}` |
+| `createWorkCenter(companyId, formData)` | `kind='external'` clears `labor_rate` to null; inserts `metadata: {}`. On a `23505` name collision with an **archived** work center, revives that row instead (un-archive + apply form values via `reviveArchivedWorkCenterByName`); a live collision re-throws as a duplicate |
 | `updateWorkCenter(workCenterId, formData)` | Same kind logic |
-| `deleteWorkCenter(workCenterId)` | Raises `23503` if `routing_operations` reference |
-| `bulkDeleteWorkCenters(workCenterIds)` | Batched 100/chunk, same FK guard |
+| `deleteWorkCenter(workCenterId)` | **Archive** — sets `deleted_at` via `.update()` (not a SQL `DELETE`); never blocks even when `routing_operations` reference it (the row survives so they keep resolving) |
+| `bulkDeleteWorkCenters(workCenterIds)` | **Archive** in 100-row batches; same never-blocks semantics |
 | `bulkImportWorkCenters(companyId, rows)` | Vendor-name resolution for external rows; de-dupe by name |
 
 `getAllWorkCenters` and `getWorkCentersFlat` still exist in `workCentersAccess.ts` but have no non-test callers (the list page queries per tab via `getWorkCentersByKind`, and routing pickers use `getWorkCentersForRouting`). They are dead and slated for removal — pruning is tracked in **#550**.
@@ -137,11 +137,12 @@ The only editable entity in this module is the **work center** (`name`, `kind`, 
 - [ ] **Given** a work center referenced by ≥1 routing operation, **when** it is opened in edit mode, **then** the Kind toggle is disabled (locked) so internal↔external cannot be flipped — *manual: open a referenced work center's edit page and confirm the locked toggle + caption (`kindLocked` in `WorkCenterForm.tsx`); automation-pending*.
 - [ ] **Given** an edit where kind stays internal, **when** the user re-checks uniqueness against a name owned by *another* row, **then** the current row is excluded from the conflict check — *verified by `__tests__/utils/workCentersAccess.test.ts > 'workCentersAccess' > 'checkWorkCenterNameExists' > 'excludes a specific id when excludeId is set'`*.
 
-**Delete**
+**Delete (= archive)**
 
-- [ ] **Given** a work center with no routing-operation references, **when** the user confirms delete, **then** the row is removed and the user returns to the list — *manual: delete an unreferenced work center from the detail page (`deleteWorkCenter`); automation-pending*.
-- [ ] **Given** a work center referenced by routing operations, **when** delete is attempted, **then** the Delete button/dialog is disabled and, if forced, a friendly "used in routing operations" error is raised instead of a raw FK dump — *error mapping verified by `__tests__/utils/workCentersAccess.test.ts > 'workCentersAccess' > 'deleteWorkCenter' > 'throws a friendly error on FK violation (23503)'`; button-disabled UI automation-pending*.
-- [ ] **Given** selected rows on the list, **when** the user bulk-deletes, **then** they are removed in batches of 100 with the same FK guard — *manual: select rows and use Delete (N) (`bulkDeleteWorkCenters`); automation-pending*.
+- [ ] **Given** any work center, **when** the user confirms delete, **then** it is **archived** — `deleted_at` is stamped via `.update()` (no SQL `DELETE`) — and it disappears from the list tabs and routing pickers, while a by-id link (`getWorkCenter`) still resolves it — *verified by `__tests__/utils/workCentersAccess.test.ts > 'workCentersAccess' > 'deleteWorkCenter' > 'archives the work center by stamping deleted_at instead of hard-deleting'`*.
+- [ ] **Given** a work center referenced by routing operations, **when** delete is attempted, **then** the archive still **succeeds — it never blocks** — and the row survives so every referencing operation keeps resolving (the Delete button/dialog is never disabled, and there is no `23503` FK-guard branch any more) — *same archive path as above; the former FK-guard test was removed. A Supabase failure surfaces a friendly error — `__tests__/utils/workCentersAccess.test.ts > 'workCentersAccess' > 'deleteWorkCenter' > 'throws when supabase returns an error'`*.
+- [ ] **Given** selected rows on the list, **when** the user bulk-deletes, **then** they are archived (`deleted_at` set) in batches of 100, never blocked by references — *verified by `__tests__/utils/workCentersAccess.test.ts > 'workCentersAccess' > 'bulkDeleteWorkCenters' > 'archives each id by stamping deleted_at instead of hard-deleting'`*.
+- [ ] **Given** an archived work center's name, **when** a user re-creates or re-imports that name, **then** the archived row is **revived** (un-archived + updated) rather than duplicated — *insert-collision revive path in `createWorkCenter` (`reviveArchivedWorkCenterByName`); import upsert sets `deleted_at=None`; automation-pending*.
 
 **Import**
 

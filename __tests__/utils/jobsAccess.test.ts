@@ -4,7 +4,7 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
   const chainMethods = [
     'from', 'select', 'insert', 'update', 'delete',
-    'eq', 'neq', 'or', 'in', 'order', 'range', 'limit', 'lt', 'not', 'single', 'maybeSingle',
+    'eq', 'neq', 'or', 'in', 'is', 'order', 'range', 'limit', 'lt', 'not', 'single', 'maybeSingle',
   ];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
@@ -34,9 +34,6 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksInvoiceLinkForJob: vi.fn(),
   getJobPartInvoiceSummaries: vi.fn(),
 }));
-vi.mock('@/utils/jobAttachmentsAccess', () => ({
-  deleteStoredFilesForJobs: vi.fn(),
-}));
 
 import {
   applyOverdueJobsFilter,
@@ -58,7 +55,6 @@ import {
   getQuickBooksInvoiceLinkForJob,
   getJobPartInvoiceSummaries,
 } from '@/utils/quickbooksAccess';
-import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 
 describe('jobsAccess', () => {
   beforeEach(() => {
@@ -77,29 +73,30 @@ describe('jobsAccess', () => {
   });
 
   describe('deleteJob', () => {
-    // deleteJob gates on records of value (shipments + invoice), NOT production
-    // status: confirm existence, check countShipmentsForJob +
-    // getQuickBooksInvoiceLinkForJob, clean storage, then delete. The existence
-    // load and the delete both hit from('jobs'); the mock serves select+delete
-    // and captures the delete scoping.
+    // deleteJob ARCHIVES (universal soft-delete): confirm existence + tenant scope,
+    // then stamp deleted_at via .update() scoped by id + company_id. It is never
+    // gated by records of value — shipments/invoices no longer block it — and does
+    // no storage cleanup. The existence load and the archive update both hit
+    // from('jobs'); the mock serves select + update and captures the update patch
+    // and its eq() scoping.
     function installJobsFrom(opts: {
       jobRow?: { id: string } | null;
       loadError?: { message: string } | null;
-      deleteError?: { message: string } | null;
+      updateError?: { message: string } | null;
     }) {
       const jobRow = opts.jobRow === undefined ? { id: 'j1' } : opts.jobRow;
-      const deleteEqArgs: Array<[string, unknown]> = [];
-      const deleteFn = vi.fn().mockReturnValue({
+      const updateEqArgs: Array<[string, unknown]> = [];
+      const updateFn = vi.fn().mockImplementation(() => ({
         eq: vi.fn().mockImplementation((c1: string, v1: unknown) => {
-          deleteEqArgs.push([c1, v1]);
+          updateEqArgs.push([c1, v1]);
           return {
             eq: vi.fn().mockImplementation((c2: string, v2: unknown) => {
-              deleteEqArgs.push([c2, v2]);
-              return Promise.resolve({ error: opts.deleteError ?? null });
+              updateEqArgs.push([c2, v2]);
+              return Promise.resolve({ error: opts.updateError ?? null });
             }),
           };
         }),
-      });
+      }));
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
         if (table === 'jobs') {
           return {
@@ -112,47 +109,38 @@ describe('jobsAccess', () => {
                 }),
               }),
             }),
-            delete: deleteFn,
+            update: updateFn,
           };
         }
         throw new Error(`unexpected table ${table}`);
       });
-      return { deleteFn, deleteEqArgs };
+      return { updateFn, updateEqArgs };
     }
 
-    beforeEach(() => {
-      vi.mocked(countShipmentsForJob).mockResolvedValue(0);
-      vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue(null);
-      vi.mocked(deleteStoredFilesForJobs).mockResolvedValue(undefined);
-    });
-
-    it('deletes a job with no shipments or invoice, scoped to company_id (any status)', async () => {
-      const { deleteFn, deleteEqArgs } = installJobsFrom({});
+    it('archives a job by stamping deleted_at, scoped to id + company_id (any status)', async () => {
+      const { updateFn, updateEqArgs } = installJobsFrom({});
       await deleteJob('j1', 'co-1');
-      expect(deleteStoredFilesForJobs).toHaveBeenCalledWith(['j1']);
-      expect(deleteFn).toHaveBeenCalledTimes(1);
-      expect(deleteEqArgs).toContainEqual(['id', 'j1']);
-      expect(deleteEqArgs).toContainEqual(['company_id', 'co-1']);
+      expect(updateFn).toHaveBeenCalledTimes(1);
+      const patch = updateFn.mock.calls[0][0] as Record<string, unknown>;
+      expect(patch).toHaveProperty('deleted_at');
+      expect(typeof patch.deleted_at).toBe('string');
+      expect(updateEqArgs).toContainEqual(['id', 'j1']);
+      expect(updateEqArgs).toContainEqual(['company_id', 'co-1']);
     });
 
-    it('rejects when the job has shipment records and never deletes', async () => {
+    it('archives even when the job has shipments and an invoice (records-of-value guards removed)', async () => {
+      // The old hard-delete refused shipped/invoiced jobs. Archiving preserves the
+      // row and all its history, so it always succeeds regardless of downstream refs.
       vi.mocked(countShipmentsForJob).mockResolvedValue(2);
-      const { deleteFn } = installJobsFrom({});
-      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/shipment records/);
-      expect(deleteFn).not.toHaveBeenCalled();
-      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
-    });
-
-    it('rejects when the job has been invoiced and never deletes', async () => {
       vi.mocked(getQuickBooksInvoiceLinkForJob).mockResolvedValue({
         invoiceId: 'i1',
         docNumber: '1001',
         url: 'http://qb.example/invoice/1',
       });
-      const { deleteFn } = installJobsFrom({});
-      await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/invoiced in QuickBooks/i);
-      expect(deleteFn).not.toHaveBeenCalled();
-      expect(deleteStoredFilesForJobs).not.toHaveBeenCalled();
+      const { updateFn } = installJobsFrom({});
+      await expect(deleteJob('j1', 'co-1')).resolves.toBeUndefined();
+      expect(updateFn).toHaveBeenCalledTimes(1);
+      expect(updateFn.mock.calls[0][0]).toHaveProperty('deleted_at');
     });
 
     it('throws "Job not found" when the job row is missing', async () => {
@@ -160,8 +148,8 @@ describe('jobsAccess', () => {
       await expect(deleteJob('j1', 'co-1')).rejects.toThrow(/not found/i);
     });
 
-    it('throws a friendly error when the delete query fails', async () => {
-      installJobsFrom({ deleteError: { message: 'boom' } });
+    it('throws a friendly error when the archive update fails', async () => {
+      installJobsFrom({ updateError: { message: 'boom' } });
       await expect(deleteJob('j1', 'co-1')).rejects.toBeTruthy();
     });
   });

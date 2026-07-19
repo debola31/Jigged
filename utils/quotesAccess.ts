@@ -123,6 +123,7 @@ export async function getQuotes(
     .from('quotes')
     .select(QUOTE_LIST_SELECT, { count: 'exact' })
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
@@ -172,6 +173,7 @@ export async function getAllQuotes(
       .from('quotes')
       .select(QUOTE_LIST_SELECT)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -213,7 +215,8 @@ export async function getQuotesCount(
   let query = supabase
     .from('quotes')
     .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId);
+    .eq('company_id', companyId)
+    .is('deleted_at', null);
 
   if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
@@ -770,23 +773,26 @@ export async function repriceQuoteDriftedLinesToCurrent(
 }
 
 /**
- * Delete a quote (cascades to its line items and cost snapshots).
+ * Archive a quote ("Delete" in the UI). Stamps deleted_at instead of removing
+ * the row: the quote, its line items, and its cost snapshots all survive, and
+ * any job created from it still resolves — so archiving never blocks on
+ * references. The quote is just hidden from the active quotes list (reads
+ * filter deleted_at IS NULL).
  */
 export async function deleteQuote(quoteId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
   const { error } = await supabase
     .from('quotes')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', quoteId)
     .eq('company_id', companyId);
 
   if (error) {
-    console.error('Error deleting quote:', error);
+    console.error('Error archiving quote:', error);
     throw new Error(
       friendlyErrorMessage(error, {
         entity: 'quote',
-        references: 'jobs created from it',
         fallback: 'Failed to delete quote.',
       }),
     );
@@ -794,7 +800,10 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
 }
 
 /**
- * Bulk delete quotes.
+ * Bulk archive quotes ("Delete" in the UI). Stamps deleted_at per batch: the
+ * rows, their line items, and cost snapshots survive, and any jobs created from
+ * them still resolve — so archiving never blocks on references (no 23503
+ * branch). Hidden from the active quotes list (reads filter deleted_at IS NULL).
  */
 export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): Promise<void> {
   if (quoteIds.length === 0) return;
@@ -808,18 +817,15 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
     const batch = validIds.slice(i, i + BATCH_SIZE);
     const { error } = await supabase
       .from('quotes')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .in('id', batch)
       .eq('company_id', companyId);
 
     if (error) {
-      if (error.code === '23503') {
-        throw new Error('Cannot delete some quotes because they have associated jobs.');
-      }
       if (error.code === '42501' || error.message?.includes('policy')) {
         throw new Error('Permission denied. You may not have permission to delete these quotes.');
       }
-      console.error('Error bulk deleting quotes:', error);
+      console.error('Error bulk archiving quotes:', error);
       throw new Error(error.message || 'Failed to delete quotes');
     }
   }

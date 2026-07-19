@@ -82,6 +82,7 @@ export async function getCustomers(
       { count: 'exact' },
     )
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
@@ -131,6 +132,7 @@ export async function getAllCustomers(
         '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
       )
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -255,6 +257,12 @@ export async function getCustomerWithRelations(
   };
 }
 
+/**
+ * Check if a *live* customer name already exists for a company. Archived customers are
+ * intentionally ignored: their name is free to reuse, and reusing it revives the archived
+ * row (see createCustomer). Scoping this to `deleted_at IS NULL` is what stops an archived
+ * name from falsely blocking creation.
+ */
 export async function checkCustomerNameExists(
   companyId: string,
   name: string,
@@ -266,6 +274,7 @@ export async function checkCustomerNameExists(
     .from('customers')
     .select('id')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .ilike('name', name);
 
   if (excludeId) {
@@ -305,6 +314,14 @@ export async function createCustomer(
     .single();
 
   if (error) {
+    // A unique name collision (23505) with an ARCHIVED customer means the user is reusing
+    // a name they previously archived. Name is the natural identity here, so revive that
+    // row (un-archive + apply the new form values) instead of blocking. A collision with a
+    // LIVE customer is a genuine duplicate — re-throw the original error.
+    if (error.code === '23505') {
+      const revived = await reviveArchivedCustomerByName(companyId, formData);
+      if (revived) return revived;
+    }
     console.error('Error creating customer:', error);
     throw error;
   }
@@ -325,6 +342,49 @@ export async function createCustomer(
   }
 
   return customer;
+}
+
+/**
+ * Revive the archived customer that holds `formData.name` for this company, applying the
+ * new form values and clearing `deleted_at`. Returns the revived customer, or null when the
+ * colliding row is *live* (a real duplicate the caller should surface as an error). There is
+ * at most one row per (company_id, name) — the full unique constraint.
+ */
+async function reviveArchivedCustomerByName(
+  companyId: string,
+  formData: CustomerFormData,
+): Promise<Customer | null> {
+  const supabase = getSupabase();
+  const name = formData.name.trim();
+
+  const { data: existing } = await supabase
+    .from('customers')
+    .select('id, deleted_at')
+    .eq('company_id', companyId)
+    .eq('name', name)
+    .maybeSingle();
+
+  // No archived match (or the collision was with a live customer) → let the caller throw.
+  if (!existing || existing.deleted_at === null) return null;
+
+  const { data, error } = await supabase
+    .from('customers')
+    .update({
+      name: formData.name.trim(),
+      website: formData.website.trim() || null,
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error reviving archived customer:', error);
+    throw error;
+  }
+
+  return data;
 }
 
 export async function updateCustomer(
@@ -352,18 +412,28 @@ export async function updateCustomer(
   return data;
 }
 
+/**
+ * Archive a customer ("Delete" in the UI). Never blocked by references: the row and every
+ * quote / job link survive — the customer is just hidden from lists, search, and pickers
+ * (reads filter deleted_at IS NULL). Reusing its name later revives it (see createCustomer).
+ */
 export async function softDeleteCustomer(customerId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase
     .from('customers')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', customerId);
   if (error) {
-    console.error('Error deleting customer:', error);
+    console.error('Error archiving customer:', error);
     throw error;
   }
 }
 
+/**
+ * Archive customers in bulk ("Delete" in the UI). Stamps deleted_at per batch so the rows
+ * are hidden from lists, search, and pickers without touching their quote / job links.
+ * Never blocked by references.
+ */
 export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<void> {
   if (customerIds.length === 0) return;
 
@@ -378,21 +448,16 @@ export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<vo
 
     const { error } = await supabase
       .from('customers')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .in('id', batch);
 
     if (error) {
-      if (error.code === '23503') {
-        throw new Error(
-          'Cannot delete some customers because they have associated parts, quotes, or jobs. Remove those references first.'
-        );
-      }
       if (error.code === '42501' || error.message?.includes('policy')) {
         throw new Error(
           'Permission denied. You may not have permission to delete these customers.'
         );
       }
-      console.error('Error bulk deleting customers:', error);
+      console.error('Error bulk archiving customers:', error);
       throw new Error(error.message || 'Failed to delete customers');
     }
   }

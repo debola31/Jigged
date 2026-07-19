@@ -86,6 +86,19 @@ If a backfill is genuinely impossible (truly lost history), prefer an explicit "
 
 ---
 
+### Deletion is archive (soft-delete), and never blocks
+
+Every user-facing entity (`parts`, `customers`, `vendors`, `work_centers`, `jobs`, `quotes`) has a nullable `deleted_at`. The UI "Delete" action sets `deleted_at` — it must **never** issue a hard `DELETE` and **never** block on a foreign-key reference. The row survives so quotes/jobs/shipments/BOMs that reference it keep resolving. See `docs/architecture.md` §16 for the full standard.
+
+**How to apply when writing new code:**
+- **Every list / search / picker / count / dashboard query must filter `deleted_at IS NULL`.** A missing filter silently leaks archived rows — the classic soft-delete bug. By-id reads (a detail page, a document's retained FK) intentionally do *not* filter.
+- **Name is the identity: reuse revives, never duplicates.** Keep the `(company_id, name)` unique constraints FULL (not partial) — the importers upsert on them. A re-import (`deleted_at = None` in the payload) or a manual re-create (revive on `23505`) un-archives the existing row; only a collision with a *live* row is a duplicate error.
+- **Don't re-introduce records-of-value delete guards.** Archiving preserves the record, so an invoiced/shipped job archives like anything else; money-record protection belongs only at a future permanent-purge step.
+
+**Why:** the old model blocked deleting anything referenced (`ON DELETE RESTRICT`), trapping users (e.g. the "Delete (8395)" parts bulk-delete that refused every referenced part). Archive makes delete always work while keeping history intact.
+
+---
+
 ### Never make changes directly on the main branch
 
 Always create a new feature branch before modifying code, schema, or configuration. No exceptions for "small fixes" or "hotfixes."

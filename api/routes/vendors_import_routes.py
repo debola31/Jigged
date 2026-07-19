@@ -567,6 +567,11 @@ async def execute_import(
         # name → vendor.id, used to attach pending_contacts (new vendors only) after the write.
         name_to_vendor_id: dict[str, str] = {}
 
+        # Reusing an archived vendor's name revives it: clearing deleted_at on the upsert's
+        # DO UPDATE un-archives the row instead of leaving the re-imported vendor hidden.
+        for row in rows_to_write:
+            row["deleted_at"] = None
+
         if rows_to_write:
             try:
                 for batch_start in range(0, len(rows_to_write), BATCH_SIZE):

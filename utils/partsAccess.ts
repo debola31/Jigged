@@ -17,10 +17,6 @@ import type {
   PartUnitConversionFormData,
 } from '@/types/part';
 import type { InventoryTransaction, InventoryTransactionType } from '@/types/partTransaction';
-import {
-  getStoredPartAttachmentPaths,
-  deleteStoredFilesByPaths,
-} from '@/utils/partAttachmentsAccess';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
@@ -97,6 +93,7 @@ export async function getAllParts(
       .from('parts')
       .select(`${PART_COLUMNS}, routings(id)`)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -143,6 +140,7 @@ export async function getStockedParts(
       .from('parts')
       .select(PART_COLUMNS)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .eq('is_stocked', true)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -185,6 +183,7 @@ export async function getMadeParts(
       .from('parts')
       .select(`${PART_COLUMNS}, routings(id)`)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .eq('source', 'made')
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -229,6 +228,7 @@ export async function getBoughtParts(
       .from('parts')
       .select(PART_COLUMNS)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .eq('source', 'bought')
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
@@ -268,6 +268,7 @@ export async function getPartsPaginated(
     .from('parts')
     .select(PART_COLUMNS)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
@@ -297,7 +298,8 @@ export async function getPartsCount(
   let query = supabase
     .from('parts')
     .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId);
+    .eq('company_id', companyId)
+    .is('deleted_at', null);
 
   if (search.trim()) {
     query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
@@ -618,6 +620,7 @@ export async function getPartsForSelect(
       .from('parts')
       .select(PART_SELECT_COLUMNS)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order('part_name', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -662,6 +665,7 @@ export async function searchPartsForSelect(
     .from('parts')
     .select(PART_SELECT_COLUMNS)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('part_name', { ascending: true })
     .limit(limit);
 
@@ -737,7 +741,10 @@ export async function getPartNamesByIds(partIds: string[]): Promise<Map<string, 
 }
 
 /**
- * Check if a part name already exists for a company.
+ * Check if a *live* part name already exists for a company. Archived parts are
+ * intentionally ignored: their name is free to reuse, and reusing it revives the
+ * archived row (see createPart / the name-keyed import upsert). Scoping this to
+ * `deleted_at IS NULL` is what stops an archived name from falsely blocking creation.
  */
 export async function checkPartNameExists(
   companyId: string,
@@ -750,6 +757,7 @@ export async function checkPartNameExists(
     .from('parts')
     .select('id')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .ilike('part_name', partName);
 
   if (excludeId) {
@@ -810,6 +818,14 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     .single();
 
   if (error) {
+    // A unique part_name collision (23505) with an ARCHIVED part means the user is
+    // reusing a name they previously archived. Name is the natural identity here, so
+    // revive that row (un-archive + apply the new form values) instead of blocking. A
+    // collision with a LIVE part is a genuine duplicate — re-throw the original error.
+    if (error.code === '23505') {
+      const revived = await reviveArchivedPartByName(companyId, formData);
+      if (revived) return revived;
+    }
     console.error('Error creating part:', error);
     throw error;
   }
@@ -817,6 +833,48 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
   // No pricing is seeded on create — each part owns its markup directly. The
   // detail page's Pricing card shows a single unfilled tier row for the user
   // to fill; until they do, the part reads as "no markup / not priceable".
+  return rowToPart(data as PartRow);
+}
+
+/**
+ * Revive the archived part that holds `formData.part_name` for this company, applying
+ * the new form values and clearing `deleted_at`. Returns the revived part, or null when
+ * the colliding row is *live* (a real duplicate the caller should surface as an error).
+ * There is at most one row per (company_id, part_name) — the full unique constraint.
+ */
+async function reviveArchivedPartByName(
+  companyId: string,
+  formData: PartFormData,
+): Promise<Part | null> {
+  const supabase = getSupabase();
+  const name = formData.part_name.trim();
+
+  const { data: existing } = await supabase
+    .from('parts')
+    .select('id, deleted_at')
+    .eq('company_id', companyId)
+    .eq('part_name', name)
+    .maybeSingle();
+
+  // No archived match (or the collision was with a live part) → let the caller throw.
+  if (!existing || existing.deleted_at === null) return null;
+
+  const { data, error } = await supabase
+    .from('parts')
+    .update({
+      ...formDataToInsert(formData),
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+    .select(PART_COLUMNS)
+    .single();
+
+  if (error) {
+    console.error('Error reviving archived part:', error);
+    throw error;
+  }
+
   return rowToPart(data as PartRow);
 }
 
@@ -845,12 +903,6 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
   return rowToPart(data as PartRow);
 }
 
-/**
- * Delete a part permanently.
- * CASCADE removes the routing (and its operations) and parts_bom rows where
- * this part is the parent. Children are RESTRICTed — a part referenced as a
- * child somewhere can't be deleted without removing those references first.
- */
 /**
  * Set the preferred vendor for a part. Used by the Cost section's vendor
  * picker on the part detail page — that picker doubles as both the
@@ -901,33 +953,21 @@ export async function updatePartCostingBatchQuantity(
   }
 }
 
+/**
+ * Archive a part ("Delete" in the UI). Never blocked by references: the row, its
+ * attachments, and every quote / job / BOM link survive — the part is just hidden from
+ * lists, search, and pickers (reads filter deleted_at IS NULL). Reusing its name later
+ * revives it (see createPart). Delegates to bulkDeleteParts so both paths share the
+ * archive_parts RPC (which also detaches the part as a BOM child so parents recompute cost).
+ */
 export async function deletePart(partId: string): Promise<void> {
-  const supabase = getSupabase();
-
-  // Capture attachment file paths BEFORE the delete — the part_attachments rows
-  // cascade away with the part, so we can't read them afterward. Capture-then-
-  // clean (not clean-then-delete): a part blocked by FK references must keep its
-  // files when the delete below is refused.
-  const attachmentPaths = await getStoredPartAttachmentPaths([partId]);
-
-  const { error } = await supabase.from('parts').delete().eq('id', partId);
-
-  if (error) {
-    if (error.code === '23503') {
-      throw new Error(
-        'Cannot delete this part because it is referenced by quotes, jobs, or another part\'s BOM. Remove those references first.',
-      );
-    }
-    console.error('Error deleting part:', error);
-    throw error;
-  }
-
-  // Row gone (and its attachment rows with it); best-effort remove the files.
-  await deleteStoredFilesByPaths(attachmentPaths);
+  await bulkDeleteParts([partId]);
 }
 
 /**
- * Bulk delete parts permanently.
+ * Archive parts in bulk ("Delete" in the UI). Calls the archive_parts RPC, which — per
+ * batch, atomically — stamps deleted_at and deletes the parts' parts_bom child edges so
+ * every dependent parent part's live cost rollup recomputes without them. Never blocks.
  */
 export async function bulkDeleteParts(partIds: string[]): Promise<void> {
   if (partIds.length === 0) return;
@@ -936,37 +976,66 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
   if (validIds.length === 0) return;
 
   const supabase = getSupabase();
-  const BATCH_SIZE = 100;
+  const BATCH_SIZE = 500;
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
 
-    // Capture this batch's attachment paths before the cascade removes the rows.
-    const attachmentPaths = await getStoredPartAttachmentPaths(batch);
-
-    const { error } = await supabase
-      .from('parts')
-      .delete()
-      .in('id', batch);
+    const { error } = await supabase.rpc('archive_parts', { p_ids: batch });
 
     if (error) {
-      if (error.code === '23503') {
-        throw new Error(
-          'Cannot delete some parts because they are referenced by quotes, jobs, or BOM rows. Remove those references first.',
-        );
-      }
       if (error.code === '42501' || error.message?.includes('policy')) {
         throw new Error(
           'Permission denied. You may not have permission to delete these parts.',
         );
       }
-      console.error('Error bulk deleting parts:', error);
-      throw new Error(error.message || 'Failed to delete parts');
+      console.error('Error archiving parts:', error);
+      throw new Error(error.message || 'Failed to archive parts');
     }
-
-    // Batch deleted; best-effort remove its attachment files from storage.
-    await deleteStoredFilesByPaths(attachmentPaths);
   }
+}
+
+/**
+ * Reference counts for the pre-archive impact warning, aggregated via the
+ * parts_deletion_impact RPC (a uuid[] arg, so it works for a bulk selection of
+ * thousands without hitting the URL-length limit of a huge `.in()` filter).
+ * Best-effort: on error it returns zero counts so the delete dialog still opens.
+ */
+export interface PartsDeletionImpact {
+  /** number of parts about to be archived (echoed back for convenience) */
+  partCount: number;
+  /** distinct quotes that reference these parts — their history is kept */
+  quotesCount: number;
+  /** distinct jobs that reference these parts — their history is kept */
+  jobsCount: number;
+  /** OTHER parts that have these as a BOM component; their cost will recompute */
+  bomParentsCount: number;
+}
+
+export async function getPartsDeletionImpact(partIds: string[]): Promise<PartsDeletionImpact> {
+  const base: PartsDeletionImpact = {
+    partCount: partIds.length,
+    quotesCount: 0,
+    jobsCount: 0,
+    bomParentsCount: 0,
+  };
+  if (partIds.length === 0) return base;
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('parts_deletion_impact', { p_ids: partIds });
+
+  if (error) {
+    console.error('Error computing parts deletion impact:', error);
+    return base;
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    partCount: partIds.length,
+    quotesCount: row?.quotes_count ?? 0,
+    jobsCount: row?.jobs_count ?? 0,
+    bomParentsCount: row?.bom_parents_count ?? 0,
+  };
 }
 
 // ============================================================

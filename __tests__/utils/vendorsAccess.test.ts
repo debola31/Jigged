@@ -4,7 +4,7 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
   const chainMethods = [
     'from', 'select', 'insert', 'update', 'delete',
-    'eq', 'neq', 'or', 'in', 'order', 'range', 'single', 'maybeSingle',
+    'eq', 'neq', 'or', 'in', 'is', 'ilike', 'order', 'range', 'limit', 'single', 'maybeSingle',
   ];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
@@ -106,17 +106,22 @@ describe('vendorsAccess', () => {
   });
 
   describe('deleteVendor', () => {
-    it('deletes by vendor id', async () => {
+    it('archives by vendor id (sets deleted_at) instead of deleting', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = null;
       await deleteVendor('v1');
-      expect(mockQueryBuilder.delete).toHaveBeenCalled();
+      expect(mockQueryBuilder.update).toHaveBeenCalled();
+      const updateArg = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(updateArg).toHaveProperty('deleted_at');
+      expect(updateArg.deleted_at).toBeTruthy();
+      expect(mockQueryBuilder.delete).not.toHaveBeenCalled();
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'v1');
     });
 
-    it('throws with a friendly message on FK violation (23503)', async () => {
-      mockQueryBuilder.error = { code: '23503', message: 'fk violation' };
-      await expect(deleteVendor('v1')).rejects.toThrow();
+    it('throws when the archive update errors', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(deleteVendor('v1')).rejects.toBeTruthy();
     });
   });
 });

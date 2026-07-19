@@ -11,12 +11,7 @@ import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import SearchIcon from '@mui/icons-material/Search';
@@ -42,6 +37,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllCustomers, softDeleteCustomer, bulkSoftDeleteCustomers } from '@/utils/customerAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { CustomerWithRelations } from '@/types/customer';
 type Customer = CustomerWithRelations;
 
@@ -431,54 +427,14 @@ export default function CustomersPage() {
       )}
 
       {/* Delete Confirmation Dialog */}
-      <Dialog
+      <DeleteImpactDialog
         open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false, type: 'single' })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ pb: 2 }}>
-          {deleteDialog.type === 'single' ? 'Delete Customer' : 'Delete Customers'}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 0 }}>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body1" sx={{ mb: 1 }}>
-              {deleteDialog.type === 'single' ? (
-                <>
-                  Are you sure you want to delete <strong>{deleteDialog.customerName}</strong>?
-                </>
-              ) : (
-                <>
-                  Are you sure you want to delete <strong>{selectedIds.length}</strong> customer{selectedIds.length > 1 ? 's' : ''}?
-                </>
-              )}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              This action cannot be undone.
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button
-            onClick={() => setDeleteDialog({ open: false, type: 'single' })}
-            disabled={deleting}
-            color="inherit"
-            size="large"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            variant="contained"
-            color="error"
-            disabled={deleting}
-            size="large"
-            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onClose={() => setDeleteDialog({ open: false, type: 'single' })}
+        onConfirm={handleDeleteConfirm}
+        loading={deleting}
+        entityLabel="customer"
+        count={deleteDialog.type === 'single' ? 1 : selectedIds.length}
+      />
 
       {/* Error Snackbar */}
       <Snackbar

@@ -45,6 +45,7 @@ export async function getAllVendors(
       .from('vendors')
       .select(VENDOR_COLUMNS)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -138,6 +139,7 @@ export async function getPartsByPreferredVendor(
     .from('parts')
     .select('id, part_name, primary_unit')
     .eq('preferred_vendor_id', vendorId)
+    .is('deleted_at', null)
     .order('part_name', { ascending: true });
 
   if (error) {
@@ -164,6 +166,7 @@ export async function getWorkCentersByVendor(
     .from('work_centers')
     .select('id, name, kind')
     .eq('vendor_id', vendorId)
+    .is('deleted_at', null)
     .order('name', { ascending: true });
 
   if (error) {
@@ -179,7 +182,10 @@ export async function getWorkCentersByVendor(
 }
 
 /**
- * Check if a vendor name already exists for a company.
+ * Check if a *live* vendor name already exists for a company. Archived vendors are
+ * intentionally ignored: their name is free to reuse, and reusing it revives the
+ * archived row (see createVendor / reviveArchivedVendorByName). Scoping this to
+ * `deleted_at IS NULL` is what stops an archived name from falsely blocking creation.
  */
 export async function checkVendorNameExists(
   companyId: string,
@@ -192,6 +198,7 @@ export async function checkVendorNameExists(
     .from('vendors')
     .select('id')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .ilike('name', name);
 
   if (excludeId) {
@@ -243,12 +250,30 @@ export async function createVendor(
     .select(VENDOR_COLUMNS)
     .single();
 
+  let vendor: Vendor;
   if (error) {
-    console.error('Error creating vendor:', error);
-    throw error;
+    // A unique name collision (23505) with an ARCHIVED vendor means the user is
+    // reusing a name they previously archived. Name is the natural identity here, so
+    // revive that row (un-archive + apply the new form values) instead of blocking. A
+    // collision with a LIVE vendor is a genuine duplicate — re-throw the original error.
+    if (error.code === '23505') {
+      const revived = await reviveArchivedVendorByName(companyId, formData);
+      if (revived) {
+        vendor = revived;
+      } else {
+        console.error('Error creating vendor:', error);
+        throw error;
+      }
+    } else {
+      console.error('Error creating vendor:', error);
+      throw error;
+    }
+  } else {
+    vendor = data as Vendor;
   }
-  const vendor = data as Vendor;
 
+  // Runs for both the fresh-insert and revive paths: when the create form supplies
+  // an initial contact, attach it as the primary contact of the resulting vendor.
   if (initialContact && initialContact.name.trim() !== '') {
     const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
     const { error: contactError } = await supabase
@@ -274,6 +299,48 @@ export async function createVendor(
   return vendor;
 }
 
+/**
+ * Revive the archived vendor that holds `formData.name` for this company, applying the
+ * new form values and clearing `deleted_at`. Returns the revived vendor, or null when the
+ * colliding row is *live* (a real duplicate the caller should surface as an error). There
+ * is at most one row per (company_id, name) — the full unique constraint.
+ */
+async function reviveArchivedVendorByName(
+  companyId: string,
+  formData: VendorFormData,
+): Promise<Vendor | null> {
+  const supabase = getSupabase();
+  const name = formData.name.trim();
+
+  const { data: existing } = await supabase
+    .from('vendors')
+    .select('id, deleted_at')
+    .eq('company_id', companyId)
+    .eq('name', name)
+    .maybeSingle();
+
+  // No archived match (or the collision was with a live vendor) → let the caller throw.
+  if (!existing || existing.deleted_at === null) return null;
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .update({
+      ...formDataToInsert(formData),
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+    .select(VENDOR_COLUMNS)
+    .single();
+
+  if (error) {
+    console.error('Error reviving archived vendor:', error);
+    throw error;
+  }
+
+  return data as Vendor;
+}
+
 export async function updateVendor(
   vendorId: string,
   formData: VendorFormData,
@@ -297,21 +364,29 @@ export async function updateVendor(
   return data as Vendor;
 }
 
+/**
+ * Archive a vendor ("Delete" in the UI). Never blocked by references: the row and every
+ * part (preferred vendor) or work-center link survive — the vendor is just hidden from
+ * lists, search, and pickers (reads filter deleted_at IS NULL). Reusing its name later
+ * revives it (see createVendor / reviveArchivedVendorByName).
+ */
 export async function deleteVendor(vendorId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('vendors').delete().eq('id', vendorId);
+  const { error } = await supabase
+    .from('vendors')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', vendorId);
 
   if (error) {
-    if (error.code === '23503') {
-      throw new Error(
-        'Cannot delete this vendor because it is referenced by a part (preferred vendor) or work center. Remove those references first.',
-      );
-    }
-    console.error('Error deleting vendor:', error);
+    console.error('Error archiving vendor:', error);
     throw error;
   }
 }
 
+/**
+ * Archive vendors in bulk ("Delete" in the UI). Stamps deleted_at per batch; never blocks
+ * on references (parts/work-center links survive). See deleteVendor for the single-row form.
+ */
 export async function bulkDeleteVendors(vendorIds: string[]): Promise<void> {
   if (vendorIds.length === 0) return;
 
@@ -323,16 +398,14 @@ export async function bulkDeleteVendors(vendorIds: string[]): Promise<void> {
 
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase.from('vendors').delete().in('id', batch);
+    const { error } = await supabase
+      .from('vendors')
+      .update({ deleted_at: new Date().toISOString() })
+      .in('id', batch);
 
     if (error) {
-      if (error.code === '23503') {
-        throw new Error(
-          'Cannot delete some vendors because they are referenced by parts or work centers. Remove those references first.',
-        );
-      }
-      console.error('Error bulk deleting vendors:', error);
-      throw new Error(error.message || 'Failed to delete vendors');
+      console.error('Error archiving vendors:', error);
+      throw new Error(error.message || 'Failed to archive vendors');
     }
   }
 }

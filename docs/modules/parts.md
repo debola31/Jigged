@@ -173,7 +173,7 @@ An **editable, maturity-adaptive workspace** (`PartWorkspace`) — not a read-on
 - **Files** — engineering attachments (`?tab=files`, always visible).
 - **Activity** — the part Notes + transaction feed (its slug stays `history` for back-compat).
 
-A sticky header shows the part name and a completeness/priceability chip. Delete lives in the header and is disabled when quotes/jobs/BOM parents reference the part.
+A sticky header shows the part name and a completeness/priceability chip. Delete lives in the header; it **archives** the part (never disabled, never blocked — even when quotes/jobs/BOM parents reference it) and detaches it from other parts' BOMs so their costs recompute. See `docs/architecture.md` §16.
 
 ▸ **Inline Routing Editor (`PartRoutingPanel`)**
 
@@ -330,11 +330,17 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a bought part whose selected vendor has no cost tier, **when** the Cost card renders, **then** it shows one empty red starter row + a red prompt, with Save disabled until edited — *verified by `__tests__/components/parts/PartProcurementPricingPanel.test.tsx > 'PartProcurementPricingPanel — explicit save + red no-cost state' > 'shows the red no-cost prompt + an empty starter row, with Save disabled until edited'`*.
 - [ ] **Given** a typed cost tier, **when** the user clicks **Save costs**, **then** it persists on the button (not on blur) and fires `onSaved` so the "Needs cost" chip clears without a reload — *verified by `__tests__/components/parts/PartProcurementPricingPanel.test.tsx > 'PartProcurementPricingPanel — explicit save + red no-cost state' > 'saves a typed tier via the Save button (not on blur) and fires onSaved'`*.
 
-**Delete (part row)**
+**Delete (part row) — archive (soft-delete), never blocks**
 
-- [ ] **Given** a part with no quote/job/BOM-parent references, **when** the user confirms Delete, **then** the part is hard-deleted — *verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'deletes part by ID'`*.
-- [ ] **Given** a part referenced by quotes/jobs/BOM parents, **when** deletion is attempted, **then** it is refused with a friendly FK message (and the UI disables the Delete button up-front) — *verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'throws user-friendly error on FK constraint violation'`*.
-- [ ] **Given** several parts selected, **when** the user confirms bulk delete, **then** all deletable rows are removed and referenced ones are refused — *verified by `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'deletes multiple parts by IDs'` AND `> 'bulkDeleteParts' > 'throws user-friendly error on FK constraint violation'`*.
+Deletion is **archive**: the row is hidden (`deleted_at` set) but kept, so quotes/jobs/BOM
+parents that reference it still resolve. It is **never** disabled or refused for referenced
+parts. Archiving also detaches the part as a BOM child (via the `archive_parts` RPC) so
+dependent parts' costs recompute. See `docs/architecture.md` §16.
+
+- [ ] **Given** any part (referenced or not), **when** the user confirms Delete, **then** the part is archived via the `archive_parts` RPC and never blocked — *verified by `__tests__/utils/partsAccess.test.ts > 'deletePart' > 'archives the part via the archive_parts RPC (never a hard delete, never blocks)'`*.
+- [ ] **Given** several parts selected, **when** the user confirms bulk delete, **then** all are archived in one RPC call — *verified by `__tests__/utils/partsAccess.test.ts > 'bulkDeleteParts' > 'archives multiple parts via the archive_parts RPC'`*.
+- [ ] **Given** a delete is requested, **when** the confirm dialog opens, **then** it shows an impact summary (quotes/jobs referencing the parts — kept for history — and how many other parts' costs will change) and never prevents the delete — *impact counts verified by `__tests__/utils/partsAccess.test.ts > 'getPartsDeletionImpact'`*.
+- [ ] **Given** an archived part's name, **when** the user re-creates or re-imports it, **then** the archived row is revived (un-archived + updated) rather than duplicated — *revive-on-collision verified by `__tests__/utils/partsAccess.test.ts > 'createPart'`; import revive by the parts-import integration suite*.
 
 **File attachments (edit → save → reload → persists)**
 

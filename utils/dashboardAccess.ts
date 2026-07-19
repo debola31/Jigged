@@ -301,6 +301,7 @@ async function getRevenueInRange(
       'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))',
     )
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .eq('fulfillment_status', 'fully_shipped')
     .gte('updated_at', startIso)
     .lt('updated_at', endIso);
@@ -331,6 +332,7 @@ async function getCompletedJobsInRange(
     .from('jobs')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .eq('fulfillment_status', 'fully_shipped')
     .gte('updated_at', startIso)
     .lt('updated_at', endIso);
@@ -349,7 +351,8 @@ async function getOverdueJobs(companyId: string): Promise<number> {
     supabase
       .from('jobs')
       .select('*', { count: 'exact', head: true })
-      .eq('company_id', companyId),
+      .eq('company_id', companyId)
+      .is('deleted_at', null),
   );
 
   if (error) throw error;
@@ -491,6 +494,7 @@ async function fetchJobActivity(
     .from('jobs')
     .select('id, job_number, created_at, completed_at, customer:customers(name)')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(perSource);
   if (before) createdQ = createdQ.lt('created_at', before);
@@ -499,6 +503,7 @@ async function fetchJobActivity(
     .from('jobs')
     .select('id, job_number, created_at, completed_at, customer:customers(name)')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(perSource);
@@ -551,6 +556,7 @@ async function fetchQuoteActivity(
     .from('quotes')
     .select('id, quote_number, created_at, customer:customers(name)')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(perSource);
   if (before) q = q.lt('created_at', before);

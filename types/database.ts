@@ -1560,7 +1560,6 @@ export type Database = {
           id: string
           is_location_tracked: boolean
           is_stocked: boolean
-          legacy_id: string | null
           part_name: string
           preferred_vendor_id: string | null
           primary_unit: string | null
@@ -1577,7 +1576,6 @@ export type Database = {
           id?: string
           is_location_tracked?: boolean
           is_stocked?: boolean
-          legacy_id?: string | null
           part_name: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -1594,7 +1592,6 @@ export type Database = {
           id?: string
           is_location_tracked?: boolean
           is_stocked?: boolean
-          legacy_id?: string | null
           part_name?: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -2739,7 +2736,6 @@ export type Database = {
           country: string | null
           created_at: string
           id: string
-          legacy_id: string | null
           name: string
           postal_code: string | null
           state: string | null
@@ -2753,7 +2749,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           id?: string
-          legacy_id?: string | null
           name: string
           postal_code?: string | null
           state?: string | null
@@ -2767,7 +2762,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           id?: string
-          legacy_id?: string | null
           name?: string
           postal_code?: string | null
           state?: string | null

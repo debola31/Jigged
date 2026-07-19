@@ -70,7 +70,6 @@ class PartConflictInfo(BaseModel):
     conflict_type values:
       - "duplicate_part_name": part already exists in DB with this name
       - "csv_duplicate": same part_name appears multiple times in CSV
-      - "csv_duplicate_legacy_id": same legacy_id appears multiple times in CSV
         (would cause an ON CONFLICT DO UPDATE collision at execute time)
       - "customer_not_found": legacy customer-name lookup failed
       - "unknown_vendor": preferred_vendor_name doesn't match any existing vendor
@@ -182,7 +181,7 @@ class PartExecuteResponse(BaseModel):
 
     success: bool
     imported_count: int
-    updated_count: int = 0  # Rows upserted via legacy_id ON CONFLICT path
+    updated_count: int = 0  # Rows upserted via (company_id, part_name) ON CONFLICT path
     skipped_count: int
     errors: list[PartImportError]
 
@@ -218,8 +217,12 @@ PART_SCHEMA = {
     },
     "primary_unit": {
         "type": "string",
-        "required": False,
-        "description": "Primary unit of measure (required when is_stocked=true; e.g., 'lbs', 'pcs', 'kg', 'in')",
+        # Required for EVERY part, not just stocked ones: the parts table has an
+        # unconditional `parts_requires_unit` CHECK (primary_unit IS NOT NULL).
+        # This said False, so a unit-less row passed validate and then failed the
+        # batch insert with a 500.
+        "required": True,
+        "description": "Primary unit of measure — every part needs one (e.g., 'lbs', 'pcs', 'kg', 'in')",
     },
     "quantity": {
         "type": "number",
@@ -240,11 +243,6 @@ PART_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Preferred vendor name. Resolved against existing vendors at import; fails as unknown_vendor if not found.",
-    },
-    "legacy_id": {
-        "type": "string",
-        "required": False,
-        "description": "ID from legacy/previous system. Unique per company; enables idempotent re-import via ON CONFLICT.",
     },
     "notes": {
         "type": "string",

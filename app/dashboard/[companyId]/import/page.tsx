@@ -1,0 +1,864 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogActions from '@mui/material/DialogActions';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
+import Step from '@mui/material/Step';
+import StepLabel from '@mui/material/StepLabel';
+import Stepper from '@mui/material/Stepper';
+import Stack from '@mui/material/Stack';
+import Collapse from '@mui/material/Collapse';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Typography from '@mui/material/Typography';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
+import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
+import ColumnMappingStep from '@/components/data-import/ColumnMappingStep';
+import ImportReviewView from '@/components/data-import/ImportReviewView';
+import EditableDataGrid from '@/components/data-import/EditableDataGrid';
+import FixToolbar from '@/components/data-import/FixToolbar';
+import MergeVariantsDialog from '@/components/data-import/MergeVariantsDialog';
+import SuggestFixesPanel from '@/components/data-import/SuggestFixesPanel';
+import ImportProgressPanel from '@/components/data-import/ImportProgressPanel';
+import { analyzeBundle } from '@/lib/dataImportAnalyzer';
+import { lossPhrase, rowsAtRisk } from '@/lib/dataImportImpact';
+import {
+  applyOp,
+  buildWorkingFiles,
+  invertOp,
+  setWorkingEntity,
+  setWorkingRole,
+  workingToAnalyzed,
+  workingToClassification,
+  type EditOp,
+  type WorkingFile,
+} from '@/lib/dataImportEditing';
+import { bulkReplace, fillBlanks, mergeVariants } from '@/lib/dataImportActions';
+import { autoCreateLinkFor, createMissingParents, findMissingParents } from '@/lib/dataImportLinks';
+import CreateMissingDialog from '@/components/data-import/CreateMissingDialog';
+import FillGapDialog from '@/components/data-import/FillGapDialog';
+import ConfirmVariantsDialog from '@/components/data-import/ConfirmVariantsDialog';
+import { ENTITY_IDENTITY_FIELD } from '@/lib/dataImportSchema';
+import {
+  buildImportPlan,
+  runImportPlan,
+  type ExecuteResponseShape,
+  type ImportProgress,
+  type ImportSummary,
+} from '@/lib/dataImportIngest';
+import {
+  reconcile,
+  filterWorkingByMode,
+  type ExistingIdentities,
+  type ImportMode,
+} from '@/lib/dataImportReconcile';
+import { fetchExistingIdentities } from '@/lib/dataImportExisting';
+import { API_BASE_URL } from '@/lib/api';
+import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import type {
+  EntityType,
+  Finding,
+  FixSuggestion,
+  ImportReview,
+  StructureResponse,
+  SuggestFixesResponse,
+  UploadedFilePayload,
+} from '@/types/data-import';
+
+const STEPS = ["What you'll need", 'Upload your files', 'Check your files', 'Review', 'Import'];
+const SAMPLE_ROWS = 20;
+
+const WHAT_TO_EXPORT = [
+  { name: 'Parts & inventory', hint: 'part numbers, descriptions, costs, on-hand qty' },
+  { name: 'Vendors', hint: 'suppliers and outside processors' },
+  { name: 'Work centers', hint: 'machines and outside operations' },
+  { name: 'Routings', hint: 'the operation steps for each part' },
+  { name: 'Bills of material', hint: 'which parts go into which assemblies' },
+  { name: 'Customers', hint: 'optional, if you have them' },
+];
+
+/**
+ * Compose the review from structure + the freshly-computed DETERMINISTIC findings.
+ *
+ * No AI narrative: the redesigned review is fully deterministic. The old "gotchas" it produced
+ * were vague, out-of-tool advice ("do a VLOOKUP in Excel", "check your platform's setup guide")
+ * that contradicted the fix-it-in-app premise and duplicated the real orphan checks — so we
+ * stopped generating them, and with nothing left consuming the narrative call, stopped making it
+ * (an AI cost with no visible output, and the Map→Review step's only network failure point).
+ */
+function composeReport(structure: StructureResponse, deterministic: Finding[], generatedAt: string): ImportReview {
+  return {
+    schema_version: 1,
+    erp_detection: structure.erp_detection,
+    files: structure.files,
+    findings: deterministic,
+    summary: '',
+    recommendations: [],
+    narrative_available: false,
+    ai_provider: '',
+    ai_model: '',
+    generated_at: generatedAt,
+  };
+}
+
+export default function ImportDataPage() {
+  const params = useParams();
+  const companyId = params.companyId as string;
+
+  const [activeStep, setActiveStep] = useState(0);
+  const [files, setFiles] = useState<UploadedFilePayload[]>([]);
+  const [report, setReport] = useState<ImportReview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Working dataset threaded through Map → Review: editable entity + column mapping, then
+  // editable rows. Edits re-run the analyzer client-side (no server round-trip), so the
+  // review updates live.
+  const [structure, setStructure] = useState<StructureResponse | null>(null);
+  const [working, setWorking] = useState<WorkingFile[]>([]);
+  const [journal, setJournal] = useState<EditOp[]>([]);
+  const [redoStack, setRedoStack] = useState<EditOp[]>([]);
+  const [gridIndex, setGridIndex] = useState(0);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [showAllData, setShowAllData] = useState(false);
+  // The one task the owner opened. One thing per screen, inside the task.
+  const [openTask, setOpenTask] = useState<Finding | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [suggestions, setSuggestions] = useState<FixSuggestion[] | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestAvailable, setSuggestAvailable] = useState(true);
+  const [existing, setExisting] = useState<ExistingIdentities | null>(null);
+  const [importMode, setImportMode] = useState<ImportMode>('both');
+
+  // The import loop runs in the browser (~65 sequential POSTs), so leaving the page mid-write
+  // kills it half-done. Warn before the owner navigates or refreshes while it's running.
+  useEffect(() => {
+    if (!importing) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [importing]);
+
+  // What the owner loses if they import as things stand — the Review step's headline, and
+  // the same sentence the Import step repeats. Recomputed from the working set, so every fix
+  // moves the number immediately.
+  const impact = useMemo(() => rowsAtRisk(working), [working]);
+
+  const closeTask = () => setOpenTask(null);
+
+  /** The file a task is about (tasks name their source file; filenames contain dots, so
+   *  never parse the finding id for it). */
+  const taskFileIndex = useMemo(
+    () => (openTask ? working.findIndex((w) => w.filename === openTask.source_files[0]) : -1),
+    [openTask, working],
+  );
+
+  // --- which fix does this task open? -------------------------------------
+  // The names behind an orphan finding, recomputed from the working set — so after the owner
+  // adds some (or edits a name in the grid), the dialog reflects what's ACTUALLY still missing.
+  const createLink = useMemo(() => (openTask ? (autoCreateLinkFor(openTask.id) ?? null) : null), [openTask]);
+  const missingParents = useMemo(
+    () => (createLink ? findMissingParents(working, createLink) : []),
+    [createLink, working],
+  );
+
+  const gapTask = useMemo(() => {
+    if (!openTask || openTask.category !== 'data_gap' || taskFileIndex < 0) return null;
+    // id is `gap.<entity>.<field>` — the field is the tail, the entity is fixed-width.
+    const fieldKey = openTask.id.split('.').slice(2).join('.');
+    const file = working[taskFileIndex];
+    if (!fieldKey || !file.columnRoles[fieldKey]) return null;
+    return { file, fileIndex: taskFileIndex, fieldKey };
+  }, [openTask, working, taskFileIndex]);
+
+  const variantTask = useMemo(() => {
+    if (!openTask || openTask.category !== 'name_variant' || taskFileIndex < 0) return null;
+    const file = working[taskFileIndex];
+    const identity = ENTITY_IDENTITY_FIELD[file.entityType];
+    const colId = identity ? file.columnRoles[identity] : undefined;
+    return colId ? { file, fileIndex: taskFileIndex, colId } : null;
+  }, [openTask, working, taskFileIndex]);
+
+  async function authToken(): Promise<string> {
+    const supabase = getSupabase();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.');
+    return session.access_token;
+  }
+
+  async function postJson<T>(path: string, body: unknown, token: string): Promise<T> {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = `Analysis failed (${res.status})`;
+      try {
+        const b = await res.json();
+        if (b?.detail && typeof b.detail === 'string') detail = b.detail;
+      } catch {
+        /* keep default */
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // Upload → Map: classify each file + map its columns (AI structure pass), then let the
+  // owner confirm/correct on the Map step BEFORE anything is analyzed.
+  async function runStructure() {
+    setError(null);
+    setBusy(true);
+    try {
+      const token = await authToken();
+      const result = await postJson<StructureResponse>(
+        '/api/data-import/structure',
+        {
+          company_id: companyId,
+          files: files.map((f) => ({
+            filename: f.filename,
+            headers: f.headers,
+            row_count: f.rows.length,
+            sample_rows: f.rows.slice(0, SAMPLE_ROWS).map((r) => f.headers.map((h) => r[h] ?? '')),
+          })),
+        },
+        token,
+      );
+      setStructure(result);
+      setWorking(buildWorkingFiles(files, result.files));
+      setActiveStep(2);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Map → Review: run the deterministic analyzer on the CONFIRMED mapping. No network — the
+  // review is fully client-side now, so the transition is instant (and can't fail).
+  function confirmMapping() {
+    if (!structure) return;
+    setError(null);
+    const findings = analyzeBundle(workingToAnalyzed(working));
+    const confirmed: StructureResponse = {
+      erp_detection: structure.erp_detection,
+      files: workingToClassification(working),
+    };
+    setStructure(confirmed);
+    setJournal([]);
+    setRedoStack([]);
+    setGridIndex(0);
+    setReport(composeReport(confirmed, findings, new Date().toISOString()));
+    setActiveStep(3);
+  }
+
+  function handleEntityChange(fileIndex: number, entityType: EntityType) {
+    setWorking((w) => setWorkingEntity(w, fileIndex, entityType));
+  }
+
+  function handleRoleChange(fileIndex: number, field: string, rawHeader: string) {
+    setWorking((w) => setWorkingRole(w, fileIndex, field, rawHeader));
+  }
+
+  // Re-run the deterministic analyzer over the edited working set and refresh the review.
+  function recompute(next: WorkingFile[]) {
+    if (!structure) return;
+    const findings = analyzeBundle(workingToAnalyzed(next));
+    setReport((prev) => composeReport(structure, findings, prev?.generated_at ?? new Date().toISOString()));
+  }
+
+  // Apply one remediation op (a single cell edit or a bulk batch): it lands on the undo
+  // journal as one unit and re-runs the analyzer. This is the single path the grid, the
+  // bulk toolbar, and the merge dialog all go through.
+  function applyRemediation(op: EditOp) {
+    if (op.edits.length === 0 && !op.addRecords?.length) return;
+    const next = applyOp(working, op);
+    setWorking(next);
+    setJournal((j) => [...j, op]);
+    setRedoStack([]);
+    recompute(next);
+  }
+
+  function handleCellEdit(
+    fileIndex: number,
+    rowId: string,
+    colId: string,
+    oldValue: string,
+    newValue: string,
+  ) {
+    applyRemediation({ label: `Edit ${colId}`, edits: [{ fileIndex, rowId, colId, oldValue, newValue }] });
+  }
+
+  function undo() {
+    if (journal.length === 0) return;
+    const last = journal[journal.length - 1];
+    const next = applyOp(working, invertOp(last));
+    setWorking(next);
+    setJournal((j) => j.slice(0, -1));
+    setRedoStack((r) => [...r, last]);
+    recompute(next);
+  }
+
+  function redo() {
+    if (redoStack.length === 0) return;
+    const last = redoStack[redoStack.length - 1];
+    const next = applyOp(working, last);
+    setWorking(next);
+    setRedoStack((r) => r.slice(0, -1));
+    setJournal((j) => [...j, last]);
+    recompute(next);
+  }
+
+  // Review → Import: the actual dependency-ordered write, reusing the per-entity execute routes.
+  async function runImport() {
+    setError(null);
+    setImporting(true);
+    setImportProgress(null);
+    try {
+      const token = await authToken();
+      const plan = buildImportPlan(filterWorkingByMode(working, existing ?? {}, importMode));
+      const post = (endpoint: string, body: unknown) =>
+        postJson<ExecuteResponseShape>(endpoint, body, token);
+      setImportSummary(await runImportPlan(plan, companyId, post, setImportProgress));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  // Explicit-action only (AI-cost rule): the owner clicks "Suggest how to fix these".
+  async function requestSuggestions() {
+    if (!report) return;
+    setSuggestLoading(true);
+    try {
+      const token = await authToken();
+      const resp = await postJson<SuggestFixesResponse>(
+        '/api/data-import/suggest-fixes',
+        {
+          company_id: companyId,
+          findings: report.findings
+            .filter((f) => f.verified)
+            .map((f) => ({
+              id: f.id,
+              category: f.category,
+              severity: f.severity,
+              title: f.title,
+              detail: f.detail,
+              count: f.count,
+              examples: f.examples.slice(0, 3),
+            })),
+          file_summaries: working.map((wf) => ({
+            filename: wf.filename,
+            entity_type: wf.entityType,
+            row_count: wf.rows.length,
+          })),
+        },
+        token,
+      );
+      setSuggestions(resp.suggestions);
+      setSuggestAvailable(resp.suggestions_available);
+    } catch {
+      setSuggestions([]);
+      setSuggestAvailable(false);
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
+  // Review → Import: read what's already in Jigged (for new-vs-existing + create/update modes),
+  // then advance. Best-effort read; the Import step renders immediately and updates when it lands.
+  function goToImport() {
+    setImportSummary(null);
+    setExisting(null);
+    setActiveStep(4);
+    fetchExistingIdentities(companyId)
+      .then(setExisting)
+      .catch(() => setExisting({}));
+  }
+
+  const activeFile = working[gridIndex];
+  const mergeDefaultCol = activeFile
+    ? activeFile.columnRoles[ENTITY_IDENTITY_FIELD[activeFile.entityType] ?? ''] ??
+      activeFile.headers[0] ??
+      ''
+    : '';
+
+  return (
+    <Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Bring your existing shop data into Jigged. We&apos;ll help you check and fix it first, and
+        show you exactly what will come in — nothing is imported until you say so.
+      </Typography>
+
+      <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+        {STEPS.map((label) => (
+          <Step key={label}>
+            <StepLabel>{label}</StepLabel>
+          </Step>
+        ))}
+      </Stepper>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {busy ? (
+        <AIAnalysisLoading description="Reading your files and detecting the source system…" />
+      ) : (
+        <>
+          {/* Step 0 — What you'll need */}
+          {activeStep === 0 && (
+            <Card elevation={2}>
+              <CardContent sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Export these from your current system as CSV
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Add whatever you have — you don&apos;t need all of them, and you can add more later.
+                  Most shop systems (JobBOSS, E2, Tangle, spreadsheets) can export each list to CSV.
+                </Typography>
+                <Stack spacing={1.25}>
+                  {WHAT_TO_EXPORT.map((w) => (
+                    <Box key={w.name} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <DescriptionOutlinedIcon color="action" />
+                      <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                        {w.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        — {w.hint}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+                <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button variant="contained" size="large" onClick={() => setActiveStep(1)}>
+                    Get started
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Step 1 — Upload */}
+          {activeStep === 1 && (
+            <Box>
+              <MultiFileDropzone files={files} onChange={setFiles} />
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(0)}>Back</Button>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<AutoAwesomeIcon />}
+                  disabled={files.length === 0}
+                  onClick={runStructure}
+                >
+                  Analyze {files.length > 0 ? `${files.length} file${files.length === 1 ? '' : 's'}` : ''}
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 2 — Map columns (confirm what each file is + how columns map) */}
+          {activeStep === 2 && (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Here&apos;s what we found in your files
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                We read your files and matched everything we could. Just handle the few items
+                flagged below, then continue — you can still change anything on the next step.
+              </Typography>
+              <ColumnMappingStep
+                files={working}
+                onEntityChange={handleEntityChange}
+                onRoleChange={handleRoleChange}
+              />
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(1)}>Back to files</Button>
+                <Button variant="contained" size="large" onClick={confirmMapping}>
+                  Looks right — continue
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 3 — Review + fix (live re-analyze) */}
+          {activeStep === 3 && report && (
+            <Box>
+              <ImportReviewView
+                report={report}
+                impact={impact}
+                onUploadMore={() => setActiveStep(1)}
+                onOpenTask={setOpenTask}
+                canUndo={journal.length > 0}
+                canRedo={redoStack.length > 0}
+                onUndo={undo}
+                onRedo={redo}
+              />
+
+              {/* The fix for a task lives WITH the task — never "use the toolbar below". */}
+              {createLink && missingParents.length > 0 && (
+                <CreateMissingDialog
+                  key={openTask?.id}
+                  link={createLink}
+                  missing={missingParents}
+                  onClose={closeTask}
+                  onConfirm={(entries) => {
+                    applyRemediation(createMissingParents(working, createLink, entries));
+                    closeTask();
+                  }}
+                />
+              )}
+              {gapTask && (
+                <FillGapDialog
+                  key={openTask?.id}
+                  file={gapTask.file}
+                  fieldKey={gapTask.fieldKey}
+                  onClose={closeTask}
+                  onEditByHand={() => {
+                    setGridIndex(gapTask.fileIndex);
+                    closeTask();
+                  }}
+                  onFill={(colId, value) => {
+                    applyRemediation(fillBlanks(working, gapTask.fileIndex, colId, value));
+                    closeTask();
+                  }}
+                />
+              )}
+              {variantTask && (
+                <ConfirmVariantsDialog
+                  key={openTask?.id}
+                  file={variantTask.file}
+                  colId={variantTask.colId}
+                  onClose={closeTask}
+                  onMerge={(colId, canonical, variants) =>
+                    applyRemediation(mergeVariants(working, variantTask.fileIndex, colId, canonical, variants))
+                  }
+                />
+              )}
+
+              {/* The escape hatch: everything above is the guided path, but a power user (or an
+                  issue we didn't surface as a task) can still open the full data and edit anything.
+                  Collapsed by default so it never competes with "What to sort out". */}
+              {working.length > 0 && (
+                <Box sx={{ mt: 4, borderTop: 1, borderColor: 'divider', pt: 2 }}>
+                  <Button
+                    onClick={() => setShowAllData((v) => !v)}
+                    endIcon={showAllData ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  >
+                    {showAllData ? 'Hide the full data' : 'See or edit all your data'}
+                  </Button>
+                  {/* unmountOnExit: the grid renders every row, so keep it OUT of the DOM until
+                      opened — otherwise a 30k-row export makes the whole Review page janky. */}
+                  <Collapse in={showAllData} unmountOnExit>
+                    <Typography variant="body2" color="text.secondary" sx={{ my: 1.5 }}>
+                      Edit any value directly, fix a whole column at once, or let AI suggest fixes.
+                      Everything above updates as you change things here.
+                    </Typography>
+                    <SuggestFixesPanel
+                      suggestions={suggestions}
+                      loading={suggestLoading}
+                      available={suggestAvailable}
+                      onRequest={requestSuggestions}
+                    />
+                    {activeFile && (
+                      <FixToolbar
+                        key={activeFile.filename}
+                        file={activeFile}
+                        onBulkReplace={(colId, find, replace) =>
+                          applyRemediation(bulkReplace(working, gridIndex, colId, find, replace))
+                        }
+                        onFillBlanks={(colId, value) =>
+                          applyRemediation(fillBlanks(working, gridIndex, colId, value))
+                        }
+                        onOpenMerge={() => setMergeOpen(true)}
+                      />
+                    )}
+                    <EditableDataGrid
+                      files={working}
+                      activeIndex={gridIndex}
+                      onActiveIndexChange={setGridIndex}
+                      onCellEdit={handleCellEdit}
+                    />
+                    {activeFile && (
+                      <MergeVariantsDialog
+                        open={mergeOpen}
+                        onClose={() => setMergeOpen(false)}
+                        file={activeFile}
+                        defaultColId={mergeDefaultCol}
+                        onMerge={(colId, canonical, variants) =>
+                          applyRemediation(mergeVariants(working, gridIndex, colId, canonical, variants))
+                        }
+                      />
+                    )}
+                  </Collapse>
+                </Box>
+              )}
+
+              <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+                <Button onClick={() => setActiveStep(2)}>Back to mapping</Button>
+                <Button variant="contained" size="large" onClick={goToImport}>
+                  Continue to import
+                </Button>
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 4 — Import (pre-commit plan → confirm → dependency-ordered write → summary) */}
+          {activeStep === 4 && report && (
+            <ImportStep
+              working={working}
+              existing={existing}
+              importMode={importMode}
+              onModeChange={setImportMode}
+              importing={importing}
+              progress={importProgress}
+              summary={importSummary}
+              onImport={runImport}
+              onBack={() => setActiveStep(3)}
+            />
+          )}
+        </>
+      )}
+    </Box>
+  );
+}
+
+function ImportStep({
+  working,
+  existing,
+  importMode,
+  onModeChange,
+  importing,
+  progress,
+  summary,
+  onImport,
+  onBack,
+}: {
+  working: WorkingFile[];
+  existing: ExistingIdentities | null;
+  importMode: ImportMode;
+  onModeChange: (mode: ImportMode) => void;
+  importing: boolean;
+  progress: ImportProgress | null;
+  summary: ImportSummary | null;
+  onImport: () => void;
+  onBack: () => void;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const rec = useMemo(() => reconcile(working, existing ?? {}), [working, existing]);
+  const plan = useMemo(
+    () => buildImportPlan(filterWorkingByMode(working, existing ?? {}, importMode)),
+    [working, existing, importMode],
+  );
+  const planByEntity = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of plan) m.set(b.entity, (m.get(b.entity) ?? 0) + b.rows.length);
+    return [...m.entries()];
+  }, [plan]);
+  // Same sentence the Review step leads with — the owner should never meet a different
+  // story about what they're about to lose just because they moved forward a step.
+  const lost = lossPhrase(rowsAtRisk(working));
+
+  // The write is long (~65 sequential batches); show live progress, not an opaque "Importing…".
+  if (importing) {
+    return (
+      <Card elevation={2}>
+        <CardContent sx={{ p: 3 }}>
+          <ImportProgressPanel progress={progress} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (summary) {
+    return (
+      <Card elevation={2}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            {summary.failed ? 'Import finished with some errors' : 'Import complete'}
+          </Typography>
+          <Alert
+            severity={summary.failed ? 'warning' : 'success'}
+            icon={summary.failed ? undefined : <CheckCircleOutlineIcon />}
+            sx={{ mb: 2 }}
+          >
+            Created {summary.totalCreated.toLocaleString()}
+            {summary.totalUpdated > 0 ? `, updated ${summary.totalUpdated.toLocaleString()}` : ''}
+            {summary.totalSkipped > 0 ? `, skipped ${summary.totalSkipped.toLocaleString()}` : ''}
+            {summary.totalErrors > 0
+              ? ` · ${summary.totalErrors} error${summary.totalErrors === 1 ? '' : 's'}`
+              : ''}
+            .
+          </Alert>
+          <Stack spacing={1.5}>
+            {summary.byEntity.map((e) => (
+              <Box key={e.entity}>
+                <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 130, textTransform: 'capitalize' }}>
+                    {e.entity.replace('_', ' ')}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {e.created.toLocaleString()} created
+                    {e.updated > 0 ? `, ${e.updated.toLocaleString()} updated` : ''}
+                    {e.skipped > 0 ? `, ${e.skipped.toLocaleString()} skipped` : ''}
+                    {e.errorCount > 0 ? `, ${e.errorCount.toLocaleString()} error${e.errorCount === 1 ? '' : 's'}` : ''}
+                  </Typography>
+                </Box>
+                {/* Why the errors happened — grouped by reason, with real examples. Turns a
+                    bare "38 errors" into "38 — Part not found (e.g. ABC-123)". */}
+                {e.errorGroups.length > 0 && (
+                  <Box sx={{ ml: { sm: '146px' }, mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {e.errorGroups.map((g, i) => (
+                      <Box key={i}>
+                        <Typography variant="body2" color="text.secondary">
+                          <Box component="span" sx={{ color: 'warning.main', fontWeight: 600 }}>
+                            {g.count.toLocaleString()}
+                          </Box>{' '}
+                          {g.reason}
+                        </Typography>
+                        {g.examples.length > 0 && (
+                          <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                            {g.examples.map((ex, j) => (
+                              <Chip key={j} size="small" variant="outlined" label={ex} sx={{ maxWidth: 260 }} />
+                            ))}
+                          </Box>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            ))}
+          </Stack>
+          {summary.totalSkipped + summary.totalErrors > 0 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Skipped and errored rows almost always reference something that isn&apos;t in Jigged yet
+              (a part, vendor, or work center the row points at). Add or fix it on the Review step and
+              run the import again — re-importing is safe: existing records update in place, they
+              don&apos;t duplicate.
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card elevation={2}>
+      <CardContent sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Review what will be created
+        </Typography>
+        {rec.hasExisting && (
+          <Box sx={{ mb: 2 }}>
+            <Alert severity="info" sx={{ mb: 1.5 }}>
+              <strong>{rec.totalMatched.toLocaleString()}</strong> of your rows match records already
+              in Jigged, and <strong>{rec.totalNew.toLocaleString()}</strong> are new. Choose what to
+              do — existing records update in place; nothing is duplicated.
+            </Alert>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={importMode}
+              onChange={(_, v) => {
+                if (v) onModeChange(v as ImportMode);
+              }}
+              disabled={importing}
+              sx={{ flexWrap: 'wrap' }}
+            >
+              <ToggleButton value="both">Add new + update existing</ToggleButton>
+              <ToggleButton value="create">Add new only</ToggleButton>
+              <ToggleButton value="update">Update existing only</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        )}
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Here&apos;s what will import, in order (so linked records connect up):
+        </Typography>
+        <Stack spacing={1} sx={{ mb: 2 }}>
+          {planByEntity.map(([entity, count], i) => (
+            <Box key={entity} sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+              <Chip size="small" label={i + 1} />
+              <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 130 }}>
+                {entity.replace('_', ' ')}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {count.toLocaleString()} row{count === 1 ? '' : 's'}
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+
+        {lost !== '' && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>{lost}</strong> won&apos;t come in — those rows get skipped, and we&apos;ll tell you
+            which. You can import the rest now and sort them out later, or go back and fix them first.
+          </Alert>
+        )}
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Button onClick={onBack} disabled={importing}>
+            Back to review
+          </Button>
+          <Button
+            variant="contained"
+            size="large"
+            disabled={importing || plan.length === 0}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {importing ? 'Importing…' : 'Import into Jigged'}
+          </Button>
+        </Box>
+
+        <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+          <DialogTitle>Import into Jigged?</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2">
+              This creates and updates records in your Jigged company. Existing records (matched by
+              name / part number) update in place — nothing is duplicated, and rows that can&apos;t be
+              resolved are skipped and reported. You can re-run safely.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setConfirmOpen(false);
+                onImport();
+              }}
+            >
+              Yes, import
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </CardContent>
+    </Card>
+  );
+}

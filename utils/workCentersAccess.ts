@@ -387,7 +387,6 @@ export async function bulkImportWorkCenters(
     vendor_name?: string;
     labor_rate?: string;
     description?: string;
-    legacy_id?: string;
   }>,
 ): Promise<WorkCenterImportResult> {
   const supabase = getSupabase();
@@ -478,7 +477,7 @@ export async function bulkImportWorkCenters(
       vendor_id: vendorId,
       labor_rate: row.labor_rate ? parseFloat(row.labor_rate) : null,
       description: row.description?.trim() || null,
-      metadata: row.legacy_id ? { legacy_id: row.legacy_id } : {},
+      metadata: {},
     });
 
     if (error) {

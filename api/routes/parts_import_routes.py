@@ -27,8 +27,10 @@ Each legacy-mapped row writes a deprecation entry to the import-event log
 (visible in server logs). Plan to remove the alias once the pilot customer's
 CSVs use the new headers.
 
-`legacy_id` is unique per company; rows with a `legacy_id` set are upserted
-via ON CONFLICT so re-importing the same source CSV is idempotent.
+Idempotent by part number: every row is upserted ON CONFLICT
+(company_id, part_name), the table's real unique key — so re-importing the same
+export updates parts in place rather than skipping or duplicating them. (No
+dependence on a `legacy_id` column; real ERP exports don't carry one.)
 """
 
 import hashlib
@@ -67,6 +69,7 @@ from services.uom_normalizer import (
     resolve_units_for_rows,
 )
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -432,13 +435,13 @@ async def validate_import(
     Checks (in order, per row):
       1. Required field: part_name
       2. Numeric ranges: quantity, cost_per_unit, reorder_point all non-negative
-      3. UOM resolution for stockable rows (alias map → AI inference fallback)
+      3. UOM resolution for every row (alias map → AI inference fallback)
       4. preferred_vendor_name resolves against existing vendors
-      5. CSV duplicate part_name (csv_duplicate)
-      6. legacy_id collision against existing parts is NOT a conflict — it's
-         an upsert path, handled at execute time
-      7. part_name collision against existing parts (duplicate_part_name) — only
-         when no legacy_id provided (otherwise upsert)
+      5. Within-CSV duplicate part_name (csv_duplicate) — the second and later
+         copies skip; the upsert can't touch the same key twice in one batch
+
+    An existing part_name is NOT a conflict: execute upserts on
+    (company_id, part_name), so a re-imported part updates in place.
 
     Customer fields (`customer_match_mode`, `selected_customer_id`, or a
     `customer_name`/`customer_id` mapping) are rejected with 400 — parts no
@@ -446,31 +449,10 @@ async def validate_import(
     """
     _reject_customer_fields(request)
     try:
-        # Existing parts (for collision detection and legacy_id upsert path)
-        parts_response = (
-            supabase.table("parts")
-            .select("id, part_name, legacy_id")
-            .eq("company_id", request.company_id)
-            .execute()
+        # Existing vendors (for preferred_vendor_name resolution). Paged past the 1000-row cap.
+        existing_vendors = fetch_all_by_company(
+            supabase, "vendors", "id, name", request.company_id
         )
-        existing_parts = parts_response.data or []
-
-        existing_parts_by_name: dict[str, dict] = {}
-        existing_parts_by_legacy_id: dict[str, dict] = {}
-        for part in existing_parts:
-            if part.get("part_name"):
-                existing_parts_by_name[part["part_name"].lower()] = part
-            if part.get("legacy_id"):
-                existing_parts_by_legacy_id[part["legacy_id"]] = part
-
-        # Existing vendors (for preferred_vendor_name resolution)
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_vendors = vendors_response.data or []
         vendor_name_to_id = {
             v["name"].lower(): v["id"] for v in existing_vendors
         }
@@ -482,7 +464,6 @@ async def validate_import(
         cost_column = reverse_mappings.get("cost_per_unit")
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
-        legacy_id_column = reverse_mappings.get("legacy_id")
         # New (chunk 11) columns:
         source_column = reverse_mappings.get("source")
         is_stocked_column = reverse_mappings.get("is_stocked")
@@ -494,30 +475,19 @@ async def validate_import(
 
         has_routing_cols = _has_routing_columns(request.mappings)
 
-        # First pass: track part_name and legacy_id occurrences for CSV duplicate
-        # detection. legacy_id duplicates matter because the execute path upserts
-        # via ON CONFLICT (company_id, legacy_id) — two rows in the same batch
-        # sharing a legacy_id cause a Postgres 21000 error otherwise.
+        # First pass: track part_name occurrences to flag within-CSV duplicates. The second and
+        # later copies skip — the upsert can't touch the same (company_id, part_name) key twice
+        # in one batch (Postgres 21000).
         part_occurrences: dict[str, list[int]] = {}
-        legacy_id_occurrences: dict[str, list[int]] = {}
         for i, row in enumerate(request.rows):
             row_number = i + 1 + request.batch_offset
             part_name = (
                 row.get(part_name_column, "").strip() if part_name_column else ""
             )
             if part_name:
-                key = part_name.lower()
-                part_occurrences.setdefault(key, []).append(row_number)
-            legacy_id_val = (
-                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
-            )
-            if legacy_id_val:
-                legacy_id_occurrences.setdefault(legacy_id_val, []).append(row_number)
+                part_occurrences.setdefault(part_name.lower(), []).append(row_number)
 
         csv_duplicates = {k: v for k, v in part_occurrences.items() if len(v) > 1}
-        csv_legacy_id_duplicates = {
-            k: v for k, v in legacy_id_occurrences.items() if len(v) > 1
-        }
 
         # Second pass: per-row validation
         validation_errors: list[PartValidationError] = []
@@ -525,50 +495,25 @@ async def validate_import(
         validation_error_rows: set[int] = set()
         conflict_rows: set[int] = set()
 
-        # Determine which rows look stocked (so we know whether to require unit)
-        stocked_row_numbers: set[int] = set()
-        for i, row in enumerate(request.rows):
-            row_number = i + 1 + request.batch_offset
-            explicit_stocked: Optional[bool] = None
-            if is_stocked_column:
-                explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
-            elif legacy_is_stockable_column:
-                explicit_stocked = parse_bool(row.get(legacy_is_stockable_column, ""))
-            if explicit_stocked is True:
-                stocked_row_numbers.add(row_number)
-            elif explicit_stocked is None and _row_has_inventory_data(
-                row, reverse_mappings
-            ):
-                stocked_row_numbers.add(row_number)
-
-        # Resolve UOMs for stocked rows that have a unit column
+        # Resolve UOMs for EVERY row that has a unit column — not just stocked ones.
+        #
+        # `parts_requires_unit` makes a unit mandatory for every part (stocked or "made"), so a
+        # unit has to be resolved for every row. This previously ran only for `stocked_row_numbers`,
+        # which meant a filled unit on a NON-stocked ("made") part was never resolved: it then hit
+        # the "have a raw unit but no resolved unit" branch and was rejected as `unknown_unit` and
+        # skipped — even a perfectly good "each". That's why filling units still skipped ~7,700
+        # parts on the Tangle export (its parts are is_stocked=false). resolve_units_for_rows
+        # returns 1-based indices into the rows we pass, so add batch_offset to get row_number.
         if request.pre_resolved_uoms:
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
         elif primary_unit_column or description_column:
-            stocked_rows = [
-                row
-                for i, row in enumerate(request.rows)
-                if (i + 1 + request.batch_offset) in stocked_row_numbers
-            ]
-            stocked_index_map = {
-                idx + 1: orig_idx + 1 + request.batch_offset
-                for idx, orig_idx in enumerate(
-                    [
-                        i
-                        for i in range(len(request.rows))
-                        if (i + 1 + request.batch_offset) in stocked_row_numbers
-                    ]
-                )
-            }
             partial = resolve_units_for_rows(
-                stocked_rows,
+                request.rows,
                 name_column=part_name_column,
                 description_column=description_column,
                 uom_column=primary_unit_column,
             )
-            uom_resolutions = {
-                stocked_index_map[k]: v for k, v in partial.items()
-            }
+            uom_resolutions = {k + request.batch_offset: v for k, v in partial.items()}
         else:
             uom_resolutions = {}
 
@@ -648,39 +593,41 @@ async def validate_import(
                     validation_error_rows.add(row_number)
                     continue
 
-            # UOM required when stocked
-            if row_number in stocked_row_numbers:
-                resolved_unit = uom_resolutions.get(row_number)
-                csv_unit = (
-                    row.get(primary_unit_column, "").strip()
-                    if primary_unit_column
-                    else ""
+            # UOM is required for EVERY part, not just stocked ones — the DB
+            # enforces it unconditionally via the `parts_requires_unit` check
+            # constraint. Flagging it only for stocked rows let unit-less rows
+            # through validate and then blew up execute's batch insert.
+            resolved_unit = uom_resolutions.get(row_number)
+            csv_unit = (
+                row.get(primary_unit_column, "").strip()
+                if primary_unit_column
+                else ""
+            )
+            if not resolved_unit and not csv_unit:
+                validation_errors.append(
+                    PartValidationError(
+                        row_number=row_number,
+                        error_type="missing_primary_unit",
+                        field="primary_unit",
+                        message="Unit of measure is required — every part needs one",
+                    )
                 )
-                if not resolved_unit and not csv_unit:
-                    validation_errors.append(
-                        PartValidationError(
-                            row_number=row_number,
-                            error_type="missing_primary_unit",
-                            field="primary_unit",
-                            message="primary_unit is required for stocked parts",
-                        )
+                validation_error_rows.add(row_number)
+                continue
+            if not resolved_unit and csv_unit:
+                # Could not normalize — surface as conflict (unknown_unit)
+                conflicts.append(
+                    PartConflictInfo(
+                        row_number=row_number,
+                        csv_part_name=part_name,
+                        csv_customer_code=None,
+                        conflict_type="unknown_unit",
+                        existing_part_id="",
+                        existing_value=f"Could not normalize unit '{csv_unit}' to a known canonical value",
                     )
-                    validation_error_rows.add(row_number)
-                    continue
-                if not resolved_unit and csv_unit:
-                    # Could not normalize — surface as conflict (unknown_unit)
-                    conflicts.append(
-                        PartConflictInfo(
-                            row_number=row_number,
-                            csv_part_name=part_name,
-                            csv_customer_code=None,
-                            conflict_type="unknown_unit",
-                            existing_part_id="",
-                            existing_value=f"Could not normalize unit '{csv_unit}' to a known canonical value",
-                        )
-                    )
-                    conflict_rows.add(row_number)
-                    continue
+                )
+                conflict_rows.add(row_number)
+                continue
 
             # Vendor resolution
             vendor_name = (
@@ -724,53 +671,11 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            # legacy_id idempotency: if provided, this is an upsert — not a conflict
-            legacy_id_val = (
-                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
-            )
-            has_legacy_id = bool(legacy_id_val)
-
-            # In-CSV legacy_id duplicate: the upsert can't resolve the same
-            # ON CONFLICT (company_id, legacy_id) key twice in one batch
-            # (Postgres 21000).
-            if has_legacy_id and legacy_id_val in csv_legacy_id_duplicates:
-                other_rows = [
-                    r
-                    for r in csv_legacy_id_duplicates[legacy_id_val]
-                    if r != row_number
-                ]
-                if other_rows:
-                    conflicts.append(
-                        PartConflictInfo(
-                            row_number=row_number,
-                            csv_part_name=part_name,
-                            csv_customer_code=None,
-                            conflict_type="csv_duplicate_legacy_id",
-                            existing_part_id="",
-                            existing_value=(
-                                f"Legacy ID '{legacy_id_val}' duplicated in CSV at rows "
-                                f"{', '.join(map(str, other_rows))}"
-                            ),
-                        )
-                    )
-                    conflict_rows.add(row_number)
-                    continue
-
-            # Existing part_name collision (only conflicts when not upserting via legacy_id)
-            if not has_legacy_id and key in existing_parts_by_name:
-                existing = existing_parts_by_name[key]
-                conflicts.append(
-                    PartConflictInfo(
-                        row_number=row_number,
-                        csv_part_name=part_name,
-                        csv_customer_code=None,
-                        conflict_type="duplicate_part_name",
-                        existing_part_id=existing["id"],
-                        existing_value=f"Part '{part_name}' already exists",
-                    )
-                )
-                conflict_rows.add(row_number)
-                continue
+            # An existing part_name is NOT a conflict — the import upserts on
+            # (company_id, part_name), so it updates in place. (We used to skip it,
+            # or upsert only when a curated `legacy_id` column happened to be
+            # present; part_name is the DB's real unique key, so re-imports are
+            # idempotent for everyone now, no legacy_id needed.)
 
         total_skipped = conflict_rows | validation_error_rows
         valid_rows = len(request.rows) - len(total_skipped)
@@ -815,9 +720,11 @@ async def execute_import(
       column-mapping aliases (one-version compat). Each legacy-mapped row
       writes a deprecation log entry. See the module docstring.
     - Resolves preferred_vendor_name to vendor_id (rows that failed validation
-      have already been excluded from the insert set).
-    - Splits insert and upsert paths: rows with legacy_id are upserted via
-      ON CONFLICT (company_id, legacy_id), rows without legacy_id are plain inserts.
+      have already been excluded from the write set).
+    - Idempotent: every row is upserted ON CONFLICT (company_id, part_name), the
+      table's real unique key — so re-importing the same export updates parts in
+      place instead of skipping or duplicating them, with no dependence on a
+      curated `legacy_id` column that real ERP exports don't have.
 
     Customer fields on the request are rejected with 400 — parts no longer
     link to customers at the data layer.
@@ -848,15 +755,10 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Vendor lookup for execute-time resolution
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
+        # Vendor lookup for execute-time resolution (paged past the 1000-row cap).
         vendor_name_to_id = {
-            v["name"].lower(): v["id"] for v in (vendors_response.data or [])
+            v["name"].lower(): v["id"]
+            for v in fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         }
 
         # UOM resolutions (prefer the ones the frontend already received from validate)
@@ -872,7 +774,6 @@ async def execute_import(
         cost_column = reverse_mappings.get("cost_per_unit")
         reorder_column = reverse_mappings.get("reorder_point")
         vendor_column = reverse_mappings.get("preferred_vendor_name")
-        legacy_id_column = reverse_mappings.get("legacy_id")
         # New (chunk 11) columns:
         source_column = reverse_mappings.get("source")
         is_stocked_column = reverse_mappings.get("is_stocked")
@@ -889,15 +790,12 @@ async def execute_import(
 
         has_routing_cols = _has_routing_columns(request.mappings)
 
-        rows_to_insert: list[dict] = []
         rows_to_upsert: list[dict] = []
-        # parts.cost_per_unit was dropped in migration 20260514. For bought
-        # rows with a CSV cost, we stage NULL-vendor procurement tiers
-        # (min_quantity=1) and insert them after the parts rows commit. Each
-        # entry is (legacy_id_or_none, part_name, cost_val) — we resolve to
-        # part_id by querying parts by (company_id, legacy_id|part_name) once
-        # all rows are persisted.
-        pending_procurement_tiers: list[tuple[Optional[str], str, float]] = []
+        # parts.cost_per_unit was dropped in migration 20260514. For bought rows with a CSV
+        # cost, stage NULL-vendor procurement tiers (min_quantity=1) and write them after the
+        # parts commit. Each entry is (part_name, cost_val) — resolved to part_id by part_name
+        # once the rows are persisted.
+        pending_procurement_tiers: list[tuple[str, float]] = []
         errors: list[PartImportError] = []
         skipped = 0
 
@@ -1016,8 +914,27 @@ async def execute_import(
                     request.company_id,
                 )
 
-            if resolved_unit:
-                part_data["primary_unit"] = resolved_unit
+            # Backstop for `parts_requires_unit` — an UNCONDITIONAL check
+            # constraint (CHECK (primary_unit IS NOT NULL)). Validate above
+            # should already have skipped this row; this catches it if the two
+            # ever drift apart again. Worth the redundancy: the insert below is
+            # batched 500 at a time, so ONE unit-less row reaching Postgres
+            # raises APIError and loses the entire batch — every good row with
+            # it. That's how this shipped as a 500 rather than a skipped row.
+            if not resolved_unit:
+                errors.append(
+                    PartImportError(
+                        row_number=row_number,
+                        reason=(
+                            "Unit of measure is required — every part needs one "
+                            "(e.g. 'each', 'lbs', 'in')."
+                        ),
+                        data={"part_name": part_name},
+                    )
+                )
+                continue
+
+            part_data["primary_unit"] = resolved_unit
             if quantity_val is not None:
                 part_data["quantity"] = quantity_val
             else:
@@ -1039,77 +956,39 @@ async def execute_import(
                 if vendor_id:
                     part_data["preferred_vendor_id"] = vendor_id
 
-            # legacy_id (also drives the upsert path)
-            legacy_id_val = (
-                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
-            )
-            if legacy_id_val:
-                part_data["legacy_id"] = legacy_id_val
-                rows_to_upsert.append(part_data)
-            else:
-                rows_to_insert.append(part_data)
+            rows_to_upsert.append(part_data)
 
             # Stage a procurement tier for bought rows that supplied a cost.
             if source_val == "bought" and cost_val is not None and cost_val > 0:
-                pending_procurement_tiers.append(
-                    (legacy_id_val or None, part_name, cost_val)
-                )
+                pending_procurement_tiers.append((part_name, cost_val))
 
-        # Bulk insert in batches
+        # Idempotent write: upsert every row on (company_id, part_name) — existing parts update
+        # in place, new ones insert. Split created vs updated by which names existed before this
+        # run (the upsert response can't tell them apart). id_by_part_name lets us attach the
+        # staged procurement tiers without a re-query.
         BATCH_SIZE = 500
-        imported_count = 0
-        updated_count = 0
-        # Capture the inserted/upserted parts so we can correlate them to
-        # `pending_procurement_tiers` by part_name (or legacy_id) and grab
-        # their ids. Saves a round-trip vs re-querying after the writes.
-        id_by_legacy_id: dict[str, str] = {}
+        existing_names = {
+            (p.get("part_name") or "").lower()
+            for p in fetch_all_by_company(supabase, "parts", "part_name", request.company_id)
+        }
+        imported_count = sum(
+            1 for r in rows_to_upsert if r["part_name"].lower() not in existing_names
+        )
+        updated_count = len(rows_to_upsert) - imported_count
         id_by_part_name: dict[str, str] = {}
-
-        if rows_to_insert:
-            try:
-                total = len(rows_to_insert)
-                for batch_start in range(0, total, BATCH_SIZE):
-                    batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
-                    response = supabase.table("parts").insert(batch).execute()
-                    imported_count += len(response.data) if response.data else 0
-                    for inserted in response.data or []:
-                        pid = inserted.get("id")
-                        if not pid:
-                            continue
-                        if inserted.get("part_name"):
-                            id_by_part_name[inserted["part_name"]] = pid
-                        if inserted.get("legacy_id"):
-                            id_by_legacy_id[inserted["legacy_id"]] = pid
-            except Exception as e:
-                error_str = str(e)
-                logger.error(f"Parts import insert error: {error_str}", exc_info=True)
-                if "23505" in error_str or "duplicate key" in error_str.lower():
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Import failed: A part with this name already exists.",
-                    )
-                sentry_sdk.capture_exception(e)
-                raise HTTPException(status_code=500, detail="Internal server error")
 
         if rows_to_upsert:
             try:
-                total = len(rows_to_upsert)
-                for batch_start in range(0, total, BATCH_SIZE):
+                for batch_start in range(0, len(rows_to_upsert), BATCH_SIZE):
                     batch = rows_to_upsert[batch_start : batch_start + BATCH_SIZE]
                     response = (
                         supabase.table("parts")
-                        .upsert(batch, on_conflict="company_id,legacy_id")
+                        .upsert(batch, on_conflict="company_id,part_name")
                         .execute()
                     )
-                    updated_count += len(response.data) if response.data else 0
-                    for upserted in response.data or []:
-                        pid = upserted.get("id")
-                        if not pid:
-                            continue
-                        if upserted.get("part_name"):
-                            id_by_part_name[upserted["part_name"]] = pid
-                        if upserted.get("legacy_id"):
-                            id_by_legacy_id[upserted["legacy_id"]] = pid
+                    for row in response.data or []:
+                        if row.get("id") and row.get("part_name"):
+                            id_by_part_name[row["part_name"]] = row["id"]
             except Exception as e:
                 error_str = str(e)
                 logger.error(f"Parts import upsert error: {error_str}", exc_info=True)
@@ -1125,36 +1004,33 @@ async def execute_import(
         if pending_procurement_tiers:
             try:
                 tier_rows: list[dict] = []
-                for lid, name, cost in pending_procurement_tiers:
-                    part_id = (
-                        id_by_legacy_id.get(lid) if lid else id_by_part_name.get(name)
-                    )
-                    if not part_id and name:
-                        part_id = id_by_part_name.get(name)
+                for name, cost in pending_procurement_tiers:
+                    part_id = id_by_part_name.get(name)
                     if not part_id:
                         # Row was skipped/conflicted earlier; just drop the
-                        # tier — the parent insert never happened.
+                        # tier — the parent write never happened.
                         continue
                     tier_rows.append(
                         {
                             "part_id": part_id,
-                            "vendor_id": None,
                             "min_quantity": 1,
                             "cost_per_unit": cost,
                         }
                     )
 
                 if tier_rows:
-                    # Upsert on (part_id, vendor_id, min_quantity) so
-                    # re-importing the same CSV updates the imported cost
-                    # instead of failing with a duplicate-key error.
+                    # Upsert on (part_id, min_quantity) so re-importing the same
+                    # CSV updates the imported cost instead of failing with a
+                    # duplicate-key error. (Was keyed on vendor_id too until the
+                    # per-vendor tier model was collapsed — migration
+                    # 20260714173443 dropped the column.)
                     for batch_start in range(0, len(tier_rows), BATCH_SIZE):
                         batch = tier_rows[batch_start : batch_start + BATCH_SIZE]
                         (
                             supabase.table("part_procurement_tiers")
                             .upsert(
                                 batch,
-                                on_conflict="part_id,vendor_id,min_quantity",
+                                on_conflict="part_id,min_quantity",
                             )
                             .execute()
                         )
@@ -1169,7 +1045,7 @@ async def execute_import(
                 # via the UI.
 
         logger.info(
-            f"Parts import complete: {imported_count} inserted, {updated_count} upserted, {skipped} skipped"
+            f"Parts import complete: {imported_count} created, {updated_count} updated, {skipped} skipped"
         )
 
         return PartExecuteResponse(

@@ -35,6 +35,13 @@ class MockSupabaseTable:
             self._on_insert(data)
         return self
 
+    def upsert(self, data, on_conflict=None):
+        # parts_bom now upserts on (parent_part_id, child_part_id). Treat like insert.
+        self._inserted = data
+        if self._on_insert is not None:
+            self._on_insert(data)
+        return self
+
     def execute(self):
         result = MagicMock()
         result.data = self._data
@@ -249,3 +256,34 @@ class TestBomExecute:
         assert r.status_code == 200
         data = r.json()
         assert data["imported_count"] == 2
+
+    @pytest.mark.unit
+    async def test_reimport_updates_existing_line_no_500(self, test_client):
+        # Regression: an existing (parent, child) BOM line used to be skipped (or, if forced,
+        # 500 on the unique key). Now it upserts on (parent_part_id, child_part_id) — updates
+        # quantity/unit in place, reported as updated not created.
+        request = {
+            "company_id": "co1",
+            "mappings": {
+                "Parent": "parent_part_name",
+                "Child": "child_part_name",
+                "Qty": "quantity",
+                "Unit": "unit",
+            },
+            "rows": [
+                {"Parent": "PART_A", "Child": "PART_B", "Qty": "9", "Unit": "pcs"},  # exists → update
+                {"Parent": "PART_C", "Child": "PART_D", "Qty": "5", "Unit": "lbs"},  # new → create
+            ],
+            "skip_conflicts": True,
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS,
+            bom=[{"id": "b1", "parent_part_id": "p-A", "child_part_id": "p-B"}],
+        )
+        r = await test_client.post("/api/bom/import/execute", json=request)
+        app.dependency_overrides.clear()
+        assert r.status_code == 200  # not a duplicate-key 500
+        data = r.json()
+        assert data["updated_count"] == 1
+        assert data["imported_count"] == 1
+        assert data["skipped_count"] == 0

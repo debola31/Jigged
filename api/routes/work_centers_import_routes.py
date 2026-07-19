@@ -31,6 +31,7 @@ from models.work_centers_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -218,24 +219,12 @@ async def validate_import(
 ):
     """Validate work centers CSV data before import."""
     try:
-        wc_response = (
-            supabase.table("work_centers")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_wcs = wc_response.data or []
+        existing_wcs = fetch_all_by_company(supabase, "work_centers", "id, name", request.company_id)
         existing_wcs_lookup = {
             wc["name"].lower(): wc for wc in existing_wcs if wc.get("name")
         }
 
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
-        existing_vendors = vendors_response.data or []
+        existing_vendors = fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         vendor_name_to_id = {
             v["name"].lower(): v["id"] for v in existing_vendors
         }
@@ -369,20 +358,8 @@ async def validate_import(
                     conflict_rows.add(row_number)
                     continue
 
-            # Existing DB collision
-            if name_key in existing_wcs_lookup:
-                existing = existing_wcs_lookup[name_key]
-                conflicts.append(
-                    WorkCenterConflictInfo(
-                        row_number=row_number,
-                        csv_name=name,
-                        conflict_type="duplicate_name",
-                        existing_work_center_id=existing["id"],
-                        existing_value=f"Work center '{name}' already exists",
-                    )
-                )
-                conflict_rows.add(row_number)
-                continue
+            # An existing work center is NOT a conflict — execute upserts on
+            # (company_id, name), so a re-imported one updates in place.
 
         total_skipped = conflict_rows | validation_error_rows
         valid_rows = len(request.rows) - len(total_skipped)
@@ -432,15 +409,10 @@ async def execute_import(
         skip_row_numbers = {c.row_number for c in validate_response.conflicts}
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
-        # Vendor lookup for execute-time resolution
-        vendors_response = (
-            supabase.table("vendors")
-            .select("id, name")
-            .eq("company_id", request.company_id)
-            .execute()
-        )
+        # Vendor lookup for execute-time resolution (paged past the 1000-row cap).
         vendor_name_to_id = {
-            v["name"].lower(): v["id"] for v in (vendors_response.data or [])
+            v["name"].lower(): v["id"]
+            for v in fetch_all_by_company(supabase, "vendors", "id, name", request.company_id)
         }
 
         reverse_mappings = {v: k for k, v in request.mappings.items()}
@@ -449,10 +421,8 @@ async def execute_import(
         vendor_column = reverse_mappings.get("vendor_name")
         labor_rate_column = reverse_mappings.get("labor_rate")
         description_column = reverse_mappings.get("description")
-        legacy_id_column = reverse_mappings.get("legacy_id")
 
-        rows_to_insert: list[dict] = []
-        rows_to_upsert: list[dict] = []
+        rows_to_write: list[dict] = []
         errors: list[WorkCenterImportError] = []
         skipped = 0
 
@@ -508,30 +478,28 @@ async def execute_import(
                         except ValueError:
                             pass
 
-            legacy_id_val = (
-                row.get(legacy_id_column, "").strip() if legacy_id_column else ""
-            )
-            if legacy_id_val:
-                wc_data["metadata"]["legacy_id"] = legacy_id_val
+            rows_to_write.append(wc_data)
 
-            rows_to_insert.append(wc_data)
-
+        # Idempotent write: upsert on (company_id, name). Existing work centers update in place,
+        # new ones insert — split by which names existed before this run.
         BATCH_SIZE = 500
-        imported_count = 0
-        if rows_to_insert:
+        existing_names = {
+            (w.get("name") or "").lower()
+            for w in fetch_all_by_company(supabase, "work_centers", "name", request.company_id)
+        }
+        imported_count = sum(1 for r in rows_to_write if r["name"].lower() not in existing_names)
+        updated_count = len(rows_to_write) - imported_count
+        if rows_to_write:
             try:
-                total = len(rows_to_insert)
-                for batch_start in range(0, total, BATCH_SIZE):
-                    batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
-                    response = supabase.table("work_centers").insert(batch).execute()
-                    imported_count += len(response.data) if response.data else 0
-            except Exception as e:
-                error_str = str(e)
-                if "23505" in error_str or "duplicate key" in error_str.lower():
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Import failed: A work center with this name already exists.",
+                for batch_start in range(0, len(rows_to_write), BATCH_SIZE):
+                    batch = rows_to_write[batch_start : batch_start + BATCH_SIZE]
+                    (
+                        supabase.table("work_centers")
+                        .upsert(batch, on_conflict="company_id,name")
+                        .execute()
                     )
+            except Exception as e:
+                logger.error(f"Work centers import upsert error: {str(e)}", exc_info=True)
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(
                     status_code=500,
@@ -541,7 +509,7 @@ async def execute_import(
         return WorkCenterExecuteResponse(
             success=True,
             imported_count=imported_count,
-            updated_count=0,
+            updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
         )

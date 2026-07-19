@@ -95,6 +95,7 @@ class ExecuteResponse(BaseModel):
 
     success: bool
     imported_count: int
+    updated_count: int = 0  # existing customers updated in place on re-import (upsert)
     skipped_count: int
     errors: list[ImportError]
 

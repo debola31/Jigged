@@ -24,7 +24,6 @@ export interface Vendor {
   state: string | null;
   postal_code: string | null;
   country: string | null;
-  legacy_id: string | null;
   created_at: string;
   updated_at: string;
 }

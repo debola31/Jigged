@@ -44,6 +44,7 @@ from models.routings_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company, fetch_all_in
 
 logger = logging.getLogger(__name__)
 
@@ -225,24 +226,12 @@ def _load_lookups(supabase: Client, company_id: str) -> tuple[
     dict[str, dict],  # work_center_name_lower -> {id, name, kind}
 ]:
     """Load parts + work_centers lookups for the company."""
-    parts_response = (
-        supabase.table("parts")
-        .select("id, part_name")
-        .eq("company_id", company_id)
-        .execute()
-    )
-    parts = parts_response.data or []
+    parts = fetch_all_by_company(supabase, "parts", "id, part_name", company_id)
     parts_lookup = {
         p["part_name"].lower(): p for p in parts if p.get("part_name")
     }
 
-    wc_response = (
-        supabase.table("work_centers")
-        .select("id, name, kind")
-        .eq("company_id", company_id)
-        .execute()
-    )
-    wcs = wc_response.data or []
+    wcs = fetch_all_by_company(supabase, "work_centers", "id, name, kind", company_id)
     wc_lookup = {wc["name"].lower(): wc for wc in wcs if wc.get("name")}
 
     return parts_lookup, wc_lookup
@@ -590,7 +579,15 @@ async def execute_import(
                 detail="Conflicts detected. Set skip_conflicts=true to import non-conflicting rows only.",
             )
 
-        skip_row_numbers = {c.row_number for c in validate_response.conflicts}
+        # Existing operations (conflict_type "duplicate_routing_op") are NOT skipped: on a
+        # re-import we upsert them in place (idempotent), the same way parts/vendors update
+        # rather than error. Only genuine problems — unknown part, unresolved work center,
+        # invalid or duplicated-in-CSV sequence — get skipped.
+        skip_row_numbers = {
+            c.row_number
+            for c in validate_response.conflicts
+            if c.conflict_type != "duplicate_routing_op"
+        }
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
         parts_lookup, wc_lookup = _load_lookups(supabase, request.company_id)
@@ -730,8 +727,27 @@ async def execute_import(
             existing_routings = []
         part_id_to_routing_id = {r["part_id"]: r["id"] for r in existing_routings}
 
+        # Existing (routing_id, sequence) pairs, so we can (a) upsert without colliding and
+        # (b) report created-vs-updated honestly. Paged past PostgREST's 1000-row cap: an
+        # unpaged lookup only saw the first 1000, so a re-import of thousands of operations
+        # tried a plain INSERT on the rest and 500'd every batch — that WAS the "N errors" a
+        # full re-import showed.
+        existing_op_pairs: set[tuple[str, int]] = set()
+        if part_id_to_routing_id:
+            for op in fetch_all_in(
+                supabase,
+                "routing_operations",
+                "routing_id, sequence",
+                "routing_id",
+                list(part_id_to_routing_id.values()),
+            ):
+                seq = op.get("sequence")
+                if seq is not None:
+                    existing_op_pairs.add((op["routing_id"], int(seq)))
+
         imported_routings = 0
         imported_operations = 0
+        updated_operations = 0
 
         # Create routings rows for parts that don't yet have one
         new_routings_payload = []
@@ -764,8 +780,11 @@ async def execute_import(
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
 
-        # Bulk-insert routing_operations
-        ops_to_insert: list[dict] = []
+        # Build the write set. Existing (routing_id, sequence) rows UPDATE in place; new ones
+        # insert — one idempotent upsert on the table's unique key, so a re-import never
+        # collides. (Assumes a stable `sequence` per row, which routing exports carry; rows
+        # auto-numbered because the CSV had no sequence column are the pre-existing exception.)
+        ops_to_write: list[dict] = []
         for part_id, ops in per_part_ops.items():
             routing_id = part_id_to_routing_id.get(part_id)
             if not routing_id:
@@ -773,16 +792,20 @@ async def execute_import(
             for op in ops:
                 op_with_routing = dict(op)
                 op_with_routing["routing_id"] = routing_id
-                ops_to_insert.append(op_with_routing)
+                if (routing_id, int(op["sequence"])) in existing_op_pairs:
+                    updated_operations += 1
+                ops_to_write.append(op_with_routing)
 
-        if ops_to_insert:
+        if ops_to_write:
             BATCH_SIZE = 500
             try:
-                total = len(ops_to_insert)
+                total = len(ops_to_write)
                 for batch_start in range(0, total, BATCH_SIZE):
-                    batch = ops_to_insert[batch_start : batch_start + BATCH_SIZE]
+                    batch = ops_to_write[batch_start : batch_start + BATCH_SIZE]
                     response = (
-                        supabase.table("routing_operations").insert(batch).execute()
+                        supabase.table("routing_operations")
+                        .upsert(batch, on_conflict="routing_id,sequence")
+                        .execute()
                     )
                     imported_operations += len(response.data) if response.data else 0
             except Exception as e:
@@ -795,10 +818,15 @@ async def execute_import(
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
 
+        # imported_operations counts everything upsert wrote (inserts + updates); split the
+        # updates back out so the summary reads "created" vs "updated" like the other imports.
+        created_operations = max(0, imported_operations - updated_operations)
+
         return RoutingExecuteResponse(
             success=True,
             imported_routings_count=imported_routings,
-            imported_operations_count=imported_operations,
+            imported_operations_count=created_operations,
+            updated_count=updated_operations,
             skipped_count=skipped,
             errors=errors,
         )

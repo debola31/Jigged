@@ -105,7 +105,8 @@ class BomExecuteResponse(BaseModel):
     """Response with import results for BOM."""
 
     success: bool
-    imported_count: int
+    imported_count: int  # new BOM lines created
+    updated_count: int = 0  # existing (parent, child) lines updated in place on re-import
     skipped_count: int
     errors: list[BomImportError]
 

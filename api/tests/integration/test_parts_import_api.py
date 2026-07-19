@@ -43,7 +43,6 @@ class MockAIProvider:
             "cost per unit": ("cost_per_unit", 0.90),
             "cost": ("cost_per_unit", 0.80),
             "preferred vendor": ("preferred_vendor_name", 0.85),
-            "legacy id": ("legacy_id", 0.85),
         }
 
         class Suggestion:
@@ -95,6 +94,11 @@ class MockSupabaseTable:
         return self
 
     def in_(self, field, values):
+        return self
+
+    def range(self, start, end):
+        # Paged reads (fetch_all_by_company): the mock returns its full data on the first
+        # page; since test fixtures are < 1000 rows, the paging loop stops after one call.
         return self
 
     def insert(self, data):
@@ -326,11 +330,12 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "NEW001", "Description": "New Part 1"},
-                {"Part Name": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1", "Unit": "ea"},
+                {"Part Name": "NEW002", "Description": "New Part 2", "Unit": "ea"},
             ],
         }
 
@@ -358,11 +363,12 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "", "Description": "Part Without Name"},
-                {"Part Name": "VALID001", "Description": "Valid Part"},
+                {"Part Name": "", "Description": "Part Without Name", "Unit": "ea"},
+                {"Part Name": "VALID001", "Description": "Valid Part", "Unit": "ea"},
             ],
         }
 
@@ -382,17 +388,114 @@ class TestPartsValidateEndpoint:
         assert data["validation_errors"][0]["error_type"] == "missing_part_name"
 
     @pytest.mark.unit
+    async def test_validate_requires_unit_on_every_part(self, test_client):
+        """A part with no unit is a validation error — for EVERY part, not just stocked.
+
+        `parts` has an unconditional check constraint,
+        CHECK (primary_unit IS NOT NULL). This check used to run only for rows
+        inferred as stocked, so a unit-less row passed validate and then blew up
+        execute's 500-row batch insert with a raw APIError — taking every good
+        row in the batch with it, and surfacing as HTTP 500. These tests mock
+        Supabase, so the constraint isn't there to catch it: assert it here.
+        """
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name"},  # no unit column at all
+            "pricing_columns": [],
+            "rows": [{"Part Name": "NOUNIT001"}],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/validate",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["error_rows_count"] == 1
+        assert data["validation_errors"][0]["error_type"] == "missing_primary_unit"
+        assert data["valid_rows_count"] == 0
+
+    @pytest.mark.unit
+    async def test_validate_resolves_unit_on_a_NON_stocked_part(self, test_client):
+        """A filled unit on a made/non-stocked part must resolve — not be skipped as unknown_unit.
+
+        UOM resolution used to run only for rows inferred as *stocked*. A "made"
+        part (is_stocked=false) with a perfectly good unit like "each" therefore
+        never got resolved, hit the "raw unit present but not resolved" branch,
+        and was rejected as unknown_unit. That silently skipped ~7,700 parts of a
+        real is_stocked=false export even after the owner filled every unit. Now
+        resolution runs for every row; "each" resolves via the alias table.
+        """
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Stocked": "is_stocked",
+                "Unit": "primary_unit",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "MADE-001", "Stocked": "false", "Unit": "each"}],
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+        response = await test_client.post("/api/parts/import/validate", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["valid_rows_count"] == 1  # imports fine
+        assert data["error_rows_count"] == 0
+        assert not any(c["conflict_type"] == "unknown_unit" for c in data["conflicts"])
+
+    @pytest.mark.unit
+    async def test_execute_skips_unit_less_row_instead_of_failing_the_batch(
+        self, test_client
+    ):
+        """A unit-less row is skipped; the good rows in its batch still import."""
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "NOUNIT001", "Unit": ""},   # would violate the constraint
+                {"Part Name": "GOOD001", "Unit": "ea"},   # must survive regardless
+            ],
+            "skip_conflicts": True,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
+
+        response = await test_client.post(
+            "/api/parts/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200  # NOT a 500
+        data = response.json()
+        assert data["imported_count"] == 1
+        assert data["skipped_count"] == 1
+
+    @pytest.mark.unit
     async def test_validate_detects_duplicate_part_name_in_csv(self, test_client):
         """Detects duplicate part_name within CSV file."""
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "DUPE001"},
-                {"Part Name": "DUPE001"},
+                {"Part Name": "DUPE001", "Unit": "ea"},
+                {"Part Name": "DUPE001", "Unit": "ea"},
             ],
         }
 
@@ -415,46 +518,33 @@ class TestPartsValidateEndpoint:
         assert len(csv_duplicate_conflicts) >= 1
 
     @pytest.mark.unit
-    async def test_validate_detects_duplicate_legacy_id_in_csv(self, test_client):
-        """Detects duplicate legacy_id within CSV file.
+    async def test_validate_treats_an_existing_part_as_an_update_not_a_conflict(self, test_client):
+        """A re-imported part (name already exists) is NOT a conflict — it updates in place.
 
-        Two rows sharing a legacy_id would cause Postgres 21000 ('ON CONFLICT
-        DO UPDATE command cannot affect row a second time') at execute time,
-        because the upsert path uses ON CONFLICT (company_id, legacy_id).
+        The import upserts on (company_id, part_name), so re-importing the same export is
+        idempotent: existing parts update, they don't skip or duplicate. No legacy_id needed.
         """
+        existing_parts = [{"id": "p1", "part_name": "EXIST-001"}]
         request_data = {
             "company_id": "test-company-id",
-            "mappings": {
-                "Part Name": "part_name",
-                "Legacy Id": "legacy_id",
-            },
+            "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART_A", "Legacy Id": "LEG-123"},
-                {"Part Name": "PART_B", "Legacy Id": "LEG-123"},
+                {"Part Name": "EXIST-001", "Unit": "ea"},  # already in Jigged
+                {"Part Name": "NEW-001", "Unit": "ea"},    # net new
             ],
         }
 
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
-
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(existing_parts, [])
+        response = await test_client.post("/api/parts/import/validate", json=request_data)
         app.dependency_overrides.clear()
 
         assert response.status_code == 200
         data = response.json()
-
-        assert data["has_conflicts"] is True
-        legacy_id_dupe_conflicts = [
-            c
-            for c in data["conflicts"]
-            if c["conflict_type"] == "csv_duplicate_legacy_id"
-        ]
-        assert len(legacy_id_dupe_conflicts) == 2
-        assert all("LEG-123" in c["existing_value"] for c in legacy_id_dupe_conflicts)
+        # Neither row is a conflict — both are valid to write (one insert, one update).
+        assert data["has_conflicts"] is False
+        assert data["valid_rows_count"] == 2
+        assert not any(c["conflict_type"] == "duplicate_part_name" for c in data["conflicts"])
 
     @pytest.mark.unit
     async def test_validate_rejects_customer_match_mode(self, test_client):
@@ -567,10 +657,11 @@ class TestPartsValidateEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Preferred Vendor": "preferred_vendor_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001", "Preferred Vendor": "Nonexistent Vendor"},
+                {"Part Name": "PART001", "Preferred Vendor": "Nonexistent Vendor", "Unit": "ea"},
             ],
         }
 
@@ -637,11 +728,12 @@ class TestPartsExecuteEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Description": "description",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "NEW001", "Description": "New Part 1"},
-                {"Part Name": "NEW002", "Description": "New Part 2"},
+                {"Part Name": "NEW001", "Description": "New Part 1", "Unit": "ea"},
+                {"Part Name": "NEW002", "Description": "New Part 2", "Unit": "ea"},
             ],
             "skip_conflicts": False,
         }
@@ -663,21 +755,22 @@ class TestPartsExecuteEndpoint:
         assert data["skipped_count"] == 0
 
     @pytest.mark.unit
-    async def test_execute_skips_conflicts_when_skip_conflicts_true(self, test_client):
-        """Skips conflicting rows when skip_conflicts is True."""
+    async def test_execute_updates_existing_creates_new(self, test_client):
+        """Re-importing is idempotent: an existing part UPDATES, a new one is CREATED, no skips."""
         existing_parts = [
-            {"id": "existing-1", "part_name": "EXIST001", "legacy_id": None},
+            {"id": "existing-1", "part_name": "EXIST001"},
         ]
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "EXIST001"},  # Will be skipped (duplicate)
-                {"Part Name": "NEW001"},    # Will be imported
+                {"Part Name": "EXIST001", "Unit": "ea"},  # already exists -> updated
+                {"Part Name": "NEW001", "Unit": "ea"},    # net new -> created
             ],
             "skip_conflicts": True,
         }
@@ -695,8 +788,9 @@ class TestPartsExecuteEndpoint:
         data = response.json()
 
         assert data["success"] is True
-        assert data["imported_count"] == 1
-        assert data["skipped_count"] == 1
+        assert data["imported_count"] == 1  # NEW001 created
+        assert data["updated_count"] == 1   # EXIST001 updated in place
+        assert data["skipped_count"] == 0   # nothing skipped
 
     @pytest.mark.unit
     async def test_execute_imports_stocked_part_with_unit_and_quantity(
@@ -757,7 +851,9 @@ class TestPartsExecuteEndpoint:
         tier_inserts = [r for r in insert_log if r["table"] == "part_procurement_tiers"]
         assert len(tier_inserts) == 1
         tier = tier_inserts[0]["data"][0]
-        assert tier["vendor_id"] is None
+        # vendor_id was dropped from part_procurement_tiers (migration 20260714173443 —
+        # per-vendor tiers collapsed to part-level); the tier no longer carries it.
+        assert "vendor_id" not in tier
         assert tier["min_quantity"] == 1
         assert tier["cost_per_unit"] == 12.5
 
@@ -805,19 +901,19 @@ class TestPartsExecuteEndpoint:
         assert inserted.get("preferred_vendor_id") == "vendor-abc"
 
     @pytest.mark.unit
-    async def test_execute_legacy_id_uses_upsert_path(self, test_client):
-        """Rows with legacy_id are upserted via ON CONFLICT for idempotency."""
+    async def test_execute_upserts_on_part_name_for_idempotency(self, test_client):
+        """Every row is upserted ON CONFLICT (company_id, part_name) — the idempotency key."""
         upsert_log: list = []
 
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
-                "Legacy Id": "legacy_id",
+                "Unit": "primary_unit",
             },
             "pricing_columns": [],
             "rows": [
-                {"Part Name": "PART001", "Legacy Id": "old-system-001"},
+                {"Part Name": "PART001", "Unit": "ea"},
             ],
             "skip_conflicts": False,
         }
@@ -835,9 +931,9 @@ class TestPartsExecuteEndpoint:
         app.dependency_overrides.clear()
 
         assert response.status_code == 200
-        # The route called upsert with on_conflict="company_id,legacy_id"
-        assert len(upsert_log) == 1
-        assert upsert_log[0]["on_conflict"] == "company_id,legacy_id"
+        # The parts write is an upsert keyed on (company_id, part_name), no legacy_id.
+        parts_upserts = [u for u in upsert_log if u["on_conflict"] == "company_id,part_name"]
+        assert len(parts_upserts) == 1
 
     @pytest.mark.unit
     async def test_execute_sub_assembly_classification_new_headers(self, test_client):

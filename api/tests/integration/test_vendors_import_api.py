@@ -68,6 +68,7 @@ class MockSupabaseTable:
     def select(self, *a, **k): return self
     def eq(self, *a, **k): return self
     def in_(self, *a, **k): return self
+    def range(self, *a, **k): return self
     def is_(self, *a, **k): return self
     def delete(self): return self
 
@@ -222,7 +223,8 @@ class TestVendorsValidate:
         assert response.json()["proposed_merges"] == []
 
     @pytest.mark.unit
-    async def test_validate_existing_db_duplicate(self, test_client):
+    async def test_validate_existing_vendor_is_an_update_not_a_conflict(self, test_client):
+        """A vendor already in Jigged is not a conflict — execute upserts it on (company_id, name)."""
         existing = [{"id": "v-old", "name": "Acme"}]
         request = {
             "company_id": "co1",
@@ -237,8 +239,8 @@ class TestVendorsValidate:
         )
         app.dependency_overrides.clear()
         data = response.json()
-        assert data["has_conflicts"] is True
-        assert data["conflicts"][0]["conflict_type"] == "duplicate_name"
+        assert data["has_conflicts"] is False
+        assert not any(c["conflict_type"] == "duplicate_name" for c in data["conflicts"])
 
     @pytest.mark.unit
     async def test_validate_missing_contact_name_when_email_set(self, test_client):
@@ -368,7 +370,7 @@ class TestVendorsExecute:
         assert contact_payload["role"] == "accounts_payable"
         assert contact_payload["is_primary"] is True
         # vendor_id should be the synthetic id from the vendors insert
-        assert contact_payload["vendor_id"] == "new-vendors-0"
+        assert contact_payload["vendor_id"] == "up-vendors-0"
 
     @pytest.mark.unit
     async def test_execute_defaults_role_to_sales_when_omitted(self, test_client):
@@ -505,10 +507,10 @@ class TestVendorsExecute:
         contact_inserts = [i for i in insert_log if i["table"] == "vendor_contacts"]
         assert len(contact_inserts) == 1
         # The single vendor_contacts insert batch should contain exactly one
-        # row, keyed to Acme's synthetic vendor id (new-vendors-0).
+        # row, keyed to Acme's synthetic vendor id (up-vendors-0).
         contact_rows = contact_inserts[0]["data"]
         assert len(contact_rows) == 1
-        assert contact_rows[0]["vendor_id"] == "new-vendors-0"
+        assert contact_rows[0]["vendor_id"] == "up-vendors-0"
         assert contact_rows[0]["name"] == "Pat"
 
     @pytest.mark.unit
@@ -543,12 +545,13 @@ class TestVendorsExecute:
         assert data["merged_count"] == 1
 
     @pytest.mark.unit
-    async def test_execute_uses_upsert_for_legacy_id(self, test_client):
+    async def test_execute_upserts_on_name_for_idempotency(self, test_client):
+        """Every vendor is upserted ON CONFLICT (company_id, name) — the idempotency key."""
         upsert_log = []
         request = {
             "company_id": "co1",
-            "mappings": {"Name": "name", "Legacy Id": "legacy_id"},
-            "rows": [{"Name": "Acme", "Legacy Id": "old-1"}],
+            "mappings": {"Name": "name"},
+            "rows": [{"Name": "Acme"}],
             "skip_conflicts": False,
         }
         app.dependency_overrides[get_supabase] = create_override(
@@ -561,4 +564,4 @@ class TestVendorsExecute:
         assert response.status_code == 200
         vendors_upserts = [u for u in upsert_log if u["table"] == "vendors"]
         assert len(vendors_upserts) == 1
-        assert vendors_upserts[0]["on_conflict"] == "company_id,legacy_id"
+        assert vendors_upserts[0]["on_conflict"] == "company_id,name"

@@ -78,5 +78,8 @@ api/.coverage
 .claude/*
 !.claude/settings.json
 
+# Local UI-drive screenshots (may contain real customer data — never commit)
+.screenshots/
+
 # Blender
 /outputs/

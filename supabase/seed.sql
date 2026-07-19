@@ -67,8 +67,11 @@ insert into auth.identities (
 ) on conflict do nothing;
 
 -- ── Company + access ─────────────────────────────────────────────────────────
-insert into public.companies (id, name) values
-  ('22222222-2222-2222-2222-222222222222', 'Vanguard Precision Works')
+insert into public.companies (id, name, settings) values
+  ('22222222-2222-2222-2222-222222222222', 'Vanguard Precision Works',
+   -- Enable the opt-in data-import tool in dev + preview branches so
+   -- it's visible while the feature rolls out. Seed is local/preview-only, never prod.
+   '{"features": {"data_import": true}}'::jsonb)
 on conflict (id) do nothing;
 
 insert into public.user_company_access (id, user_id, company_id, role, name) values

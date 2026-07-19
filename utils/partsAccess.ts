@@ -25,7 +25,7 @@ import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, legacy_id, is_location_tracked, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, is_location_tracked, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -39,7 +39,6 @@ interface PartRow {
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   costing_batch_quantity: number | string | null;
-  legacy_id: string | null;
   is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
@@ -64,7 +63,6 @@ function rowToPart(row: PartRow): Part {
       row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
         ? null
         : Number(row.costing_batch_quantity),
-    legacy_id: row.legacy_id,
     is_location_tracked: row.is_location_tracked ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,

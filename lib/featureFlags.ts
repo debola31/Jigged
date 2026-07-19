@@ -66,6 +66,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     // GA feature with a kill-switch: enabled unless explicitly turned off.
     defaultEnabled: true,
   },
+  {
+    key: 'data_import',
+    label: 'Data import',
+    description:
+      'Guided data importer for onboarding: upload legacy ERP CSV exports, review what will come in and what to fix (record counts, duplicates, orphan references, gaps) plus a best-effort source-ERP guess, then import. Opt-in per tenant while onboarding.',
+  },
 ] as const;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];
@@ -106,6 +112,16 @@ export function isInventoryLocationsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
   return readFeatureFlag(company, 'inventory_locations');
+}
+
+/**
+ * Data import is opt-IN: off unless the company row explicitly sets
+ * settings.features.data_import = true (enabled per tenant while onboarding).
+ */
+export function isDataImportEnabled(
+  company: Pick<Company, 'settings'> | null | undefined,
+): boolean {
+  return readFeatureFlag(company, 'data_import');
 }
 
 /**

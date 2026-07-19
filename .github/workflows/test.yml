@@ -94,6 +94,22 @@ jobs:
         working-directory: ./
         run: supabase start
 
+      # `supabase gen types typescript --local` (the check below) starts its OWN
+      # postgres-meta container and — unlike `supabase start` — does NOT honor
+      # SUPABASE_INTERNAL_IMAGE_REGISTRY, so it pulls postgres-meta straight from
+      # public.ecr.aws and re-flakes on the exact rate limit #579 fixed for the
+      # stack. Pull the identical image from GHCR (unmetered from GH runners) and
+      # tag it as the ECR ref the CLI looks for, so gen-types finds it locally and
+      # never touches ECR. POSTGRES_META_VERSION tracks the pinned CLI (2.109.0) —
+      # bump it in lockstep with the setup-cli version above if the CLI changes.
+      - name: Pre-pull postgres-meta from GHCR (gen-types ignores the registry override)
+        env:
+          POSTGRES_META_VERSION: v0.96.1
+        run: |
+          docker pull "ghcr.io/supabase/postgres-meta:${POSTGRES_META_VERSION}"
+          docker tag "ghcr.io/supabase/postgres-meta:${POSTGRES_META_VERSION}" \
+            "public.ecr.aws/supabase/postgres-meta:${POSTGRES_META_VERSION}"
+
       - name: Verify generated DB types match migrations (issue #406)
         working-directory: ./
         # The local stack (started above) has replayed supabase/migrations/.

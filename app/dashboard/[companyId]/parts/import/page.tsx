@@ -694,8 +694,6 @@ export default function ImportPartsPage() {
               return 'Duplicate Part Name';
             case 'csv_duplicate':
               return 'Duplicate in CSV';
-            case 'csv_duplicate_legacy_id':
-              return 'Duplicate Legacy ID in CSV';
             default:
               return 'Conflict';
           }

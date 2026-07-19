@@ -79,7 +79,18 @@ class MockSupabaseTable:
     def eq(self, *args, **kwargs):
         return self
 
+    def in_(self, *args, **kwargs):
+        return self
+
+    def range(self, *args, **kwargs):
+        return self
+
     def insert(self, data):
+        self._inserted = data
+        return self
+
+    def upsert(self, data, on_conflict=None):
+        # Customers now upsert on (company_id, name). Treat like insert for the mock.
         self._inserted = data
         return self
 
@@ -420,8 +431,8 @@ class TestExecuteEndpoint:
         assert "conflicts detected" in response.json()["detail"].lower()
 
     @pytest.mark.unit
-    async def test_execute_skips_conflicts_when_skip_conflicts_true(self, test_client):
-        """Skips conflicting rows when skip_conflicts is True."""
+    async def test_execute_updates_existing_creates_new(self, test_client):
+        """An existing-name customer updates in place (upsert); a new one is created."""
         existing_customers = [
             {"id": "existing-1", "name": "Existing Company"},
         ]
@@ -432,8 +443,8 @@ class TestExecuteEndpoint:
                 "Name": "name",
             },
             "rows": [
-                {"Name": "Existing Company"},  # Will be skipped (name conflict)
-                {"Name": "New Company"},  # Will be imported
+                {"Name": "Existing Company"},  # Updated in place (no longer skipped)
+                {"Name": "New Company"},  # Created
             ],
             "skip_conflicts": True,
         }
@@ -451,8 +462,9 @@ class TestExecuteEndpoint:
         data = response.json()
 
         assert data["success"] is True
-        assert data["imported_count"] == 1
-        assert data["skipped_count"] == 1
+        assert data["imported_count"] == 1  # New Company
+        assert data["updated_count"] == 1  # Existing Company
+        assert data["skipped_count"] == 0
 
     @pytest.mark.unit
     async def test_execute_returns_correct_counts(self, test_client):
@@ -468,8 +480,8 @@ class TestExecuteEndpoint:
                 "Name": "name",
             },
             "rows": [
-                {"Name": "Existing One"},  # Skip - name conflict
-                {"Name": "Existing Two"},  # Skip - name conflict
+                {"Name": "Existing One"},  # Update - existing name (upsert)
+                {"Name": "Existing Two"},  # Update - existing name (upsert)
                 {"Name": ""},  # Skip - validation error (missing name)
                 {"Name": "Valid Company 1"},  # Import
                 {"Name": "Valid Company 2"},  # Import
@@ -491,5 +503,6 @@ class TestExecuteEndpoint:
         data = response.json()
 
         assert data["success"] is True
-        assert data["imported_count"] == 3
-        assert data["skipped_count"] == 3  # 2 conflicts + 1 validation error
+        assert data["imported_count"] == 3  # 3 new
+        assert data["updated_count"] == 2  # 2 existing names updated in place
+        assert data["skipped_count"] == 1  # only the missing-name validation error

@@ -6,7 +6,13 @@ from typing import Optional
 
 from openai import OpenAI
 
-from .base_provider import AIProvider, MappingSuggestion
+from .base_provider import (
+    AIProvider,
+    FixSuggestionResult,
+    ImportNarrativeResult,
+    MappingSuggestion,
+    StructureResult,
+)
 
 
 MAPPING_PROMPT_TEMPLATE = """You are analyzing a CSV file to map columns to a customer database schema for a manufacturing operations data platform.
@@ -64,6 +70,16 @@ class OpenAIProvider(AIProvider):
     @property
     def provider_name(self) -> str:
         return "openai"
+
+    async def analyze_structure(self, files, entity_schemas, erp_catalog) -> StructureResult:
+        # The data-import review is Anthropic-only for now (factory defaults to Anthropic).
+        raise NotImplementedError("analyze_structure is not implemented for the OpenAI provider")
+
+    async def generate_import_narrative(self, erp, findings, file_summaries) -> ImportNarrativeResult:
+        raise NotImplementedError("generate_import_narrative is not implemented for the OpenAI provider")
+
+    async def suggest_fixes(self, findings, file_summaries) -> FixSuggestionResult:
+        raise NotImplementedError("suggest_fixes is not implemented for the OpenAI provider")
 
     async def suggest_column_mappings(
         self,

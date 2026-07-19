@@ -25,10 +25,18 @@ class MockSupabaseTable:
     def select(self, *a, **k): return self
     def eq(self, *a, **k): return self
     def in_(self, *a, **k): return self
+    def range(self, *a, **k): return self
     def is_(self, *a, **k): return self
     def delete(self): return self
 
     def insert(self, data):
+        self._inserted = data
+        if self._on_insert is not None:
+            self._on_insert(data)
+        return self
+
+    def upsert(self, data, on_conflict=None):
+        # routing_operations now upsert on (routing_id, sequence). Treat like insert for the mock.
         self._inserted = data
         if self._on_insert is not None:
             self._on_insert(data)
@@ -276,3 +284,30 @@ class TestRoutingsExecute:
         assert op["external_setup_cost"] == 75.0
         assert "setup_minutes" not in op
         assert "cycle_minutes_per_unit" not in op
+
+    @pytest.mark.unit
+    async def test_reimport_upserts_existing_operation_no_500(self, test_client):
+        # Regression: a re-import used to plain-INSERT operations that already existed and
+        # 500 the whole batch (the "N errors" in the summary). Now an existing
+        # (routing_id, sequence) upserts in place — no error, reported as updated not created.
+        insert_log = []
+        request = {
+            "company_id": "co1",
+            "mappings": {"Part": "part_name", "WC": "work_center_name"},
+            "rows": [{"Part": "PART001", "WC": "HURCO Mill"}],
+            "skip_conflicts": True,
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS,
+            work_centers=WCS_INTERNAL,
+            routings=[{"id": "r-1", "part_id": "p-1"}],  # PART001 already has a routing
+            ops=[{"id": "op-1", "routing_id": "r-1", "sequence": 1}],  # ...and sequence 1
+            insert_log=insert_log,
+        )
+        r = await test_client.post("/api/routings/import/execute", json=request)
+        app.dependency_overrides.clear()
+        assert r.status_code == 200  # not a duplicate-key 500
+        body = r.json()
+        assert body["updated_count"] == 1
+        assert body["imported_operations_count"] == 0
+        assert body["skipped_count"] == 0

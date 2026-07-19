@@ -17,6 +17,7 @@ Detailed specifications for each Jigged module.
 | [Operator View](operator-view.md) | Shop floor interface | Must Have |
 | [Shipments](shipments.md) | Packing slips + fulfillment status | Built |
 | [Invitation System](invitation-system.md) | User invitations and referrals | Should Have |
+| [Data Import](data-import.md) | Guided onboarding import (Upload → Map → Review & Fix → Import); idempotent natural-identity upsert. See also the [Phase 2 design](data-import-phase2-design.md). | Built |
 | [Demo Mode](demo-mode.md) | Demo mode with hidden demo company | Should Have |
 | [AI Insights & Charts](ai-insights.md) | AI-powered dashboard insights and natural language queries | Should Have |
 

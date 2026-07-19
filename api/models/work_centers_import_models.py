@@ -105,7 +105,7 @@ class WorkCenterExecuteResponse(BaseModel):
 
     success: bool
     imported_count: int
-    updated_count: int = 0  # Rows upserted via legacy_id ON CONFLICT path
+    updated_count: int = 0  # Rows upserted via (company_id, name) ON CONFLICT path
     skipped_count: int
     errors: list[WorkCenterImportError]
 
@@ -136,10 +136,5 @@ WORK_CENTER_SCHEMA = {
         "type": "string",
         "required": False,
         "description": "Additional notes or description",
-    },
-    "legacy_id": {
-        "type": "string",
-        "required": False,
-        "description": "ID from legacy/previous system (preserved in metadata for re-import idempotency)",
     },
 }

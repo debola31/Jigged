@@ -155,19 +155,25 @@ Replaces manual CSV column mapping with an AI-powered backend that analyzes CSV 
        ▼
 4. VALIDATE
    Call /validate endpoint
-   Show conflicts if any (duplicate name)
+   Flag within-CSV duplicate names + validation errors
        │
        ▼
 5. EXECUTE
-   Call /execute endpoint
-   Show results: imported, skipped, errors
+   Call /execute endpoint (upsert on (company_id, name))
+   Show results: created, updated, skipped, errors
 ```
 
-### Conflict Detection
+### Conflict Detection & idempotency
 
-- **Duplicate name** → Conflict (name must be unique per company)
+- **A customer name that already exists in the company is NOT a conflict — it is an update.**
+  Execute upserts `ON CONFLICT (company_id, name)`, so re-importing the same list updates
+  those customers in place rather than skipping or duplicating them (idempotent). Only the
+  columns present in the CSV are written; a contact/address is attached only to a **new**
+  customer (re-attaching a primary contact to an existing one would duplicate it).
 
-- User can choose to skip conflicts and import valid rows
+- **Duplicate name *within the same CSV*** (`csv_duplicate_name`) → those rows are skipped.
+
+- User can choose to skip conflicts and import valid rows.
 
 ### Confidence Scoring
 

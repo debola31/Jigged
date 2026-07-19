@@ -614,6 +614,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Inventory](docs/modules/inventory.md)
 - [Operator View](docs/modules/operator-view.md)
 - [Invitation System](docs/modules/invitation-system.md)
+- [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))
 
 ### Testing Documentation
 

@@ -20,7 +20,7 @@ import type {
 } from '@/types/vendorContact';
 
 const VENDOR_COLUMNS =
-  'id, company_id, name, address_line1, address_line2, city, state, postal_code, country, legacy_id, created_at, updated_at';
+  'id, company_id, name, address_line1, address_line2, city, state, postal_code, country, created_at, updated_at';
 
 const VENDOR_CONTACT_COLUMNS =
   'id, vendor_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
@@ -353,7 +353,6 @@ export async function bulkImportVendors(
     state?: string;
     postal_code?: string;
     country?: string;
-    legacy_id?: string;
   }>,
 ): Promise<VendorImportResult> {
   const supabase = getSupabase();
@@ -407,7 +406,6 @@ export async function bulkImportVendors(
       state: trimmed(row.state),
       postal_code: trimmed(row.postal_code),
       country: trimmed(row.country) || 'USA',
-      legacy_id: trimmed(row.legacy_id),
     });
 
     if (error) {

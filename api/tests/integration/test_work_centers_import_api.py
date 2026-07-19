@@ -50,10 +50,18 @@ class MockSupabaseTable:
     def select(self, *a, **k): return self
     def eq(self, *a, **k): return self
     def in_(self, *a, **k): return self
+    def range(self, *a, **k): return self
     def is_(self, *a, **k): return self
     def delete(self): return self
 
     def insert(self, data):
+        self._inserted = data
+        if self._on_insert is not None:
+            self._on_insert(data)
+        return self
+
+    def upsert(self, data, on_conflict=None):
+        # Work centers now upsert on (company_id, name). Treat it like insert for the mock.
         self._inserted = data
         if self._on_insert is not None:
             self._on_insert(data)

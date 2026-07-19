@@ -25,7 +25,7 @@ A **work center** is a unit of production capacity. It can be **internal** (a ma
 | `vendor_id` | FK → `vendors`; required when `kind='external'` (DB CHECK), null when `kind='internal'` |
 | `labor_rate` | numeric; used when `kind='internal'`; cleared to null when `kind='external'` |
 | `description` | optional multiline |
-| `metadata` | jsonb; defaults to `{}`. `bulkImportWorkCenters` stores `{legacy_id}` when a source system id is carried on import; otherwise empty |
+| `metadata` | jsonb; defaults to `{}` (reserved for future per-work-center attributes) |
 | `created_at`, `updated_at` | |
 
 External work centers do **not** carry a labor_rate on the work-center row. Their cost is a single **vendor unit price** set per routing operation (`routing_operations.external_unit_price`) — pricing is per-operation, not per-vendor. External (vendor) work **bills once per part, so there is no setup cost** — setup is an internal-only concept (the `external_setup_cost` column was dropped in June 2026).
@@ -86,7 +86,7 @@ Renders the same `WorkCenterForm` in `mode="edit"`, hydrated from `getWorkCenter
 
 ### Import — `/dashboard/{companyId}/work-centers/import`
 
-CSV upload → AI-assisted column mapping → conflict/validation review → execute. This flow goes through the **FastAPI** import router (`api/routes/work_centers_import_routes.py`, prefix `/api/work-centers/import`) with `/analyze`, `/validate`, and `/execute` endpoints — it is a multi-step import pipeline with conflict detection, not a Supabase-client CRUD call. External rows resolve `vendor_name` → `vendor_id` server-side against the company's vendors; unresolved vendors surface as `unknown_vendor` conflicts and internal rows carrying a vendor surface as `vendor_forbidden_for_internal` errors. De-duplicates by name (against existing rows and within the file). The client-side `bulkImportWorkCenters` in `workCentersAccess.ts` implements the same name/vendor resolution rules and is unit-covered as the reference logic.
+CSV upload → AI-assisted column mapping → conflict/validation review → execute. This flow goes through the **FastAPI** import router (`api/routes/work_centers_import_routes.py`, prefix `/api/work-centers/import`) with `/analyze`, `/validate`, and `/execute` endpoints — it is a multi-step import pipeline with conflict detection, not a Supabase-client CRUD call. External rows resolve `vendor_name` → `vendor_id` server-side against the company's vendors; unresolved vendors surface as `unknown_vendor` conflicts and internal rows carrying a vendor surface as `vendor_forbidden_for_internal` errors. Execute upserts `ON CONFLICT (company_id, name)`, so a work center already in the company **updates in place** rather than being skipped — re-importing is idempotent; within-CSV duplicate names collapse into one. The client-side `bulkImportWorkCenters` in `workCentersAccess.ts` implements the same name/vendor resolution rules and is unit-covered as the reference logic.
 
 ---
 

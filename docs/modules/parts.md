@@ -55,12 +55,11 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | quantity | Numeric | Yes | On-hand count (default 0); only ever changed through `inventory_transactions`, never the part form |
 | reorder_point | Numeric | No | Low-stock threshold |
 | preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
-| legacy_id | Text | No | Import cross-reference; unique per company when set |
 | is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
 | updated_at | Timestamp | Yes | Auto-updated on changes |
 
-**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. `(company_id, legacy_id)` is also unique when `legacy_id` is set.
+**Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. This is the identity key the CSV importer upserts on (`ON CONFLICT (company_id, part_name)`), so re-importing the same export updates parts in place rather than duplicating them.
 
 **Removed in April 2026:** `category_id` and the `part_categories` table. Categories were anemic (one number — `default_markup_percent`); rather than a shared default, each part now owns its markup directly on its own `part_pricing_tiers` rows.
 
@@ -260,13 +259,14 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 3. **Review Mappings** - Display with confidence indicators
 
-4. **Validate** - Check for duplicate part names within company
+4. **Validate** - Resolve units, flag within-CSV duplicate part names, check references
 
-5. **Execute** - Import with results summary
+5. **Execute** - Upsert with results summary (created / updated / skipped / errors)
 
 ### Conflict Detection
 
-- **Duplicate part_name** within company → Conflict
+- **Duplicate part_name *within the same CSV*** (`csv_duplicate`) → the second and later rows collapse into one (they don't import twice).
+- **A part_name that already exists in the company** is **not** a conflict — it is an **update**. Execute upserts `ON CONFLICT (company_id, part_name)`, so re-importing the same export updates parts in place rather than duplicating or skipping them (idempotent). No `legacy_id` is involved.
 
 ### API Endpoints
 

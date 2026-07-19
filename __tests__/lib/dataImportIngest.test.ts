@@ -1,0 +1,186 @@
+import { describe, it, expect, vi } from 'vitest';
+import { buildImportPlan, runImportPlan, summarizeResults, type ImportProgress } from '@/lib/dataImportIngest';
+import type { EditableRow, WorkingFile } from '@/lib/dataImportEditing';
+import type { EntityType } from '@/types/data-import';
+
+function wf(
+  filename: string,
+  entityType: EntityType,
+  columnRoles: Record<string, string>,
+  rows: Record<string, string>[],
+): WorkingFile {
+  return {
+    filename,
+    entityType,
+    columnRoles,
+    headers: Object.keys(rows[0] ?? {}),
+    rows: rows.map((r, i) => ({ ...r, __rowId: `${filename}#${i}` }) as EditableRow),
+  };
+}
+
+describe('buildImportPlan', () => {
+  it('orders by dependency tier, inverts columnRoles, strips __rowId, skips unknown', () => {
+    const working = [
+      wf('bom.csv', 'bom', { parent_part_name: 'Parent', child_part_name: 'Child' }, [
+        { Parent: 'A', Child: 'B' },
+      ]),
+      wf('parts.csv', 'parts', { part_name: 'PN' }, [{ PN: 'A' }]),
+      wf('vendors.csv', 'vendors', { name: 'V' }, [{ V: 'Acme' }]),
+      wf('mystery.csv', 'unknown', {}, [{ X: '1' }]),
+    ];
+    const plan = buildImportPlan(working);
+
+    expect(plan.map((b) => b.entity)).toEqual(['vendors', 'parts', 'bom']); // ordered; unknown skipped
+
+    const parts = plan.find((b) => b.entity === 'parts')!;
+    expect(parts.endpoint).toBe('/api/parts/import/execute');
+    expect(parts.mappings).toEqual({ PN: 'part_name' }); // canonical->raw inverted to raw->canonical
+    expect(parts.rows).toEqual([{ PN: 'A' }]); // __rowId stripped
+    expect(parts.extra).toEqual({ pricing_columns: [] }); // parts-only required extra
+    expect(plan.find((b) => b.entity === 'vendors')!.extra).toEqual({});
+  });
+
+  it('splits into ≤500-row batches', () => {
+    const rows = Array.from({ length: 501 }, (_, i) => ({ V: `v${i}` }));
+    const plan = buildImportPlan([wf('vendors.csv', 'vendors', { name: 'V' }, rows)]);
+    expect(plan).toHaveLength(2);
+    expect(plan[0].rows).toHaveLength(500);
+    expect(plan[1].rows).toHaveLength(1);
+    expect(plan[0].batchCount).toBe(2);
+    expect(plan[1].batchIndex).toBe(1);
+  });
+
+  it('numbers routing ops in whole-file order per part when no sequence column is mapped', () => {
+    // Part A's ops straddle the 500-row batch boundary — the case that used to renumber per
+    // batch. Interleave A and B so we prove numbering is per-part, not per-row-index.
+    const rows: Record<string, string>[] = [];
+    for (let i = 0; i < 300; i++) rows.push({ Part: 'A', WC: `wcA${i}` });
+    for (let i = 0; i < 300; i++) rows.push({ Part: 'B', WC: `wcB${i}` }); // A finishes at index 599 → batch 2
+    const plan = buildImportPlan([wf('rt.csv', 'routings', { part_name: 'Part', work_center_name: 'WC' }, rows)]);
+
+    // Synthetic sequence column is mapped, and every batch carries it.
+    expect(plan[0].mappings['__jigged_seq']).toBe('sequence');
+    const all = plan.flatMap((b) => b.rows);
+    const aSeqs = all.filter((r) => r.Part === 'A').map((r) => Number(r['__jigged_seq']));
+    const bSeqs = all.filter((r) => r.Part === 'B').map((r) => Number(r['__jigged_seq']));
+    expect(aSeqs).toEqual(Array.from({ length: 300 }, (_, i) => i + 1)); // 1..300, continuous across batches
+    expect(bSeqs).toEqual(Array.from({ length: 300 }, (_, i) => i + 1));
+  });
+
+  it('leaves a mapped sequence column untouched (exact order wins)', () => {
+    const rows = [
+      { Part: 'A', WC: 'x', Seq: '20' },
+      { Part: 'A', WC: 'y', Seq: '10' },
+    ];
+    const plan = buildImportPlan([
+      wf('rt.csv', 'routings', { part_name: 'Part', work_center_name: 'WC', sequence: 'Seq' }, rows),
+    ]);
+    expect(plan[0].mappings['__jigged_seq']).toBeUndefined(); // no synthetic column injected
+    expect(plan[0].rows[0]).not.toHaveProperty('__jigged_seq');
+    expect(plan[0].mappings).toMatchObject({ Seq: 'sequence' });
+  });
+});
+
+describe('summarizeResults', () => {
+  it('aggregates created/updated/skipped/errors and flags failures', () => {
+    const s = summarizeResults([
+      { entity: 'vendors', response: { imported_count: 3, skipped_count: 1, errors: [] } },
+      { entity: 'parts', response: { imported_count: 10, updated_count: 2, skipped_count: 0, errors: ['x'] } },
+      { entity: 'routings', response: { imported_operations_count: 7, skipped_count: 0 } },
+      { entity: 'bom', response: null }, // a batch threw
+    ]);
+    expect(s.totalCreated).toBe(20); // 3 + 10 + 7 (routings uses imported_operations_count)
+    expect(s.totalUpdated).toBe(2);
+    expect(s.totalSkipped).toBe(1);
+    expect(s.totalErrors).toBe(2); // parts 1 error + bom null-batch 1
+    expect(s.failed).toBe(true);
+  });
+
+  it('groups row-level errors by reason with examples, and counts a failed batch by its rows', () => {
+    const s = summarizeResults([
+      {
+        entity: 'routings',
+        response: {
+          imported_operations_count: 0,
+          skipped_count: 0,
+          errors: [
+            { row_number: 3, reason: "Part 'ABC-123' not found at execute time", data: { Part: 'ABC-123' } },
+            { row_number: 9, reason: "Part 'DEF-9' not found at execute time", data: { Part: 'DEF-9' } },
+            { row_number: 12, reason: 'Work center could not be resolved for row', data: { WC: 'Mystery' } },
+          ],
+        },
+      },
+      // A whole BOM batch of 500 rows threw with the server's detail message.
+      { entity: 'bom', response: null, failure: { message: 'Import failed: duplicate key value', rows: 500 } },
+    ]);
+
+    const routings = s.byEntity.find((e) => e.entity === 'routings')!;
+    // The two "Part 'X' not found" collapse into one heading; examples keep the specifics.
+    const partGroup = routings.errorGroups.find((g) => g.reason === 'Part not found')!;
+    expect(partGroup.count).toBe(2);
+    expect(partGroup.examples).toEqual(['ABC-123', 'DEF-9']);
+    expect(routings.errorGroups.map((g) => g.reason)).toContain('Work center could not be resolved');
+
+    // A failed batch is counted by its rows, not as "1 error".
+    const bom = s.byEntity.find((e) => e.entity === 'bom')!;
+    expect(bom.errorCount).toBe(500);
+    expect(bom.errorGroups[0].count).toBe(500);
+    expect(s.totalErrors).toBe(503); // 3 routing rows + 500 bom rows
+  });
+});
+
+describe('runImportPlan — progress', () => {
+  const bundle = () => [
+    wf('vendors.csv', 'vendors', { name: 'V' }, Array.from({ length: 3 }, (_, i) => ({ V: `v${i}` }))),
+    wf('parts.csv', 'parts', { part_name: 'PN' }, Array.from({ length: 501 }, (_, i) => ({ PN: `p${i}` }))),
+  ];
+
+  it('emits a determinate, monotonic progress stream that ends at 100%', async () => {
+    const plan = buildImportPlan(bundle()); // vendors(1 batch, 3) + parts(2 batches: 500 + 1)
+    const seen: ImportProgress[] = [];
+    const post = vi.fn().mockResolvedValue({ imported_count: 1 });
+
+    await runImportPlan(plan, 'co', post, (p) => seen.push(structuredClone(p)));
+
+    const last = seen[seen.length - 1];
+    expect(last.rowsTotal).toBe(504);
+    expect(last.rowsDone).toBe(504); // everything accounted for
+    expect(last.batchesDone).toBe(3);
+    expect(last.currentEntity).toBeNull(); // final tick signals done
+    // rowsDone never goes backwards.
+    const rows = seen.map((p) => p.rowsDone);
+    expect(rows).toEqual([...rows].sort((a, b) => a - b));
+  });
+
+  it('tracks per-entity totals + completion for the stage checklist', async () => {
+    const plan = buildImportPlan(bundle());
+    const seen: ImportProgress[] = [];
+    await runImportPlan(plan, 'co', vi.fn().mockResolvedValue({}), (p) => seen.push(structuredClone(p)));
+
+    const final = seen[seen.length - 1].entities;
+    expect(final).toEqual([
+      { entity: 'vendors', rowsTotal: 3, rowsDone: 3, rowsFailed: 0 },
+      { entity: 'parts', rowsTotal: 501, rowsDone: 501, rowsFailed: 0 },
+    ]);
+    // The stages complete in write order: vendors reaches 100% before parts finishes.
+    const vendorsDoneAt = seen.findIndex((p) => p.entities[0].rowsDone === 3);
+    const partsDoneAt = seen.findIndex((p) => (p.entities[1]?.rowsDone ?? 0) === 501);
+    expect(vendorsDoneAt).toBeLessThan(partsDoneAt);
+  });
+
+  it('records rowsFailed per entity when a batch throws (surfaces a failed stage)', async () => {
+    const plan = buildImportPlan(bundle());
+    // Fail every parts batch; vendors succeed.
+    const post = vi.fn().mockImplementation((endpoint: string) =>
+      endpoint.includes('parts') ? Promise.reject(new Error('500')) : Promise.resolve({ imported_count: 1 }),
+    );
+    const seen: ImportProgress[] = [];
+    await runImportPlan(plan, 'co', post, (p) => seen.push(structuredClone(p)));
+
+    const final = seen[seen.length - 1].entities;
+    expect(final.find((e) => e.entity === 'vendors')).toMatchObject({ rowsFailed: 0, rowsDone: 3 });
+    expect(final.find((e) => e.entity === 'parts')).toMatchObject({ rowsFailed: 501, rowsDone: 501 });
+    // The bar still advanced through the failed batches (attempted rows) — no stall.
+    expect(seen[seen.length - 1].rowsDone).toBe(504);
+  });
+});

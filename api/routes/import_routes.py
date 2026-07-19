@@ -26,6 +26,7 @@ from models.import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
@@ -397,9 +398,25 @@ async def execute_import(
                 detail="Conflicts detected. Set skip_conflicts=true to import non-conflicting rows only.",
             )
 
-        # Build combined set of rows to skip (conflicts + validation errors)
-        skip_row_numbers = {c.row_number for c in validate_response.conflicts}
+        # An existing-name customer is NOT skipped — execute upserts it (updates in place),
+        # mirroring vendors/work centers. Only within-CSV duplicate names (csv_duplicate_name)
+        # and validation errors are skipped.
+        skip_row_numbers = {
+            c.row_number
+            for c in validate_response.conflicts
+            if c.conflict_type != "duplicate_name"
+        }
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
+
+        # Existing customer names (paged past PostgREST's 1000-row cap). Drives (a) attaching a
+        # contact/address only to NEW customers — re-attaching a primary contact to an existing
+        # customer would duplicate it and trip the one-primary index — and (b) the
+        # created-vs-updated split in the summary.
+        existing_customer_names = {
+            c["name"].lower()
+            for c in fetch_all_by_company(supabase, "customers", "name", request.company_id)
+            if c.get("name")
+        }
 
         # Find column mappings
         reverse_mappings = {v: k for k, v in request.mappings.items()}
@@ -418,7 +435,7 @@ async def execute_import(
             "country",
         }
 
-        prepared = []  # list of (customer_row, contact_row_or_None, address_row_or_None)
+        prepared = []  # list of dicts: customer_data / name_lower / is_new / contact_row / address_data
         errors = []
         skipped = 0
 
@@ -449,11 +466,15 @@ async def execute_import(
             if address_data and "country" not in address_data:
                 address_data["country"] = "USA"
 
-            # Only create a contact row when there's a real name — never
-            # silently invent a contact (mirrors the vendor migration's
-            # data-quality rule).
+            name_lower = customer_data.get("name", "").lower()
+            is_new = name_lower not in existing_customer_names
+
+            # Attach a contact/address ONLY to a NEW customer — a re-imported (existing)
+            # customer updates in place; re-inserting its primary contact/address would
+            # duplicate it (and trip the one-primary index). Never invent a contact without
+            # a real name.
             contact_row = None
-            if contact_data.get("name"):
+            if is_new and contact_data.get("name"):
                 contact_row = {
                     "name": contact_data["name"],
                     "role": "buyer",
@@ -463,53 +484,65 @@ async def execute_import(
                 }
 
             prepared.append(
-                (
-                    customer_data,
-                    contact_row,
-                    address_data if address_data else None,
-                )
+                {
+                    "customer_data": customer_data,
+                    "name_lower": name_lower,
+                    "is_new": is_new,
+                    "contact_row": contact_row,
+                    "address_data": address_data if (is_new and address_data) else None,
+                }
             )
 
-        # Bulk insert: customers first, then a per-customer contact row and
-        # address row for each row that had matching content.
-        imported_count = 0
+        # Idempotent write: upsert on (company_id, name). Existing customers update in place,
+        # new ones insert. Contacts/addresses are attached only to NEW customers (see above),
+        # keyed by the customer id read back from the upsert.
+        imported_count = sum(1 for p in prepared if p["is_new"])
+        updated_count = len(prepared) - imported_count
         if prepared:
             try:
-                customers_payload = [c for c, _, _ in prepared]
-                response = supabase.table("customers").insert(customers_payload).execute()
-                imported_count = len(response.data) if response.data else 0
+                BATCH_SIZE = 500
+                name_to_customer_id: dict[str, str] = {}
+                customers_payload = [p["customer_data"] for p in prepared]
+                for batch_start in range(0, len(customers_payload), BATCH_SIZE):
+                    batch = customers_payload[batch_start : batch_start + BATCH_SIZE]
+                    response = (
+                        supabase.table("customers")
+                        .upsert(batch, on_conflict="company_id,name")
+                        .execute()
+                    )
+                    for r in response.data or []:
+                        if r.get("name") and r.get("id"):
+                            name_to_customer_id[r["name"].lower()] = r["id"]
 
-                if response.data:
-                    contact_rows_to_insert = []
-                    address_rows_to_insert = []
-                    for inserted_customer, (_, contact_row, address_data) in zip(
-                        response.data, prepared
-                    ):
-                        if contact_row:
-                            contact_rows_to_insert.append({
-                                "customer_id": inserted_customer["id"],
-                                **contact_row,
-                            })
-                        if address_data:
-                            address_rows_to_insert.append({
-                                "customer_id": inserted_customer["id"],
-                                **address_data,
+                contact_rows_to_insert = []
+                address_rows_to_insert = []
+                for p in prepared:
+                    if not (p["contact_row"] or p["address_data"]):
+                        continue
+                    customer_id = name_to_customer_id.get(p["name_lower"])
+                    if not customer_id:
+                        continue
+                    if p["contact_row"]:
+                        contact_rows_to_insert.append(
+                            {"customer_id": customer_id, **p["contact_row"]}
+                        )
+                    if p["address_data"]:
+                        address_rows_to_insert.append(
+                            {
+                                "customer_id": customer_id,
+                                **p["address_data"],
                                 "default_billing": True,
                                 "default_shipping": True,
-                            })
-                    if contact_rows_to_insert:
-                        supabase.table("customer_contacts").insert(
-                            contact_rows_to_insert
-                        ).execute()
-                    if address_rows_to_insert:
-                        supabase.table("customer_addresses").insert(
-                            address_rows_to_insert
-                        ).execute()
+                            }
+                        )
+                if contact_rows_to_insert:
+                    supabase.table("customer_contacts").insert(contact_rows_to_insert).execute()
+                if address_rows_to_insert:
+                    supabase.table("customer_addresses").insert(address_rows_to_insert).execute()
             except Exception as e:
                 error_str = str(e)
                 # Check for PostgreSQL unique constraint violation (code 23505)
                 if "23505" in error_str or "duplicate key" in error_str.lower():
-                    # Parse which constraint was violated
                     if "name" in error_str.lower():
                         raise HTTPException(
                             status_code=400,
@@ -530,7 +563,8 @@ async def execute_import(
         return ExecuteResponse(
             success=True,
             imported_count=imported_count,
-            skipped_count=skipped,  # Now matches validation's skipped_rows_count
+            updated_count=updated_count,
+            skipped_count=skipped,
             errors=errors,  # Only unexpected DB errors
         )
 

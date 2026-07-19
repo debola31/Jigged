@@ -37,6 +37,7 @@ from models.bom_import_models import (
 )
 from services.ai import get_provider
 from utils.rate_limiter import RateLimiter
+from utils.db_pagination import fetch_all_in
 
 logger = logging.getLogger(__name__)
 
@@ -559,7 +560,14 @@ async def execute_import(
                 detail="Conflicts detected. Set skip_conflicts=true to import non-conflicting rows only.",
             )
 
-        skip_row_numbers = {c.row_number for c in validate_response.conflicts}
+        # An existing (parent, child) BOM line is NOT skipped — execute upserts it (updates
+        # quantity/unit in place). Only within-CSV duplicate pairs (csv_duplicate), cycles,
+        # self-references, and unknown parts stay skipped.
+        skip_row_numbers = {
+            c.row_number
+            for c in validate_response.conflicts
+            if c.conflict_type != "duplicate_bom_line"
+        }
         skip_row_numbers |= {e.row_number for e in validate_response.validation_errors}
 
         # Resolve part names (the validate already returned valid rows but we
@@ -587,6 +595,19 @@ async def execute_import(
             if p.get("part_name")
         }
 
+        # Existing (parent_part_id, child_part_id) pairs — so we upsert without colliding and
+        # report created vs updated honestly. Paged past PostgREST's 1000-row cap.
+        existing_bom_pairs = {
+            (r["parent_part_id"], r["child_part_id"])
+            for r in fetch_all_in(
+                supabase,
+                "parts_bom",
+                "parent_part_id, child_part_id",
+                "parent_part_id",
+                list(part_name_to_id.values()),
+            )
+        }
+
         reverse_mappings = {v: k for k, v in request.mappings.items()}
         parent_column = reverse_mappings.get("parent_part_name")
         child_column = reverse_mappings.get("child_part_name")
@@ -596,6 +617,7 @@ async def execute_import(
         rows_to_insert: list[dict] = []
         errors: list[BomImportError] = []
         skipped = 0
+        updated_count = 0
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
@@ -641,17 +663,26 @@ async def execute_import(
                 "unit": unit,
             }
 
+            if (parent_id, child_id) in existing_bom_pairs:
+                updated_count += 1
             rows_to_insert.append(bom_data)
 
         BATCH_SIZE = 500
-        imported_count = 0
+        written_count = 0
         if rows_to_insert:
             try:
                 total = len(rows_to_insert)
                 for batch_start in range(0, total, BATCH_SIZE):
                     batch = rows_to_insert[batch_start : batch_start + BATCH_SIZE]
-                    response = supabase.table("parts_bom").insert(batch).execute()
-                    imported_count += len(response.data) if response.data else 0
+                    # Idempotent: existing (parent, child) lines update quantity/unit in place,
+                    # new ones insert. Updating an existing edge can't introduce a cycle (the
+                    # edge was already in the acyclic graph); new edges were cycle-validated.
+                    response = (
+                        supabase.table("parts_bom")
+                        .upsert(batch, on_conflict="parent_part_id,child_part_id")
+                        .execute()
+                    )
+                    written_count += len(response.data) if response.data else 0
             except Exception as e:
                 error_str = str(e)
                 if "23505" in error_str or "duplicate key" in error_str.lower():
@@ -667,9 +698,12 @@ async def execute_import(
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
 
+        # written_count is inserts + updates; split the updates back out for an honest summary.
+        created_count = max(0, written_count - updated_count)
         return BomExecuteResponse(
             success=True,
-            imported_count=imported_count,
+            imported_count=created_count,
+            updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
         )

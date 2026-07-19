@@ -1,8 +1,8 @@
-"""fetch_all_by_company must page past PostgREST's 1000-row cap."""
+"""fetch_all_by_company / fetch_all_in must page past PostgREST's 1000-row cap."""
 
 import pytest
 
-from utils.db_pagination import fetch_all_by_company
+from utils.db_pagination import fetch_all_by_company, fetch_all_in
 
 pytestmark = pytest.mark.unit
 
@@ -59,3 +59,60 @@ def test_exact_multiple_of_page_size_stops_cleanly():
     # 2000 rows: after the 2nd full page, a 3rd read returns empty and the loop ends.
     rows = [{"id": i} for i in range(2000)]
     assert len(fetch_all_by_company(_FakeClient(rows), "parts", "id", "c")) == 2000
+
+
+class _FakeInQuery:
+    """Filters by `column IN values`, then range-slices — models fetch_all_in's per-chunk paging."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self._col = None
+        self._vals = set()
+        self._start = 0
+        self._end = None
+
+    def select(self, *a, **k):
+        return self
+
+    def in_(self, col, vals):
+        self._col, self._vals = col, set(vals)
+        return self
+
+    def range(self, start, end):
+        self._start, self._end = start, end
+        return self
+
+    def execute(self):
+        matched = [r for r in self._rows if r.get(self._col) in self._vals]
+
+        class _Resp:
+            pass
+
+        r = _Resp()
+        r.data = matched[self._start : self._end + 1]
+        return r
+
+
+class _FakeInClient:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def table(self, _name):
+        return _FakeInQuery(self._rows)
+
+
+def test_fetch_all_in_filters_to_requested_values():
+    rows = [{"parent_part_id": f"p{i}", "child_part_id": f"c{i}"} for i in range(5)]
+    got = fetch_all_in(
+        _FakeInClient(rows), "parts_bom", "parent_part_id, child_part_id", "parent_part_id", ["p1", "p3"]
+    )
+    assert sorted(r["parent_part_id"] for r in got) == ["p1", "p3"]
+
+
+def test_fetch_all_in_chunks_large_value_lists():
+    # 700 distinct ids (> the 300 chunk size → 3 chunks). Each id matched exactly once, no dups.
+    rows = [{"parent_part_id": f"p{i}"} for i in range(700)]
+    ids = [f"p{i}" for i in range(700)]
+    got = fetch_all_in(_FakeInClient(rows), "parts_bom", "parent_part_id", "parent_part_id", ids)
+    assert len(got) == 700
+    assert len({r["parent_part_id"] for r in got}) == 700

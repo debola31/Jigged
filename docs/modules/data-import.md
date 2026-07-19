@@ -367,12 +367,14 @@ The same surface serves both the first-time "bring my whole shop in" journey and
   (`filterWorkingByMode`); there is **no backend `mode` parameter**. The post-import summary
   reports created / updated / skipped / errors per entity (there is **no downloadable skip
   list** today — that idea was dropped).
-  - **Write-side idempotency differs by entity:** parts, vendors, and work centers upsert
-    `ON CONFLICT` on their natural identity (`(company_id, part_name)` / `(company_id, name)`),
-    so an existing row **updates in place**. Routing operations upsert on
-    `(routing_id, sequence)`. **Customers and BOM lines are insert-and-skip-existing** — the
-    importer skips a row whose identity already exists rather than updating it (they do not
-    update in place). No `legacy_id` is involved anywhere.
+  - **Every entity updates in place** via upsert on its natural identity — an existing record
+    is updated, not skipped or duplicated: parts `(company_id, part_name)`; vendors and work
+    centers `(company_id, name)`; **customers** `(company_id, name)`; routing operations
+    `(routing_id, sequence)`; **BOM lines** `(parent_part_id, child_part_id)` (updates
+    quantity/unit). Non-destructive: only the columns present are written, and rows removed
+    from the CSV are not deleted. No `legacy_id` is involved anywhere. (For customers/BOM the
+    child rows attached only to *new* records — customer contacts/addresses, and for BOM the
+    line itself — so a re-import doesn't duplicate them.)
   - Research basis: HubSpot / Salesforce / Insycle import modes + match keys; Dynamics 365
     duplicate detection; categorized preview.
 

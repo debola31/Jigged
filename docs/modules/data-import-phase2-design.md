@@ -217,14 +217,19 @@ external-work-center vendor resolution), 500-row batching (Vercel body limit), a
 service-role client. Rebuilding that in a unified endpoint would duplicate hundreds of lines
 and drift. **Decision: the unified importer reuses these execute routes as the write layer.**
 
-**Write-side idempotency is per-entity, not uniform** — no `legacy_id` anywhere:
-- **parts / vendors / work centers** — upsert `ON CONFLICT` on their natural identity
-  (`(company_id, part_name)` / `(company_id, name)`): an existing row **updates in place**.
-- **routing operations** — upsert `ON CONFLICT (routing_id, sequence)` (paged existing-op
-  lookup so a large re-import doesn't collide; created vs updated reported separately).
-- **customers / BOM lines** — `INSERT` with **skip-existing**: a row whose identity already
-  exists is skipped, not updated. (If update-in-place is wanted for these later, they'd move
-  to the same natural-identity upsert.)
+**Every entity upserts on its natural identity** — an existing row updates in place, no
+`legacy_id` anywhere:
+- **parts / vendors / work centers / customers** — upsert `ON CONFLICT` on
+  `(company_id, part_name)` / `(company_id, name)`.
+- **routing operations** — upsert `ON CONFLICT (routing_id, sequence)`.
+- **BOM lines** — upsert `ON CONFLICT (parent_part_id, child_part_id)` (updates quantity/unit;
+  updating an existing edge can't introduce a cycle, and new edges are cycle-validated).
+
+All use a **paged existing-key lookup** (`fetch_all_by_company` / `fetch_all_in`) so a large
+re-import doesn't miss existing rows and collide, and each reports **created vs updated**
+separately. For customers, the child rows (contacts, addresses) and, for BOM, the line itself
+attach **only to new records**, so a re-import never duplicates them. Non-destructive: only the
+columns present are written; rows dropped from the CSV are not deleted.
 
 ### 6b. Dependency-ordered orchestration
 At Import, the client sends the remediated rows to the per-entity execute endpoints **in
@@ -250,8 +255,8 @@ are applied **client-side**, before the write, by `filterWorkingByMode` (`lib/da
 it reconciles each row against existing identities and drops the rows a mode excludes, so the
 execute routes receive only rows that should be written. **No backend `mode` parameter was
 needed** (the earlier "may need a small `mode` param" note was superseded by the client-side
-approach). Note the entity asymmetry from §6a: for customers/BOM, "update existing" reduces to
-skip-existing since those importers don't update in place.
+approach). All entities update existing rows in place (§6a), so "add new + update existing"
+holds uniformly.
 
 ### 6d. Transactionality (explicit non-goal for v1)
 Cross-entity all-or-nothing atomicity across separate endpoint calls is hard and out of scope

@@ -246,11 +246,13 @@ Everything else:
 
 | Category | Count | Route file | Criteria met |
 |----------|-------|------------|--------------|
-| Import analysis (AI column mapping) | 4 | `import_routes.py`, `parts_import_routes.py`, `operations_import_routes.py`, `inventory_routes.py` | AI |
+| Unified data-import orchestration (structure, narrative, suggest-fixes) | 3 | `data_import_routes.py` (`/api/data-import/*`) | AI (client drives analysis, posts to the per-entity execute routes below) |
+| Per-entity import analysis (AI column mapping) | 6 | `import_routes.py` (customers), `parts_import_routes.py`, `vendors_import_routes.py`, `work_centers_import_routes.py`, `routings_import_routes.py`, `bom_import_routes.py` | AI |
+| Per-entity import validate/execute pipelines | 12 | same six `*_import_routes.py` files | Complex business logic (natural-identity upsert, conflict detection, batching) |
 | Insights (dashboard, refresh, chat) | 3 | `insights_routes.py` | AI + complex aggregation |
 | Operator management | 4 | `operators_routes.py` | Service role (`auth.admin.*`) |
 | Admin company management | 4 | `admin_routes.py` | Service role + system admin |
-| Import validate/execute pipelines | 8 | `import_routes.py`, `parts_import_routes.py`, `operations_import_routes.py`, `inventory_routes.py` | Complex business logic |
+| QuickBooks / quote email | — | `quickbooks_routes.py`, `quote_email_routes.py` | Service role / third-party integration |
 | Chat history | 1 | `insights_routes.py` | Grouped with insights |
 
 #### 8.5 Backend Structure
@@ -260,15 +262,20 @@ api/
 ├── index.py                         # Entry point, CORS config, route registration
 ├── routes/
 │   ├── admin_routes.py              # System admin endpoints (service role)
+│   ├── data_import_routes.py        # Unified data-import: /api/data-import/{structure,narrative,suggest-fixes}
 │   ├── import_routes.py             # Customer import (AI + pipeline)
+│   ├── parts_import_routes.py       # Parts import (AI + pipeline; parts absorb inventory)
+│   ├── vendors_import_routes.py     # Vendors import (AI + pipeline)
+│   ├── work_centers_import_routes.py# Work centers import (AI + pipeline)
+│   ├── routings_import_routes.py    # Routings import (AI + pipeline)
+│   ├── bom_import_routes.py         # Bill-of-materials import (AI + pipeline)
 │   ├── insights_routes.py           # AI insights + chat
-│   ├── inventory_routes.py          # Inventory import (AI + pipeline)
-│   ├── operations_import_routes.py  # Operations import (AI + pipeline)
 │   ├── operators_routes.py          # Operator auth management (service role)
-│   └── parts_import_routes.py       # Parts import (AI + pipeline)
+│   ├── quickbooks_routes.py         # QuickBooks integration (service role)
+│   └── quote_email_routes.py        # Quote/transactional email
 ├── models/                          # Pydantic request/response models
 ├── services/
-│   └── ai.py                        # AI provider abstraction (Anthropic, OpenAI, Google)
+│   └── ai/                          # AI provider package: factory + base/claude/openai/gemini providers, model_config
 └── utils/
     └── rate_limiter.py              # Rate limiting for AI endpoints
 ```

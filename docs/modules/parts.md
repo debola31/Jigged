@@ -259,13 +259,14 @@ Uses the same AI-powered import infrastructure as Customers (see Customers PRD f
 
 3. **Review Mappings** - Display with confidence indicators
 
-4. **Validate** - Check for duplicate part names within company
+4. **Validate** - Resolve units, flag within-CSV duplicate part names, check references
 
-5. **Execute** - Import with results summary
+5. **Execute** - Upsert with results summary (created / updated / skipped / errors)
 
 ### Conflict Detection
 
-- **Duplicate part_name** within company → Conflict
+- **Duplicate part_name *within the same CSV*** (`csv_duplicate`) → the second and later rows collapse into one (they don't import twice).
+- **A part_name that already exists in the company** is **not** a conflict — it is an **update**. Execute upserts `ON CONFLICT (company_id, part_name)`, so re-importing the same export updates parts in place rather than duplicating or skipping them (idempotent). No `legacy_id` is involved.
 
 ### API Endpoints
 

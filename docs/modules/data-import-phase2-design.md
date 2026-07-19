@@ -114,9 +114,10 @@ values" (what the finding used to say — an instruction pointing outside the to
 
 ### 4e. Link to existing records (non-empty company)
 A bounded, read-only fetch of existing identity values for the target entities (RLS-safe,
-client-side via the typed Supabase client or a small read endpoint) → match uploaded rows
-(exact-normalized first; fuzzy as a proposal) → present **new / matches-existing / ambiguous**
-→ user confirms links. Open decision (§11): auto-link exact matches vs. always-ask.
+client-side via the typed Supabase client — `lib/dataImportExisting.ts`) → match uploaded rows →
+bucket **new / matches-existing**. **As shipped, matching is exact-normalized only** (case/
+whitespace-insensitive); the fuzzy-match "ambiguous → propose" path described here is **not
+built** — it remains a future enhancement.
 
 ### 4f. AI-suggested fixes — new endpoint, guardrail-bound
 `POST /api/data-import/suggest-fixes` (AI, mirrors the narrative endpoint: tiny payload =
@@ -210,13 +211,20 @@ a toolbar "below":
 ### 6a. Reuse the per-entity importers — do NOT build a second writer
 The per-entity import routes (`parts_import_routes`, `vendors_import_routes`,
 `work_centers_import_routes`, `bom_import_routes`, `routings_import_routes`, customers in
-`import_routes`) already implement the hard write logic: field validation, **conflict detection
-against existing rows**, **ON CONFLICT upsert on the natural identity key** (`part_name` / `name`),
-per-entity business rules (parts
-procurement tiers, UOM resolution, external-work-center vendor resolution), 500-row batching
-(Vercel body limit), and RLS via the service-role client. Rebuilding that in a unified endpoint
-would duplicate hundreds of lines and drift. **Decision: the unified importer reuses these
-execute routes as the write layer.**
+`import_routes`) already implement the hard write logic: field validation, conflict detection
+against existing rows, per-entity business rules (parts procurement tiers, UOM resolution,
+external-work-center vendor resolution), 500-row batching (Vercel body limit), and RLS via the
+service-role client. Rebuilding that in a unified endpoint would duplicate hundreds of lines
+and drift. **Decision: the unified importer reuses these execute routes as the write layer.**
+
+**Write-side idempotency is per-entity, not uniform** — no `legacy_id` anywhere:
+- **parts / vendors / work centers** — upsert `ON CONFLICT` on their natural identity
+  (`(company_id, part_name)` / `(company_id, name)`): an existing row **updates in place**.
+- **routing operations** — upsert `ON CONFLICT (routing_id, sequence)` (paged existing-op
+  lookup so a large re-import doesn't collide; created vs updated reported separately).
+- **customers / BOM lines** — `INSERT` with **skip-existing**: a row whose identity already
+  exists is skipped, not updated. (If update-in-place is wanted for these later, they'd move
+  to the same natural-identity upsert.)
 
 ### 6b. Dependency-ordered orchestration
 At Import, the client sends the remediated rows to the per-entity execute endpoints **in
@@ -237,10 +245,13 @@ write sends rows to the server** (batched). That's correct — the write is an e
 action and the existing routes own it.
 
 ### 6c. Upsert modes
-Map the PRD's modes onto the existing importers: **Add new + update existing** (default) uses
-the natural-identity ON CONFLICT upsert (`part_name` / `name`); **create-only** skips matches; **update-only**
-skips non-matches. Some importers may need a small `mode` parameter added to their execute
-request — a contained change, confirmed per route at build time.
+The PRD's modes — **Add new + update existing** (default), **create-only**, **update-only** —
+are applied **client-side**, before the write, by `filterWorkingByMode` (`lib/dataImportReconcile.ts`):
+it reconciles each row against existing identities and drops the rows a mode excludes, so the
+execute routes receive only rows that should be written. **No backend `mode` parameter was
+needed** (the earlier "may need a small `mode` param" note was superseded by the client-side
+approach). Note the entity asymmetry from §6a: for customers/BOM, "update existing" reduces to
+skip-existing since those importers don't update in place.
 
 ### 6d. Transactionality (explicit non-goal for v1)
 Cross-entity all-or-nothing atomicity across separate endpoint calls is hard and out of scope
@@ -251,8 +262,26 @@ later required, the hardening path is a server orchestrator that refactors the p
 execute bodies into service functions callable inside one transaction (§11) — bigger, deferred.
 
 ### 6e. Post-import summary
-Aggregate each entity's execute response into one **added / updated / skipped (with reasons)**
-summary + a downloadable skip list, then route the owner to fix + re-run the remainder.
+`summarizeResults` (`lib/dataImportIngest.ts`) aggregates each entity's execute response into one
+**created / updated / skipped / errors** summary, and — the part that makes errors actionable —
+groups the row-level errors into `errorGroups`: each is a reason heading with the row-specific
+bits stripped (so "Part 'ABC' not found" and "Part 'DEF' not found" collapse into one "Part not
+found" group), a count, and up to six real example values. A batch that fails wholesale (network
+/ 500) is recorded with the server's message and **counted by its row count**, not as a single
+error. The UI (`app/dashboard/[companyId]/import/page.tsx`) renders the per-reason breakdown with
+example chips + a remediation banner, then routes the owner to fix on Review and re-run the
+remainder (re-import is idempotent for the upsert entities). **There is no downloadable skip
+list** — that idea was dropped.
+
+### 6f. Routing operation sequencing (batch-safe)
+Routing operations upsert on `(routing_id, sequence)`, so each op needs a stable sequence — and
+because a part's operations can span more than one 500-row batch, the sequence must be assigned
+**before batching**, from whole-file order, or a straddling part would be renumbered per batch
+and collide. `numberRoutingOpsInFileOrder` (`lib/dataImportIngest.ts`, inside `buildImportPlan`)
+does this: when no `sequence` column is mapped, it numbers each part's ops by their order across
+the entire file and injects a synthetic `sequence` (`__jigged_seq`). A mapped step-order column
+wins. The analyzer emits a `sequence_inferred` info notice (lands in "things we noticed") when no
+step column is mapped, pointing the owner at the Map step.
 
 ## 7. Agent orchestration — surface, action layer, approval gates
 
@@ -387,7 +416,8 @@ Test *external behavior* (dataset in → findings/verdict/write-plan out), never
 - **Link-to-existing default:** auto-link exact-normalized matches vs. always-ask (mis-link
   risk vs. fatigue) — PRD open question; lean auto-link only on exact identity match, fuzzy
   always-ask.
-- **Upsert `mode` param** may need adding to some per-entity execute requests — confirm each.
+- ~~**Upsert `mode` param** may need adding to some per-entity execute requests.~~ **Resolved:**
+  modes are applied client-side by `filterWorkingByMode` (§6c); no backend `mode` param was added.
 - **Atomicity:** v1 is per-entity + resumable (non-atomic). Server-orchestrator-in-one-txn is
   the deferred hardening path if partial-import is unacceptable to shops.
 - **AI-suggestion UI recipe** (reveal-uncertainty without inducing blind trust) is unvalidated

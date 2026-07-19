@@ -79,7 +79,7 @@ No "capabilities" checkboxes — what a vendor is used for is derived from inbou
 
 ### Import — `/dashboard/{companyId}/vendors/import`
 
-CSV upload, column mapping, validation, then execute via `/api/vendors/import/*` endpoints. De-duplicates by name (case-insensitive).
+CSV upload, column mapping, validation, then execute via `/api/vendors/import/*` endpoints. Execute upserts `ON CONFLICT (company_id, name)` (case-insensitive match), so a vendor already in the company **updates in place** rather than being skipped — re-importing the same file is idempotent. Within-CSV duplicate names collapse into one row.
 
 ---
 

@@ -15,10 +15,12 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
     'eq',
     'neq',
     'ilike',
+    'is',
     'or',
     'order',
     'range',
     'single',
+    'maybeSingle',
     'in',
   ];
 
@@ -306,14 +308,18 @@ describe('customerAccess utilities', () => {
   });
 
   describe('softDeleteCustomer', () => {
-    it('deletes customer by ID', async () => {
+    it('archives customer by ID (stamps deleted_at)', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = null;
 
       await softDeleteCustomer('customer-1');
 
+      // Universal soft-delete: "Delete" archives (sets deleted_at) rather than
+      // issuing a hard DELETE — the row survives and is hidden from reads.
       expect(mockSupabase.from).toHaveBeenCalledWith('customers');
-      expect(mockQueryBuilder.delete).toHaveBeenCalled();
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ deleted_at: expect.any(String) }),
+      );
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'customer-1');
     });
   });

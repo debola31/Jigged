@@ -244,17 +244,11 @@ export default function VendorDetailPage() {
             Edit
           </Button>
 
-          <Tooltip
-            title={
-              hasReferences
-                ? 'Cannot delete — this vendor is referenced by parts or work centers'
-                : 'Delete Vendor'
-            }
-          >
+          <Tooltip title="Delete Vendor">
             <span>
               <IconButton
                 onClick={() => setDeleteDialogOpen(true)}
-                disabled={actionLoading || hasReferences}
+                disabled={actionLoading}
                 sx={{
                   color: 'error.main',
                   '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
@@ -636,12 +630,13 @@ export default function VendorDetailPage() {
         <DialogTitle>Delete Vendor?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{vendor.name}</strong>? This action cannot be
-            undone.
+            <strong>{vendor.name}</strong> will be archived — removed from your vendor
+            lists, but existing references keep working. Reusing the name later re-creates
+            (revives) it.
           </Typography>
           {hasReferences && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              This vendor is referenced by{' '}
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Referenced by{' '}
               {supplies
                 ? `${linkedParts.length} part${linkedParts.length === 1 ? '' : 's'} (preferred supplier)`
                 : null}
@@ -649,7 +644,7 @@ export default function VendorDetailPage() {
               {outside
                 ? `${linkedWorkCenters.length} work center${linkedWorkCenters.length === 1 ? '' : 's'}`
                 : null}
-              . Remove those references before deleting.
+              {' '}— kept for history.
             </Alert>
           )}
         </DialogContent>
@@ -661,7 +656,7 @@ export default function VendorDetailPage() {
             onClick={handleDelete}
             color="error"
             variant="contained"
-            disabled={actionLoading || hasReferences}
+            disabled={actionLoading}
             startIcon={
               actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
             }

@@ -497,7 +497,8 @@ export default function InventoryPage() {
               {selectedIds.length === 1 ? '' : 's'}?
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Items referenced by quotes, jobs, or other parts&apos; BOMs cannot be deleted.
+              Deleted items are removed from your lists but kept &mdash; quotes, jobs, and BOMs
+              that use them keep working, and re-importing the item restores it.
             </Typography>
           </Box>
         </DialogContent>

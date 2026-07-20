@@ -69,6 +69,7 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
       `
     )
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .in('production_status', ['not_started', 'in_progress']);
 
   if (error) throw error;
@@ -144,6 +145,7 @@ export async function getLowStockPartsAlerts(
     .from('parts')
     .select('id, part_name, quantity, reorder_point, primary_unit')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .eq('is_stocked', true)
     .not('reorder_point', 'is', null);
 

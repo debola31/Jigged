@@ -4,7 +4,7 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
   const chainMethods = [
     'from', 'select', 'insert', 'update', 'delete',
-    'eq', 'neq', 'or', 'ilike', 'in', 'order', 'range', 'single', 'maybeSingle',
+    'eq', 'neq', 'or', 'ilike', 'in', 'is', 'order', 'range', 'single', 'maybeSingle',
   ];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
@@ -30,6 +30,7 @@ import {
   checkWorkCenterNameExists,
   createWorkCenter,
   deleteWorkCenter,
+  bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
 
 describe('workCentersAccess', () => {
@@ -133,9 +134,29 @@ describe('workCentersAccess', () => {
   });
 
   describe('deleteWorkCenter', () => {
-    it('throws a friendly error on FK violation (23503)', async () => {
-      mockQueryBuilder.error = { code: '23503', message: 'fk violation' };
-      await expect(deleteWorkCenter('wc1')).rejects.toThrow(/routing operations/i);
+    it('archives the work center by stamping deleted_at instead of hard-deleting', async () => {
+      await deleteWorkCenter('wc1');
+      const updateArg = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(updateArg).toHaveProperty('deleted_at');
+      expect(updateArg.deleted_at).toBeTruthy();
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'wc1');
+      expect(mockQueryBuilder.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws when supabase returns an error', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(deleteWorkCenter('wc1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('bulkDeleteWorkCenters', () => {
+    it('archives each id by stamping deleted_at instead of hard-deleting', async () => {
+      await bulkDeleteWorkCenters(['wc1', 'wc2']);
+      const updateArg = (mockQueryBuilder.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(updateArg).toHaveProperty('deleted_at');
+      expect(updateArg.deleted_at).toBeTruthy();
+      expect(mockQueryBuilder.in).toHaveBeenCalledWith('id', ['wc1', 'wc2']);
+      expect(mockQueryBuilder.delete).not.toHaveBeenCalled();
     });
   });
 });

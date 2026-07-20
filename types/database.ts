@@ -399,6 +399,7 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
+          deleted_at: string | null
           id: string
           name: string
           updated_at: string | null
@@ -407,6 +408,7 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string | null
+          deleted_at?: string | null
           id?: string
           name: string
           updated_at?: string | null
@@ -415,6 +417,7 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string | null
+          deleted_at?: string | null
           id?: string
           name?: string
           updated_at?: string | null
@@ -1189,6 +1192,7 @@ export type Database = {
           customer_id: string | null
           customer_name: string | null
           customer_po_number: string | null
+          deleted_at: string | null
           due_date: string | null
           fulfillment_status: string
           id: string
@@ -1214,6 +1218,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
+          deleted_at?: string | null
           due_date?: string | null
           fulfillment_status: string
           id?: string
@@ -1239,6 +1244,7 @@ export type Database = {
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
+          deleted_at?: string | null
           due_date?: string | null
           fulfillment_status?: string
           id?: string
@@ -1556,6 +1562,7 @@ export type Database = {
           company_id: string
           costing_batch_quantity: number
           created_at: string
+          deleted_at: string | null
           description: string | null
           id: string
           is_location_tracked: boolean
@@ -1572,6 +1579,7 @@ export type Database = {
           company_id: string
           costing_batch_quantity?: number
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           is_location_tracked?: boolean
@@ -1588,6 +1596,7 @@ export type Database = {
           company_id?: string
           costing_batch_quantity?: number
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           is_location_tracked?: boolean
@@ -2216,6 +2225,7 @@ export type Database = {
           created_by: string | null
           customer_id: string | null
           customer_name: string | null
+          deleted_at: string | null
           expiration_date: string | null
           id: string
           lead_time_text: string | null
@@ -2238,6 +2248,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          deleted_at?: string | null
           expiration_date?: string | null
           id?: string
           lead_time_text?: string | null
@@ -2260,6 +2271,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          deleted_at?: string | null
           expiration_date?: string | null
           id?: string
           lead_time_text?: string | null
@@ -2735,6 +2747,7 @@ export type Database = {
           company_id: string
           country: string | null
           created_at: string
+          deleted_at: string | null
           id: string
           name: string
           postal_code: string | null
@@ -2748,6 +2761,7 @@ export type Database = {
           company_id: string
           country?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           name: string
           postal_code?: string | null
@@ -2761,6 +2775,7 @@ export type Database = {
           company_id?: string
           country?: string | null
           created_at?: string
+          deleted_at?: string | null
           id?: string
           name?: string
           postal_code?: string | null
@@ -2814,6 +2829,7 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string
+          deleted_at: string | null
           description: string | null
           id: string
           kind: string
@@ -2826,6 +2842,7 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           kind?: string
@@ -2838,6 +2855,7 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           kind?: string
@@ -2900,6 +2918,7 @@ export type Database = {
         }
         Returns: Json
       }
+      archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
       compute_job_fulfillment_status: {
         Args: { p_job_id: string }
         Returns: string
@@ -3052,6 +3071,14 @@ export type Database = {
         Returns: string
       }
       next_order_number: { Args: { company_uuid: string }; Returns: number }
+      parts_deletion_impact: {
+        Args: { p_ids: string[] }
+        Returns: {
+          bom_parents_count: number
+          jobs_count: number
+          quotes_count: number
+        }[]
+      }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }
         Returns: undefined

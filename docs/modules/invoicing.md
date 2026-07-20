@@ -78,7 +78,12 @@ to `partially_invoiced` via a trigger.
   allowed.
 - `updateJobPartPrice` — blocked per-part once `qty_invoiced > 0` (untouched parts on a
   partially-invoiced job stay repriceable).
-- `deleteJob` — still blocked when any created invoice (or shipment) exists.
+- `deleteJob` — **archives** the job (soft-delete via `deleted_at`); it never blocks. The
+  former "records-of-value" guards (blocking when the job had a created invoice or a
+  shipment) were **removed** — archiving preserves the row, so the invoice/shipment history
+  stays intact and every retained reference keeps resolving. `cancelJob` (the `cancelled`
+  production status) is a separate shop-floor outcome, not a deletion. See
+  [Architecture §16 — Deletion & Archiving Policy](../architecture.md#16-deletion--archiving-policy).
 
 ## Not built (deferred)
 

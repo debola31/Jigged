@@ -328,9 +328,22 @@ export default function PartWorkspace({
   const jobsCount = part.jobs_count ?? 0;
   const bomParentsCount = part.bom_parents_count ?? 0;
 
-  // Delete is gated by anything that references this part. The DB also blocks
-  // via FK, but disabling up-front beats waiting for a raw error.
-  const hasReferences = quotesCount > 0 || jobsCount > 0 || bomParentsCount > 0;
+  // "Delete" archives the part (soft-delete via archive_parts) and is NEVER
+  // blocked by references (see architecture.md §16). Quotes and jobs keep
+  // referencing the retained part; it is removed from other parts' BOMs, so
+  // their cost updates. These lines summarize that impact for the confirm dialog.
+  const deleteImpactLines: string[] = [];
+  if (bomParentsCount > 0) {
+    deleteImpactLines.push(
+      `Removed from ${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' BOM${bomParentsCount === 1 ? '' : 's'} — their cost will update`,
+    );
+  }
+  if (quotesCount > 0) {
+    deleteImpactLines.push(`Still on ${quotesCount} quote${quotesCount === 1 ? '' : 's'} — kept for history`);
+  }
+  if (jobsCount > 0) {
+    deleteImpactLines.push(`Still on ${jobsCount} job${jobsCount === 1 ? '' : 's'} — kept for history`);
+  }
 
   return (
     <Box>
@@ -345,7 +358,6 @@ export default function PartWorkspace({
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onDelete={() => setDeleteDialogOpen(true)}
-        hasReferences={hasReferences}
         actionLoading={actionLoading}
       />
 
@@ -431,24 +443,20 @@ export default function PartWorkspace({
         <DialogTitle>Delete Part?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{part.part_name}</strong>? This action cannot be
-            undone.
+            <strong>{part.part_name}</strong> will be hidden from your lists.
           </Typography>
-          {hasReferences && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              This part is referenced by{' '}
-              {[
-                quotesCount > 0 ? `${quotesCount} quote${quotesCount === 1 ? '' : 's'}` : null,
-                jobsCount > 0 ? `${jobsCount} job${jobsCount === 1 ? '' : 's'}` : null,
-                bomParentsCount > 0
-                  ? `${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' BOM${bomParentsCount === 1 ? '' : 's'}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(', ')}
-              . Remove those references before deleting.
-            </Alert>
+          {deleteImpactLines.length > 0 && (
+            <Box component="ul" sx={{ m: 0, mt: 2, pl: 3 }}>
+              {deleteImpactLines.map((line, i) => (
+                <Typography component="li" variant="body2" key={i} sx={{ mb: 0.5 }}>
+                  {line}
+                </Typography>
+              ))}
+            </Box>
           )}
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            You can bring it back by re-creating or re-importing the same name.
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)} disabled={actionLoading}>
@@ -458,7 +466,7 @@ export default function PartWorkspace({
             onClick={handleDelete}
             color="error"
             variant="contained"
-            disabled={actionLoading || hasReferences}
+            disabled={actionLoading}
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
             {actionLoading ? 'Deleting...' : 'Delete'}

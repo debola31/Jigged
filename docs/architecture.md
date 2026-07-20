@@ -467,3 +467,79 @@ read-path fallback — see the "No silent runtime fallbacks" principle in CLAUDE
 billing address into the QuickBooks invoice push (`api/services/quickbooks.py`).
 These are the remaining live-FK reads of identity fields on customer-facing/financial
 documents; apply the standard above when closing them.
+
+### 16. Deletion & Archiving Policy
+
+**"Delete" = archive (soft-delete), universally.** Every user-facing entity — `parts`,
+`customers`, `vendors`, `work_centers`, `jobs`, `quotes` — carries a nullable
+`deleted_at timestamptz`. The UI "Delete" action sets `deleted_at` instead of issuing a
+SQL `DELETE`, and it **never blocks**: the row survives, so every downstream reference
+(quote lines, job parts, shipments, invoices, BOM edges) keeps resolving and no foreign
+key can trap the user. This replaced the prior model where `ON DELETE RESTRICT` / `NO
+ACTION` FKs blocked deleting anything that was referenced.
+
+**Reads hide archived rows.** Every list / search / picker / count / dashboard query
+filters `deleted_at IS NULL` — centralised in the `utils/*Access.ts` read functions and
+the dashboard/alerts rollups. By-id reads (`getPart`, `getJob`, …) intentionally do *not*
+filter, so a direct link or a document's retained FK still resolves the archived row. A
+stray missing `deleted_at IS NULL` on a list/metric query is the classic soft-delete
+correctness bug — audit new queries for it.
+
+**Name is the natural identity; reuse revives.** The unique name constraints
+(`parts_unique_per_company (company_id, part_name)` and the `(company_id, name)`
+equivalents on customers/vendors/work_centers) stay **full** constraints — *not* partial
+indexes — because the data-import system upserts every entity on its name key
+(`ON CONFLICT (company_id, <name>) DO UPDATE`) and PostgREST cannot target a partial
+index. There is therefore only ever **one row per name**, and reusing an archived name
+**revives** that row rather than duplicating it:
+- **Import** (`api/routes/*_import_routes.py`): each upsert payload sets `deleted_at =
+  None`, so `DO UPDATE` un-archives + updates the row.
+- **Manual create** (`createPart` / `createVendor` / `createCustomer` /
+  `createWorkCenter`): the name-exists pre-check (`checkXNameExists`) is scoped to live
+  rows so an archived name doesn't falsely block; on the insert's `23505` the create path
+  revives the archived row (`reviveArchivedXByName`). A collision with a **live** row is
+  still a genuine duplicate error.
+
+**Parts also detach BOM edges on archive.** Archiving a part must honestly change derived
+numbers (no silent read-path fallback — see the CLAUDE.md "No silent runtime fallbacks"
+principle). The `archive_parts(uuid[])` RPC, in one transaction, stamps `deleted_at`
+**and** deletes the part's `parts_bom` rows where it is the *child*, so every parent
+part's live cost rollup (`compute_part_cost_at_qty`) recomputes without it. Its own BOM
+(where it is the *parent*) and its `part_location_stock` are left in place — hidden with
+the part, and they return if it is revived. Reviving a part does **not** re-add BOM
+memberships it was removed from — the deliberate "deleting changes pricing" trade-off.
+
+**Impact warning, never a block.** Deletion is confirmed through
+`components/common/DeleteImpactDialog.tsx`, which shows a consequence summary for both
+single and bulk deletes — for parts, sourced from the `parts_deletion_impact(uuid[])` RPC
+(how many quotes/jobs reference them, kept for history; how many other parts' costs will
+change). The dialog never prevents the delete.
+
+**Money/audit records: archive preserves them; only a permanent delete would destroy.**
+Because archive keeps the row, archiving a shipped/invoiced job or a converted quote is
+safe — its shipment/invoice/child-job history is intact, just hidden. The former "kept
+for recordkeeping" hard guards on `deleteJob` were therefore removed. Jobs keep an
+orthogonal `cancelled` production status (`cancelJob`/`reopenJob`) — a shop-floor
+outcome, not deletion.
+
+**Deferred (not built in v1): restore UX & permanent purge.** v1 archives and retains;
+there is intentionally **no** Trash / Restore / Permanent-delete UI. Restore stays
+possible (rows are retained; reuse-by-name already brings catalog entities back). When a
+permanent-purge / empty-trash is added later, money/audit rows (shipments, invoices, and
+rows referencing them) should be kept-and-reported, and any retention/purge job must
+carry the `company_id` tenant predicate under RLS.
+
+**Per-entity summary:**
+
+| Entity | "Delete" behaviour | Reuse-by-name | Notes |
+|---|---|---|---|
+| parts | archive; `archive_parts` RPC also strips BOM-child edges | revives | impact dialog shows quote/job/BOM-cost counts |
+| customers, vendors, work_centers | archive (`UPDATE deleted_at`) | revives | import upsert + create both revive |
+| jobs | archive (`UPDATE deleted_at`) | n/a | `cancelled` status is separate; records-of-value guards removed |
+| quotes | archive (`UPDATE deleted_at`) | n/a | `sweepExpiredQuotes` is a status change, not deletion |
+
+**Relationship to the Document Snapshot Standard (§15):** complementary. Snapshots keep a
+document readable if its master is edited/deleted; archive means the master usually is
+*not* deleted at all (the row persists), so a document's retained FK still resolves.
+Snapshots remain the correct belt-and-suspenders for true permanent deletion and for
+fields that must reflect the issue date.

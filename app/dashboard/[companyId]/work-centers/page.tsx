@@ -13,10 +13,6 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Tabs from '@mui/material/Tabs';
@@ -51,6 +47,7 @@ import { getCompany } from '@/utils/companyAccess';
 import { generateStationPlacards } from '@/utils/stationPlacardPdf';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { WorkCenter, WorkCenterKind } from '@/types/workCenter';
 import type { Vendor } from '@/types/vendor';
 
@@ -495,43 +492,14 @@ export default function WorkCentersPage() {
         </Card>
       )}
 
-      <Dialog
+      <DeleteImpactDialog
         open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ pb: 2 }}>Delete Work Centers</DialogTitle>
-        <DialogContent sx={{ pt: 0 }}>
-          <Typography variant="body1" sx={{ mb: 1 }}>
-            Are you sure you want to delete <strong>{selectedIds.length}</strong> work center
-            {selectedIds.length > 1 ? 's' : ''}?
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Work centers referenced by routing operations cannot be deleted.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button
-            onClick={() => setDeleteDialog({ open: false })}
-            disabled={deleting}
-            color="inherit"
-            size="large"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            variant="contained"
-            color="error"
-            disabled={deleting}
-            size="large"
-            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onClose={() => setDeleteDialog({ open: false })}
+        onConfirm={handleDeleteConfirm}
+        loading={deleting}
+        entityLabel="work center"
+        count={selectedIds.length}
+      />
 
       <Snackbar
         open={snackbar.open}

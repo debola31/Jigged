@@ -3454,15 +3454,9 @@ Operations Module _(historical — superseded by [Work Centers](modules/work-cen
 
   - Adjustment transactions - Can set quantity to any non-negative value (used for corrections/reconciliation)
 
-### Hard Delete (No Soft Delete)
+### Archive (Soft Delete)
 
-  Inventory items use hard delete (no deleted_at column). When an item is deleted:
-
-  - The inventory_items record is permanently removed
-
-  - Associated inventory_unit_conversions are cascade deleted
-
-  - inventory_transactions remain orphaned for audit purposes (store item_name snapshot)
+  Superseded by PR #580: inventory items (now `parts` rows with `is_stocked = true`) use **archive**, not hard delete. `parts` carries a nullable `deleted_at`, and "Delete" calls the `archive_parts` RPC (sets `deleted_at`, never blocks) instead of a SQL `DELETE`. The row is kept and hidden; `parts_unit_conversions` and `inventory_transactions` are kept (nothing cascades), and the ledger's `item_name` snapshot is preserved. See `docs/architecture.md` §16 for the authoritative deletion & archiving policy.
 
 [Invitation System](modules/invitation-system.md)
 ### 5.3 Demo Mode Flow

@@ -386,8 +386,9 @@ export default function CustomerForm({
         <DialogTitle>Delete Customer?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This will permanently delete the customer along with their contacts
-            and addresses.
+            This customer will be removed from your lists. Its contacts, addresses,
+            and any quotes or jobs that reference it are kept — and you can bring it
+            back by re-creating or re-importing the same name.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

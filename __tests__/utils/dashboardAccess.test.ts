@@ -37,6 +37,7 @@ function makeBuilder(table: string) {
   b.select = vi.fn(ret);
   b.eq = vi.fn(ret);
   b.in = vi.fn(ret);
+  b.is = vi.fn(ret);
   b.not = vi.fn((col: string) => {
     if (col === 'completed_at') state.completedFilter = true;
     return b;

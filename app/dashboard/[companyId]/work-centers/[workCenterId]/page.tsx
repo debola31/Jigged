@@ -93,9 +93,6 @@ export default function WorkCenterDetailPage() {
   }
 
   const isInternal = workCenter.kind === 'internal';
-  // Delete is gated by the routing_operations FK — the DB will reject the delete
-  // anyway, but checking up front lets us disable the button and explain why.
-  const hasReferences = workCenter.routing_operations_count > 0;
   const metadataCode =
     typeof workCenter.metadata?.code === 'string' ? (workCenter.metadata.code as string) : null;
 
@@ -129,17 +126,11 @@ export default function WorkCenterDetailPage() {
             Edit
           </Button>
 
-          <Tooltip
-            title={
-              hasReferences
-                ? 'Cannot delete — this work center is used by routing operations'
-                : 'Delete Work Center'
-            }
-          >
+          <Tooltip title="Delete Work Center">
             <span>
               <IconButton
                 onClick={() => setDeleteDialogOpen(true)}
-                disabled={actionLoading || hasReferences}
+                disabled={actionLoading}
                 sx={{
                   color: 'error.main',
                   '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)' },
@@ -313,14 +304,14 @@ export default function WorkCenterDetailPage() {
         <DialogTitle>Delete Work Center?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete <strong>{workCenter.name}</strong>? This action cannot
-            be undone.
+            Delete <strong>{workCenter.name}</strong>? It will be removed from your
+            work centers list. Routings that already use it keep working, and creating
+            a work center with the same name later brings it back.
           </Typography>
-          {hasReferences && (
-            <Alert severity="warning" sx={{ mt: 2 }}>
-              This work center is used by {workCenter.routing_operations_count} routing operation
-              {workCenter.routing_operations_count !== 1 ? 's' : ''}. Remove those references
-              before deleting.
+          {workCenter.routing_operations_count > 0 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              Used by {workCenter.routing_operations_count} routing operation
+              {workCenter.routing_operations_count !== 1 ? 's' : ''} — kept.
             </Alert>
           )}
         </DialogContent>
@@ -332,7 +323,7 @@ export default function WorkCenterDetailPage() {
             onClick={handleDelete}
             color="error"
             variant="contained"
-            disabled={actionLoading || hasReferences}
+            disabled={actionLoading}
             startIcon={
               actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
             }

@@ -36,6 +36,11 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 
   const supabase = {
     from: vi.fn().mockImplementation(() => builder),
+    // RPCs (archive_parts, parts_deletion_impact) resolve to the builder's current
+    // data/error, so a test stages them the same way it stages a query result.
+    rpc: vi
+      .fn()
+      .mockImplementation(() => Promise.resolve({ data: builder.data, error: builder.error })),
   };
 
   return { mockQueryBuilder: builder, mockSupabase: supabase };
@@ -60,6 +65,7 @@ import {
   updatePart,
   deletePart,
   bulkDeleteParts,
+  getPartsDeletionImpact,
   getJobsForPart,
   getQuotesForPart,
   getPartNotes,
@@ -541,6 +547,8 @@ describe('partsAccess utilities', () => {
 
       expect(mockQueryBuilder.ilike).toHaveBeenCalledWith('part_name', 'PART001');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
+      // Scoped to live rows so an archived name doesn't falsely block creation.
+      expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
       expect(result).toBe(true);
     });
 
@@ -605,7 +613,9 @@ describe('partsAccess utilities', () => {
       expect(result).toEqual(mockCreatedPart);
     });
 
-    it('throws error when insert fails', async () => {
+    it('re-throws a duplicate-name error when no archived part matches (a live duplicate)', async () => {
+      // 23505 with no archived same-name row → reviveArchivedPartByName returns null,
+      // so the original duplicate error is re-thrown (a genuine live duplicate).
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { message: 'Insert failed', code: '23505' };
 
@@ -647,46 +657,64 @@ describe('partsAccess utilities', () => {
   });
 
   describe('deletePart', () => {
-    it('deletes part by ID', async () => {
+    it('archives the part via the archive_parts RPC (never a hard delete, never blocks)', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = null;
 
       await deletePart('part-1');
 
-      expect(mockSupabase.from).toHaveBeenCalledWith('parts');
-      expect(mockQueryBuilder.delete).toHaveBeenCalled();
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'part-1');
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('archive_parts', { p_ids: ['part-1'] });
     });
 
-    it('throws user-friendly error on FK constraint violation', async () => {
+    it('surfaces an error if the archive RPC fails', async () => {
       mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { message: 'FK violation', code: '23503' };
+      mockQueryBuilder.error = { message: 'archive failed', code: 'P0001' };
 
-      await expect(deletePart('part-1')).rejects.toThrow(
-        "Cannot delete this part because it is referenced by quotes, jobs, or another part's BOM. Remove those references first."
-      );
+      await expect(deletePart('part-1')).rejects.toThrow();
     });
   });
 
   describe('bulkDeleteParts', () => {
-    it('deletes multiple parts by IDs', async () => {
+    it('archives multiple parts via the archive_parts RPC', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = null;
 
       await bulkDeleteParts(['part-1', 'part-2', 'part-3']);
 
-      expect(mockSupabase.from).toHaveBeenCalledWith('parts');
-      expect(mockQueryBuilder.delete).toHaveBeenCalled();
-      expect(mockQueryBuilder.in).toHaveBeenCalledWith('id', ['part-1', 'part-2', 'part-3']);
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('archive_parts', {
+        p_ids: ['part-1', 'part-2', 'part-3'],
+      });
     });
 
-    it('throws user-friendly error on FK constraint violation', async () => {
-      mockQueryBuilder.data = null;
-      mockQueryBuilder.error = { message: 'FK violation', code: '23503' };
+    it('is a no-op for an empty list', async () => {
+      await bulkDeleteParts([]);
+      expect(mockSupabase.rpc).not.toHaveBeenCalled();
+    });
+  });
 
-      await expect(bulkDeleteParts(['part-1'])).rejects.toThrow(
-        'Cannot delete some parts because they are referenced by quotes, jobs, or BOM rows. Remove those references first.'
-      );
+  describe('getPartsDeletionImpact', () => {
+    it('returns zero counts for an empty selection without calling the RPC', async () => {
+      const impact = await getPartsDeletionImpact([]);
+      expect(impact).toEqual({ partCount: 0, quotesCount: 0, jobsCount: 0, bomParentsCount: 0 });
+      expect(mockSupabase.rpc).not.toHaveBeenCalled();
+    });
+
+    it('maps the parts_deletion_impact RPC row into the impact shape', async () => {
+      mockQueryBuilder.data = [{ quotes_count: 2, jobs_count: 1, bom_parents_count: 5 }];
+      mockQueryBuilder.error = null;
+
+      const impact = await getPartsDeletionImpact(['a', 'b']);
+
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('parts_deletion_impact', { p_ids: ['a', 'b'] });
+      expect(impact).toEqual({ partCount: 2, quotesCount: 2, jobsCount: 1, bomParentsCount: 5 });
+    });
+
+    it('falls back to zero counts if the RPC errors (best-effort so the dialog still opens)', async () => {
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = { message: 'nope' };
+
+      const impact = await getPartsDeletionImpact(['a']);
+      expect(impact).toEqual({ partCount: 1, quotesCount: 0, jobsCount: 0, bomParentsCount: 0 });
     });
   });
 });

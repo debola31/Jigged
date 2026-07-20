@@ -11,13 +11,8 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import InputAdornment from '@mui/material/InputAdornment';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import CircularProgress from '@mui/material/CircularProgress';
 import MuiLink from '@mui/material/Link';
 
 import SearchIcon from '@mui/icons-material/Search';
@@ -50,6 +45,7 @@ import { getAllCustomers } from '@/utils/customerAccess';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
+import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { QuoteWithRelations, QuoteStatus, QuoteFilters, CompanyMember } from '@/types/quote';
 import type { Customer } from '@/types/customer';
 
@@ -526,59 +522,15 @@ export default function QuotesPage() {
       )}
 
       {/* Delete Dialog */}
-      <Dialog
+      <DeleteImpactDialog
         open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false, type: 'single' })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ pb: 2 }}>
-          {deleteDialog.type === 'single' ? 'Delete Quote' : 'Delete Quotes'}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 0 }}>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body1" sx={{ mb: 1 }}>
-              {deleteDialog.type === 'single' ? (
-                <>
-                  Are you sure you want to delete <strong>{deleteDialog.quoteNumber}</strong>?
-                </>
-              ) : (
-                <>
-                  Are you sure you want to delete <strong>{selectedIds.length}</strong> quote
-                  {selectedIds.length > 1 ? 's' : ''}?
-                </>
-              )}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              This action cannot be undone.
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button
-            type="button"
-            onClick={() => setDeleteDialog({ open: false, type: 'single' })}
-            disabled={deleting}
-            color="inherit"
-            size="large"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleDeleteConfirm}
-            variant="contained"
-            color="error"
-            disabled={deleting}
-            size="large"
-            startIcon={
-              deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
-            }
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onClose={() => setDeleteDialog({ open: false, type: 'single' })}
+        onConfirm={handleDeleteConfirm}
+        loading={deleting}
+        entityLabel="quote"
+        count={deleteDialog.type === 'single' ? 1 : selectedIds.length}
+        revivableByName={false}
+      />
 
       {/* Snackbar */}
       <Snackbar

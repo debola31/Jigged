@@ -793,6 +793,45 @@ class TestPartsExecuteEndpoint:
         assert data["skipped_count"] == 0   # nothing skipped
 
     @pytest.mark.unit
+    async def test_execute_upserts_clear_deleted_at_to_revive_archived_parts(self, test_client):
+        """Re-importing a name revives an archived part: every parts upsert payload carries
+        deleted_at=None so ON CONFLICT (company_id, part_name) DO UPDATE un-archives the row
+        rather than leaving the re-imported part hidden. See docs/architecture.md §16."""
+        upsert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
+            "pricing_columns": [],
+            "rows": [
+                {"Part Name": "WIDGET-1", "Unit": "ea"},
+                {"Part Name": "WIDGET-2", "Unit": "ea"},
+            ],
+            "skip_conflicts": True,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[], upsert_log=upsert_log
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+
+        # Every parts upsert (keyed on company_id,part_name) must set deleted_at=None so the
+        # DO UPDATE path revives an archived same-name row.
+        parts_rows = [
+            row
+            for entry in upsert_log
+            if entry.get("on_conflict") == "company_id,part_name"
+            for row in (entry["data"] if isinstance(entry["data"], list) else [entry["data"]])
+        ]
+        assert parts_rows, "expected a parts upsert on (company_id, part_name)"
+        assert all(row.get("deleted_at", "MISSING") is None for row in parts_rows)
+
+    @pytest.mark.unit
     async def test_execute_imports_stocked_part_with_unit_and_quantity(
         self, test_client
     ):

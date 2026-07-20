@@ -53,7 +53,7 @@ the generic "low-stakes ⇒ no dialog" advice.
 
 | Target | Stakes | Treatment |
 |---|---|---|
-| **High-impact / hard to reverse** — e.g. delete a whole **Part** (cascades to routing; blocked by references) | High | **Confirmation dialog**, danger style, consequences stated, Delete kept away from Cancel ([NN/g — proximity](https://www.nngroup.com/articles/proximity-consequential-options/)). |
+| **High-impact / hard to reverse** — e.g. delete a whole **Part**, which **archives** it (soft-delete via `deleted_at`) and never blocks | High | **Confirmation dialog**, danger style, consequences stated, Delete kept away from Cancel ([NN/g — proximity](https://www.nngroup.com/articles/proximity-consequential-options/)). This is [`DeleteImpactDialog`](../components/common/DeleteImpactDialog.tsx), which states the impact (quotes/jobs that reference the part, other parts whose cost will change) — a warning, never a block. See [Architecture §16](architecture.md#16-deletion--archiving-policy). |
 | **Immediately-persisted row delete** — BOM material row, routing operation row (auto-saved on change) | Low–med | **Lightweight confirmation dialog** — same shape as the Part delete, less copy. This is the safety-net *floor*; see the audience note for why NOT an Undo snackbar. |
 | **Staged (explicit-Save) edit** — pricing-tier removal | Low | **No dialog.** Removal is in-memory until the user clicks Save; the dirty-state indicator + the option to walk away unsaved *is* the safety net. |
 
@@ -150,11 +150,15 @@ When an action can't be performed in the current state, prefer (in order):
    than hiding or graying out. A *disabled* button isn't focusable, so keyboard /
    screen-reader users never learn it exists or why, and a hover tooltip hides the
    reason ([NN/g — Why Disabled Buttons Hurt UX](https://www.nngroup.com/videos/why-disabled-buttons-hurt-ux-and-how-to-fix-them/), [NN/g — Disabled Accessibility: the pragmatic approach](https://www.nngroup.com/articles/disabled-accessibility-the-pragmatic-approach/), [Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/)).
-   Example: Delete shows on **every** job, in any production status; clicking
-   explains the blocker when there is one — *kept for recordkeeping* when the job
-   has a shipment or a QuickBooks invoice — instead of hiding the button or
-   running a confirm→error two-step. Removal is gated by *records of value*, not
-   the status label (the discriminator shop ERPs use for hard-delete).
+   Example: Delete shows on **every** job, in any production status. It now
+   **archives** the job (soft-delete via `deleted_at`) rather than hard-deleting, so
+   it **always succeeds** — presented through a consequence-summary dialog, never a
+   confirm→error two-step. The former *records-of-value* guards (which blocked a job
+   that had a shipment or a QuickBooks invoice) were **removed**: archive preserves
+   that history intact, so there is nothing left to block (see
+   [Architecture §16](architecture.md#16-deletion--archiving-policy)). The
+   keep-visible-and-explain rule still governs genuinely-blocked actions — see the
+   invoiced-line lock in rule 2.
 2. **Disable only for a stable lock** whose disabled state is itself meaningful,
    paired with a *visible* reason (not hover-only); prefer `aria-disabled` so it
    stays focusable. Example: once invoiced in QuickBooks, "Edit line" is disabled

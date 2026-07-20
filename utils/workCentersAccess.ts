@@ -26,6 +26,7 @@ export async function getAllWorkCenters(
     .from('work_centers')
     .select(WORK_CENTER_COLUMNS)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order(sortField, { ascending: sortDirection === 'asc' });
 
   if (search?.trim()) {
@@ -57,6 +58,7 @@ export async function getWorkCentersByKind(
     .from('work_centers')
     .select(WORK_CENTER_COLUMNS)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .eq('kind', kind)
     .order('name', { ascending: true });
 
@@ -86,6 +88,7 @@ export async function getWorkCentersFlat(
     .from('work_centers')
     .select(WORK_CENTER_COLUMNS)
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .order('name', { ascending: true });
 
   if (options?.kind) {
@@ -140,6 +143,7 @@ export async function getWorkCentersForRouting(
       .from('work_centers')
       .select(`id, name, kind, labor_rate, vendor:vendors(name)`)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order('name', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -234,7 +238,10 @@ export async function getWorkCenterWithRelations(
 }
 
 /**
- * Check if a work center name already exists for a company.
+ * Check if a *live* work center name already exists for a company. Archived work
+ * centers are intentionally ignored: their name is free to reuse, and reusing it
+ * revives the archived row (see createWorkCenter). Scoping this to `deleted_at IS
+ * NULL` is what stops an archived name from falsely blocking creation.
  */
 export async function checkWorkCenterNameExists(
   companyId: string,
@@ -247,6 +254,7 @@ export async function checkWorkCenterNameExists(
     .from('work_centers')
     .select('id')
     .eq('company_id', companyId)
+    .is('deleted_at', null)
     .ilike('name', name);
 
   if (excludeId) {
@@ -265,6 +273,11 @@ export async function checkWorkCenterNameExists(
 
 /**
  * Create a new work center.
+ *
+ * A unique-name collision (23505) with an ARCHIVED work center means the user is
+ * reusing a name they previously archived. Name is the natural identity here, so
+ * revive that row (un-archive + apply the new form values) instead of blocking. A
+ * collision with a LIVE work center is a genuine duplicate — re-throw the error.
  */
 export async function createWorkCenter(
   companyId: string,
@@ -287,7 +300,59 @@ export async function createWorkCenter(
     .single();
 
   if (error) {
+    if (error.code === '23505') {
+      const revived = await reviveArchivedWorkCenterByName(companyId, formData);
+      if (revived) return revived;
+    }
     console.error('Error creating work center:', error);
+    throw error;
+  }
+
+  return data as WorkCenter;
+}
+
+/**
+ * Revive the archived work center that holds `formData.name` for this company,
+ * applying the new form values and clearing `deleted_at`. Returns the revived work
+ * center, or null when the colliding row is *live* (a real duplicate the caller
+ * should surface as an error). There is at most one row per (company_id, name) —
+ * the full unique constraint work_centers_unique_per_company.
+ */
+async function reviveArchivedWorkCenterByName(
+  companyId: string,
+  formData: WorkCenterFormData,
+): Promise<WorkCenter | null> {
+  const supabase = getSupabase();
+  const name = formData.name.trim();
+
+  const { data: existing } = await supabase
+    .from('work_centers')
+    .select('id, deleted_at')
+    .eq('company_id', companyId)
+    .eq('name', name)
+    .maybeSingle();
+
+  // No archived match (or the collision was with a live work center) → let the caller throw.
+  if (!existing || existing.deleted_at === null) return null;
+
+  const { data, error } = await supabase
+    .from('work_centers')
+    .update({
+      name,
+      kind: formData.kind,
+      vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
+      labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
+      description: formData.description.trim() || null,
+      metadata: {},
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id)
+    .select(WORK_CENTER_COLUMNS)
+    .single();
+
+  if (error) {
+    console.error('Error reviving archived work center:', error);
     throw error;
   }
 
@@ -326,26 +391,29 @@ export async function updateWorkCenter(
 }
 
 /**
- * Delete a work center.
+ * Archive a work center ("Delete" in the UI). Never blocked by references: the row
+ * and every routing operation that references it survive — the work center is just
+ * hidden from lists and pickers (reads filter deleted_at IS NULL). Reusing its name
+ * later revives it (see createWorkCenter).
  */
 export async function deleteWorkCenter(workCenterId: string): Promise<void> {
   const supabase = getSupabase();
 
-  const { error } = await supabase.from('work_centers').delete().eq('id', workCenterId);
+  const { error } = await supabase
+    .from('work_centers')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', workCenterId);
 
   if (error) {
-    if (error.code === '23503') {
-      throw new Error(
-        'Cannot delete this work center because it is used in routing operations. Remove those references first.',
-      );
-    }
-    console.error('Error deleting work center:', error);
+    console.error('Error archiving work center:', error);
     throw error;
   }
 }
 
 /**
- * Bulk delete work centers.
+ * Bulk archive work centers ("Delete" in the UI). Stamps deleted_at per batch;
+ * never blocked by routing-operation references — archived rows are just hidden
+ * from lists and pickers. Reusing a name later revives that row (see createWorkCenter).
  */
 export async function bulkDeleteWorkCenters(workCenterIds: string[]): Promise<void> {
   if (workCenterIds.length === 0) return;
@@ -359,16 +427,14 @@ export async function bulkDeleteWorkCenters(workCenterIds: string[]): Promise<vo
   for (let i = 0; i < validIds.length; i += BATCH_SIZE) {
     const batch = validIds.slice(i, i + BATCH_SIZE);
 
-    const { error } = await supabase.from('work_centers').delete().in('id', batch);
+    const { error } = await supabase
+      .from('work_centers')
+      .update({ deleted_at: new Date().toISOString() })
+      .in('id', batch);
 
     if (error) {
-      if (error.code === '23503') {
-        throw new Error(
-          'Cannot delete some work centers because they are used in routing operations. Remove those references first.',
-        );
-      }
-      console.error('Error bulk deleting work centers:', error);
-      throw new Error(error.message || 'Failed to delete work centers');
+      console.error('Error archiving work centers:', error);
+      throw new Error(error.message || 'Failed to archive work centers');
     }
   }
 }
@@ -409,7 +475,8 @@ export async function bulkImportWorkCenters(
   const { data: vendorRows } = await supabase
     .from('vendors')
     .select('id, name')
-    .eq('company_id', companyId);
+    .eq('company_id', companyId)
+    .is('deleted_at', null);
   const vendorIdByName = new Map<string, string>();
   for (const v of (vendorRows || []) as Array<{ id: string; name: string }>) {
     vendorIdByName.set(v.name.toLowerCase(), v.id);

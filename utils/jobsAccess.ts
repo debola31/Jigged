@@ -5,7 +5,6 @@
 // Supabase client (incremental adoption)" for the rollout contract.
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
-import { deleteStoredFilesForJobs } from '@/utils/jobAttachmentsAccess';
 import type { Database } from '@/types/database';
 
 // Update payloads for tables this file mutates conditionally. The typed
@@ -31,12 +30,9 @@ import type {
 import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
-import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
+import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { orIlikeValue } from '@/utils/searchFilter';
-import {
-  getQuickBooksInvoiceLinkForJob,
-  getJobPartInvoiceSummaries,
-} from '@/utils/quickbooksAccess';
+import { getJobPartInvoiceSummaries } from '@/utils/quickbooksAccess';
 
 /**
  * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
@@ -123,6 +119,7 @@ export async function getAllJobs(
         )
       `)
       .eq('company_id', companyId)
+      .is('deleted_at', null)
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -971,26 +968,20 @@ export async function getJobQuantitiesForQuote(
 // ============== Job Lifecycle ==============
 
 /**
- * Delete a job. Deletion is gated by RECORDS OF VALUE, not production status: a
- * job can be removed in any production state (queued, running, completed, or
- * cancelled) as long as it has no shipment records and no QuickBooks invoice —
- * deleting either would orphan a real record. The discriminator is history, not
- * the status label (matches how shop ERPs gate hard-delete). This guard lives
- * here, not just in the UI, so a bypassed caller still can't remove a
- * shipped/invoiced job.
- *
- * Cascades remove job_parts, job_operations, job_materials, job_notes,
- * job_attachments (rows) and the quickbooks_invoice_links; inventory_transactions
- * keep their rows with job_id set null. Two things are handled explicitly:
- *   - attachment files in storage — cleaned up (best-effort) before the delete.
- *   - shipments — shipments_job_id_fkey has no ON DELETE, so any shipment row
- *     (voided included) blocks deletion rather than tripping the FK / losing
- *     fulfillment history.
+ * Archive a job ("Delete" in the UI). Never blocked by references, and never
+ * gated by production status: the row and ALL of its history — shipments,
+ * QuickBooks invoices, child job_parts / operations / materials, notes, and
+ * attachment files — survive untouched. Archiving just stamps deleted_at, which
+ * hides the job from the active jobs list (reads filter deleted_at IS NULL)
+ * while a direct link to it still resolves and every downstream reference
+ * (shipments, invoices, child jobs) keeps resolving. Because nothing is
+ * destroyed, there are no records-of-value guards — archiving is always safe.
  */
 export async function deleteJob(jobId: string, companyId: string): Promise<void> {
   const supabase = getSupabase();
 
-  // 1. Existence + tenant scope.
+  // Existence + tenant scope. No shipment/invoice guards: archiving preserves
+  // the row and its history, so it can never orphan a record.
   const { data: jobRow, error: loadErr } = await supabase
     .from('jobs')
     .select('id')
@@ -999,7 +990,7 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
     .maybeSingle();
 
   if (loadErr) {
-    console.error('Error loading job for delete:', loadErr);
+    console.error('Error loading job for archive:', loadErr);
     throw new Error(
       friendlyErrorMessage(loadErr, { entity: 'job', fallback: 'Failed to load job.' }),
     );
@@ -1008,31 +999,14 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
     throw new Error('Job not found.');
   }
 
-  // 2. Records-of-value guards (status-agnostic). A shipment or a created invoice
-  //    means the job is kept for recordkeeping rather than hard-deleted.
-  if ((await countShipmentsForJob(jobId)) > 0) {
-    throw new Error(
-      "This job has shipment records, so it's kept for recordkeeping and can't be deleted.",
-    );
-  }
-  const invoiceLink = await getQuickBooksInvoiceLinkForJob(companyId, jobId);
-  if (invoiceLink) {
-    throw new Error(
-      "This job has been invoiced in QuickBooks, so it's kept for recordkeeping and can't be deleted.",
-    );
-  }
-
-  // 3. Clean up storage (best-effort), then delete the job row.
-  await deleteStoredFilesForJobs([jobId]);
-
   const { error } = await supabase
     .from('jobs')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', jobId)
     .eq('company_id', companyId);
 
   if (error) {
-    console.error('Error deleting job:', error);
+    console.error('Error archiving job:', error);
     throw new Error(
       friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete job.' }),
     );

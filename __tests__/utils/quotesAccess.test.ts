@@ -17,6 +17,8 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
     'ilike',
     'or',
     'in',
+    'is',
+    'lt',
     'order',
     'range',
     'single',
@@ -556,64 +558,40 @@ describe('quotesAccess utilities', () => {
   });
 
   describe('deleteQuote', () => {
-    it('deletes the quote row (no attachment cleanup)', async () => {
+    it('archives the quote via deleted_at (soft delete, no attachment cleanup)', async () => {
+      const eqId = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ data: null, error: null }),
+      });
+      const updateSpy = vi.fn().mockReturnValue({ eq: eqId });
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
         if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            delete: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: null,
-                  error: null,
-                }),
-              }),
-            }),
-          };
+          return { ...mockQueryBuilder, update: updateSpy };
         }
         return mockQueryBuilder;
       });
 
       await expect(deleteQuote('quote-1', 'company-1')).resolves.toBeUndefined();
-      // Quote attachments are gone — storage helper must not be involved.
+
+      // Archive = stamp deleted_at via .update(...), scoped by id + company —
+      // never a hard .delete().
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ deleted_at: expect.any(String) }),
+      );
+      expect(eqId).toHaveBeenCalledWith('id', 'quote-1');
+      // Quote attachments survive the archive — storage helper must not be involved.
       expect(mockStorageHelpers.deleteFileFromStorage).not.toHaveBeenCalled();
     });
   });
 
   describe('bulkDeleteQuotes', () => {
-    it('deletes multiple quotes in batches', async () => {
+    it('archives multiple quotes in batches via deleted_at', async () => {
+      const inSpy = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ data: null, error: null }),
+      });
+      const updateSpy = vi.fn().mockReturnValue({ in: inSpy });
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              in: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: [],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
         if (table === 'quotes') {
-          return {
-            ...mockQueryBuilder,
-            delete: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              in: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: null,
-                  error: null,
-                }),
-              }),
-            }),
-          };
+          return { ...mockQueryBuilder, update: updateSpy };
         }
         return mockQueryBuilder;
       });
@@ -621,6 +599,11 @@ describe('quotesAccess utilities', () => {
       await bulkDeleteQuotes(['quote-1', 'quote-2', 'quote-3'], 'company-1');
 
       expect(mockSupabase.from).toHaveBeenCalledWith('quotes');
+      // Archive = stamp deleted_at via .update(...), scoped by id-set + company.
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ deleted_at: expect.any(String) }),
+      );
+      expect(inSpy).toHaveBeenCalledWith('id', ['quote-1', 'quote-2', 'quote-3']);
     });
 
     it('handles empty array gracefully', async () => {
@@ -630,35 +613,15 @@ describe('quotesAccess utilities', () => {
     });
 
     it('filters out invalid IDs', async () => {
+      const inSpy = vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ data: null, error: null }),
+      });
+      const updateSpy = vi.fn().mockReturnValue({ in: inSpy });
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              in: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: [],
-                  error: null,
-                }),
-              }),
-            }),
-          };
+        if (table === 'quotes') {
+          return { ...mockQueryBuilder, update: updateSpy };
         }
-        return {
-          ...mockQueryBuilder,
-          delete: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            in: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                data: null,
-                error: null,
-              }),
-            }),
-          }),
-        };
+        return mockQueryBuilder;
       });
 
       await bulkDeleteQuotes(
@@ -666,46 +629,14 @@ describe('quotesAccess utilities', () => {
         'company-1',
       );
 
-      // Should only call with valid IDs
-      expect(mockSupabase.from).toHaveBeenCalled();
+      // Only the truthy string IDs reach the archive .in() clause.
+      expect(inSpy).toHaveBeenCalledWith('id', ['valid-id', 'another-valid']);
     });
 
-    it('throws user-friendly error on FK constraint violation', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
-        if (table === 'quote_attachments') {
-          return {
-            ...mockQueryBuilder,
-            select: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              in: vi.fn().mockReturnValue({
-                ...mockQueryBuilder,
-                eq: vi.fn().mockReturnValue({
-                  data: [],
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        return {
-          ...mockQueryBuilder,
-          delete: vi.fn().mockReturnValue({
-            ...mockQueryBuilder,
-            in: vi.fn().mockReturnValue({
-              ...mockQueryBuilder,
-              eq: vi.fn().mockReturnValue({
-                data: null,
-                error: { code: '23503', message: 'FK violation' },
-              }),
-            }),
-          }),
-        };
-      });
-
-      await expect(bulkDeleteQuotes(['quote-1'], 'company-1')).rejects.toThrow(
-        'Cannot delete some quotes because they have associated jobs.'
-      );
-    });
+    // The old "throws a user-friendly error on 23503 FK violation" test was
+    // removed: bulk delete now archives (stamps deleted_at) instead of hard
+    // deleting, so a quote with associated jobs no longer hits an FK constraint
+    // — archiving never blocks on references.
   });
 
   // ============== Status Transition Tests ==============

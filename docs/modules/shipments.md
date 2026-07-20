@@ -121,7 +121,7 @@ The single entry point for shipment creation now that a slip belongs to one job.
 | `getShipmentById(shipmentId)` | Hydrated `ShipmentWithRelations` (customer, addresses, nested line_items with job + part); resolves `created_by_member` |
 | `getShipmentsForJob(jobId)` | Non-voided shipments filtered via `line_items.job_part.job_id`; newest-first; batch-resolves `created_by_member` |
 | `listShipmentsForCompany(companyId, filters?)` | Flat list with optional customer/date/voided filters. No current caller — kept for reporting/future surfaces. |
-| `countShipmentsForJob(jobId)` | Counts **all** rows (voided included) via the direct `shipments.job_id` column; used as `deleteJob`'s pre-delete FK guard |
+| `countShipmentsForJob(jobId)` | Counts **all** rows (voided included) via the direct `shipments.job_id` column. (No longer gates `deleteJob` — deleting a job now archives it and preserves shipment history; see `docs/architecture.md` §16.) |
 | `getJobPartShipmentSummaries(jobId)` | `{job_part_id, qty_ordered, qty_shipped, qty_remaining (clamped ≥0), last_ship_date}` |
 | `getJobShipmentSummary(jobId)` | Job-level rollup: ordered/shipped/remaining, last ship date, latest packing slip #, count |
 | `getOpenJobPartsForCustomer(companyId, customerId, filter?)` | Feeds only `ShipmentForm`'s dormant customer-mode branch — no live caller; slated for removal with that branch (Planned, see #550) |
@@ -170,10 +170,14 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a job crossing forward into `fully_shipped`, **when** the closing shipment commits, **then** exactly one `job_fulfillment_audit` row records it, keyed to the triggering shipment — *verified by `api/tests/integration/test_shipment_void_permutations.py > 'TestExplicitEdgeCases' > 'test_audit_causal_link_second_ship_closes'` AND `> 'TestExplicitEdgeCases' > 'test_audit_on_void_and_reship_two_rows'`*.
 - [ ] **Given** any generated ship/void sequence up to length 4, **when** replayed against the DB, **then** column, job status, audit count, and `job_last_ship_date` all match the oracle — *verified by `api/tests/integration/test_shipment_void_permutations.py > 'test_all_short_permutations_agree_with_oracle'`*.
 
-**Delete guard (job referencing shipments)**
+**Delete = archive (shipment history preserved, never blocks)**
 
-- [ ] **Given** a job with no shipments or invoices, **when** it is deleted, **then** the delete succeeds scoped to `company_id` — *verified by `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'deletes a job with no shipments or invoice, scoped to company_id (any status)'`*.
-- [ ] **Given** a job that has shipment records, **when** deletion is attempted, **then** it is rejected and nothing is deleted (the `countShipmentsForJob` guard, counting voided rows too) — *verified by `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'rejects when the job has shipment records and never deletes'` AND `__tests__/utils/shipmentsAccess.test.ts > 'countShipmentsForJob' > 'counts all shipment rows for a job via the direct job_id column'`*.
+Deleting a job **archives** it (sets `jobs.deleted_at`) rather than hard-deleting, so its
+shipment records survive intact and nothing is ever blocked. The old
+`countShipmentsForJob`/invoice "records-of-value" guards were removed. See `docs/architecture.md` §16.
+
+- [ ] **Given** a job with no shipments or invoices, **when** it is deleted, **then** it is archived (`deleted_at` stamped) scoped to `id` + `company_id` — *verified by `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'archives a job by stamping deleted_at, scoped to id + company_id (any status)'`*.
+- [ ] **Given** a job that has shipment records (and an invoice), **when** it is deleted, **then** it is still archived (not blocked) and the shipment/invoice history is preserved — *verified by `__tests__/utils/jobsAccess.test.ts > 'deleteJob' > 'archives even when the job has shipments and an invoice (records-of-value guards removed)'`*.
 
 **Customer-consistency (DB triggers)**
 

@@ -503,6 +503,10 @@ async def execute_import(
                 BATCH_SIZE = 500
                 name_to_customer_id: dict[str, str] = {}
                 customers_payload = [p["customer_data"] for p in prepared]
+                # Reusing an archived customer's name revives it: clearing deleted_at on the
+                # upsert's DO UPDATE un-archives the row instead of leaving it hidden.
+                for row in customers_payload:
+                    row["deleted_at"] = None
                 for batch_start in range(0, len(customers_payload), BATCH_SIZE):
                     batch = customers_payload[batch_start : batch_start + BATCH_SIZE]
                     response = (

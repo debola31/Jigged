@@ -489,6 +489,10 @@ async def execute_import(
         }
         imported_count = sum(1 for r in rows_to_write if r["name"].lower() not in existing_names)
         updated_count = len(rows_to_write) - imported_count
+        # Reusing an archived work center's name revives it: clearing deleted_at on the upsert's
+        # DO UPDATE un-archives the row instead of leaving the re-imported work center hidden.
+        for row in rows_to_write:
+            row["deleted_at"] = None
         if rows_to_write:
             try:
                 for batch_start in range(0, len(rows_to_write), BATCH_SIZE):

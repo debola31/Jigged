@@ -11,12 +11,7 @@ import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import FormControl from '@mui/material/FormControl';
@@ -47,10 +42,32 @@ import type {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
-import { getAllParts, bulkDeleteParts } from '@/utils/partsAccess';
+import {
+  getAllParts,
+  bulkDeleteParts,
+  getPartsDeletionImpact,
+  type PartsDeletionImpact,
+} from '@/utils/partsAccess';
 import { getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
+import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { Part } from '@/types/part';
+
+/** Turn the aggregate deletion impact into human-readable consequence lines for the dialog. */
+function buildPartsImpactLines(impact: PartsDeletionImpact | null): string[] {
+  if (!impact) return [];
+  const { quotesCount, jobsCount, bomParentsCount } = impact;
+  const lines: string[] = [];
+  if (bomParentsCount > 0)
+    lines.push(
+      `Removed from ${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' BOM${bomParentsCount === 1 ? '' : 's'} — their cost will update`,
+    );
+  if (quotesCount > 0)
+    lines.push(`Still on ${quotesCount} quote${quotesCount === 1 ? '' : 's'} — kept for history`);
+  if (jobsCount > 0)
+    lines.push(`Still on ${jobsCount} job${jobsCount === 1 ? '' : 's'} — kept for history`);
+  return lines;
+}
 
 // Augment Part with the "would the quote form accept this without a
 // warning" flag. Computed at render time from the priceableIds set so AG
@@ -86,7 +103,10 @@ export default function PartsPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<PartRow>>(null);
 
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    impact: PartsDeletionImpact | null;
+  }>({ open: false, impact: null });
   const [deleting, setDeleting] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{
@@ -225,7 +245,14 @@ export default function PartsPage() {
     }
   };
 
-  const handleBulkDeleteClick = () => setDeleteDialog({ open: true });
+  const handleBulkDeleteClick = () => {
+    // Open immediately; fetch the impact counts in the background so the dialog
+    // isn't gated on a round trip (they fill in when ready). Best-effort.
+    setDeleteDialog({ open: true, impact: null });
+    getPartsDeletionImpact(selectedIds)
+      .then((impact) => setDeleteDialog((d) => (d.open ? { open: true, impact } : d)))
+      .catch(() => {});
+  };
 
   const handleDeleteConfirm = async () => {
     setDeleting(true);
@@ -237,7 +264,7 @@ export default function PartsPage() {
         gridRef.current.api.deselectAll();
       }
       await fetchParts();
-      setDeleteDialog({ open: false });
+      setDeleteDialog({ open: false, impact: null });
       setSnackbar({
         open: true,
         message: `Deleted ${count} part${count === 1 ? '' : 's'}`,
@@ -249,7 +276,7 @@ export default function PartsPage() {
         message: error instanceof Error ? error.message : 'An error occurred',
         severity: 'error',
       });
-      setDeleteDialog({ open: false });
+      setDeleteDialog({ open: false, impact: null });
     } finally {
       setDeleting(false);
     }
@@ -539,45 +566,15 @@ export default function PartsPage() {
         </Card>
       )}
 
-      <Dialog
+      <DeleteImpactDialog
         open={deleteDialog.open}
-        onClose={() => !deleting && setDeleteDialog({ open: false })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ pb: 2 }}>Delete Parts</DialogTitle>
-        <DialogContent sx={{ pt: 0 }}>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body1" sx={{ mb: 1 }}>
-              Are you sure you want to delete <strong>{selectedIds.length}</strong> part
-              {selectedIds.length === 1 ? '' : 's'}?
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Parts referenced by quotes, jobs, or other parts&apos; BOMs cannot be deleted.
-            </Typography>
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button
-            onClick={() => setDeleteDialog({ open: false })}
-            disabled={deleting}
-            color="inherit"
-            size="large"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            variant="contained"
-            color="error"
-            disabled={deleting}
-            size="large"
-            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onClose={() => setDeleteDialog({ open: false, impact: null })}
+        onConfirm={handleDeleteConfirm}
+        loading={deleting}
+        entityLabel="part"
+        count={selectedIds.length}
+        impactLines={buildPartsImpactLines(deleteDialog.impact)}
+      />
 
       <Snackbar
         open={snackbar.open}

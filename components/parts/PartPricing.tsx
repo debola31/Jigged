@@ -137,20 +137,25 @@ function blankRow(): EditRow {
  * (Min qty / Markup %), always inline-editable. There is no shared or named
  * markup-rate layer; a new part opens with a single unfilled row to fill in.
  *
+ * The markup tier table is **identical for made and bought parts** — the same
+ * Qty / Base / Markup % / Unit price columns. Unit price is editable and
+ * back-calculates the markup; markup % stays the source of truth and the unit
+ * price is always derived `base × (1 + markup/100)`.
+ *
  *   Made parts:
- *     - Cost build-up (run labor / setup / materials) summarised at top
- *     - Markup tier table with Qty / Base / Markup % / Unit price
- *     - Unit price is editable and back-calculates the markup
+ *     - Cost build-up (run labor / setup / materials) summarised at top,
+ *       then the markup tier table
+ *     - Base / unit comes from the routing + BOM at each tier qty
  *
  *   Bought parts:
- *     - Cost source (per-vendor tier sheets) lives in a separate
+ *     - Cost source (part-level procurement tiers) lives in a separate
  *       PartProcurementPricingPanel card above this one — keeping
  *       cost-of-goods and markup visually distinct
- *     - Markup tier table with just Qty / Markup %
- *     - Unit price is NOT shown in the card — it depends on which vendor
- *       wins at the actual order quantity, which is only known at quote
- *       time. The quote engine multiplies get_procurement_cost(qty) by
- *       (1 + markup/100) using the closest tier from this card.
+ *     - Base / unit comes from get_procurement_cost(qty) at each tier qty
+ *       (same compute engine, getComputedPartCost), so the card shows the
+ *       final unit-price-after-markup just like a made part. (Since PR #567
+ *       collapsed procurement to part-level tiers, this cost is deterministic
+ *       — no "which vendor wins" ambiguity.)
  *
  * Pricing feeds quotes (financial data), so tier edits are committed via an
  * explicit Save — not auto-saved.
@@ -291,10 +296,10 @@ export default function PartPricing({
   // Fetch the single-source base cost for each distinct tier quantity via the
   // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
   // one the quote form and the persisted line use. Debounced so editing a tier
-  // qty doesn't refetch on every keystroke. Bought parts don't show a base/unit
-  // column, so skip them.
+  // qty doesn't refetch on every keystroke. Works for BOTH made and bought parts
+  // — for a bought part the engine reads its procurement tiers — so the Pricing
+  // card can show the same Base/unit + final Unit-price columns for both.
   useEffect(() => {
-    if (isBought) return;
     const qtys = [
       ...new Set(
         rows
@@ -675,9 +680,11 @@ export default function PartPricing({
 
           {loading && spinner}
 
-          {/* Markup tiers — always inline-editable. Bought parts hide Base / unit
-              and Unit price (those are quote-time values; cost depends on which
-              vendor wins at the actual order qty). */}
+          {/* Markup tiers — always inline-editable. Made and bought parts show the
+              same columns (Base / unit, Markup %, Unit price); the base cost comes
+              from the routing/BOM for made parts and from the procurement tiers for
+              bought parts (same compute engine), so both surface a final unit price
+              after markup. */}
           {!loading && (isBought || breakdown) && (
             <>
               <TableContainer>
@@ -685,9 +692,9 @@ export default function PartPricing({
               <TableHead>
                 <TableRow>
                   <TableCell>{qtyColumnHeader}</TableCell>
-                  {!isBought && <TableCell align="right">Base / unit</TableCell>}
+                  <TableCell align="right">Base / unit</TableCell>
                   <TableCell align="right">Markup %</TableCell>
-                  {!isBought && <TableCell align="right">Unit price</TableCell>}
+                  <TableCell align="right">Unit price</TableCell>
                   <TableCell align="right"></TableCell>
                 </TableRow>
               </TableHead>
@@ -703,11 +710,9 @@ export default function PartPricing({
                           inputMode="decimal"
                         />
                       </TableCell>
-                      {!isBought && (
-                        <TableCell align="right">
-                          {formatCurrency(row.baseCostPerUnit)}
-                        </TableCell>
-                      )}
+                      <TableCell align="right">
+                        {formatCurrency(row.baseCostPerUnit)}
+                      </TableCell>
                       <TableCell align="right" sx={{ minWidth: 120 }}>
                         <TextField
                           size="small"
@@ -717,17 +722,15 @@ export default function PartPricing({
                           sx={{ width: 100 }}
                         />
                       </TableCell>
-                      {!isBought && (
-                        <TableCell align="right" sx={{ minWidth: 130 }}>
-                          <TextField
-                            size="small"
-                            value={row.unitPrice}
-                            onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
-                            inputMode="decimal"
-                            sx={{ width: 120 }}
-                          />
-                        </TableCell>
-                      )}
+                      <TableCell align="right" sx={{ minWidth: 130 }}>
+                        <TextField
+                          size="small"
+                          value={row.unitPrice}
+                          onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
+                          inputMode="decimal"
+                          sx={{ width: 120 }}
+                        />
+                      </TableCell>
                       <TableCell align="right">
                         <DeleteIconButton
                           ariaLabel="Remove tier"

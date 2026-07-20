@@ -48,7 +48,7 @@ Routings are edited **inline on the part detail page** via the `PartRoutingPanel
 
 - **Internal vs external fields** — an internal work center's editor shows setup minutes, cycle minutes per unit, and an optional labor-rate override (pre-filled from the work center's default). An external work center's editor shows a per-unit vendor price and no setup (external work bills once per part). At least one of setup/cycle (internal) or a unit price (external) is required before the row will save.
 
-- **Auto-save** — Each row-editor save, reorder click, or delete persists the whole operations list immediately via `saveRoutingWithOperations`, then refetches so new temp IDs become real DB IDs. A subtle "Saving…" / "All changes saved" indicator (`SaveStatus`) appears above the list. The first add implicitly creates the routing record if the part doesn't have one yet.
+- **Auto-save** — Each row-editor save, reorder click, or delete persists the whole operations list immediately via `saveRoutingWithOperations`, then refetches so new temp IDs become real DB IDs. A subtle "Saving…" / "All changes saved" indicator (`SaveStatus`) appears above the list. The first add implicitly creates the routing record if the part doesn't have one yet. Each such write also **bumps the owning part's `updated_at`** (via DB triggers, `touch_parts_updated_at_on_satellite_writes`), so a part whose routing was just edited rises to the top of the recency-sorted parts list and picker — see [Parts](parts.md).
 
 - **No minimum** — A routing can be saved with zero operations during editing (it just won't be useful for jobs). The cost breakdown surfaces a `no_operations` warning; the job-creation flow surfaces a missing routing if needed.
 

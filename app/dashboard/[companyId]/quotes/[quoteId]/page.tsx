@@ -32,9 +32,10 @@ import {
   deleteQuote,
   detectQuoteLineDrift,
   repriceQuoteDriftedLinesToCurrent,
+  getQuoteConversionState,
   type QuoteLineDriftInfo,
+  type QuoteLineConversion,
 } from '@/utils/quotesAccess';
-import { getJobQuantitiesForQuote } from '@/utils/jobsAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import { readQuoteValidityDays } from '@/lib/companyDefaults';
@@ -68,12 +69,12 @@ export default function QuoteDetailPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [company, setCompany] = useState<Company | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  // Current job_part quantities keyed by source quote line — populated only for
-  // converted quotes so each line can reflect "now N on the job" when a job
-  // quantity was edited after conversion. The quote keeps its quoted figures.
-  const [jobQtyByLine, setJobQtyByLine] = useState<
-    Map<string, { quantity: number; job_id: string; job_number: string }>
-  >(new Map());
+  // Which line items are already on a live job, and the job/PO that owns each.
+  // A quote is converted in one or more passes (one job per customer PO), so this
+  // drives the remaining-lines logic, the Convert button, the converted-jobs
+  // banner, and the per-line "now N on the job" note (a job quantity edited after
+  // conversion; the quote keeps its quoted figures).
+  const [conversions, setConversions] = useState<QuoteLineConversion[]>([]);
   // Lines whose price has drifted from the part's current tier table, keyed by
   // line-item id (override lines are never included). Surfaced read-only on the
   // detail page; the "Update prices to current" action reprices them all.
@@ -101,32 +102,23 @@ export default function QuoteDetailPage() {
     [companyId],
   );
 
-  // Reflect current job quantities on a converted quote (read-only). A quantity
-  // edited on the job after conversion shows here as "now N on the job"; the
-  // quoted figure itself never changes.
+  // Load which lines are already on a job (plain Supabase reads — no AI, safe on
+  // mount). Re-runs whenever the quote reloads (e.g. after creating a job), so
+  // the remaining-lines set and the banner stay current. Keyed by line-item id
+  // (unique per quote), so a stale entry from another quote can never match.
   useEffect(() => {
-    // Only converted quotes have jobs to reflect. No need to clear stale data
-    // for a non-converted quote: the map is keyed by line-item id (unique per
-    // quote), so a different quote's lines never match a leftover entry.
-    if (!quote?.converted_at) return;
+    if (!quote) return;
     let cancelled = false;
-    getJobQuantitiesForQuote(quoteId)
+    getQuoteConversionState(quoteId)
       .then((rows) => {
         if (cancelled) return;
-        setJobQtyByLine(
-          new Map(
-            rows.map((r) => [
-              r.source_quote_line_item_id,
-              { quantity: r.quantity, job_id: r.job_id, job_number: r.job_number },
-            ]),
-          ),
-        );
+        setConversions(rows);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [quote?.converted_at, quoteId]);
+  }, [quote, quoteId]);
 
   // Detect price drift once the quote is loaded (plain Supabase reads — no AI,
   // safe on mount). Runs for converted/expired quotes too so the "was → now"
@@ -228,11 +220,27 @@ export default function QuoteDetailPage() {
   // edit-mode block below and updateQuote's status recompute).
   const isEditable = !convertedLocked;
   const daysLeft = daysUntilExpiration(quote.expiration_date);
-  const linkedJobs = quote.jobs ?? [];
   const lineItems = [...(quote.line_items ?? [])].sort((a, b) => a.sequence - b.sequence);
   const grandTotal = lineItems.reduce(
     (sum, li) => sum + (li.total_price ?? li.unit_price * li.quantity),
     0,
+  );
+
+  // Conversion state: which lines are already on a job, plus a job→PO lookup for
+  // the banner. A quote may still have lines left to convert even after its first
+  // job (one job per customer PO), so the Convert action follows the remaining
+  // lines — not the binary converted_at lock.
+  const convertedByLine = new Map(conversions.map((c) => [c.line_item_id, c]));
+  const hasUnconvertedLines = lineItems.some((li) => !convertedByLine.has(li.id));
+  const someConverted = convertedByLine.size > 0;
+  // Distinct live jobs off this quote (deduped by job_id), each with its PO.
+  const jobsFromConversions = Array.from(
+    new Map(
+      conversions.map((c) => [
+        c.job_id,
+        { id: c.job_id, job_number: c.job_number, po: c.customer_po_number },
+      ]),
+    ).values(),
   );
 
   // Price-drift summary. detectQuoteLineDrift already excludes override lines, so
@@ -348,7 +356,7 @@ export default function QuoteDetailPage() {
             buttons (not a hidden icon menu) read better for the shop-floor tablet /
             older-user audience. */}
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          {!convertedLocked && (
+          {hasUnconvertedLines && (
             <Button
               variant="contained"
               color="primary"
@@ -356,7 +364,7 @@ export default function QuoteDetailPage() {
               onClick={() => setConvertModalOpen(true)}
               disabled={actionLoading}
             >
-              Convert to Job
+              {someConverted ? 'Create Another Job' : 'Convert to Job'}
             </Button>
           )}
           {isEditable && (
@@ -452,11 +460,13 @@ export default function QuoteDetailPage() {
         </Alert>
       )}
 
-      {/* Converted to Jobs Banner */}
-      {convertedLocked && linkedJobs.length > 0 && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          This quote was converted to{' '}
-          {linkedJobs.map((j, i) => (
+      {/* Converted to Jobs Banner. Built from live conversions (cancelled /
+          archived jobs excluded), each shown with its customer PO. A quote can be
+          converted in several passes, so it may still have lines left to convert. */}
+      {someConverted && (
+        <Alert severity={hasUnconvertedLines ? 'info' : 'success'} sx={{ mb: 3 }}>
+          {hasUnconvertedLines ? 'Jobs created from this quote:' : 'This quote is fully on jobs:'}{' '}
+          {jobsFromConversions.map((j, i) => (
             <span key={j.id}>
               {i > 0 && ', '}
               <MuiLink
@@ -466,11 +476,18 @@ export default function QuoteDetailPage() {
               >
                 Job {j.job_number}
               </MuiLink>
+              {j.po ? ` (PO ${j.po})` : ''}
             </span>
-          ))}{' '}
-          on {formatDate(quote.converted_at)}
+          ))}
+          {quote.converted_at ? ` — first on ${formatDate(quote.converted_at)}` : ''}
+          {hasUnconvertedLines && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              Some parts on this quote aren&apos;t on a job yet — use{' '}
+              <strong>Create Another Job</strong> to add them under a new PO.
+            </Typography>
+          )}
           {lineItems.some((li) => {
-            const j = jobQtyByLine.get(li.id);
+            const j = convertedByLine.get(li.id);
             return j && j.quantity !== li.quantity;
           }) && (
             <Typography variant="body2" sx={{ mt: 0.5 }}>
@@ -656,7 +673,7 @@ export default function QuoteDetailPage() {
                             <td className="num">
                               {li.quantity}
                               {(() => {
-                                const jobQ = jobQtyByLine.get(li.id);
+                                const jobQ = convertedByLine.get(li.id);
                                 if (!jobQ || jobQ.quantity === li.quantity) return null;
                                 return (
                                   <Tooltip
@@ -760,6 +777,7 @@ export default function QuoteDetailPage() {
         open={convertModalOpen}
         onClose={() => setConvertModalOpen(false)}
         quote={quote}
+        conversions={conversions}
         onConverted={(jobId) => {
           router.push(`/dashboard/${companyId}/jobs/${jobId}`);
         }}

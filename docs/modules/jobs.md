@@ -72,8 +72,8 @@ Overdue surfaces as:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | id | UUID | Yes | Primary key |
-| job_number | Text | Yes | Mirrors source quote (`Q-0141` → `J-0141`); set explicitly by `convertQuoteToJob`. No manual creation, no auto-numbering trigger |
-| quote_id | UUID (FK) | No | Source quote when the job came from one; **null** for jobs created directly from a PO |
+| job_number | Text | Yes | First job off a quote mirrors it (`Q-0141` → `J-0141`); a **later PO on the same quote** draws a fresh `J-N` from the shared order counter. Set explicitly by `convertQuoteToJob` / `createJobFromPurchaseOrder`. No manual creation, no auto-numbering trigger |
+| quote_id | UUID (FK) | No | Source quote when the job came from one; **null** for jobs created directly from a PO. **Many jobs may share one `quote_id`** — a quote is converted in one or more passes, one job (one customer PO) per pass |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | production_status | Text | Yes | `not_started` / `in_progress` / `completed` / `cancelled` — DERIVED from `job_parts.production_status` via `compute_job_production_status()` and the sync triggers; never written directly by the dashboard |
 | fulfillment_status | Text | Yes | `unshipped` / `partially_shipped` / `fully_shipped` — DERIVED from the parts via `compute_job_fulfillment_status()` as shipment records are created |
@@ -152,7 +152,7 @@ Overdue surfaces as:
 
 A job can be created two ways:
 
-**(a) Convert a quote.** Build a quote, open its detail page, and use **Convert to Job**; one job is produced with one work cell per `(part, selected quantity)`. This flow lives in [Quotes](quotes.md).
+**(a) Convert a quote.** Build a quote, open its detail page, and use **Convert to Job**; a job is produced with one work cell per `(part, selected quantity)`, carrying the customer PO entered at conversion. A quote can be converted in **several passes** — one job per PO, each covering a subset of the parts — so the same quote may spawn multiple jobs (button relabels to **Create Another Job** while lines remain). This flow lives in [Quotes](quotes.md).
 
 **(b) New Job from PO (direct).** When a customer sends a PO with no prior quote, click **New Job from PO** on the jobs list. The "Accept Purchase Order" modal (a modal, not a `/jobs/new` route) captures the customer, PO #, due date, and one-or-more **existing** parts — each with a quantity and the agreed unit price — plus an optional PO PDF. When a part + quantity are chosen, the modal **pre-fills the expected sell price** (cost + markup at that quantity, resolved by the *same* `getTiersWithComputedPrices` + `resolveTier` path quote line items use — pure DB reads, no AI). The user can override it; if the entered price differs from expected, a non-blocking "Differs from expected $X" hint appears with a one-tap **Reset**. A part with no priced tier just leaves the price blank. On accept, `createJobFromPurchaseOrder` (`utils/jobsAccess.ts`) creates the job (`quote_id` null, job number `J-NNNN` from the shared per-company order counter — same sequence as quotes) and clones each part's routing into operations + materials via the same `create_job_part_operations_from_routing` RPC the quote path uses. v1 is **existing parts only** — every part must already have a routing (the create fails fast otherwise).
 

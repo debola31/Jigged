@@ -1031,11 +1031,77 @@ export interface ConvertToJobResult {
 }
 
 /**
- * Convert a quote into a single job that owns one job_part per converted line
- * item (one per part). For a price-options quote the caller passes
- * `options.selectedLineItemIds` to pick the accepted quantity per part; a firm
- * quote converts all its lines. Either way the set must resolve to exactly one
- * line per part_id. The job number mirrors the quote number (Q-NNNN → J-NNNN).
+ * One quote line item already consumed by a live job, and the job/PO that owns
+ * it. A quote can be converted in several passes — one job per customer PO, each
+ * covering a subset of the not-yet-converted line items — so this is the source
+ * of truth for "what's left to convert." It drives the Convert-to-Job modal
+ * (hides already-converted parts) and the quote detail page (lists the jobs +
+ * their POs, shows remaining lines). Cancelled and archived (deleted_at) jobs
+ * are excluded, so their lines free up for re-conversion.
+ */
+export interface QuoteLineConversion {
+  line_item_id: string;
+  job_id: string;
+  job_number: string;
+  customer_po_number: string | null;
+  /** Current quantity on the job_part (may differ from the quoted qty). */
+  quantity: number;
+}
+
+export async function getQuoteConversionState(
+  quoteId: string,
+): Promise<QuoteLineConversion[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('job_parts')
+    .select(
+      'source_quote_line_item_id, quantity, jobs!inner(id, job_number, customer_po_number, quote_id, production_status, deleted_at)',
+    )
+    .eq('jobs.quote_id', quoteId)
+    .is('jobs.deleted_at', null)
+    .neq('jobs.production_status', 'cancelled')
+    .not('source_quote_line_item_id', 'is', null);
+  if (error) {
+    console.error('Error loading quote conversion state:', error);
+    return [];
+  }
+  type Row = {
+    source_quote_line_item_id: string | null;
+    quantity: number;
+    jobs: {
+      id: string;
+      job_number: string;
+      customer_po_number: string | null;
+      quote_id: string | null;
+      production_status: string;
+      deleted_at: string | null;
+    } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  return rows
+    .filter(
+      (r): r is Row & { source_quote_line_item_id: string; jobs: NonNullable<Row['jobs']> } =>
+        Boolean(r.source_quote_line_item_id && r.jobs),
+    )
+    .map((r) => ({
+      line_item_id: r.source_quote_line_item_id,
+      job_id: r.jobs.id,
+      job_number: r.jobs.job_number,
+      customer_po_number: r.jobs.customer_po_number,
+      quantity: r.quantity,
+    }));
+}
+
+/**
+ * Convert (part of) a quote into a job that owns one job_part per converted line
+ * item (one per part). A quote may be converted in SEVERAL passes — one job per
+ * customer PO — each pass taking a subset of the still-unconverted lines; lines
+ * already on a live job are skipped so nothing is double-converted. For a
+ * price-options quote the caller passes `options.selectedLineItemIds` to pick the
+ * accepted quantity per part; a firm quote converts all its remaining lines.
+ * Either way the set must resolve to exactly one line per part_id. The first job
+ * off a quote keeps the mirror number (Q-NNNN → J-NNNN); a later PO draws a fresh
+ * J-N from the shared order counter.
  * Each part's routing is cloned into job_operations + job_materials via the
  * `create_job_part_operations_from_routing` RPC.
  *
@@ -1066,9 +1132,6 @@ export async function convertQuoteToJob(
     console.error('Error fetching quote:', quoteError);
     throw quoteError;
   }
-  if (quote.converted_at) {
-    throw new Error('This quote has already been converted to a job.');
-  }
 
   const lineItems = ((quote.line_items || []) as QuoteLineItem[])
     .slice()
@@ -1077,16 +1140,36 @@ export async function convertQuoteToJob(
     throw new Error('This quote has no line items to convert.');
   }
 
+  // A quote is converted in one or more passes (one job per customer PO). Load
+  // the line items already consumed by a live job so this pass never
+  // double-converts one — the quote stays "open" until every line is on a job.
+  const alreadyConverted = new Set(
+    (await getQuoteConversionState(quoteId)).map((c) => c.line_item_id),
+  );
+
   // Resolve which line items become job parts. A price-options quote offers
   // several quantities per part, so the caller picks one line per part via
-  // selectedLineItemIds; a firm quote (one line per part) converts them all.
+  // selectedLineItemIds; a firm quote (one line per part) converts all its
+  // still-unconverted lines. Either way, lines already on a job are excluded.
   const selectedIds = options.selectedLineItemIds;
-  const lineItemsToConvert =
-    selectedIds && selectedIds.length > 0
-      ? lineItems.filter((li) => selectedIds.includes(li.id))
-      : lineItems;
+  const hasExplicitSelection = !!(selectedIds && selectedIds.length > 0);
+  const requested = hasExplicitSelection
+    ? lineItems.filter((li) => selectedIds!.includes(li.id))
+    : lineItems;
+  // An explicitly selected line that's already on a job means the caller's view
+  // is stale — reject rather than silently dropping it.
+  if (hasExplicitSelection && requested.some((li) => alreadyConverted.has(li.id))) {
+    throw new Error(
+      'Some selected parts are already on a job. Reload the quote and pick from the remaining parts.',
+    );
+  }
+  const lineItemsToConvert = requested.filter((li) => !alreadyConverted.has(li.id));
   if (lineItemsToConvert.length === 0) {
-    throw new Error('No matching line items selected to convert.');
+    throw new Error(
+      hasExplicitSelection
+        ? 'No matching line items selected to convert.'
+        : 'Every line item on this quote is already on a job.',
+    );
   }
   // Exactly one line per part — converting two quantities of the same part
   // would silently create duplicate job parts. Reject instead (this also
@@ -1146,9 +1229,37 @@ export async function convertQuoteToJob(
     throw new Error('A due date is required to create the job.');
   }
 
-  // Job number mirrors the quote number (Q-0141 → J-0141). Manual jobs are
-  // not supported, so this is unique by construction.
-  const jobNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  // Job number: the first job off a quote keeps the familiar mirror
+  // (Q-0141 → J-0141). A later PO on the same quote — or the rare case where the
+  // mirror is already held by a since-archived job — draws a fresh J-N from the
+  // shared atomic order counter, which can never collide. Uniqueness is
+  // (company_id, job_number) and counts archived rows too, so we probe without a
+  // deleted_at filter.
+  const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  const { data: mirrorHolder, error: mirrorErr } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('company_id', quote.company_id)
+    .eq('job_number', mirrorNumber)
+    .limit(1)
+    .maybeSingle();
+  if (mirrorErr) {
+    console.error('Error checking job number availability:', mirrorErr);
+    throw mirrorErr;
+  }
+  let jobNumber: string;
+  if (mirrorHolder) {
+    const { data: generated, error: numErr } = await supabase.rpc('generate_direct_job_number', {
+      company_uuid: quote.company_id,
+    });
+    if (numErr || !generated) {
+      console.error('Error generating job number:', numErr);
+      throw numErr || new Error('Could not generate a job number.');
+    }
+    jobNumber = generated as string;
+  } else {
+    jobNumber = mirrorNumber;
+  }
 
   const { data: job, error: jobError } = await supabase
     .from('jobs')
@@ -1232,13 +1343,25 @@ export async function convertQuoteToJob(
     sequence += 10;
   }
 
+  const nowIso = new Date().toISOString();
+  const quoteUpdate: {
+    status_changed_at: string;
+    updated_at: string;
+    converted_at?: string;
+  } = {
+    status_changed_at: nowIso,
+    updated_at: nowIso,
+  };
+  // converted_at marks the FIRST conversion (and locks the quote from edits).
+  // Leave it untouched on later passes so it keeps meaning "acceptance began at",
+  // and so a partially-converted quote doesn't churn its timestamp per PO.
+  if (!quote.converted_at) {
+    quoteUpdate.converted_at = nowIso;
+  }
+
   const { data: updatedQuote, error: updateError } = await supabase
     .from('quotes')
-    .update({
-      converted_at: new Date().toISOString(),
-      status_changed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(quoteUpdate)
     .eq('id', quoteId)
     .select()
     .single();

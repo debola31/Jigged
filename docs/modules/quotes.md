@@ -48,7 +48,9 @@ A single quote can include:
 - **Active** — the quote is open. Editable (metadata AND line items, via the reconcile policy below), attachable, convertible.
 - **Expired** — past `expiration_date`. Read-only, but can still be converted with a warning (the price is no longer guaranteed).
 
-**Conversion flag:** `converted_at` is set when the quote is converted. Conversion creates **one job** (Q-NNNN → J-NNNN) with one work cell (`job_part`) per selected (part, quantity); each `job_part` records `source_quote_line_item_id` for the line it came from. For a price-options quote the salesperson picks the accepted quantity per part in the convert dialog (firm quotes convert all their lines as-is). Loading a converted quote shows the linked job in the "Jobs" banner; the quote itself stays intact as the record of every option that was offered.
+**Conversion is multi-pass (one job per customer PO).** A quote is not a single all-or-nothing conversion. A customer typically accepts a quote by issuing **one or more POs over time**, each PO for some of the quoted parts, so the quote can be converted in **several passes** — each pass creates **one job** carrying **one customer PO** and covering a chosen subset of the still-unconverted line items. Each `job_part` records `source_quote_line_item_id` for the line it came from, and a line can only be converted **once** (a line already on a live job is skipped). The first job off a quote keeps the mirror number (Q-NNNN → J-NNNN); a later PO on the same quote draws a fresh J-N from the shared order counter. For a price-options quote the salesperson picks the accepted quantity per part in the convert dialog (firm quotes convert all their remaining lines as-is).
+
+**Conversion flag:** `converted_at` marks the **first** conversion (and from then on locks the quote from edits); it is not re-stamped on later passes, so it reads "acceptance began at". The quote is **fully converted** when every line is on a live job — a state derived from the job linkage, not from `converted_at`. `getQuoteConversionState(quoteId)` (in `utils/quotesAccess.ts`) is the source of truth for which lines are converted and by which job/PO (cancelled and archived jobs are excluded, freeing their lines to be re-converted). Loading a converted quote shows every linked job — with its PO — in the "Jobs" banner; the quote itself stays intact as the record of every option that was offered.
 
 **Post-conversion quantities:** the quote's line-item quantities are **frozen** once converted (the quote is read-only), but the *job's* `job_parts.quantity` is **editable** — customers often change quantity after the fact. The job is the post-conversion source of truth. The read-only quote reflects the live job quantity inline ("now N on job", with the originally quoted figure kept) so the divergence is visible without making the quote writable. See [Jobs Module — Editing order quantity](jobs.md).
 
@@ -245,27 +247,28 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 red **Delete** icon button, laid out on a single row. Labelled buttons (rather than
 a hidden `⋮` icon menu) read better for the shop-floor tablet / older-user audience
 ([NN/G](https://www.nngroup.com/articles/icon-usability/) on icon ambiguity).
-`Back to Quotes` stays top-left. Availability is gated purely by `converted_at`:
+`Back to Quotes` stays top-left. **Edit** is gated by `converted_at` (locked after the first conversion so already-converted lines can't drift), but the convert action follows the **remaining unconverted lines**, not the binary flag:
 
 | Current State | Buttons shown |
 |---|---|
-| Active or Expired, not converted | Convert to Job, Edit, View PDF, Delete |
-| Converted | View PDF, Delete (Convert and Edit hidden — line items are frozen) |
+| Active or Expired, nothing converted | **Convert to Job**, Edit, View PDF, Delete |
+| Partially converted (some lines still open) | **Create Another Job**, View PDF, Delete (Edit hidden) |
+| Fully converted (every line on a job) | View PDF, Delete (convert + Edit hidden) |
 
-Expired quotes still show **Convert to Job**; the expired-price warning surfaces in
+The convert button relabels to **Create Another Job** once at least one job exists, and disappears only when every line is on a live job. Expired quotes still show it; the expired-price warning surfaces in
 the Convert modal rather than gating the button. **View PDF** is always available;
 see [Printing Quotes](#printing-quotes) below. (Email was descoped — there is no
 Email action on the detail page.)
 
 ### 4. Convert to Job Modal
 
-**Trigger:** "Convert to Job" button on the detail page (active or expired quote).
+**Trigger:** "Convert to Job" / "Create Another Job" button on the detail page (active or expired quote, while any line is still unconverted).
 
-**Prerequisite:** Every part on the quote must have a routing. If any does not, conversion is blocked, reporting how many parts are missing routings.
+**Prerequisite:** Every part being converted must have a routing. If any does not, conversion is blocked, reporting how many parts are missing routings.
 
 **Modal Content:**
 
-The modal groups the quote's line items by part. A part with a single quantity is shown as a fixed line and auto-included. A part with several quantities (a price-options quote) renders a radio group — one radio per quoted quantity — so the salesperson picks the accepted quantity:
+Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. The modal groups the remaining line items by part. A part with a single quantity is shown as a fixed line and auto-included. A part with several quantities (a price-options quote) renders a radio group — one radio per quoted quantity — so the salesperson picks the accepted quantity:
 
 ```
 Holder — choose quantity
@@ -281,7 +284,7 @@ Multi-quantity parts start with **no** radio selected; the user must pick delibe
 
 **Actions:**
 
-- Create J-NNNN → calls `convertQuoteToJob(quoteId, { dueDate, customerPoNumber, selectedLineItemIds })`, where `selectedLineItemIds` is the one chosen line per part. Conversion creates **one job** with one `job_part` per selected line, clones each part's routing via the `create_job_part_operations_from_routing` RPC, sets `quote.converted_at`, and redirects to the new job. The quote stays intact as the record of all options offered.
+- Create Job → calls `convertQuoteToJob(quoteId, { dueDate, customerPoNumber, selectedLineItemIds })`, where `selectedLineItemIds` is the one chosen line per remaining part. Conversion creates **one job** (with this pass's PO) with one `job_part` per selected line, clones each part's routing via the `create_job_part_operations_from_routing` RPC, sets `quote.converted_at` on the first pass, and redirects to the new job. Any lines left unconverted stay available for a later pass under a different PO. The quote stays intact as the record of all options offered.
 - Cancel → closes the modal without changes.
 
 The Create button stays disabled until **every** multi-quantity part has a quantity selected, the due date is valid, **and a Customer PO is entered**. A `MissingFieldsNotice` above the button lists whatever is still blocking conversion. `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
@@ -472,18 +475,20 @@ If the salesperson quotes this part at quantities 1, 2, and 4, three `quote_line
 
 ## Convert to Job Function
 
-`convertQuoteToJob(quoteId, { dueDate?, customerPoNumber?, selectedLineItemIds? })`:
+`convertQuoteToJob(quoteId, { dueDate?, customerPoNumber?, selectedLineItemIds? })` — may be called multiple times per quote (one call per customer PO):
 
-1. Refuse if `converted_at` is already set, or if the quote has no line items.
-2. Resolve which lines to convert: `selectedLineItemIds` when provided (a price-options quote — one chosen line per part), else all lines (a firm quote). **Reject if the resolved set has more than one line for any `part_id`** ("This is a price-options quote. Pick a single quantity per part before converting.").
-3. Pre-flight: every part must have a routing, else fail before any write.
-4. Use the **required** due date passed from the modal — rejected if empty and it must not be in the past. It is written straight to the job and is **no longer derived from lead time**. **Reject if no `customer_po_number` is provided** ("Customer PO is required to convert a quote to a job.") — the PO is captured as a required, non-empty value, never coerced to NULL.
-5. Insert **one** `jobs` row (job number Q-NNNN → J-NNNN) carrying `quote_id`, `customer_id`, `due_date`, `customer_po_number`, `production_status = 'not_started'`.
+1. Refuse only if the quote has no line items. `converted_at` being set does **not** block — a partially-converted quote can be converted again.
+2. Load the lines already on a live job (`getQuoteConversionState`) and exclude them. Resolve which lines to convert: `selectedLineItemIds` when provided (one chosen line per remaining part), else all still-unconverted lines. Reject an explicit selection that includes an already-converted line ("Some selected parts are already on a job…") and reject when nothing remains ("Every line item on this quote is already on a job."). **Reject if the resolved set has more than one line for any `part_id`** ("This is a price-options quote…").
+3. Pre-flight: every part being converted must have a routing, else fail before any write.
+4. Use the **required** due date passed from the modal — rejected if empty and it must not be in the past. It is written straight to the job and is **no longer derived from lead time**. **Reject if no `customer_po_number` is provided** — the PO is captured as a required, non-empty value, never coerced to NULL.
+5. Insert **one** `jobs` row carrying `quote_id`, `customer_id`, `due_date`, `customer_po_number`, `production_status = 'not_started'`. Job number: the mirror `Q-NNNN → J-NNNN` when free (the first, common case), otherwise a fresh `J-N` from `generate_direct_job_number` (a later PO, or a mirror already held by a since-archived job).
 6. For each resolved line, insert a `job_parts` row (`part_id`, `quantity = line.quantity`, `source_quote_line_item_id = line.id`) and clone the part's routing via the `create_job_part_operations_from_routing(job_part_id, routing_id)` RPC.
-7. Set `quote.converted_at` (status unchanged); the quote keeps all its line items as the record of every option offered.
+7. Stamp `quote.converted_at` only on the **first** conversion (status unchanged); the quote keeps all its line items as the record of every option offered.
 8. Return `{ quote, job: { id, job_number, parts: [{ id, part_id, quantity, source_quote_line_item_id }, …] } }`.
 
-A quote with three distinct parts becomes one job with three work cells; each cell's quantity is the quantity of the line the user picked for that part. `quantity = line.quantity` is the value **at conversion**; the job's `job_parts.quantity` is editable afterward (the quote line stays frozen) — see [Jobs Module — Editing order quantity](jobs.md).
+A quote with three distinct parts can become one job with all three, or (say) one job under PO-A for two parts and a later job under PO-B for the third — whatever POs the customer issues. `quantity = line.quantity` is the value **at conversion**; the job's `job_parts.quantity` is editable afterward (the quote line stays frozen) — see [Jobs Module — Editing order quantity](jobs.md).
+
+> **Concurrency note:** the double-conversion guard is app-level (read-then-write, non-transactional like the rest of this function), so two truly-simultaneous conversions of the *same* line could both succeed. In practice conversions are sequential per user; a DB-level uniqueness guard on `source_quote_line_item_id` is a possible future hardening.
 
 ---
 

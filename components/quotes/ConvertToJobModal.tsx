@@ -19,7 +19,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
-import { convertQuoteToJob } from '@/utils/quotesAccess';
+import { convertQuoteToJob, type QuoteLineConversion } from '@/utils/quotesAccess';
 import { unitShortLabel } from '@/lib/standardUnits';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
@@ -28,6 +28,12 @@ interface ConvertToJobModalProps {
   open: boolean;
   onClose: () => void;
   quote: QuoteWithRelations;
+  /**
+   * Line items already consumed by a live job (with their job/PO). A quote can
+   * be converted in several passes — one job per customer PO — so these parts
+   * are shown as already-done and excluded from this pass's selection.
+   */
+  conversions?: QuoteLineConversion[];
   /** Receives the new job's id once the conversion succeeds. */
   onConverted: (jobId: string) => void;
 }
@@ -55,6 +61,7 @@ export default function ConvertToJobModal({
   open,
   onClose,
   quote,
+  conversions,
   onConverted,
 }: ConvertToJobModalProps) {
   const [loading, setLoading] = useState(false);
@@ -80,12 +87,34 @@ export default function ConvertToJobModal({
     [quote.line_items],
   );
 
+  // A quote is converted in one or more passes (one job per customer PO). Lines
+  // already on a live job are locked; the whole part is "done" once any of its
+  // lines is converted (only one line per part ever converts).
+  const convertedByLine = useMemo(
+    () => new Map((conversions ?? []).map((c) => [c.line_item_id, c])),
+    [conversions],
+  );
+  const convertedPartIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const li of lineItems) {
+      if (convertedByLine.has(li.id)) ids.add(li.part_id);
+    }
+    return ids;
+  }, [lineItems, convertedByLine]);
+  const isFirstConversion = convertedPartIds.size === 0;
+
   // Group line items by part (first-appearance order). A part with one
   // quantity converts as-is; a part with several quantities (price options)
   // needs the salesperson to pick the accepted quantity before converting.
-  const partGroups = useMemo(() => {
-    const groups: { part_id: string; part_name: string; unit: string; items: QuoteLineItem[] }[] =
-      [];
+  // Split into the parts still available to convert this pass vs the ones
+  // already on a job (shown read-only so the user sees the full picture).
+  const { partGroups, convertedGroups } = useMemo(() => {
+    const groups: {
+      part_id: string;
+      part_name: string;
+      unit: string;
+      items: QuoteLineItem[];
+    }[] = [];
     const index = new Map<string, number>();
     for (const li of lineItems) {
       let gi = index.get(li.part_id);
@@ -103,8 +132,11 @@ export default function ConvertToJobModal({
       }
       groups[gi].items.push(li);
     }
-    return groups;
-  }, [lineItems]);
+    return {
+      partGroups: groups.filter((g) => !convertedPartIds.has(g.part_id)),
+      convertedGroups: groups.filter((g) => convertedPartIds.has(g.part_id)),
+    };
+  }, [lineItems, convertedPartIds]);
 
   // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
   // multi-quantity parts start empty so the user must pick deliberately.
@@ -146,7 +178,12 @@ export default function ConvertToJobModal({
       : ' ';
   const poValid = customerPoInput.trim() !== '';
 
+  // The first job off a quote keeps the mirror number (Q-0141 → J-0141); a later
+  // PO draws a fresh J-N (unknown until the write), so only promise the mirror on
+  // the first conversion.
   const expectedJobNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  const createLabel = isFirstConversion ? `Create ${expectedJobNumber}` : 'Create Job';
+  const nothingToConvert = partGroups.length === 0;
 
   const handleConvert = async () => {
     setLoading(true);
@@ -221,16 +258,45 @@ export default function ConvertToJobModal({
             </Alert>
           )}
 
-          <Typography variant="body1" gutterBottom>
-            Convert <strong>{quote.quote_number}</strong> to{' '}
-            <strong>{expectedJobNumber}</strong>
-          </Typography>
+          {isFirstConversion ? (
+            <Typography variant="body1" gutterBottom>
+              Convert <strong>{quote.quote_number}</strong> to{' '}
+              <strong>{expectedJobNumber}</strong>
+            </Typography>
+          ) : (
+            <Typography variant="body1" gutterBottom>
+              Create another job from <strong>{quote.quote_number}</strong>
+            </Typography>
+          )}
           <Typography variant="body2" color="text.secondary" gutterBottom>
             Customer: {quote.customers?.name || '—'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Parts: {partGroups.length}
+            Parts on this job: {partGroups.length}
           </Typography>
+
+          {convertedGroups.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Already on a job:
+              </Typography>
+              {convertedGroups.map((group) => {
+                const conv = group.items
+                  .map((li) => convertedByLine.get(li.id))
+                  .find((c): c is QuoteLineConversion => !!c);
+                return (
+                  <Typography key={group.part_id} variant="body2" color="text.secondary">
+                    • {group.part_name}
+                    {conv
+                      ? ` — Job ${conv.job_number}${
+                          conv.customer_po_number ? ` (PO ${conv.customer_po_number})` : ''
+                        }`
+                      : ' — converted'}
+                  </Typography>
+                );
+              })}
+            </Box>
+          )}
 
           <Divider sx={{ my: 2 }} />
 
@@ -295,6 +361,12 @@ export default function ConvertToJobModal({
             </Alert>
           )}
 
+          {lineItems.length > 0 && nothingToConvert && (
+            <Alert severity="info">
+              Every part on this quote is already on a job.
+            </Alert>
+          )}
+
           <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Box>
               <Typography variant="body2" color="text.secondary">
@@ -348,10 +420,17 @@ export default function ConvertToJobModal({
           <Button
             variant="contained"
             onClick={handleConvert}
-            disabled={loading || lineItems.length === 0 || !dueDateValid || !allPartsChosen || !poValid}
+            disabled={
+              loading ||
+              lineItems.length === 0 ||
+              nothingToConvert ||
+              !dueDateValid ||
+              !allPartsChosen ||
+              !poValid
+            }
             startIcon={loading ? <CircularProgress size={20} /> : null}
           >
-            {loading ? 'Creating…' : `Create ${expectedJobNumber}`}
+            {loading ? 'Creating…' : createLabel}
           </Button>
         )}
       </DialogActions>

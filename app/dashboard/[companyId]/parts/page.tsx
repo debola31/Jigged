@@ -58,14 +58,14 @@ function buildPartsImpactLines(impact: PartsDeletionImpact | null): string[] {
   if (!impact) return [];
   const { quotesCount, jobsCount, bomParentsCount } = impact;
   const lines: string[] = [];
-  if (quotesCount > 0)
-    lines.push(`Used on ${quotesCount} quote${quotesCount === 1 ? '' : 's'} — kept for history`);
-  if (jobsCount > 0)
-    lines.push(`Used on ${jobsCount} job${jobsCount === 1 ? '' : 's'} — kept for history`);
   if (bomParentsCount > 0)
     lines.push(
-      `${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' cost will change (these parts are components in their BOMs)`,
+      `Removed from ${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' BOM${bomParentsCount === 1 ? '' : 's'} — their cost will update`,
     );
+  if (quotesCount > 0)
+    lines.push(`Still on ${quotesCount} quote${quotesCount === 1 ? '' : 's'} — kept for history`);
+  if (jobsCount > 0)
+    lines.push(`Still on ${jobsCount} job${jobsCount === 1 ? '' : 's'} — kept for history`);
   return lines;
 }
 

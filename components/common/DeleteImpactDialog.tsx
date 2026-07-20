@@ -56,7 +56,6 @@ export default function DeleteImpactDialog({
 }: DeleteImpactDialogProps) {
   const plural = count === 1 ? entityLabel : `${entityLabel}s`;
   const subject = count === 1 ? 'This' : 'These';
-  const object = count === 1 ? 'it' : 'them';
   const one = count === 1 ? 'it' : 'one';
 
   return (
@@ -72,11 +71,9 @@ export default function DeleteImpactDialog({
       <DialogContent>
         <DialogContentText component="div">
           <Typography variant="body1">
-            {subject} {plural} will be removed from your lists. Anything that already
-            references {object} — quotes, jobs, and BOMs — keeps working; nothing is
-            permanently destroyed.
+            {subject} {plural} will be hidden from your lists.
             {revivableByName
-              ? ` You can bring ${one} back later by re-creating or re-importing the same name.`
+              ? ` You can bring ${one} back anytime by re-creating or re-importing the same name.`
               : ''}
           </Typography>
 

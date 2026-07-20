@@ -329,23 +329,20 @@ export default function PartWorkspace({
   const bomParentsCount = part.bom_parents_count ?? 0;
 
   // "Delete" archives the part (soft-delete via archive_parts) and is NEVER
-  // blocked by references — quotes, jobs, and BOMs that use it keep working
-  // (see architecture.md §16). These lines just summarize the archive impact
-  // for the confirm dialog.
+  // blocked by references (see architecture.md §16). Quotes and jobs keep
+  // referencing the retained part; it is removed from other parts' BOMs, so
+  // their cost updates. These lines summarize that impact for the confirm dialog.
   const deleteImpactLines: string[] = [];
-  if (quotesCount > 0 || jobsCount > 0) {
-    const used = [
-      quotesCount > 0 ? `${quotesCount} quote${quotesCount === 1 ? '' : 's'}` : null,
-      jobsCount > 0 ? `${jobsCount} job${jobsCount === 1 ? '' : 's'}` : null,
-    ]
-      .filter(Boolean)
-      .join(' and ');
-    deleteImpactLines.push(`Used on ${used} — kept for history.`);
-  }
   if (bomParentsCount > 0) {
     deleteImpactLines.push(
-      `${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' cost will change (this part is a component in their BOMs).`,
+      `Removed from ${bomParentsCount} other part${bomParentsCount === 1 ? '' : 's'}' BOM${bomParentsCount === 1 ? '' : 's'} — their cost will update`,
     );
+  }
+  if (quotesCount > 0) {
+    deleteImpactLines.push(`Still on ${quotesCount} quote${quotesCount === 1 ? '' : 's'} — kept for history`);
+  }
+  if (jobsCount > 0) {
+    deleteImpactLines.push(`Still on ${jobsCount} job${jobsCount === 1 ? '' : 's'} — kept for history`);
   }
 
   return (
@@ -446,8 +443,7 @@ export default function PartWorkspace({
         <DialogTitle>Delete Part?</DialogTitle>
         <DialogContent>
           <Typography>
-            <strong>{part.part_name}</strong> will be removed from your lists. Quotes and jobs that
-            use it keep working — nothing is permanently destroyed.
+            <strong>{part.part_name}</strong> will be hidden from your lists.
           </Typography>
           {deleteImpactLines.length > 0 && (
             <Box component="ul" sx={{ m: 0, mt: 2, pl: 3 }}>

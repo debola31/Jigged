@@ -135,10 +135,12 @@ export default function QuotesPage() {
       if (statusFilter !== 'all') filters.status = statusFilter;
       if (customerFilter) filters.customerId = customerFilter;
       if (createdByFilter) filters.createdBy = createdByFilter;
-      if (searchDebounced) filters.search = searchDebounced;
+      // Text search is applied client-side (below) — the list already loads
+      // every quote with its customer + part names, so we filter in memory and
+      // don't refetch per keystroke.
       return getAllQuotes(companyId, filters, sortModel.field, sortModel.sort);
     },
-    [companyId, searchDebounced, statusFilter, customerFilter, createdByFilter, sortModel],
+    [companyId, statusFilter, customerFilter, createdByFilter, sortModel],
     {
       onError: (error) => {
         console.error('Error fetching quotes:', error);
@@ -146,6 +148,24 @@ export default function QuotesPage() {
     },
   );
   const quotes = quotesData ?? EMPTY_QUOTES;
+
+  // Search quotes like jobs — by quote #, customer name, or any line item's part
+  // (name or description). The list query already joins `customers` and
+  // `line_items.parts`, so this needs no DB round-trip; matching in memory keeps
+  // it instant and avoids an RPC (unlike jobs, quotes has no un-joined field).
+  const filteredQuotes = useMemo(() => {
+    const q = searchDebounced.trim().toLowerCase();
+    if (!q) return quotes;
+    return quotes.filter((quote) => {
+      if (quote.quote_number?.toLowerCase().includes(q)) return true;
+      if (quote.customers?.name?.toLowerCase().includes(q)) return true;
+      return (quote.line_items ?? []).some(
+        (li) =>
+          li.parts?.part_name?.toLowerCase().includes(q) ||
+          li.parts?.description?.toLowerCase().includes(q),
+      );
+    });
+  }, [quotes, searchDebounced]);
 
   // Clear selection when search or any filter changes — the rows on screen
   // change, so any ids selected before may no longer be visible. Called from
@@ -157,15 +177,15 @@ export default function QuotesPage() {
 
   // Grid height calculation
   const gridHeight = useMemo(() => {
-    if (loading || quotes.length === 0) return 600;
+    if (loading || filteredQuotes.length === 0) return 600;
 
     const headerHeight = 56;
     const rowHeight = 52;
     const paginationHeight = 56;
-    const displayedRows = Math.min(quotes.length, 25);
+    const displayedRows = Math.min(filteredQuotes.length, 25);
 
     return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
-  }, [loading, quotes.length]);
+  }, [loading, filteredQuotes.length]);
 
   const handleGridReady = (event: GridReadyEvent<QuoteWithRelations>) => {
     event.api.applyColumnState({
@@ -331,7 +351,7 @@ export default function QuotesPage() {
         }}
       >
         <TextField
-          placeholder="Search quotes..."
+          placeholder="Quote #, customer, part…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -430,7 +450,7 @@ export default function QuotesPage() {
       </Box>
 
       {/* Grid or Empty State */}
-      {!loading && quotes.length === 0 ? (
+      {!loading && filteredQuotes.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
             <DescriptionOutlinedIcon
@@ -476,7 +496,7 @@ export default function QuotesPage() {
           >
             <AgGridReact<QuoteWithRelations>
               ref={gridRef}
-              rowData={quotes}
+              rowData={filteredQuotes}
               columnDefs={columnDefs}
               theme={jiggedAgGridTheme}
               defaultColDef={{

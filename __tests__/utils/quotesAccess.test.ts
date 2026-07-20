@@ -671,27 +671,23 @@ describe('quotesAccess utilities', () => {
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
                 ...mockQueryBuilder,
-                is: vi.fn().mockReturnValue({
+                neq: vi.fn().mockReturnValue({
                   ...mockQueryBuilder,
-                  neq: vi.fn().mockReturnValue({
-                    ...mockQueryBuilder,
-                    not: vi.fn().mockResolvedValue({
-                      data: [
-                        {
-                          source_quote_line_item_id: 'li-1',
-                          quantity: 5,
-                          jobs: {
-                            id: 'job-1',
-                            job_number: 'J-0001',
-                            customer_po_number: 'PO-1',
-                            quote_id: 'quote-1',
-                            production_status: 'not_started',
-                            deleted_at: null,
-                          },
+                  not: vi.fn().mockResolvedValue({
+                    data: [
+                      {
+                        source_quote_line_item_id: 'li-1',
+                        quantity: 5,
+                        production_status: 'not_started',
+                        jobs: {
+                          id: 'job-1',
+                          job_number: 'J-0001',
+                          customer_po_number: 'PO-1',
+                          quote_id: 'quote-1',
                         },
-                      ],
-                      error: null,
-                    }),
+                      },
+                    ],
+                    error: null,
                   }),
                 }),
               }),

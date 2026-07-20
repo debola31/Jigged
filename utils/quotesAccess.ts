@@ -1031,13 +1031,18 @@ export interface ConvertToJobResult {
 }
 
 /**
- * One quote line item already consumed by a live job, and the job/PO that owns
- * it. A quote can be converted in several passes — one job per customer PO, each
+ * One quote line item already consumed by a job, and the job/PO that owns it. A
+ * quote can be converted in several passes — one job per customer PO, each
  * covering a subset of the not-yet-converted line items — so this is the source
  * of truth for "what's left to convert." It drives the Convert-to-Job modal
  * (hides already-converted parts) and the quote detail page (lists the jobs +
- * their POs, shows remaining lines). Cancelled and archived (deleted_at) jobs
- * are excluded, so their lines free up for re-conversion.
+ * their POs, shows remaining lines).
+ *
+ * A line counts as converted when it has a **non-cancelled** job_part — matching
+ * the `job_parts_one_active_per_quote_line` partial unique index exactly, so the
+ * app view and the DB guarantee never disagree. Cancelling a job cancels its
+ * parts, which frees the line for re-conversion; archiving a job does not (the
+ * archived job stays the record of that conversion — cancel is the way to redo).
  */
 export interface QuoteLineConversion {
   line_item_id: string;
@@ -1055,11 +1060,11 @@ export async function getQuoteConversionState(
   const { data, error } = await supabase
     .from('job_parts')
     .select(
-      'source_quote_line_item_id, quantity, jobs!inner(id, job_number, customer_po_number, quote_id, production_status, deleted_at)',
+      'source_quote_line_item_id, quantity, production_status, jobs!inner(id, job_number, customer_po_number, quote_id)',
     )
     .eq('jobs.quote_id', quoteId)
-    .is('jobs.deleted_at', null)
-    .neq('jobs.production_status', 'cancelled')
+    // The job_part's own status — matches the partial unique index predicate.
+    .neq('production_status', 'cancelled')
     .not('source_quote_line_item_id', 'is', null);
   if (error) {
     console.error('Error loading quote conversion state:', error);
@@ -1068,13 +1073,12 @@ export async function getQuoteConversionState(
   type Row = {
     source_quote_line_item_id: string | null;
     quantity: number;
+    production_status: string;
     jobs: {
       id: string;
       job_number: string;
       customer_po_number: string | null;
       quote_id: string | null;
-      production_status: string;
-      deleted_at: string | null;
     } | null;
   };
   const rows = (data ?? []) as unknown as Row[];
@@ -1320,6 +1324,16 @@ export async function convertQuoteToJob(
       .select('id, part_id')
       .single();
     if (jpErr) {
+      // Race backstop: the app-level pre-check above can't see a conversion that
+      // landed between it and this insert. The job_parts_one_active_per_quote_line
+      // partial unique index rejects the duplicate (23505); surface the same
+      // friendly message the pre-check uses rather than a raw DB error.
+      const code = (jpErr as { code?: string }).code;
+      if (code === '23505' && (jpErr.message ?? '').includes('one_active_per_quote_line')) {
+        throw new Error(
+          'Some selected parts were just converted on another job. Reload the quote and pick from the remaining parts.',
+        );
+      }
       console.error('Error creating job_part:', jpErr);
       throw jpErr;
     }

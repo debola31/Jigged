@@ -57,7 +57,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
 | is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
-| updated_at | Timestamp | Yes | Auto-updated on changes |
+| updated_at | Timestamp | Yes | Auto-updated on changes — **including edits to the part's satellite data** (routing, pricing tiers, BOM, procurement tiers), which bump it via AFTER triggers (`touch_parts_updated_at_on_satellite_writes` migration). Before that, editing a routing/pricing/BOM left `updated_at` stale, so recency-sort missed the parts people actually worked on. |
 
 **Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. This is the identity key the CSV importer upserts on (`ON CONFLICT (company_id, part_name)`), so re-importing the same export updates parts in place rather than duplicating them.
 
@@ -127,6 +127,8 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 **Features:**
 
 - AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
+
+- **Default sort is most-recently-updated first** (the Updated column, descending) — users care about the parts they just worked on, not the alphabetical top. Alphabetical is one click away on the Part Name header. Sorting is server-side for the real columns (`part_name`, `source`, `updated_at`). This pairs with the `updated_at` accuracy fix below, so a part whose routing/pricing/BOM was just edited rises to the top.
 
 - Search box (searches part name and description)
 

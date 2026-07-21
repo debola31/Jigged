@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-16T20:51:51Z
+-- Generated: 2026-07-20T19:19:31Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "website" text,
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
     CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
 );
@@ -222,6 +223,7 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "ship_to_address" jsonb,
     "contact_snapshot" jsonb,
     "lead_time_text" text,
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
@@ -252,6 +254,7 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "ship_to_address" jsonb,
     "contact_snapshot" jsonb,
     "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -430,11 +433,10 @@ CREATE TABLE IF NOT EXISTS "public"."vendors"
     "state" text,
     "postal_code" text,
     "country" text DEFAULT 'USA'::text,
-    "legacy_id" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "vendors_pkey" PRIMARY KEY (id),
-    CONSTRAINT "vendors_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "vendors_unique_per_company" UNIQUE (company_id, name)
 );
 
@@ -449,14 +451,13 @@ CREATE TABLE IF NOT EXISTS "public"."parts"
     "quantity" numeric NOT NULL DEFAULT 0,
     "reorder_point" numeric,
     "preferred_vendor_id" uuid,
-    "legacy_id" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "source" text NOT NULL DEFAULT 'made'::text,
     "is_location_tracked" boolean NOT NULL DEFAULT false,
     "costing_batch_quantity" numeric NOT NULL DEFAULT 1,
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "parts_pkey" PRIMARY KEY (id),
-    CONSTRAINT "parts_legacy_id_unique_per_company" UNIQUE (company_id, legacy_id),
     CONSTRAINT "parts_unique_per_company" UNIQUE (company_id, part_name),
     CONSTRAINT "parts_costing_batch_quantity_check" CHECK (((costing_batch_quantity IS NULL) OR (costing_batch_quantity > (0)::numeric))),
     CONSTRAINT "parts_quantity_non_negative" CHECK ((quantity >= (0)::numeric)),
@@ -754,6 +755,7 @@ CREATE TABLE IF NOT EXISTS "public"."work_centers"
     "metadata" jsonb DEFAULT '{}'::jsonb,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "deleted_at" timestamp with time zone,
     CONSTRAINT "work_centers_pkey" PRIMARY KEY (id),
     CONSTRAINT "work_centers_unique_per_company" UNIQUE (company_id, name),
     CONSTRAINT "work_centers_external_requires_vendor" CHECK (((kind = 'internal'::text) OR (vendor_id IS NOT NULL))),
@@ -2623,6 +2625,7 @@ CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_ad
 CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE is_primary;
 CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_customers_live_by_company ON public.customers USING btree (company_id) WHERE (deleted_at IS NULL);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers USING btree (company_id, name);
 CREATE INDEX IF NOT EXISTS idx_customers_name_trgm ON public.customers USING gin (name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS inventory_locations_company_parent_idx ON public.inventory_locations USING btree (company_id, parent_id);
@@ -2677,6 +2680,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS part_procurement_tiers_part_id_min_quantity_ke
 CREATE INDEX IF NOT EXISTS idx_parts_company_id ON public.parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_parts_company_made ON public.parts USING btree (company_id) WHERE (source = 'made'::text);
 CREATE INDEX IF NOT EXISTS idx_parts_company_stocked ON public.parts USING btree (company_id) WHERE is_stocked;
+CREATE INDEX IF NOT EXISTS idx_parts_live_by_company ON public.parts USING btree (company_id) WHERE (deleted_at IS NULL);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name ON public.parts USING btree (company_id, part_name);
 CREATE INDEX IF NOT EXISTS idx_parts_part_name_trgm ON public.parts USING gin (part_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_parts_preferred_vendor ON public.parts USING btree (preferred_vendor_id) WHERE (preferred_vendor_id IS NOT NULL);
@@ -2722,10 +2726,12 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user_id ON public.user_preferenc
 CREATE INDEX IF NOT EXISTS idx_vendor_contacts_vendor ON public.vendor_contacts USING btree (vendor_id);
 CREATE UNIQUE INDEX IF NOT EXISTS vendor_contacts_one_primary ON public.vendor_contacts USING btree (vendor_id) WHERE is_primary;
 CREATE INDEX IF NOT EXISTS idx_vendors_company ON public.vendors USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_vendors_live_by_company ON public.vendors USING btree (company_id) WHERE (deleted_at IS NULL);
 CREATE INDEX IF NOT EXISTS waitlist_created_at_idx ON public.waitlist USING btree (created_at);
 CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (email);
 CREATE INDEX IF NOT EXISTS idx_work_centers_company ON public.work_centers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_work_centers_company_kind ON public.work_centers USING btree (company_id, kind);
+CREATE INDEX IF NOT EXISTS idx_work_centers_live_by_company ON public.work_centers USING btree (company_id) WHERE (deleted_at IS NULL);
 CREATE INDEX IF NOT EXISTS idx_work_centers_vendor ON public.work_centers USING btree (vendor_id) WHERE (vendor_id IS NOT NULL);
 
 -- ============================================================
@@ -2967,6 +2973,29 @@ BEGIN
 
     SELECT quantity INTO v_rollup FROM public.parts WHERE id = p_part_id;
     RETURN jsonb_build_object('location_balance', p_converted_new_quantity, 'part_quantity', v_rollup);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.archive_parts(p_ids uuid[])
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    -- Idempotent: only stamp rows that aren't already archived, so a re-archive keeps the
+    -- original archive time.
+    UPDATE public.parts
+       SET deleted_at = now(),
+           updated_at = now()
+     WHERE id = ANY(p_ids)
+       AND deleted_at IS NULL;
+
+    -- Remove the archived parts from every parent part's BOM so those parents' live cost
+    -- rollups (compute_part_cost_at_qty reads parts_bom) recompute without them.
+    DELETE FROM public.parts_bom
+     WHERE child_part_id = ANY(p_ids);
 END;
 $function$
 
@@ -4794,6 +4823,27 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.parts_deletion_impact(p_ids uuid[])
+ RETURNS TABLE(quotes_count integer, jobs_count integer, bom_parents_count integer)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT
+        (SELECT count(DISTINCT qli.quote_id)
+           FROM public.quote_line_items qli
+          WHERE qli.part_id = ANY(p_ids))::int,
+        (SELECT count(DISTINCT jp.job_id)
+           FROM public.job_parts jp
+          WHERE jp.part_id = ANY(p_ids))::int,
+        (SELECT count(DISTINCT pb.parent_part_id)
+           FROM public.parts_bom pb
+          WHERE pb.child_part_id = ANY(p_ids)
+            AND pb.parent_part_id <> ALL(p_ids))::int;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.recompute_job_part_fulfillment_from_line()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -5147,13 +5197,11 @@ BEGIN
             v_new_id := gen_random_uuid();
             v_ref_map := jsonb_set(v_ref_map, ARRAY[v_item->>'_ref'], to_jsonb(v_new_id::text));
             INSERT INTO vendors (id, company_id, name,
-                                 address_line1, address_line2, city, state, postal_code, country,
-                                 legacy_id)
+                                 address_line1, address_line2, city, state, postal_code, country)
             VALUES (v_new_id, p_company_id, v_item->>'name',
                     v_item->>'address_line1', v_item->>'address_line2',
                     v_item->>'city', v_item->>'state', v_item->>'postal_code',
-                    COALESCE(v_item->>'country', 'USA'),
-                    v_item->>'legacy_id');
+                    COALESCE(v_item->>'country', 'USA'));
 
             IF v_item->'contacts' IS NOT NULL THEN
                 FOR v_contact IN SELECT * FROM jsonb_array_elements(v_item->'contacts') LOOP
@@ -5200,7 +5248,7 @@ BEGIN
             INSERT INTO parts (id, company_id, part_name, description,
                                source, is_stocked,
                                primary_unit, quantity,
-                               reorder_point, preferred_vendor_id, legacy_id)
+                               reorder_point, preferred_vendor_id)
             VALUES (v_new_id, p_company_id,
                     v_item->>'part_name', v_item->>'description',
                     v_part_source,
@@ -5210,8 +5258,7 @@ BEGIN
                     NULLIF(v_item->>'reorder_point', '')::numeric,
                     CASE WHEN v_item->>'preferred_vendor_ref' IS NOT NULL
                          THEN (v_ref_map->>(v_item->>'preferred_vendor_ref'))::uuid
-                         ELSE NULL END,
-                    v_item->>'legacy_id');
+                         ELSE NULL END);
 
             IF v_part_source = 'bought' AND v_part_cost IS NOT NULL AND v_part_cost > 0 THEN
                 INSERT INTO part_procurement_tiers
@@ -6253,6 +6300,9 @@ COMMENT ON COLUMN "public"."customers"."created_at"
 COMMENT ON COLUMN "public"."customers"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."customers"."deleted_at"
+    IS 'Archive marker (see parts.deleted_at). Reads filter deleted_at IS NULL; reusing the name revives the row.';
+
 COMMENT ON COLUMN "public"."demo_data_templates"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -6310,6 +6360,9 @@ COMMENT ON COLUMN "public"."job_operations"."routing_operation_id"
 COMMENT ON COLUMN "public"."jobs"."customer_po_number"
     IS 'Customer-issued PO number for this job. Captured at convertQuoteToJob time (or by reorder when applicable). Indexed via the partial unique-per-company index and via pg_trgm for the jobs-list search RPC.';
 
+COMMENT ON COLUMN "public"."jobs"."deleted_at"
+    IS 'Archive marker (see parts.deleted_at). Distinct from the cancelled production_status, which is a shop-floor outcome, not deletion.';
+
 COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
     IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
 
@@ -6334,9 +6387,6 @@ COMMENT ON COLUMN "public"."parts"."reorder_point"
 COMMENT ON COLUMN "public"."parts"."preferred_vendor_id"
     IS 'Default supplier for procurement. The presence of any row pointing at a vendor makes that vendor a "supplier" in the derived-role calculation on the Vendors page.';
 
-COMMENT ON COLUMN "public"."parts"."legacy_id"
-    IS 'Source-system identifier from CSV import; allows ON CONFLICT (company_id, legacy_id) DO UPDATE for safe re-import. NULL for hand-created parts.';
-
 COMMENT ON COLUMN "public"."parts"."source"
     IS 'How this part is sourced. ''made'' = produced in-shop (will have a routing); ''bought'' = procured from a vendor. Combined with is_stocked, classifies the part into one of four quadrants (Custom Made / Sub-assembly / Raw Material / Service+Drop-ship). Replaces the prior is_manufacturable boolean — see the 20260504 migration header for the (false,false)→''made'' orphan-default rationale.';
 
@@ -6345,6 +6395,9 @@ COMMENT ON COLUMN "public"."parts"."is_location_tracked"
 
 COMMENT ON COLUMN "public"."parts"."costing_batch_quantity"
     IS 'Standard costing lot size: the production run this part''s cost is amortized over (setup / batch). A made part is always valued at this quantity when it is consumed as a component in another part''s BOM. Default 1. Bought parts ignore it.';
+
+COMMENT ON COLUMN "public"."parts"."deleted_at"
+    IS 'Archive marker. When set, the part is hidden from all lists/search/pickers/dashboards (reads filter deleted_at IS NULL) but the row and its references survive. Reusing part_name (create or import upsert) revives it (clears deleted_at). Archiving a part also detaches it as a BOM child so parents recompute cost — see archive_parts().';
 
 COMMENT ON COLUMN "public"."parts_bom"."quantity"
     IS 'Quantity of child consumed per unit of parent, expressed in `unit`. Cost rollups convert to the child part primary_unit via parts_unit_conversions if `unit` differs.';
@@ -6405,6 +6458,9 @@ COMMENT ON COLUMN "public"."quotes"."ship_to_address"
 
 COMMENT ON COLUMN "public"."quotes"."contact_snapshot"
     IS 'Immutable snapshot of the customer contact { name, email, phone } at quote issue time.';
+
+COMMENT ON COLUMN "public"."quotes"."deleted_at"
+    IS 'Archive marker (see parts.deleted_at). Reads filter deleted_at IS NULL.';
 
 COMMENT ON COLUMN "public"."routing_operations"."sequence"
     IS 'Linear order within the routing. Lower values execute first. Steps of 10 (10, 20, 30...) leave room for inserts.';
@@ -6511,8 +6567,8 @@ COMMENT ON COLUMN "public"."vendor_contacts"."role_label"
 COMMENT ON COLUMN "public"."vendor_contacts"."is_primary"
     IS 'True for the contact treated as the vendor''s primary point of contact. Surfaced on the vendors list page and as a star badge on the vendor detail page. Enforced unique-per-vendor by the vendor_contacts_one_primary partial index.';
 
-COMMENT ON COLUMN "public"."vendors"."legacy_id"
-    IS 'Source-system identifier from CSV import; allows ON CONFLICT (company_id, legacy_id) DO UPDATE for safe re-import.';
+COMMENT ON COLUMN "public"."vendors"."deleted_at"
+    IS 'Archive marker (see parts.deleted_at). Reads filter deleted_at IS NULL; reusing the name revives the row.';
 
 COMMENT ON COLUMN "public"."waitlist"."id"
     IS 'Primary key. UUID auto-generated.';
@@ -6546,6 +6602,9 @@ COMMENT ON COLUMN "public"."work_centers"."vendor_id"
 
 COMMENT ON COLUMN "public"."work_centers"."labor_rate"
     IS 'Default hourly labor rate in dollars; used when kind=internal and no per-routing_operation override is set. Meaningless / typically NULL when kind=external.';
+
+COMMENT ON COLUMN "public"."work_centers"."deleted_at"
+    IS 'Archive marker (see parts.deleted_at). Reads filter deleted_at IS NULL; reusing the name revives the row.';
 
 -- ============================================================
 -- 11. STORAGE BUCKETS

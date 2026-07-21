@@ -96,9 +96,13 @@ export default function PartsPage() {
   // Completeness = priceable (set up enough to quote). Drives the inline
   // incomplete marker + this filter, replacing the old Pricing column.
   const [completenessFilter, setCompletenessFilter] = useState<CompletenessFilter>('all');
+  // Default to most-recently-updated: users care about the parts they just
+  // worked on (routing/pricing/BOM edits now bump parts.updated_at too — see
+  // migration touch_parts_updated_at_on_satellite_writes), not the alphabetical
+  // top. Alphabetical stays one click away on the Part Name column.
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
-    field: 'part_name',
-    sort: 'asc',
+    field: 'updated_at',
+    sort: 'desc',
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<PartRow>>(null);
@@ -191,7 +195,7 @@ export default function PartsPage() {
 
   const handleGridReady = (event: GridReadyEvent<PartRow>) => {
     event.api.applyColumnState({
-      state: [{ colId: 'part_name', sort: 'asc' }],
+      state: [{ colId: 'updated_at', sort: 'desc' }],
       defaultState: { sort: null },
     });
   };
@@ -217,7 +221,8 @@ export default function PartsPage() {
         sort: sortedColumn.sort as 'asc' | 'desc',
       });
     } else {
-      setSortModel({ field: 'part_name', sort: 'asc' });
+      // Clearing the sort falls back to the recency default, not alphabetical.
+      setSortModel({ field: 'updated_at', sort: 'desc' });
     }
   };
 

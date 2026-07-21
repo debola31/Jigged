@@ -234,7 +234,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 **Content cards:**
 
-- **Converted-to-Jobs banner** — only when `converted_at` is set. Lists every linked job by number with click-through links.
+- **"Jobs from this quote" banner** — shown once any job exists off the quote. Lists every live job by number **with its PO**, click-through links; when parts remain unconverted it adds a "Some parts aren't on a job yet — use Create Another Job" line. Uses the same **part-level** rule as the convert modal (a part is handled once any of its lines is on a live job), so the two never disagree.
 - **Customer card** — three columns in the order **Customer** (name + billing address) · **Ship to** (only when the shipping address differs from billing) · **Customer contact**. When shipping == billing the card is just two columns (Customer + Contact). Customer name click-throughs to the customer record.
 - **Line items** — one table for the whole quote (Part, Description, Order qty, Unit price, Total). A part with several quantities shows its name + description **once**, spanning its quantity rows, with one line per quantity.
   - **Firm quote** (every part has one quantity): a **grand total** row at the bottom.

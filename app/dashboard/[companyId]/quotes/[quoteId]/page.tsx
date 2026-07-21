@@ -472,7 +472,7 @@ export default function QuoteDetailPage() {
           converted in several passes, so it may still have lines left to convert. */}
       {someConverted && (
         <Alert severity={hasUnconvertedParts ? 'info' : 'success'} sx={{ mb: 3 }}>
-          {hasUnconvertedParts ? 'Jobs created from this quote:' : 'This quote is fully on jobs:'}{' '}
+          Jobs from this quote:{' '}
           {jobsFromConversions.map((j, i) => (
             <span key={j.id}>
               {i > 0 && ', '}
@@ -486,7 +486,6 @@ export default function QuoteDetailPage() {
               {j.po ? ` (PO ${j.po})` : ''}
             </span>
           ))}
-          {quote.converted_at ? ` — first on ${formatDate(quote.converted_at)}` : ''}
           {hasUnconvertedParts && (
             <Typography variant="body2" sx={{ mt: 0.5 }}>
               Some parts on this quote aren&apos;t on a job yet — use{' '}

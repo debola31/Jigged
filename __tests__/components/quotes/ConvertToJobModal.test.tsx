@@ -169,6 +169,55 @@ describe('ConvertToJobModal — partial quantity acceptance', () => {
   });
 });
 
+describe('ConvertToJobModal — reprice opt-in only on a real price-break crossing', () => {
+  it('does NOT offer a reprice for a single-tier part, even when the tier price differs from the quoted price', async () => {
+    // A single-tier part whose snapshot tier price ($175.28) differs from the
+    // line's stored/quoted price ($127.12) — a drift, not a break. Changing the
+    // ordered qty must NOT surface a "Reprice to the qty-N tier" option, because
+    // there is no other tier to cross.
+    const singleTierQuote = {
+      ...quote(),
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 7,
+          unit_price: 127.12,
+          total_price: 889.84,
+          is_quote_override: false,
+          basis_unknown: false,
+          pricing_basis_snapshot: {
+            tiers: [{ id: 't1', quantity: 1, unit_price: 175.28, markup_percent: 45 }],
+            resolved_tier_id: 't1',
+            resolved_quantity: 7,
+            captured_at: '2026-01-01T00:00:00Z',
+          },
+          parts: { part_name: 'ASM-GEARBOX', primary_unit: null },
+        },
+      ],
+    } as unknown as QuoteWithRelations;
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={singleTierQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Change the ordered qty (7 → 5) — still no reprice option for a single tier.
+    const qty = screen.getByLabelText(/order qty/i);
+    fireEvent.change(qty, { target: { value: '5' } });
+
+    expect(screen.queryByText(/reprice to the qty/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('ConvertToJobModal — no premature error on the empty due date', () => {
   it('does not show a red "required" error on the untouched due date; Create stays disabled', async () => {
     const base = { open: true, onClose: vi.fn(), onConverted: vi.fn(), quote: quote() };

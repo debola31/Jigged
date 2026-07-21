@@ -33,21 +33,36 @@ function parseQty(s: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Repriced order figures for a line at a (possibly changed) quantity. */
+/**
+ * Repriced order figures for a line at a (possibly changed) quantity.
+ *
+ * `crossesBreak` is true only when the ordered quantity lands in a DIFFERENT
+ * snapshot tier than the quoted quantity — i.e. a real price-break crossing.
+ * That's the only case where a reprice is meaningful; a single-tier part (or an
+ * unchanged qty) never crosses a break, so no reprice is offered and the agreed
+ * price is kept. (A drift between the line's stored price and the current tier
+ * table is a separate concern, surfaced on the quote detail page — not here.)
+ */
 function priceLineAtQty(
   line: QuoteLineItem,
   qty: number,
   useTierPrice: boolean,
-): { unitPrice: number | null; total: number | null; tierPrice: number | null } {
+): { unitPrice: number | null; total: number | null; tierPrice: number | null; crossesBreak: boolean } {
   const basis: JobPartPricingBasis = {
     isOverride: line.is_quote_override ?? false,
     basisUnknown: line.basis_unknown ?? false,
     snapshot: line.pricing_basis_snapshot ?? null,
   };
   const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(line.unit_price, basis, qty);
-  const unitPrice = useTierPrice && tierUnitPrice !== null ? tierUnitPrice : keepUnitPrice;
+  const tierAtQuoted = resolveJobPartUnitPrice(line.unit_price, basis, line.quantity).tierUnitPrice;
+  const crossesBreak =
+    qty !== line.quantity &&
+    tierUnitPrice !== null &&
+    tierAtQuoted !== null &&
+    tierUnitPrice !== tierAtQuoted;
+  const unitPrice = crossesBreak && useTierPrice ? tierUnitPrice : keepUnitPrice;
   const total = unitPrice != null ? Math.round(unitPrice * qty * 100) / 100 : null;
-  return { unitPrice, total, tierPrice: tierUnitPrice };
+  return { unitPrice, total, tierPrice: tierUnitPrice, crossesBreak };
 }
 
 interface ConvertToJobModalProps {
@@ -401,12 +416,13 @@ export default function ConvertToJobModal({
                         const priced =
                           orderedQty !== null
                             ? priceLineAtQty(line, orderedQty, useTier)
-                            : { unitPrice: null, total: null, tierPrice: null };
+                            : {
+                                unitPrice: null,
+                                total: null,
+                                tierPrice: null,
+                                crossesBreak: false,
+                              };
                         const qtyChanged = orderedQty !== null && orderedQty !== line.quantity;
-                        // A tier price only differs from the kept price on a
-                        // multi-tier line whose qty crossed a break.
-                        const tierDiffers =
-                          priced.tierPrice !== null && priced.tierPrice !== line.unit_price;
                         return (
                           <Box sx={{ flex: 1 }}>
                             <Typography variant="body2" fontWeight={600}>
@@ -437,10 +453,10 @@ export default function ConvertToJobModal({
                             {qtyChanged && (
                               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
                                 Quoted {line.quantity} {group.unit}
-                                {tierDiffers ? '' : ' — price kept from the quote'}
+                                {priced.crossesBreak ? '' : ' — price kept from the quote'}
                               </Typography>
                             )}
-                            {included && tierDiffers && (
+                            {included && priced.crossesBreak && (
                               <FormControlLabel
                                 sx={{ mt: 0.25 }}
                                 control={

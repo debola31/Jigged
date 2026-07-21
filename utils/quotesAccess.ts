@@ -1339,8 +1339,16 @@ export async function convertQuoteToJob(
         basis,
         orderedQty,
       );
+      // Only honor a reprice when the ordered qty lands in a DIFFERENT tier than
+      // the quoted qty (a real price-break crossing) — never for a single-tier
+      // part. Authoritative regardless of the client flag.
+      const tierAtQuoted = resolveJobPartUnitPrice(li.unit_price, basis, li.quantity).tierUnitPrice;
+      const crossesBreak =
+        tierUnitPrice !== null && tierAtQuoted !== null && tierUnitPrice !== tierAtQuoted;
       orderedUnitPrice =
-        override.useTierPrice && tierUnitPrice !== null ? tierUnitPrice : keepUnitPrice;
+        override.useTierPrice && crossesBreak && tierUnitPrice !== null
+          ? tierUnitPrice
+          : keepUnitPrice;
     }
     const orderedTotal =
       orderedUnitPrice != null ? Math.round(orderedUnitPrice * orderedQty * 10000) / 10000 : null;
